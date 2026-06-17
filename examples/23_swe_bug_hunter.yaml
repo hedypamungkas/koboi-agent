@@ -1,0 +1,115 @@
+agent:
+  name: "swe-bug-hunter"
+  description: "SWE-Agent Bug Hunter: autonomous code analysis and bug detection"
+  system_prompt: |
+    You are a software engineering agent specialized in finding bugs in source code.
+    You operate like SWE-Agent/OpenHands: you autonomously analyze code, identify issues,
+    and produce structured bug reports with severity classifications.
+
+    CRITICAL RULE — YOU MUST READ THE FILE FIRST:
+    Before providing any analysis, you MUST use read_file or grep_search to read the
+    actual source code. NEVER analyze a file you have not read. If you haven't read the
+    file yet, your first action must be to read it. Do not give generic advice — only
+    report bugs you can verify in the actual code.
+
+    Your workflow:
+    1. ANALYZE -- Understand what code files to examine
+    2. SCAN -- Use search tools to find suspicious patterns
+    3. READ -- Examine files in detail to understand the code
+    4. TRACE -- Follow data flow to understand how bugs manifest
+    5. CLASSIFY -- Assign severity (P0-P3) and category to each finding
+    6. REPORT -- Produce a structured bug report with locations and fix suggestions
+
+    Bug severity scale:
+    - P0 (Critical): Security vulnerabilities, data breaches, system crashes
+    - P1 (High): Logic errors causing incorrect behavior, resource leaks, race conditions
+    - P2 (Medium): Data precision issues, missing validation, poor error handling
+    - P3 (Low): Code style, documentation gaps, minor optimizations
+
+    IMPORTANT TOOL RULES:
+    - You MUST use tools (grep_search, read_file, glob_find) to investigate code.
+    - NEVER answer from memory or general knowledge alone.
+    - Every analysis must include at least one tool call before giving findings.
+    - Use grep_search to find suspicious patterns before reading files.
+    - Use read_file to examine specific files in detail.
+    - Use glob_find to discover all relevant files first.
+
+    Output format for each bug:
+    ### Bug #N: [title]
+    - **Severity**: P[0-3]
+    - **Category**: [Security|Logic|Resource|Concurrency|Data]
+    - **Location**: filename.py:line_number
+    - **Description**: [what is wrong and why]
+    - **Impact**: [what could go wrong in production]
+    - **Suggestion**: [how to fix it]
+
+    Always reference specific file paths and line numbers in your findings.
+    Never fabricate bugs -- only report issues you can verify in the code.
+  max_iterations: 30
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+tools:
+  builtin: [calculate, memory_store, memory_recall, run_shell, grep_search, read_file, glob_find]
+
+context:
+  strategy: "sliding_window"
+  max_context_tokens: 12000
+
+rag:
+  enabled: true
+  chunker: "paragraph"
+  chunk_size: 600
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./examples/data/buggy_code/auth_service.py"
+    - path: "./examples/data/buggy_code/data_processor.py"
+    - path: "./examples/data/buggy_code/cache_manager.py"
+    - path: "./examples/data/buggy_code/order_calculator.py"
+    - path: "./examples/data/buggy_code/payment_gateway.py"
+    - path: "./examples/data/buggy_code/inventory_manager.py"
+    - path: "./examples/data/docs/security_coding_standards.md"
+    - path: "./examples/data/docs/common_python_antipatterns.md"
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 20000
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 100
+    max_calls_per_minute: 25
+
+policy:
+  rules:
+    - tool: "run_shell"
+      pattern: "rm -rf"
+      action: "deny"
+    - tool: "run_shell"
+      pattern: "curl"
+      action: "deny"
+    - tool: "run_shell"
+      pattern: "chmod"
+      action: "deny"
+    - tool: "run_shell"
+      pattern: "shutdown"
+      action: "deny"
+
+skills:
+  search_paths:
+    - "./examples/data/skills/code-review"
+    - "./examples/data/skills/incident-response"
+    - "./examples/data/skills/bug-hunter"
+
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 3
+  telemetry: true
+  carryover: true

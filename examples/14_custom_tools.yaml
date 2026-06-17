@@ -1,0 +1,22 @@
+agent:
+  name: "example-custom-tools"
+  description: "Agent with custom tools"
+  system_prompt: |
+    You are an assistant that can provide weather information and translate text.
+    Use the available tools to help the user.
+  max_iterations: 10
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+tools:
+  builtin: [calculate]
+  custom:
+    - module: "examples.data.custom_tools.weather"
+    - module: "examples.data.custom_tools.translate"
+
+context:
+  strategy: "noop"

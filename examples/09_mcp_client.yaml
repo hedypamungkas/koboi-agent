@@ -1,0 +1,24 @@
+agent:
+  name: "example-mcp-client"
+  description: "Agent using MCP tools from time server"
+  system_prompt: |
+    You are an assistant that provides information about time and dates.
+    Use the available tools to retrieve time-related information.
+  max_iterations: 8
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+tools:
+  builtin: [calculate]
+
+context:
+  strategy: "noop"
+
+mcp:
+  servers:
+    - command: "python3"
+      args: ["examples/data/mcp_servers/time_server.py"]

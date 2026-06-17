@@ -1,0 +1,454 @@
+{
+  "generated_at": "2026-05-30T01:23:44.799262",
+  "machine": {
+    "node": "MSNNB-D46K9CJKHQ",
+    "processor": "arm",
+    "machine": "arm64",
+    "python_compiler": "Clang 17.0.0 (clang-1700.6.4.2)",
+    "python_implementation": "CPython",
+    "python_implementation_version": "3.9.6",
+    "python_version": "3.9.6",
+    "python_build": [
+      "default",
+      "Jan  9 2026 11:03:41"
+    ],
+    "release": "25.1.0",
+    "system": "Darwin",
+    "cpu": {
+      "python_version": "3.9.6.final.0 (64 bit)",
+      "cpuinfo_version": [
+        9,
+        0,
+        0
+      ],
+      "cpuinfo_version_string": "9.0.0",
+      "arch": "ARM_8",
+      "bits": 64,
+      "count": 11,
+      "arch_string_raw": "arm64",
+      "brand_raw": "Apple M3 Pro"
+    }
+  },
+  "benchmarks": {
+    "test_export_markdown_50": {
+      "mean_ms": 0.013,
+      "median_ms": 0.013,
+      "stddev_ms": 0.002,
+      "rounds": 14926
+    },
+    "test_export_markdown_500": {
+      "mean_ms": 0.112,
+      "median_ms": 0.111,
+      "stddev_ms": 0.005,
+      "rounds": 6913
+    },
+    "test_export_json_500": {
+      "mean_ms": 1.482,
+      "median_ms": 1.472,
+      "stddev_ms": 0.05,
+      "rounds": 641
+    },
+    "test_export_html_500": {
+      "mean_ms": 0.319,
+      "median_ms": 0.318,
+      "stddev_ms": 0.009,
+      "rounds": 2975
+    },
+    "test_is_diff_content_positive": {
+      "mean_ms": 0.0,
+      "median_ms": 0.0,
+      "stddev_ms": 0.0,
+      "rounds": 86022
+    },
+    "test_is_diff_content_negative": {
+      "mean_ms": 0.001,
+      "median_ms": 0.001,
+      "stddev_ms": 0.0,
+      "rounds": 78174
+    },
+    "test_count_changes": {
+      "mean_ms": 0.051,
+      "median_ms": 0.05,
+      "stddev_ms": 0.004,
+      "rounds": 16518
+    },
+    "test_diff_parse": {
+      "mean_ms": 0.088,
+      "median_ms": 0.087,
+      "stddev_ms": 0.003,
+      "rounds": 9833
+    },
+    "test_diff_build_rich_text": {
+      "mean_ms": 0.369,
+      "median_ms": 0.367,
+      "stddev_ms": 0.01,
+      "rounds": 2312
+    },
+    "test_thinking_pattern_match": {
+      "mean_ms": 0.001,
+      "median_ms": 0.001,
+      "stddev_ms": 0.0,
+      "rounds": 192013
+    },
+    "test_thinking_pattern_no_match": {
+      "mean_ms": 0.001,
+      "median_ms": 0.001,
+      "stddev_ms": 0.0,
+      "rounds": 170213
+    },
+    "test_thinking_pattern_large_content": {
+      "mean_ms": 0.002,
+      "median_ms": 0.002,
+      "stddev_ms": 0.001,
+      "rounds": 179116
+    },
+    "test_slash_suggester_match": {
+      "mean_ms": 0.0,
+      "median_ms": 0.0,
+      "stddev_ms": 0.0,
+      "rounds": 193574
+    },
+    "test_slash_suggester_no_match": {
+      "mean_ms": 0.0,
+      "median_ms": 0.0,
+      "stddev_ms": 0.0,
+      "rounds": 198334
+    },
+    "test_composite_suggester_route": {
+      "mean_ms": 0.0,
+      "median_ms": 0.0,
+      "stddev_ms": 0.0,
+      "rounds": 195122
+    },
+    "test_bridge_message_creation": {
+      "mean_ms": 0.954,
+      "median_ms": 0.691,
+      "stddev_ms": 1.896,
+      "rounds": 185
+    },
+    "test_bridge_mixed_message_creation": {
+      "mean_ms": 0.748,
+      "median_ms": 0.615,
+      "stddev_ms": 1.363,
+      "rounds": 1462
+    },
+    "test_slash_command_dispatch": {
+      "mean_ms": 0.001,
+      "median_ms": 0.001,
+      "stddev_ms": 0.0,
+      "rounds": 234
+    },
+    "test_slash_command_with_tools": {
+      "mean_ms": 0.001,
+      "median_ms": 0.001,
+      "stddev_ms": 0.0,
+      "rounds": 52866
+    },
+    "test_slash_command_reset_call": {
+      "mean_ms": 0.014,
+      "median_ms": 0.009,
+      "stddev_ms": 0.247,
+      "rounds": 4233
+    },
+    "test_slash_command_history_call": {
+      "mean_ms": 0.412,
+      "median_ms": 0.276,
+      "stddev_ms": 2.362,
+      "rounds": 2274
+    },
+    "test_welcome_panel_building": {
+      "mean_ms": 0.031,
+      "median_ms": 0.029,
+      "stddev_ms": 0.012,
+      "rounds": 3398
+    },
+    "test_theme_registration": {
+      "mean_ms": 0.035,
+      "median_ms": 0.01,
+      "stddev_ms": 1.879,
+      "rounds": 6135
+    },
+    "test_token_estimation_100_messages_with_tool_calls": {
+      "mean_ms": 0.454,
+      "median_ms": 0.453,
+      "stddev_ms": 0.01,
+      "rounds": 1906
+    },
+    "test_token_estimation_500_messages_with_tool_calls": {
+      "mean_ms": 2.262,
+      "median_ms": 2.251,
+      "stddev_ms": 0.088,
+      "rounds": 438
+    },
+    "test_token_estimation_2000_messages_with_tool_calls": {
+      "mean_ms": 9.452,
+      "median_ms": 9.367,
+      "stddev_ms": 0.37,
+      "rounds": 103
+    },
+    "test_memory_get_messages_100": {
+      "mean_ms": 0.0,
+      "median_ms": 0.0,
+      "stddev_ms": 0.0,
+      "rounds": 198374
+    },
+    "test_memory_get_messages_1000": {
+      "mean_ms": 0.007,
+      "median_ms": 0.007,
+      "stddev_ms": 0.0,
+      "rounds": 47432
+    },
+    "test_string_concatenation_50kb": {
+      "mean_ms": 0.016,
+      "median_ms": 0.016,
+      "stddev_ms": 0.002,
+      "rounds": 21720
+    },
+    "test_string_concatenation_200kb": {
+      "mean_ms": 0.054,
+      "median_ms": 0.054,
+      "stddev_ms": 0.003,
+      "rounds": 14972
+    },
+    "test_thinking_pattern_50kb_no_match": {
+      "mean_ms": 0.023,
+      "median_ms": 0.023,
+      "stddev_ms": 0.002,
+      "rounds": 45542
+    },
+    "test_thinking_pattern_50kb_with_match": {
+      "mean_ms": 0.005,
+      "median_ms": 0.005,
+      "stddev_ms": 0.001,
+      "rounds": 117069
+    },
+    "test_export_markdown_2000": {
+      "mean_ms": 0.435,
+      "median_ms": 0.432,
+      "stddev_ms": 0.014,
+      "rounds": 2197
+    },
+    "test_export_json_2000": {
+      "mean_ms": 6.052,
+      "median_ms": 5.885,
+      "stddev_ms": 1.914,
+      "rounds": 168
+    },
+    "test_export_html_2000": {
+      "mean_ms": 1.251,
+      "median_ms": 1.245,
+      "stddev_ms": 0.023,
+      "rounds": 799
+    },
+    "test_diff_parse_1000_lines": {
+      "mean_ms": 0.442,
+      "median_ms": 0.439,
+      "stddev_ms": 0.015,
+      "rounds": 2020
+    },
+    "test_is_diff_content_1000_lines": {
+      "mean_ms": 0.0,
+      "median_ms": 0.0,
+      "stddev_ms": 0.0,
+      "rounds": 81907
+    },
+    "test_hook_chain_emit_6_events_per_iteration": {
+      "mean_ms": 0.043,
+      "median_ms": 0.042,
+      "stddev_ms": 0.004,
+      "rounds": 5178
+    }
+  },
+  "nfr_status": {
+    "test_export_markdown_50": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 0.013
+    },
+    "test_export_markdown_500": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.112
+    },
+    "test_export_json_500": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 1.482
+    },
+    "test_export_html_500": {
+      "passed": true,
+      "threshold_ms": 2,
+      "actual_ms": 0.319
+    },
+    "test_is_diff_content_positive": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.0
+    },
+    "test_is_diff_content_negative": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.001
+    },
+    "test_count_changes": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.051
+    },
+    "test_diff_parse": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.088
+    },
+    "test_diff_build_rich_text": {
+      "passed": true,
+      "threshold_ms": 2,
+      "actual_ms": 0.369
+    },
+    "test_thinking_pattern_match": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.001
+    },
+    "test_thinking_pattern_no_match": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.001
+    },
+    "test_thinking_pattern_large_content": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.002
+    },
+    "test_slash_suggester_match": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.0
+    },
+    "test_slash_suggester_no_match": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.0
+    },
+    "test_composite_suggester_route": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.0
+    },
+    "test_bridge_message_creation": {
+      "passed": true,
+      "threshold_ms": 3,
+      "actual_ms": 0.954
+    },
+    "test_bridge_mixed_message_creation": {
+      "passed": true,
+      "threshold_ms": 3,
+      "actual_ms": 0.748
+    },
+    "test_slash_command_dispatch": {
+      "passed": true,
+      "threshold_ms": 10,
+      "actual_ms": 0.001
+    },
+    "test_slash_command_with_tools": {
+      "passed": true,
+      "threshold_ms": 10,
+      "actual_ms": 0.001
+    },
+    "test_slash_command_reset_call": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.014
+    },
+    "test_slash_command_history_call": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 0.412
+    },
+    "test_welcome_panel_building": {
+      "passed": true,
+      "threshold_ms": 10,
+      "actual_ms": 0.031
+    },
+    "test_theme_registration": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.035
+    },
+    "test_token_estimation_100_messages_with_tool_calls": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 0.454
+    },
+    "test_token_estimation_500_messages_with_tool_calls": {
+      "passed": true,
+      "threshold_ms": 25,
+      "actual_ms": 2.262
+    },
+    "test_token_estimation_2000_messages_with_tool_calls": {
+      "passed": true,
+      "threshold_ms": 100,
+      "actual_ms": 9.452
+    },
+    "test_memory_get_messages_100": {
+      "passed": true,
+      "threshold_ms": 0.5,
+      "actual_ms": 0.0
+    },
+    "test_memory_get_messages_1000": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 0.007
+    },
+    "test_string_concatenation_50kb": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.016
+    },
+    "test_string_concatenation_200kb": {
+      "passed": true,
+      "threshold_ms": 10,
+      "actual_ms": 0.054
+    },
+    "test_thinking_pattern_50kb_no_match": {
+      "passed": true,
+      "threshold_ms": 2,
+      "actual_ms": 0.023
+    },
+    "test_thinking_pattern_50kb_with_match": {
+      "passed": true,
+      "threshold_ms": 2,
+      "actual_ms": 0.005
+    },
+    "test_export_markdown_2000": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 0.435
+    },
+    "test_export_json_2000": {
+      "passed": true,
+      "threshold_ms": 15,
+      "actual_ms": 6.052
+    },
+    "test_export_html_2000": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 1.251
+    },
+    "test_diff_parse_1000_lines": {
+      "passed": true,
+      "threshold_ms": 2,
+      "actual_ms": 0.442
+    },
+    "test_is_diff_content_1000_lines": {
+      "passed": true,
+      "threshold_ms": 1,
+      "actual_ms": 0.0
+    },
+    "test_hook_chain_emit_6_events_per_iteration": {
+      "passed": true,
+      "threshold_ms": 5,
+      "actual_ms": 0.043
+    }
+  }
+}

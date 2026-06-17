@@ -1,0 +1,31 @@
+agent:
+  name: "example-eval"
+  description: "Sales agent for evaluation"
+  system_prompt: |
+    You are an Acme Corp sales assistant.
+    Help customers with product information and pricing.
+    Use the calculate tool for computations.
+  max_iterations: 10
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+tools:
+  builtin: [calculate, memory_store, memory_recall]
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 8000
+
+rag:
+  enabled: true
+  chunker: "paragraph"
+  chunk_size: 1000
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/product_catalog.md"

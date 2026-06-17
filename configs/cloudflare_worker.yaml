@@ -1,0 +1,16 @@
+agent:
+  name: "cloudflare-worker"
+  description: "Agent powered by Cloudflare Workers AI"
+  system_prompt: |
+    You are a helpful AI assistant powered by Cloudflare Workers AI.
+    Answer questions clearly and concisely.
+  max_iterations: 10
+
+llm:
+  provider: "cloudflare"
+  model: "${CLOUDFLARE_MODEL}"
+  api_key: "${CLOUDFLARE_API_TOKEN}"
+  base_url: "${CLOUDFLARE_BASE_URL:}"
+
+context:
+  strategy: "noop"

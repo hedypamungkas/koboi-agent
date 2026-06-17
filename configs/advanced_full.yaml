@@ -1,0 +1,117 @@
+agent:
+  name: "advanced-agent"
+  description: "Full-featured agent with tools, RAG, orchestration, skills, and persistent memory"
+  system_prompt: |
+    You are a versatile AI assistant with access to many capabilities:
+    - File operations (read, write, search)
+    - Shell command execution
+    - Web search
+    - Company document knowledge (RAG)
+    - Task and memory management
+    - Code review skills
+    - Sub-agent delegation for parallel work
+
+    Always explain your reasoning. When using tools, describe what you're doing.
+    For complex tasks, break them into steps and use task management.
+    For code review, use the code_review skill.
+    If unsure, ask for clarification rather than guessing.
+  max_iterations: 25
+
+llm:
+  provider: "anthropic"
+  model: "mimo-v2.5-pro"
+  auth_type: "api_key"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL:}"
+  timeout: 120.0
+  max_tokens: 4096
+
+tools:
+  builtin:
+    - list_files
+    - read_file
+    - write_file
+    - delete_file
+    - run_shell
+    - grep_search
+    - glob_find
+    - calculator
+    - web_search
+    - memory_store
+    - memory_recall
+    - git_status
+    - git_log
+    - git_diff
+    - git_commit
+    - task_create
+    - task_list
+    - task_update
+    - subagent_delegate
+  defaults:
+    timeout: 60
+    max_output: 15000
+  overrides:
+    shell:
+      timeout: 120
+      max_output: 20000
+    git:
+      timeout: 30
+    subagent_delegate:
+      timeout: 180
+
+memory:
+  backend: "sqlite"
+  db_path: "koboi_memory.db"
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 16000
+  keep_last: 12
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  chunk_size: 400
+  retriever: "keyword"
+  top_k: 5
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/employee_handbook.md"
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 20000
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 200
+    max_calls_per_minute: 30
+
+policy:
+  rules:
+    - tool: "run_shell"
+      pattern: "rm -rf /"
+      action: "deny"
+    - tool: "run_shell"
+      pattern: "curl.*\\|.*bash"
+      action: "deny"
+    - tool: "run_shell"
+      pattern: "sudo"
+      action: "confirm"
+    - tool: "delete_file"
+      action: "confirm"
+    - tool: "git_commit"
+      action: "confirm"
+
+skills:
+  search_paths:
+    - "./skills"
+
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 4
+  telemetry: true
+  carryover: true

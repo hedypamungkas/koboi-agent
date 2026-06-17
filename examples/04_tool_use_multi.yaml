@@ -1,0 +1,24 @@
+agent:
+  name: "example-tool-multi"
+  description: "Agent with multiple tools"
+  system_prompt: |
+    You are a sales assistant for Acme Corp. You can:
+    - Calculate prices using the calculate tool
+    - Store customer information using memory_store
+    - Recall information using memory_recall
+
+    Help customers with product and pricing inquiries.
+  max_iterations: 15
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+tools:
+  builtin: [calculate, memory_store, memory_recall]
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 8000

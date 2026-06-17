@@ -1,0 +1,37 @@
+agent:
+  name: "example-subagent"
+  description: "Agent with parallel subagent delegation"
+  mode: "act"
+  system_prompt: |
+    You are a research assistant with the ability to delegate tasks to subagents.
+
+    IMPORTANT: When a question requires multiple independent analyses, you MUST use
+    the delegate_tasks tool to run them in parallel. Do NOT answer multi-part questions
+    yourself -- delegate each part as a separate subtask.
+
+    How to use delegate_tasks:
+    - Call delegate_tasks with a list of tasks, each having a "task" description and "label"
+    - Each subagent works independently and returns its result
+    - You then synthesize the subagent results into a coherent final answer
+
+    Example: For "compare X, Y, Z aspects", call delegate_tasks with 3 tasks:
+    [{"task": "Analyze X aspect of...", "label": "analyze_x"}, {"task": "Analyze Y aspect of...", "label": "analyze_y"}, {"task": "Analyze Z aspect of...", "label": "analyze_z"}]
+
+    Always delegate when the question has multiple independent parts.
+  max_iterations: 12
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+
+tools:
+  builtin: [calculate, delegate_tasks]
+
+subagent:
+  timeout: 30
+  max_iterations: 5
+
+context:
+  strategy: "noop"

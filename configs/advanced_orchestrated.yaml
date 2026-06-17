@@ -1,0 +1,116 @@
+agent:
+  name: "orchestrated-advanced"
+  description: "Multi-agent orchestrator with RAG, tools, and specialist routing"
+  system_prompt: |
+    You are an orchestrator that routes questions to specialist agents:
+    - Sales: product info, pricing, orders
+    - HR: policies, benefits, leave, workplace
+    - Engineering: code review, technical analysis, debugging
+    - General: everything else
+
+    Synthesize their answers into a coherent response.
+    If a question spans multiple domains, consult multiple specialists.
+  max_iterations: 15
+
+llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-20250514"
+  auth_type: "api_key"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL:}"
+  timeout: 120.0
+  max_tokens: 4096
+
+tools:
+  builtin:
+    - read_file
+    - grep_search
+    - glob_find
+    - calculator
+    - memory_store
+    - memory_recall
+    - task_create
+    - task_list
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 12000
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  chunk_size: 400
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/employee_handbook.md"
+
+guardrails:
+  input:
+    detect_injection: true
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 150
+    max_calls_per_minute: 25
+
+orchestration:
+  enabled: true
+  router:
+    type: "keyword"
+  execution:
+    mode: "parallel"
+  agents:
+    - name: "sales"
+      description: "Product inquiries, pricing, orders, discounts"
+      keywords: ["product", "price", "buy", "purchase", "discount", "offer", "catalog", "order", "cost", "how much"]
+      system_prompt: |
+        You are a sales specialist at Acme Corp.
+        Answer questions about products, pricing, and purchasing.
+        Use the product catalog for accurate information.
+        Be helpful and persuasive while staying factual.
+      rag:
+        documents:
+          - path: "./data/sample/product_catalog.md"
+
+    - name: "hr"
+      description: "HR policies, employee benefits, leave, workplace rules"
+      keywords: ["policy", "leave", "vacation", "benefit", "salary", "employee", "handbook", "hr", "work", "remote", "sick", "holiday"]
+      system_prompt: |
+        You are an HR specialist.
+        Answer questions about company policies, employee benefits, and workplace guidelines.
+        Always cite the specific policy when answering.
+      rag:
+        documents:
+          - path: "./data/sample/employee_handbook.md"
+          - path: "./data/sample/company_policy.md"
+
+    - name: "engineering"
+      description: "Code review, technical questions, debugging, architecture"
+      keywords: ["code", "review", "bug", "debug", "function", "class", "api", "test", "refactor", "architecture"]
+      system_prompt: |
+        You are an engineering specialist.
+        Help with code review, technical analysis, debugging, and architecture questions.
+        Use read_file and grep_search to examine code when needed.
+        Provide specific, actionable feedback.
+
+    - name: "general"
+      description: "Catch-all for questions not matching other specialists"
+      keywords: []
+      system_prompt: |
+        You are a general assistant.
+        Handle questions that don't fall into sales, HR, or engineering domains.
+        Be helpful and concise.
+
+skills:
+  search_paths:
+    - "./skills"
+
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 3
+  telemetry: true
+  carryover: true

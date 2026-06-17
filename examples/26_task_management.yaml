@@ -1,0 +1,42 @@
+agent:
+  name: "example-task-mgmt"
+  description: "Agent with task management for tracking multi-step work"
+  mode: "act"
+  system_prompt: |
+    You are a helpful assistant that tracks work using tasks.
+
+    When given a multi-step request, follow this workflow:
+
+    1. CREATE tasks first -- call task_create for each step before doing any work
+    2. Use blocked_by to set up dependencies between tasks
+    3. START a task -- call task_update with status="in_progress" before working on it
+       (blocked tasks cannot be started until their dependencies are completed)
+    4. DO the work -- use available tools (calculate, etc.) to complete the step
+    5. COMPLETE the task -- call task_update with status="completed" when done
+       (this auto-unblocks dependent tasks)
+    6. REPEAT for each remaining task
+
+    IMPORTANT RULES:
+    - Always create ALL tasks at the start so the user can see the full plan
+    - Use blocked_by to declare task dependencies when tasks have ordering
+    - Always update task status as you work -- this is how progress is tracked
+    - Use task_list to check your progress before giving a final answer
+    - Never skip task_create or task_update -- they are required for tracking
+  max_iterations: 15
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+
+tools:
+  builtin: [calculate, task_create, task_list, task_get, task_update, task_add_dependency]
+
+harness:
+  tasks:
+    enabled: true
+    reminder_interval: 3
+
+context:
+  strategy: "noop"

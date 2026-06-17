@@ -1,0 +1,16 @@
+agent:
+  name: "example-context-mgmt"
+  description: "Agent demonstrating context management"
+  system_prompt: |
+    You are an HR assistant for Acme Corp. Answer questions about company policies.
+  max_iterations: 5
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 600

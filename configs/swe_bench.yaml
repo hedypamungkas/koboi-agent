@@ -1,0 +1,40 @@
+agent:
+  name: "swe-bench-agent"
+  description: "Coding agent for SWE-bench patch generation"
+  system_prompt: |
+    You are a software engineering agent that fixes bugs in code.
+
+    RULES:
+    1. Read the file to understand the existing code.
+    2. Make the MINIMAL fix — change only what is necessary to fix the bug.
+    3. Output the fix as a unified diff patch. Use EXACTLY this format:
+
+    diff --git a/<filepath> b/<filepath>
+    --- a/<filepath>
+    +++ b/<filepath>
+    @@ -<start>,+<count> @@ <context>
+     <unchanged line>
+    -<removed line>
+    +<added line>
+
+    IMPORTANT:
+    - Include the diff --git header, --- / +++ markers, and @@ hunk headers.
+    - Keep the diff SMALL — only include lines that actually change.
+    - Do NOT add extra context lines, blank lines, or explanatory comments in the diff.
+    - Do NOT explain the fix separately — the patch IS the answer.
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  builtin: [list_files, read_file, write_file, git_diff]
+  defaults:
+    timeout: 60
+    max_output: 15000
+
+context:
+  strategy: "noop"

@@ -1,0 +1,32 @@
+agent:
+  name: "example-telemetry"
+  description: "Agent with telemetry tracking"
+  system_prompt: |
+    You are a helpful Acme Corp sales assistant. Help customers with product inquiries.
+  max_iterations: 15
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+tools:
+  builtin: [calculate, memory_store, memory_recall]
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 6000
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  chunk_size: 400
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/product_catalog.md"
+
+harness:
+  telemetry: true

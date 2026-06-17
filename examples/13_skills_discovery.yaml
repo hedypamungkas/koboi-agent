@@ -1,0 +1,20 @@
+agent:
+  name: "example-skills"
+  description: "Agent with skill discovery"
+  system_prompt: |
+    You are an AI assistant with specialized capabilities.
+    When the user requests a code review or incident handling, activate the appropriate skill.
+  max_iterations: 10
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+context:
+  strategy: "noop"
+
+skills:
+  search_paths:
+    - "./examples/data/skills"

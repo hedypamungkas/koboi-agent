@@ -1,0 +1,79 @@
+agent:
+  name: "coding-agent"
+  description: "Coding assistant with filesystem and shell tools"
+  system_prompt: |
+    You are a coding assistant. Help users write, debug, and understand code.
+    Use filesystem tools to read and write files, and shell tools to run commands.
+    Always explain what you're doing and why.
+  max_iterations: 20
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+  # temperature: 0.3          # Lower for deterministic code generation
+
+tools:
+  builtin: [list_files, read_file, write_file, delete_file, run_shell, grep_search, glob_find, git_status, git_log, git_diff]
+  defaults:
+    timeout: 60
+    max_output: 15000
+  overrides:
+    shell:
+      timeout: 120
+      max_output: 20000
+    git:
+      timeout: 30
+      max_log_count: 100
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 12000
+  keep_last: 10
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 20000
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 200
+    max_calls_per_minute: 30
+
+policy:
+  rules:
+    - tool: "run_shell"
+      pattern: "rm -rf /"
+      action: "deny"
+    - tool: "run_shell"
+      pattern: "curl.*\\|.*bash"
+      action: "deny"
+    - tool: "delete_file"
+      action: "confirm"
+
+skills:
+  search_paths:
+    - "./skills"
+
+tracing:
+  provider: "langfuse"
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
+  base_url: "${LANGFUSE_BASE_URL:}"
+
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 4
+    # repeating_pattern_window: 6
+    # repeating_pattern_threshold: 2
+    # enable_recovery: true
+    # error_retry_threshold: 3
+  telemetry: true
+  carryover: true
+  # carryover_limits:
+  #   max_log_entries: 100
+  #   max_goals: 15
+  #   max_artifacts: 30
+  #   max_verified: 30

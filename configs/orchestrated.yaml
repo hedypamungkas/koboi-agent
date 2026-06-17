@@ -1,0 +1,52 @@
+agent:
+  name: "orchestrated-agent"
+  description: "Multi-agent orchestrator with specialist routing"
+  system_prompt: |
+    You are an orchestrator that synthesizes answers from specialist agents.
+    Provide a coherent, complete response based on their inputs.
+  max_iterations: 10
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 8000
+
+orchestration:
+  enabled: true
+  router:
+    type: "keyword"
+  execution:
+    mode: "sequential"
+  agents:
+    - name: "sales"
+      description: "Handles product inquiries, pricing, and sales questions"
+      keywords: ["product", "price", "buy", "purchase", "discount", "offer", "catalog", "order"]
+      system_prompt: |
+        You are a sales specialist. Answer questions about products, pricing,
+        and purchasing. Be helpful and persuasive while staying factual.
+      rag:
+        documents:
+          - path: "./data/sample/product_catalog.md"
+
+    - name: "hr"
+      description: "Handles HR policies, employee benefits, and workplace questions"
+      keywords: ["policy", "leave", "vacation", "benefit", "salary", "employee", "handbook", "hr", "work"]
+      system_prompt: |
+        You are an HR specialist. Answer questions about company policies,
+        employee benefits, and workplace guidelines. Be accurate and cite policies.
+      rag:
+        documents:
+          - path: "./data/sample/employee_handbook.md"
+          - path: "./data/sample/company_policy.md"
+
+    - name: "general"
+      description: "Handles general questions not covered by other specialists"
+      keywords: []
+      system_prompt: |
+        You are a general assistant. Handle questions that don't fall into
+        specific domains. Be helpful and concise.

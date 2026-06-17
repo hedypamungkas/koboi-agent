@@ -1,0 +1,67 @@
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+*.tar.gz
+
+# === Virtual environments ===
+.venv/
+venv/
+env/
+
+# === Secrets / Environment ===
+.env
+.env.local
+.env.*.local
+
+# === OS metadata ===
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# === IDE / Editor ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === Testing / Coverage ===
+.pytest_cache/
+.coverage
+htmlcov/
+coverage_baseline.json
+test_output.txt
+
+# === Type checking / Linting ===
+.mypy_cache/
+.ruff_cache/
+
+# === Logs ===
+.logs/
+*.log
+
+# === Runtime artifacts ===
+koboi_memory.db
+koboi_memory.db-shm
+koboi_memory.db-wal
+koboi_trust.db
+.agent_memory.json
+.agent_memory.json.lock
+
+# === Benchmarks (large files) ===
+benchmarks/results.json
+.benchmarks/
+
+# === Test artifacts ===
+MagicMock/
+
+# === Claude Code local settings (keep rules/skills committed) ===
+.claude/settings.json

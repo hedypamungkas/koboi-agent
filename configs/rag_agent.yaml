@@ -1,0 +1,37 @@
+agent:
+  name: "rag-agent"
+  description: "Agent with RAG for document Q&A"
+  system_prompt: |
+    You are a knowledgeable assistant. Use the provided context to answer questions.
+    If the context doesn't contain the answer, say so honestly.
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  builtin: [web_search]
+
+context:
+  strategy: "sliding_window"
+  max_context_tokens: 8000
+
+tracing:
+  provider: "langfuse"
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
+  base_url: "${LANGFUSE_BASE_URL:}"
+
+rag:
+  enabled: true
+  chunker: "paragraph"
+  chunk_size: 1000
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/product_catalog.md"

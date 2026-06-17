@@ -1,0 +1,66 @@
+agent:
+  name: "example-production"
+  description: "Full production agent with all features"
+  system_prompt: |
+    You are a professional and helpful Acme Corp customer service assistant.
+    You can:
+    - Answer questions about products and company policies
+    - Calculate pricing and cost estimates
+    - Store and recall customer preferences
+    - Provide product recommendations
+
+    Always be polite, accurate, and provide information based on available data.
+  max_iterations: 15
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+tools:
+  builtin: [calculate, memory_store, memory_recall, web_search]
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 10000
+
+rag:
+  enabled: true
+  chunker: "paragraph"
+  chunk_size: 1000
+  retriever: "keyword"
+  top_k: 5
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/employee_handbook.md"
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 10000
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 100
+    max_calls_per_minute: 20
+
+policy:
+  rules:
+    - tool: "run_shell"
+      pattern: "rm -rf"
+      action: "deny"
+
+tracing:
+  provider: "langfuse"
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
+  base_url: "${LANGFUSE_BASE_URL}"
+
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 3
+  telemetry: true
+  carryover: true

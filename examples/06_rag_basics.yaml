@@ -1,0 +1,28 @@
+agent:
+  name: "example-rag"
+  description: "RAG agent for document Q&A"
+  system_prompt: |
+    You are an assistant that answers based on the provided document context.
+    If the context does not contain the answer, honestly say you do not know.
+    Always cite the source of information.
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+
+context:
+  strategy: "noop"
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  chunk_size: 400
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/product_catalog.md"

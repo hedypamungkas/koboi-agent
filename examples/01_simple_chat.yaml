@@ -1,0 +1,16 @@
+agent:
+  name: "example-simple-chat"
+  description: "Simple chat agent without tools"
+  system_prompt: |
+    You are a friendly and helpful AI assistant.
+    Answer questions clearly and concisely.
+  max_iterations: 5
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+
+context:
+  strategy: "noop"

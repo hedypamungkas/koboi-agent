@@ -1,0 +1,94 @@
+agent:
+  name: "sales-agent"
+  description: "Sales assistant with product knowledge"
+  system_prompt: |
+    You are a professional sales agent for Acme Corp.
+    Help customers find the right products, answer pricing questions,
+    and provide detailed product information. Be friendly and professional.
+    Always try to recommend products that match customer needs.
+  max_iterations: 15
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+  # temperature: 0.7          # Uncomment to override provider default
+  # max_retries: 3            # Max retry attempts for retryable errors
+  # retry_backoff_base: 2.0   # Exponential backoff base
+  # transport_retries: 2      # HTTP transport level retries
+  # embedding_model: "text-embedding-3-small"
+  # api_version: "2023-06-01" # Anthropic API version
+
+tools:
+  builtin: [calculator, web_search, memory_store, memory_recall]
+  # defaults:                 # Global tool defaults
+  #   timeout: 30
+  #   max_output: 10000
+  # overrides:                # Per-tool overrides
+  #   shell:
+  #     timeout: 60
+  #     max_output: 20000
+  #   git:
+  #     timeout: 30
+  #     max_log_count: 100
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 10000
+  # keep_last: 6              # Messages to keep in truncation strategies
+  # summarization_truncation: 200  # Char limit per message in sliding window summary
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  chunk_size: 400
+  # overlap: 50               # Chunk overlap in chars (for fixed-size chunker)
+  # max_chunk_size: 400       # Max chunk size (for sentence/paragraph chunkers)
+  retriever: "keyword"
+  top_k: 5
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/company_policy.md"
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 10000
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 100
+    max_calls_per_minute: 20
+    # rate_window_seconds: 60  # Sliding window for per-minute rate limit
+
+tracing:
+  provider: "langfuse"
+  public_key: "${LANGFUSE_PUBLIC_KEY}"
+  secret_key: "${LANGFUSE_SECRET_KEY}"
+  base_url: "${LANGFUSE_BASE_URL:}"
+
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 3
+    # repeating_pattern_window: 6
+    # repeating_pattern_threshold: 2
+    # enable_recovery: true
+    # adaptive_threshold: false
+    # task_complexity_hint: "auto"  # "auto" | "simple" | "moderate" | "complex"
+    # error_retry_threshold: 3
+  telemetry: true
+  carryover: true
+  # carryover_limits:
+  #   max_log_entries: 50
+  #   max_goals: 10
+  #   max_artifacts: 20
+  #   max_verified: 20
+  # health_weights:
+  #   loop_health: 0.20
+  #   tool_success_rate: 0.20
+  #   context_efficiency: 0.15
+  #   compaction_fidelity: 0.15
+  #   permission_friction: 0.15
+  #   doom_penalty: 0.15

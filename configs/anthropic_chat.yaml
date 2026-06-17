@@ -1,0 +1,17 @@
+agent:
+  name: "anthropic-chat"
+  description: "Simple chat agent using Anthropic Claude"
+  system_prompt: |
+    You are a helpful AI assistant powered by Claude.
+    Answer questions clearly and concisely.
+  max_iterations: 5
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL:}"
+  max_tokens: 4096
+
+context:
+  strategy: "noop"

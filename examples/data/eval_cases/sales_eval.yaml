@@ -1,0 +1,30 @@
+cases:
+  - name: "Product pricing"
+    input: "How much does AcmeERP Enterprise cost?"
+    expected_keywords: ["15000", "perpetual", "license"]
+    expected_tools: []
+    min_output_length: 20
+
+  - name: "Package comparison"
+    input: "Compare the Starter and Professional packages"
+    expected_keywords: ["Starter", "Professional", "99", "299"]
+    expected_tools: []
+    min_output_length: 50
+
+  - name: "Calculate total"
+    input: "What is the total for 15 AcmeCRM Business users for one year?"
+    expected_keywords: ["4500", "25"]
+    expected_tools: ["calculate"]
+    min_output_length: 20
+
+  - name: "Product recommendation"
+    input: "We are a retail company with 5 outlets, which product is suitable?"
+    expected_keywords: ["AcmePOS", "retail"]
+    expected_tools: []
+    min_output_length: 30
+
+  - name: "Consultation service"
+    input: "How much does IT consultation cost for 2 days?"
+    expected_keywords: ["200", "hour", "3200"]
+    expected_tools: ["calculate"]
+    min_output_length: 20

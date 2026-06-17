@@ -1,0 +1,28 @@
+agent:
+  name: "example-rag-advanced"
+  description: "RAG agent with semantic retriever"
+  system_prompt: |
+    You are an assistant that answers based on document context.
+    Always cite the source of information.
+  max_iterations: 8
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+context:
+  strategy: "noop"
+
+rag:
+  enabled: true
+  chunker: "paragraph"
+  chunk_size: 600
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "in_memory"
+  documents:
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/employee_handbook.md"

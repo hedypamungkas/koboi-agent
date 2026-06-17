@@ -1,0 +1,19 @@
+agent:
+  name: "example-tool-single"
+  description: "Agent with single calculator tool"
+  system_prompt: |
+    You are a calculator assistant. Use the calculate tool for mathematical operations.
+    Explain the calculation steps in detail.
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+
+tools:
+  builtin: [calculate]
+
+context:
+  strategy: "noop"

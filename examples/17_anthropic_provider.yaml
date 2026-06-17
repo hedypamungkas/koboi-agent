@@ -1,0 +1,15 @@
+agent:
+  name: "example-anthropic"
+  description: "Agent using Anthropic Claude"
+  system_prompt: |
+    You are a friendly AI assistant. Answer questions in a clear and concise manner.
+  max_iterations: 5
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL}"
+  api_key: "${ANTHROPIC_API_KEY}"
+  base_url: "${ANTHROPIC_BASE_URL}"
+
+context:
+  strategy: "noop"

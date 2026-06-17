@@ -1,0 +1,252 @@
+"""koboi/types -- Core data types and dataclasses for the koboi framework."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable, Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from koboi.exceptions import AgentError
+
+
+class RiskLevel(Enum):
+    SAFE = "safe"
+    MODERATE = "moderate"
+    DESTRUCTIVE = "destructive"
+
+
+@dataclass
+class ToolDefinition:
+    name: str
+    description: str
+    parameters: dict
+    risk_level: RiskLevel = RiskLevel.SAFE
+    timeout: float | None = None
+
+    def __post_init__(self):
+        if not self.name or not self.name.strip():
+            raise ValueError("ToolDefinition.name cannot be empty")
+        if self.timeout is not None and self.timeout <= 0:
+            raise ValueError(f"ToolDefinition.timeout must be positive, got {self.timeout}")
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass
+class ToolResult:
+    tool_call_id: str
+    content: str
+
+
+@dataclass
+class TokenUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
+@dataclass
+class AgentResponse:
+    content: str | None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: TokenUsage | None = None
+
+    @property
+    def is_complete(self) -> bool:
+        return not self.tool_calls
+
+
+@dataclass
+class RoutingDecision:
+    query: str
+    agents: list[str]
+    confidence: float
+    method: Literal["keyword", "llm", "hybrid(keyword)", "hybrid(llm)", "hybrid(keyword+llm)"]
+    reasoning: str
+    domain_label: str | None = None
+
+    def __post_init__(self):
+        if not self.agents:
+            raise ValueError("RoutingDecision.agents cannot be empty")
+        if not (0 <= self.confidence <= 1):
+            raise ValueError(f"RoutingDecision.confidence must be in [0,1], got {self.confidence}")
+
+
+@dataclass
+class AgentResult:
+    agent_name: str
+    answer: str
+    elapsed_seconds: float
+    tokens_used: int
+    revision_count: int = 0
+    quality_score: float | None = None
+    is_dynamic: bool = False
+    domain_label: str | None = None
+    failed: bool = False
+
+
+@dataclass
+class OrchestratorResult:
+    query: str
+    routing: RoutingDecision
+    agent_results: list[AgentResult] = field(default_factory=list)
+    final_answer: str = ""
+    total_elapsed_seconds: float = 0.0
+    execution_mode: Literal["sequential", "parallel", "sequential+revision", "parallel+revision"] = "sequential"
+
+
+@dataclass
+class AgentBlueprint:
+    name: str
+    domain_label: str
+    system_prompt: str
+    chunks: list[Any]
+    chunker_config: dict
+    retriever_top_k: int = 3
+    source: str = "dynamic_llm"
+    created_at: float = 0.0
+
+
+@dataclass
+class AgentDef:
+    """Config-level definition of a single agent for orchestration."""
+    name: str
+    system_prompt: str = ""
+    description: str = ""
+    keywords: list[str] = field(default_factory=list)
+    tools_config: dict | None = None
+    rag_config: dict | None = None
+    llm_config: dict | None = None
+
+
+@dataclass
+class GuardrailResult:
+    passed: bool
+    reason: str = ""
+    sanitized_content: str | None = None
+    action: str = "block"
+
+
+@dataclass
+class AuditEntry:
+    timestamp: float
+    event_type: str
+    tool_name: str | None = None
+    arguments: str | None = None
+    result: str | None = None
+    risk_level: RiskLevel | str | None = None
+    details: str = ""
+
+
+@dataclass
+class RateLimitConfig:
+    max_tool_calls_per_session: int = 100
+    max_calls_per_tool: dict[str, int] | None = None
+    max_calls_per_minute: int = 20
+    rate_window_seconds: float = 60.0
+
+
+@dataclass
+class MCPToolInfo:
+    name: str
+    description: str
+    input_schema: dict
+
+
+@dataclass
+class SkillDefinition:
+    name: str
+    description: str
+    skill_dir: str
+    body: str | None = None
+    license: str | None = None
+    compatibility: str | None = None
+    metadata: dict | None = None
+    allowed_tools: list[str] | None = None
+
+
+@dataclass
+class EvalScore:
+    name: str
+    value: float
+    reason: str = ""
+
+    def __post_init__(self):
+        if not (0 <= self.value <= 1):
+            raise ValueError(f"EvalScore.value must be in [0,1], got {self.value}")
+
+
+@dataclass
+class EvalResult:
+    case_name: str
+    output: str
+    scores: list[EvalScore] = field(default_factory=list)
+    overall_score: float = 0.0
+    telemetry_report: dict | str = ""
+    trace_id: str | None = None
+    duration_seconds: float = 0.0
+    token_usage: TokenUsage | None = None
+    tool_calls_made: list[ToolCall] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
+    passed: bool = True
+    framework: str | None = None
+
+
+@dataclass
+class EvalCase:
+    name: str
+    user_message: str
+    expected_tools: list[str] = field(default_factory=list)
+    expected_keywords: list[str] = field(default_factory=list)
+    max_iterations: int = 10
+    tags: list[str] = field(default_factory=list)
+    expected_answer: str | None = None
+    context_docs: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
+    verification_fn: Callable | None = None
+    tool_definitions: list[dict] = field(default_factory=list)
+    expected_tool_calls: list[dict] = field(default_factory=list)
+    file_attachments: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.max_iterations < 1:
+            raise ValueError(f"EvalCase.max_iterations must be >= 1, got {self.max_iterations}")
+
+
+@dataclass
+class RunResult:
+    content: str
+    iterations_used: int = 0
+    tool_calls_made: list[ToolCall] = field(default_factory=list)
+    token_usage: TokenUsage | None = None
+    metadata: dict = field(default_factory=dict)
+    success: bool = True
+    error: AgentError | None = None
+    elapsed_seconds: float = 0.0
+
+    @property
+    def tools_used(self) -> list[str]:
+        """Unique tool names used during this run."""
+        seen: set[str] = set()
+        result: list[str] = []
+        for tc in self.tool_calls_made:
+            if tc.name not in seen:
+                seen.add(tc.name)
+                result.append(tc.name)
+        return result
+
+    @property
+    def model(self) -> str:
+        """Model identifier from metadata, if set."""
+        return self.metadata.get("model", "")
+
+    def __str__(self) -> str:
+        return self.content

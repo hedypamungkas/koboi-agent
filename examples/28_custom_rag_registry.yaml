@@ -1,0 +1,40 @@
+agent:
+  name: "example-custom-rag"
+  description: "RAG agent with custom chunker and retriever from registry"
+  system_prompt: |
+    You are an assistant that answers based on document context.
+    Always cite the source of information.
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+
+context:
+  strategy: "noop"
+
+rag:
+  enabled: true
+
+  # Custom chunker registered via @register_chunker("word_count")
+  chunker: "word_count"
+  words_per_chunk: 80
+
+  # Custom retriever registered via @register_retriever("bm25")
+  retriever: "bm25"
+
+  top_k: 3
+  augmentation: "in_memory"
+
+  # Modules to import -- triggers @register_* decorators
+  # In a real project, point to your own package:
+  #   custom_modules:
+  #     - my_company.rag.chunkers
+  #     - my_company.rag.retrievers
+  custom_modules: []
+
+  documents:
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/employee_handbook.md"

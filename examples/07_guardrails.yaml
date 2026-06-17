@@ -1,0 +1,29 @@
+agent:
+  name: "example-guardrails"
+  description: "Agent with guardrails"
+  system_prompt: |
+    You are a safe and helpful assistant. Answer questions clearly.
+    Never disclose sensitive data such as API keys or passwords.
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+
+tools:
+  builtin: [calculate, memory_store]
+
+context:
+  strategy: "noop"
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 500
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 5
+    max_calls_per_minute: 10

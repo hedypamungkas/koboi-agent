@@ -1,0 +1,156 @@
+/* app.tcss -- KoboiApp Phase 4 stylesheet */
+
+KoboiApp {
+    layout: vertical;
+}
+
+#header-bar {
+    dock: top;
+    height: 1;
+    background: $accent;
+    color: $text;
+    text-style: bold;
+}
+
+#chat-container {
+    height: 1fr;
+}
+
+#chat-area {
+    width: 100%;
+    height: 100%;
+}
+
+#status-bar {
+    dock: bottom;
+    height: 1;
+    background: $surface;
+    color: $text-muted;
+}
+
+#input-container {
+    dock: bottom;
+    height: 4;
+    padding: 0 1 1 1;
+}
+
+#input-box {
+    width: 1fr;
+}
+
+/* Command palette / history search modal */
+.modal-overlay {
+    align: center middle;
+}
+
+.modal-panel {
+    width: 60;
+    max-width: 80%;
+    height: auto;
+    max-height: 50%;
+    background: $surface;
+    border: tall $accent;
+    padding: 1 2;
+}
+
+.modal-panel > Input {
+    margin: 0 0 1 0;
+}
+
+.modal-panel > OptionList {
+    height: auto;
+    max-height: 24;
+}
+
+/* ToolCallWidget */
+.tool-header {
+    width: 100%;
+    padding: 0 2;
+    background: $surface;
+    color: $warning;
+}
+
+.tool-header.running {
+    color: $warning;
+    text-style: dim;
+}
+
+.tool-header.completed {
+    color: $success;
+}
+
+.tool-header.error {
+    color: $error;
+}
+
+.tool-body {
+    width: 100%;
+    padding: 0 2;
+    margin: 0 0 0 2;
+    max-height: 32;
+    overflow-y: auto;
+}
+
+.tool-args {
+    width: 100%;
+    color: $text-muted;
+    text-style: dim;
+    margin: 0;
+    display: none;
+}
+
+.tool-result {
+    width: 100%;
+    padding: 0 2;
+    color: $success;
+}
+
+/* Iteration marker */
+.iteration-marker {
+    width: 100%;
+    padding: 0 2;
+    color: $text-muted;
+    text-style: dim;
+    margin: 1 0;
+    height: 1;
+}
+
+/* Orchestration markers (routing, agent status) */
+.orchestration-marker {
+    width: 100%;
+    padding: 0 2;
+    color: $text-muted;
+    text-style: dim;
+    margin: 0 0 1 0;
+}
+
+/* PlanView */
+PlanView {
+    height: auto;
+    max-height: 50%;
+    border: solid $accent;
+    margin: 0;
+    padding: 0 1;
+}
+
+#plan-header {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.plan-step {
+    height: 1;
+}
+
+#plan-footer {
+    color: $text-muted;
+    margin-top: 1;
+    height: 1;
+}
+
+/* RiskBar */
+RiskBar {
+    height: 1;
+    margin: 0 0 1 0;
+}
