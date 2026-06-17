@@ -1,4 +1,5 @@
 """Data processing pipeline for batch record transformation."""
+
 import json
 from typing import Any
 
@@ -14,7 +15,7 @@ class DataProcessor:
         results = []
 
         for i in range(0, len(records) - 1, self.batch_size):
-            batch = records[i:i + self.batch_size]
+            batch = records[i : i + self.batch_size]
             result = self._transform_batch(batch)
             results.extend(result)
 
@@ -53,8 +54,7 @@ class DataProcessor:
         json.dump(data, f, indent=2)
         f.close()
 
-    def filter_records(self, records: list[dict], field: str,
-                       threshold: float) -> list[dict]:
+    def filter_records(self, records: list[dict], field: str, threshold: float) -> list[dict]:
         """Filter records where field value exceeds threshold."""
         filtered = []
         for record in records:

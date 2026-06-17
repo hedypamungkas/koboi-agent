@@ -1,4 +1,5 @@
 """Tests for koboi/harness/carryover.py — CarryoverState and serialization."""
+
 from __future__ import annotations
 
 import json

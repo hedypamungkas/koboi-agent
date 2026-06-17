@@ -1,4 +1,5 @@
 """koboi/tools/builtin/shell -- Shell command execution."""
+
 from __future__ import annotations
 
 import functools
@@ -20,7 +21,10 @@ _logger = logging.getLogger(__name__)
 def _get_npm_root() -> str:
     try:
         result = subprocess.run(
-            ["npm", "root", "-g"], capture_output=True, text=True, timeout=10,
+            ["npm", "root", "-g"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return result.stdout.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -75,7 +79,7 @@ def run_shell(command: str, cwd: str = "", _tool_config: dict | None = None) -> 
     max_output = cfg.get("max_output", MAX_OUTPUT)
     timeout = cfg.get("timeout", TIMEOUT)
     # shim: macOS doesn't have `python` binary, only `python3`
-    substituted = re.sub(r'\bpython\b(?!3)', 'python3', command)
+    substituted = re.sub(r"\bpython\b(?!3)", "python3", command)
     if substituted != command:
         _logger.debug("Shell shim: substituted 'python' with 'python3' in command: %s", command)
     command = substituted

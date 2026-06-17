@@ -1,4 +1,5 @@
 """koboi/tools/builtin/search -- Text search (grep) and file finding (glob)."""
+
 from __future__ import annotations
 
 import os
@@ -29,7 +30,7 @@ def _expand_braces(pattern: str) -> list[str]:
     if not match:
         return [pattern]
     variants = match.group(1).split(",")
-    return [pattern[:match.start()] + v + pattern[match.end():] for v in variants]
+    return [pattern[: match.start()] + v + pattern[match.end() :] for v in variants]
 
 
 def _match_glob(rel_path: str, patterns: list[str]) -> bool:
@@ -76,8 +77,14 @@ def _match_glob(rel_path: str, patterns: list[str]) -> bool:
         "required": ["pattern", "path"],
     },
 )
-def grep_search(pattern: str, path: str, file_filter: str = "", context_lines: int = 0,
-                output_mode: str = "content", _tool_config: dict | None = None) -> str:
+def grep_search(
+    pattern: str,
+    path: str,
+    file_filter: str = "",
+    context_lines: int = 0,
+    output_mode: str = "content",
+    _tool_config: dict | None = None,
+) -> str:
     cfg = _tool_config or {}
     max_output = cfg.get("max_output", MAX_OUTPUT)
     try:
@@ -122,14 +129,14 @@ def grep_search(pattern: str, path: str, file_filter: str = "", context_lines: i
                             end = min(len(lines), i + context_lines + 1)
                             for j in range(start, end):
                                 prefix = ">" if j == i else " "
-                                entry = f"{rel}:{j+1}:{prefix} {lines[j].rstrip()}"
+                                entry = f"{rel}:{j + 1}:{prefix} {lines[j].rstrip()}"
                                 if total_size + len(entry) > max_output:
                                     output_parts.append(f"\n... (truncated, total {total_matches} matches)")
                                     return "\n".join(output_parts)
                                 output_parts.append(entry)
                                 total_size += len(entry)
                         else:
-                            entry = f"{rel}:{i+1}: {line.rstrip()}"
+                            entry = f"{rel}:{i + 1}: {line.rstrip()}"
                             if total_size + len(entry) > max_output:
                                 output_parts.append(f"\n... (truncated, total {total_matches} matches)")
                                 return "\n".join(output_parts)

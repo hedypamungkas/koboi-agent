@@ -1,8 +1,11 @@
 """Tests for koboi.context module."""
+
 from __future__ import annotations
 
 from koboi.context.manager import (
-    NoopContextManager, TruncationManager, SmartTruncationManager,
+    NoopContextManager,
+    TruncationManager,
+    SmartTruncationManager,
     ensure_tool_integrity,
 )
 
@@ -33,9 +36,7 @@ class TestTruncationManager:
 
     async def test_preserves_system(self):
         mgr = TruncationManager(keep_last=3)
-        msgs = [{"role": "system", "content": "System"}] + [
-            {"role": "user", "content": f"Msg {i}"} for i in range(10)
-        ]
+        msgs = [{"role": "system", "content": "System"}] + [{"role": "user", "content": f"Msg {i}"} for i in range(10)]
         result = await mgr.manage(msgs, 1000)
         assert result[0]["role"] == "system"
 

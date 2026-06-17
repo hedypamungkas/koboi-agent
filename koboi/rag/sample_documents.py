@@ -4,6 +4,7 @@ Reads from data/sample/ files or provides inline fallbacks.
 Used by the agent factory to populate knowledge for built-in HR, sales,
 finance, and general agents.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

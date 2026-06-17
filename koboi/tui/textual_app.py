@@ -1,4 +1,5 @@
 """textual_app.py -- Full-screen Textual application for koboi-agent."""
+
 from __future__ import annotations
 
 import asyncio
@@ -68,6 +69,7 @@ class KoboiApp(App):
         # Load keybindings from config (overrides class-level BINDINGS)
         from koboi.tui.keybindings import load_keybindings
         from textual.binding import BindingsMap
+
         self._bindings_list = load_keybindings(agent.config)
         self._bindings = BindingsMap(self._bindings_list)
 
@@ -126,6 +128,7 @@ class KoboiApp(App):
 
         # Phase 5: Register themes
         from koboi.tui.themes import register_themes
+
         saved_theme = self._agent.config.get("agent", "theme", default="koboi-dark")
         register_themes(self, default=saved_theme)
 
@@ -141,10 +144,13 @@ class KoboiApp(App):
         # Phase 5: First-run welcome screen
         if self._is_first_run():
             from koboi.tui.screens.welcome_screen import WelcomeScreen
-            self.push_screen(WelcomeScreen(
-                agent_name=self._agent.config.agent_name,
-                model=f"{self._agent.config.provider}/{self._agent.config.model}",
-            ))
+
+            self.push_screen(
+                WelcomeScreen(
+                    agent_name=self._agent.config.agent_name,
+                    model=f"{self._agent.config.provider}/{self._agent.config.model}",
+                )
+            )
 
         # Phase 5: Ensure session record for SQLite backend
         if self._agent.core is None:
@@ -174,6 +180,7 @@ class KoboiApp(App):
             self._tui_approval = None
             return
         from koboi.tui.approval import TUIApprovalHandler
+
         tui_handler = TUIApprovalHandler(
             app=self,
             trust_db=self._agent.trust_db,
@@ -187,6 +194,7 @@ class KoboiApp(App):
         if self._agent.core is None:
             return
         from koboi.hooks.subagent_hook import SubagentUIHook
+
         hook = SubagentUIHook(app=self)
         self._agent.core.hooks.add(hook)
 
@@ -238,10 +246,12 @@ class KoboiApp(App):
         if event.images:
             content_for_agent = [{"type": "text", "text": message}]
             for img in event.images:
-                content_for_agent.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{img['media_type']};base64,{img['data']}"},
-                })
+                content_for_agent.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{img['media_type']};base64,{img['data']}"},
+                    }
+                )
             img_names = [img.get("path", "image").rsplit("/", 1)[-1] for img in event.images]
             chat.add_system_message(f"[dim]Attached: {', '.join(img_names)}[/dim]")
 
@@ -332,9 +342,7 @@ class KoboiApp(App):
             self._turn_count += 1
             status.turn_count = self._turn_count
             chat.begin_stream()
-            self._current_task = self.run_worker(
-                self._process_stream(result.message), exit_on_error=False
-            )
+            self._current_task = self.run_worker(self._process_stream(result.message), exit_on_error=False)
         return True
 
     # (Slash command logic moved to koboi/tui/commands.py)
@@ -346,7 +354,7 @@ class KoboiApp(App):
         if entry and (not self._history or self._history[-1] != entry):
             self._history.append(entry)
             if len(self._history) > self._history_max:
-                self._history = self._history[-self._history_max:]
+                self._history = self._history[-self._history_max :]
 
     def get_history(self) -> list[str]:
         """Return the command history list."""
@@ -393,6 +401,7 @@ class KoboiApp(App):
     def action_kill_subagents(self) -> None:
         """Cancel all running subagents (ctrl+k)."""
         from koboi.tools.builtin.subagent import get_manager
+
         manager = get_manager()
         chat = self.query_one("#chat-area", ChatLog)
         if manager:
@@ -411,6 +420,7 @@ class KoboiApp(App):
     def action_subagent_monitor(self) -> None:
         """Open the sub-agent monitoring panel."""
         from koboi.tui.screens.subagent_monitor import SubagentMonitorScreen
+
         self.push_screen(SubagentMonitorScreen(self._agent_states))
 
     def action_focus_input(self) -> None:
@@ -444,6 +454,7 @@ class KoboiApp(App):
     def action_cycle_theme(self) -> None:
         """Cycle to the next color theme."""
         from koboi.tui.themes import THEMES
+
         themes = list(THEMES.keys())
         idx = themes.index(self.theme) if self.theme in themes else 0
         self.theme = themes[(idx + 1) % len(themes)]
@@ -455,6 +466,7 @@ class KoboiApp(App):
             chat.add_system_message("Session manager not available in orchestrated mode.")
             return
         from koboi.tui.screens.session_manager import SessionManagerScreen
+
         mem = self._agent.core.memory
         if not hasattr(mem, "db_path"):
             chat = self.query_one("#chat-area", ChatLog)
@@ -472,6 +484,7 @@ class KoboiApp(App):
         if self._agent.core is None:
             return
         from koboi.memory_sqlite import SQLiteMemory
+
         mem = self._agent.core.memory
         messages = SQLiteMemory.get_session_messages(mem.db_path, session_id)
         chat = self.query_one("#chat-area", ChatLog)
@@ -491,6 +504,7 @@ class KoboiApp(App):
             chat.add_system_message("Transcript viewer not available in orchestrated mode.")
             return
         from koboi.tui.screens.transcript_viewer import TranscriptViewerScreen
+
         messages = self._agent.core.memory.get_messages()
         self.push_screen(TranscriptViewerScreen(messages))
 
@@ -498,12 +512,15 @@ class KoboiApp(App):
         """Open the help overlay."""
         from koboi.tui.screens.help_overlay import HelpOverlayScreen
         from koboi.tui.keybindings import get_keybinding_display
-        self.push_screen(HelpOverlayScreen(
-            commands=self._get_all_commands(),
-            bindings=self._bindings_list,
-            current_mode=self._mode_manager.current_mode.value,
-            keybinding_display=get_keybinding_display(self._agent.config),
-        ))
+
+        self.push_screen(
+            HelpOverlayScreen(
+                commands=self._get_all_commands(),
+                bindings=self._bindings_list,
+                current_mode=self._mode_manager.current_mode.value,
+                keybinding_display=get_keybinding_display(self._agent.config),
+            )
+        )
 
     def _is_first_run(self) -> bool:
         """Check if this is the first run (no sessions in DB)."""
@@ -513,6 +530,7 @@ class KoboiApp(App):
             mem = self._agent.core.memory
             if hasattr(mem, "db_path"):
                 from koboi.memory_sqlite import SQLiteMemory
+
                 sessions = SQLiteMemory.list_sessions(mem.db_path, limit=1)
                 return len(sessions) == 0
         except Exception:
@@ -534,6 +552,7 @@ class KoboiApp(App):
 
         def on_result(result):
             from koboi.tui.approval import PermissionResponse
+
             if result is None:
                 # User dismissed dialog (Esc)
                 result_obj = PermissionResponse(approved=False, always_allow=False)
@@ -575,6 +594,7 @@ class KoboiApp(App):
         status.current_tool = ""
         if not self._app_focused and self._notify_enabled:
             from koboi.notifications import notify
+
             notify("Koboi Agent", "Tool completed", sound=self._notify_sound)
 
     def on_stream_iteration(self, event: StreamIteration) -> None:
@@ -591,6 +611,7 @@ class KoboiApp(App):
 
         try:
             from koboi.tools.builtin.task import get_manager
+
             mgr = get_manager()
             status.task_summary = mgr.summary_short()
         except (RuntimeError, ImportError):
@@ -603,12 +624,14 @@ class KoboiApp(App):
         status.state = "idle"
         try:
             from koboi.tools.builtin.task import get_manager
+
             mgr = get_manager()
             status.task_summary = mgr.summary_short()
         except (RuntimeError, ImportError):
             pass
         if not self._app_focused and self._notify_enabled:
             from koboi.notifications import notify
+
             notify("Koboi Agent", "Response complete", sound=self._notify_sound)
 
     def on_stream_error(self, event: StreamError) -> None:
@@ -675,6 +698,7 @@ class KoboiApp(App):
     def on_subagent_dispatch(self, event) -> None:
         """Handle subagent dispatch from SubagentUIHook."""
         from koboi.hooks.subagent_hook import _SubagentDispatch
+
         if not isinstance(event, _SubagentDispatch):
             return
         chat = self.query_one("#chat-area", ChatLog)
@@ -698,6 +722,7 @@ class KoboiApp(App):
     def on_subagent_result(self, event) -> None:
         """Handle subagent result from SubagentUIHook."""
         from koboi.hooks.subagent_hook import _SubagentResult
+
         if not isinstance(event, _SubagentResult):
             return
         chat = self.query_one("#chat-area", ChatLog)

@@ -9,6 +9,7 @@ Lifecycle features:
 - Explicit cancel_task / cancel_all methods
 - Resource cleanup after each task completes
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 @dataclass
 class SubagentTask:
     """A single task to delegate to a child agent."""
+
     task: str
     label: str = ""
 
@@ -34,6 +36,7 @@ class SubagentTask:
 @dataclass
 class SubagentResult:
     """Result from a single subagent execution."""
+
     label: str
     task: str
     answer: str
@@ -95,6 +98,7 @@ class SubAgentManager:
         if not self.logger:
             return None
         from koboi.logger import AgentLogger
+
         return AgentLogger(
             log_dir=self.logger.log_dir,
             session_id=f"{self.logger.session_id}_sub_{label}",
@@ -103,6 +107,7 @@ class SubAgentManager:
     def _build_child_tools(self) -> ToolRegistry:
         """Build a filtered copy of tools that excludes delegate_tasks (prevents recursion)."""
         from koboi.tools.registry import ToolRegistry
+
         child_tools = ToolRegistry()
         for name, defn in self.tools._tools.items():
             if name == "delegate_tasks":
@@ -149,15 +154,17 @@ class SubAgentManager:
         final: list[SubagentResult] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                final.append(SubagentResult(
-                    label=tasks[i].label or f"task_{i}",
-                    task=tasks[i].task,
-                    answer="",
-                    elapsed_seconds=0,
-                    iterations_used=0,
-                    success=False,
-                    error=str(result),
-                ))
+                final.append(
+                    SubagentResult(
+                        label=tasks[i].label or f"task_{i}",
+                        task=tasks[i].task,
+                        answer="",
+                        elapsed_seconds=0,
+                        iterations_used=0,
+                        success=False,
+                        error=str(result),
+                    )
+                )
             else:
                 final.append(result)
         return final
@@ -190,8 +197,7 @@ class SubAgentManager:
 
         # Build child agent with parent's tools (excluding delegate_tasks to prevent recursion)
         system_prompt = (
-            "You are a subagent handling a specific task. "
-            "Complete the task thoroughly and provide a clear answer.\n\n"
+            "You are a subagent handling a specific task. Complete the task thoroughly and provide a clear answer.\n\n"
         )
         if summary:
             system_prompt += f"Conversation context:\n{summary}\n\n"
@@ -203,6 +209,7 @@ class SubAgentManager:
         # so parallel children don't interleave their tool-call histories.
         from koboi.hooks.chain import HookChain
         from koboi.hooks.doom_loop_hook import DoomLoopHook
+
         child_hooks = HookChain()
         for h in self.hook_chain._hooks:
             if isinstance(h, DoomLoopHook):
@@ -211,6 +218,7 @@ class SubAgentManager:
         # Add a child-specific DoomLoopHook with lower thresholds
         try:
             from koboi.harness.doom_loop import DoomLoopConfig
+
             child_doom = DoomLoopHook(
                 config=DoomLoopConfig(
                     consecutive_identical_threshold=3,

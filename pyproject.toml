@@ -87,3 +87,10 @@ include = ["koboi*"]
 [tool.setuptools.package-data]
 "koboi" = ["py.typed"]
 "koboi.tui" = ["app.tcss"]
+
+[tool.bandit]
+# B602: subprocess with shell=True — intentional in shell tool
+# B603/B604: subprocess without shell=False — intentional in shell tool
+# B404: import subprocess — intentional
+exclude_dirs = ["tests", ".venv"]
+skips = ["B602", "B603", "B604", "B404"]

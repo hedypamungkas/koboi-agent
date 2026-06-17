@@ -1,4 +1,5 @@
 """Tests for koboi.rag module."""
+
 from __future__ import annotations
 
 from koboi.rag.types import Chunk, Document, RetrievalResult
@@ -25,6 +26,7 @@ class TestChunkTypes:
 class TestChunkers:
     def test_fixed_size_chunker(self):
         from koboi.rag.chunker import FixedSizeChunker
+
         doc = Document(id="d1", title="Test", content="A " * 200)
         chunker = FixedSizeChunker(chunk_size=100, overlap=20)
         chunks = chunker.chunk(doc)
@@ -34,6 +36,7 @@ class TestChunkers:
 
     def test_sentence_chunker(self):
         from koboi.rag.chunker import SentenceChunker
+
         text = "First sentence. Second sentence. Third sentence. Fourth sentence. Fifth sentence."
         doc = Document(id="d1", title="Test", content=text)
         chunker = SentenceChunker(max_chunk_size=100)
@@ -42,6 +45,7 @@ class TestChunkers:
 
     def test_paragraph_chunker(self):
         from koboi.rag.chunker import ParagraphChunker
+
         text = "Paragraph one.\n\nParagraph two.\n\nParagraph three."
         doc = Document(id="d1", title="Test", content=text)
         chunker = ParagraphChunker(max_chunk_size=500)
@@ -52,14 +56,17 @@ class TestChunkers:
 class TestRetrievers:
     async def test_keyword_retriever(self):
         from koboi.rag.retriever import KeywordRetriever
+
         chunks = [
             Chunk(id=f"c{i}", doc_id="d1", content=text)
-            for i, text in enumerate([
-                "Python is a programming language",
-                "JavaScript runs in the browser",
-                "Python has great data science libraries",
-                "Rust is a systems programming language",
-            ])
+            for i, text in enumerate(
+                [
+                    "Python is a programming language",
+                    "JavaScript runs in the browser",
+                    "Python has great data science libraries",
+                    "Rust is a systems programming language",
+                ]
+            )
         ]
         retriever = KeywordRetriever(chunks=chunks)
         results = await retriever.retrieve("Python programming", top_k=2)
@@ -107,10 +114,7 @@ class TestKeywordRetrieverEdgeCases:
         """Test KeywordRetriever respects top_k parameter."""
         from koboi.rag.retriever import KeywordRetriever
 
-        chunks = [
-            Chunk(id=f"c{i}", doc_id="d1", content=f"Python content {i}")
-            for i in range(10)
-        ]
+        chunks = [Chunk(id=f"c{i}", doc_id="d1", content=f"Python content {i}") for i in range(10)]
         retriever = KeywordRetriever(chunks=chunks)
         results = await retriever.retrieve("Python", top_k=3)
 

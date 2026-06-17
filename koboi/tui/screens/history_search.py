@@ -1,4 +1,5 @@
 """HistorySearchScreen -- Ctrl+R history search overlay."""
+
 from __future__ import annotations
 
 from typing import Optional

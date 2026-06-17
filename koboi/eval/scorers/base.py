@@ -4,6 +4,7 @@ Heuristic and LLM-as-judge scorers for evaluating agent output quality.
 
 Adapted from agent/eval.py scorer classes.
 """
+
 from __future__ import annotations
 
 import re
@@ -24,6 +25,7 @@ class BaseScorer(ABC):
 # ---------------------------------------------------------------------------
 # Heuristic scorers
 # ---------------------------------------------------------------------------
+
 
 class ToolUsageScorer(BaseScorer):
     """Checks if expected tools were used based on telemetry."""
@@ -61,16 +63,10 @@ class KeywordPresenceScorer(BaseScorer):
 
         output_lower = output.lower()
         output_normalized = re.sub(r"[^a-z0-9]", "", output_lower)
-        matched = [
-            kw for kw in expected
-            if kw.lower() in output_lower or kw.lower() in output_normalized
-        ]
+        matched = [kw for kw in expected if kw.lower() in output_lower or kw.lower() in output_normalized]
         ratio = len(matched) / len(expected)
 
-        missing = [
-            kw for kw in expected
-            if kw.lower() not in output_lower and kw.lower() not in output_normalized
-        ]
+        missing = [kw for kw in expected if kw.lower() not in output_lower and kw.lower() not in output_normalized]
         reason = f"{len(matched)}/{len(expected)} keywords found"
         if missing:
             reason += f", missing: {missing}"
@@ -90,11 +86,9 @@ class OutputLengthScorer(BaseScorer):
         if length == 0:
             return EvalScore("output_length", 0.0, "Empty output")
         if length < self.min_length:
-            return EvalScore("output_length", 0.3,
-                             f"Output too short: {length} chars (min: {self.min_length})")
+            return EvalScore("output_length", 0.3, f"Output too short: {length} chars (min: {self.min_length})")
         if length > self.max_length:
-            return EvalScore("output_length", 0.7,
-                             f"Output very long: {length} chars (max: {self.max_length})")
+            return EvalScore("output_length", 0.7, f"Output very long: {length} chars (max: {self.max_length})")
         return EvalScore("output_length", 1.0, f"Output length OK: {length} chars")
 
 
@@ -144,6 +138,7 @@ class HealthScoreScorer(BaseScorer):
 # LLM-as-judge scorer
 # ---------------------------------------------------------------------------
 
+
 class LLMJudgeScorer(BaseScorer):
     """Uses the LLM to judge output quality on a 1-5 scale."""
 
@@ -186,8 +181,8 @@ REASON: <brief 1-sentence reason>"""
             return EvalScore("llm_judge", 0.0, f"Judge failed: {e}")
 
     def _parse_judge_response(self, text: str) -> EvalScore:
-        score_match = re.search(r'SCORE:\s*(\d+(?:\.\d+)?)', text)
-        reason_match = re.search(r'REASON:\s*(.+)', text)
+        score_match = re.search(r"SCORE:\s*(\d+(?:\.\d+)?)", text)
+        reason_match = re.search(r"REASON:\s*(.+)", text)
 
         if score_match:
             raw = float(score_match.group(1))
@@ -201,6 +196,7 @@ REASON: <brief 1-sentence reason>"""
 # ---------------------------------------------------------------------------
 # Cost scorer
 # ---------------------------------------------------------------------------
+
 
 class CostScorer(BaseScorer):
     """Tracks token usage cost per eval case."""
@@ -222,8 +218,5 @@ class CostScorer(BaseScorer):
 
         total = usage.total_tokens
         score = max(0.0, 1.0 - (total / self.max_tokens))
-        cost = (
-            usage.prompt_tokens * self.cost_per_1k_input
-            + usage.completion_tokens * self.cost_per_1k_output
-        ) / 1000
+        cost = (usage.prompt_tokens * self.cost_per_1k_input + usage.completion_tokens * self.cost_per_1k_output) / 1000
         return EvalScore("cost", round(score, 3), f"{total} tokens, ~${cost:.4f}")

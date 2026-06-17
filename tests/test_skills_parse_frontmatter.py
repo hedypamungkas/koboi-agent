@@ -1,4 +1,5 @@
 """Tests for parse_frontmatter and skills edge cases."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,8 +7,12 @@ from pathlib import Path
 import pytest
 
 from koboi.skills.registry import (
-    parse_frontmatter, discover_skills, activate_skill,
-    load_resource, build_discovery_prompt, SkillRegistry,
+    parse_frontmatter,
+    discover_skills,
+    activate_skill,
+    load_resource,
+    build_discovery_prompt,
+    SkillRegistry,
 )
 from koboi.types import SkillDefinition
 
@@ -24,7 +29,7 @@ class TestParseFrontmatter:
         assert result == {}
 
     def test_quoted_values(self):
-        content = '---\nname: "quoted name"\ndescription: \'quoted desc\'\n---\n'
+        content = "---\nname: \"quoted name\"\ndescription: 'quoted desc'\n---\n"
         result = parse_frontmatter(content)
         assert result["name"] == "quoted name"
         assert result["description"] == "quoted desc"

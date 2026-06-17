@@ -6,6 +6,7 @@ Progressive disclosure:
   2. Activation: SKILL.md body loaded on-demand
   3. Resources: files in scripts/, references/, assets/ lazy-loaded
 """
+
 from __future__ import annotations
 
 import re
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
 def parse_frontmatter(content: str) -> dict:
     """Parse YAML frontmatter from SKILL.md (no PyYAML needed)."""
-    match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
     if not match:
         return {}
 
@@ -30,22 +31,22 @@ def parse_frontmatter(content: str) -> dict:
     current_key_continuation = None
     metadata_lines = []
 
-    for line in raw.split('\n'):
+    for line in raw.split("\n"):
         stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
+        if not stripped or stripped.startswith("#"):
             continue
 
         # Handle YAML block scalar continuation lines (>, |, |-, >-, |+, >+)
-        if current_key_continuation and line.startswith('  '):
+        if current_key_continuation and line.startswith("  "):
             existing = result.get(current_key_continuation, "")
             result[current_key_continuation] = (existing + " " + stripped).strip()
             continue
         elif current_key_continuation:
             current_key_continuation = None
 
-        if current_key == 'metadata' and line.startswith('  '):
-            if ':' in stripped:
-                mk, mv = stripped.split(':', 1)
+        if current_key == "metadata" and line.startswith("  "):
+            if ":" in stripped:
+                mk, mv = stripped.split(":", 1)
                 mv = mv.strip()
                 if mv.startswith('"') and mv.endswith('"'):
                     mv = mv[1:-1]
@@ -54,13 +55,13 @@ def parse_frontmatter(content: str) -> dict:
                 metadata_lines.append((mk.strip(), mv))
             continue
 
-        if ':' in stripped:
-            key, value = stripped.split(':', 1)
+        if ":" in stripped:
+            key, value = stripped.split(":", 1)
             key = key.strip()
             value = value.strip()
 
-            if key == 'metadata':
-                current_key = 'metadata'
+            if key == "metadata":
+                current_key = "metadata"
                 metadata_lines = []
                 continue
 
@@ -68,7 +69,7 @@ def parse_frontmatter(content: str) -> dict:
                 value = value[1:-1]
             elif value.startswith("'") and value.endswith("'"):
                 value = value[1:-1]
-            elif value in ('>', '|', '|-', '>-', '|+', '>+'):
+            elif value in (">", "|", "|-", ">-", "|+", ">+"):
                 current_key_continuation = key
                 result[key] = ""
                 continue
@@ -76,10 +77,10 @@ def parse_frontmatter(content: str) -> dict:
             result[key] = value
 
     if metadata_lines:
-        result['metadata'] = {k: v for k, v in metadata_lines}
+        result["metadata"] = {k: v for k, v in metadata_lines}
 
-    if 'allowed-tools' in result:
-        result['allowed-tools'] = result['allowed-tools'].split()
+    if "allowed-tools" in result:
+        result["allowed-tools"] = result["allowed-tools"].split()
 
     return result
 
@@ -119,7 +120,9 @@ def discover_skills(search_paths: list[str | Path], recursive: bool = False) -> 
 
 
 def _try_register_skill(
-    skill_file: Path, skills: list[SkillDefinition], seen_names: set[str],
+    skill_file: Path,
+    skills: list[SkillDefinition],
+    seen_names: set[str],
 ) -> None:
     """Parse a SKILL.md and append to skills list if valid. Dedup by name."""
     try:
@@ -140,22 +143,24 @@ def _try_register_skill(
         return
     seen_names.add(name)
 
-    skills.append(SkillDefinition(
-        name=name,
-        description=description,
-        skill_dir=str(skill_file.parent.resolve()),
-        license=frontmatter.get("license"),
-        compatibility=frontmatter.get("compatibility"),
-        metadata=frontmatter.get("metadata"),
-        allowed_tools=frontmatter.get("allowed-tools"),
-    ))
+    skills.append(
+        SkillDefinition(
+            name=name,
+            description=description,
+            skill_dir=str(skill_file.parent.resolve()),
+            license=frontmatter.get("license"),
+            compatibility=frontmatter.get("compatibility"),
+            metadata=frontmatter.get("metadata"),
+            allowed_tools=frontmatter.get("allowed-tools"),
+        )
+    )
 
 
 def activate_skill(skill: SkillDefinition) -> str:
     """Load SKILL.md body (strip frontmatter). Sets skill.body and returns it."""
     skill_path = Path(skill.skill_dir) / "SKILL.md"
     content = skill_path.read_text(encoding="utf-8")
-    body = re.sub(r'^---\s*\n.*?\n---\s*\n', '', content, flags=re.DOTALL).strip()
+    body = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL).strip()
     skill.body = body
     return body
 
@@ -261,15 +266,72 @@ class SkillRegistry:
         return build_discovery_prompt(self.list_skills())
 
     # Common words that appear in almost every skill description -- useless for matching
-    _STOPWORDS = frozenset({
-        "a", "an", "the", "and", "or", "for", "to", "of", "in", "on", "at",
-        "is", "are", "was", "it", "this", "that", "with", "from", "by", "as",
-        "use", "using", "used", "when", "should", "can", "needs", "work",
-        "skill", "skills", "create", "also", "all", "any", "has", "have",
-        "nya", "di", "dan", "ke", "dari", "yang", "ini", "itu", "dengan",
-        "untuk", "pada", "adalah", "akan", "bisa", "atau", "juga", "saat",  # Indonesian stopwords kept for multilingual support
-        "load", "loaded", "help", "like", "want", "need", "make", "just",
-    })
+    _STOPWORDS = frozenset(
+        {
+            "a",
+            "an",
+            "the",
+            "and",
+            "or",
+            "for",
+            "to",
+            "of",
+            "in",
+            "on",
+            "at",
+            "is",
+            "are",
+            "was",
+            "it",
+            "this",
+            "that",
+            "with",
+            "from",
+            "by",
+            "as",
+            "use",
+            "using",
+            "used",
+            "when",
+            "should",
+            "can",
+            "needs",
+            "work",
+            "skill",
+            "skills",
+            "create",
+            "also",
+            "all",
+            "any",
+            "has",
+            "have",
+            "nya",
+            "di",
+            "dan",
+            "ke",
+            "dari",
+            "yang",
+            "ini",
+            "itu",
+            "dengan",
+            "untuk",
+            "pada",
+            "adalah",
+            "akan",
+            "bisa",
+            "atau",
+            "juga",
+            "saat",  # Indonesian stopwords kept for multilingual support
+            "load",
+            "loaded",
+            "help",
+            "like",
+            "want",
+            "need",
+            "make",
+            "just",
+        }
+    )
 
     def route(self, query: str, top_k: int = 3) -> list[SkillDefinition]:
         """Return top-k skills whose description matches query keywords.
@@ -277,15 +339,15 @@ class SkillRegistry:
         Scoring: TF-IDF inspired -- rare words in query score higher
         than common words that appear in many descriptions.
         """
-        q_words = set(re.findall(r'\w+', query.lower())) - self._STOPWORDS
+        q_words = set(re.findall(r"\w+", query.lower())) - self._STOPWORDS
         if not q_words:
             return []
 
         # IDF: count how many skills each query word appears in
         word_doc_count: dict[str, int] = {}
         for skill in self._skills.values():
-            name_words = set(re.findall(r'\w+', skill.name.replace("-", " ").replace("_", " ").lower()))
-            desc_words = set(re.findall(r'\w+', skill.description.lower())) - self._STOPWORDS
+            name_words = set(re.findall(r"\w+", skill.name.replace("-", " ").replace("_", " ").lower()))
+            desc_words = set(re.findall(r"\w+", skill.description.lower())) - self._STOPWORDS
             s_words = name_words | desc_words
             for w in q_words:
                 if w in s_words:
@@ -293,24 +355,18 @@ class SkillRegistry:
 
         scored = []
         for skill in self._skills.values():
-            name_words = set(re.findall(r'\w+', skill.name.replace("-", " ").replace("_", " ").lower()))
-            desc_words = set(re.findall(r'\w+', skill.description.lower())) - self._STOPWORDS
+            name_words = set(re.findall(r"\w+", skill.name.replace("-", " ").replace("_", " ").lower()))
+            desc_words = set(re.findall(r"\w+", skill.description.lower())) - self._STOPWORDS
             s_words = name_words | desc_words
             overlap = q_words & s_words
             if not overlap:
                 continue
             # IDF score: rarer words contribute more
-            score = sum(
-                1.0 / (1 + word_doc_count.get(w, 1))
-                for w in overlap
-            )
+            score = sum(1.0 / (1 + word_doc_count.get(w, 1)) for w in overlap)
             # Boost: name match counts 3x more than description match
             name_overlap = overlap & name_words
             if name_overlap:
-                score += sum(
-                    3.0 / (1 + word_doc_count.get(w, 1))
-                    for w in name_overlap
-                )
+                score += sum(3.0 / (1 + word_doc_count.get(w, 1)) for w in name_overlap)
             scored.append((score, skill))
 
         scored.sort(key=lambda x: x[0], reverse=True)

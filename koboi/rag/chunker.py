@@ -1,4 +1,5 @@
 """koboi/rag/chunker -- Text chunking strategies for RAG pipeline."""
+
 from __future__ import annotations
 
 import logging
@@ -30,8 +31,7 @@ def resolve_chunker(config: dict) -> BaseChunker:
 
 class BaseChunker(ABC):
     @abstractmethod
-    def chunk(self, document: Document) -> list[Chunk]:
-        ...
+    def chunk(self, document: Document) -> list[Chunk]: ...
 
     def _make_chunk(self, doc_id: str, index: int, content: str) -> Chunk:
         return Chunk(
@@ -164,6 +164,7 @@ class SemanticChunker(BaseChunker):
     def _get_embeddings_sync(self, sentences: list[str]) -> list[list[float]] | None:
         """Get embeddings for sentences. Returns None if unavailable."""
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -177,6 +178,7 @@ class SemanticChunker(BaseChunker):
         # This is a best-effort approach; if unavailable, fall back
         try:
             from koboi.rag.registry import retriever_registry
+
             entry = retriever_registry.get("semantic")
             if entry is None or "client" not in entry.inject:
                 return None
@@ -202,10 +204,7 @@ class SemanticChunker(BaseChunker):
             sentence = sentences[i]
 
             # Start new chunk if similarity drops below threshold or size exceeded
-            should_split = (
-                sim < self.similarity_threshold
-                or current_len + len(sentence) > self.max_chunk_size
-            )
+            should_split = sim < self.similarity_threshold or current_len + len(sentence) > self.max_chunk_size
             if should_split and current_len >= self.min_chunk_size:
                 content = " ".join(current)
                 chunks.append(self._make_chunk(document.id, index, content))
@@ -242,7 +241,7 @@ class ParagraphChunker(BaseChunker):
     @staticmethod
     def _is_heading(text: str) -> bool:
         stripped = text.strip()
-        return bool(stripped) and bool(re.match(r'^#{1,6}\s', stripped))
+        return bool(stripped) and bool(re.match(r"^#{1,6}\s", stripped))
 
     def chunk(self, document: Document) -> list[Chunk]:
         text = document.content.strip()
@@ -301,13 +300,9 @@ def _register_builtins() -> None:
         config_aliases={"chunk_size": "chunk_size", "overlap": "overlap"},
     )(FixedSizeChunker)
 
-    _reg("sentence", description="Sentence-aware chunks up to max_chunk_size")(
-        SentenceChunker
-    )
+    _reg("sentence", description="Sentence-aware chunks up to max_chunk_size")(SentenceChunker)
 
-    _reg("paragraph", description="Paragraph-based chunks with heading-aware merging")(
-        ParagraphChunker
-    )
+    _reg("paragraph", description="Paragraph-based chunks with heading-aware merging")(ParagraphChunker)
 
     _reg(
         "semantic",

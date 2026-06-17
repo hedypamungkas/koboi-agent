@@ -1,4 +1,5 @@
 """yolo_confirm.py -- Non-blocking modal confirmation for YOLO mode activation."""
+
 from __future__ import annotations
 
 from textual.app import ComposeResult

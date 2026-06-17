@@ -1,4 +1,5 @@
 """Tests for koboi.llm.auth module."""
+
 from __future__ import annotations
 
 from koboi.llm.auth import (
@@ -48,10 +49,12 @@ class TestStaticHeaderAuth:
 
 class TestCompositeAuth:
     def test_applies_multiple_strategies(self):
-        auth = CompositeAuth([
-            APIKeyHeaderAuth("sk-ant-key"),
-            StaticHeaderAuth("anthropic-version", "2023-06-01"),
-        ])
+        auth = CompositeAuth(
+            [
+                APIKeyHeaderAuth("sk-ant-key"),
+                StaticHeaderAuth("anthropic-version", "2023-06-01"),
+            ]
+        )
         headers = auth.apply({"Content-Type": "application/json"})
         assert headers["x-api-key"] == "sk-ant-key"
         assert headers["anthropic-version"] == "2023-06-01"
@@ -63,9 +66,11 @@ class TestCompositeAuth:
         assert headers == {"Accept": "json"}
 
     def test_later_strategy_overrides(self):
-        auth = CompositeAuth([
-            APIKeyHeaderAuth("key1"),
-            APIKeyHeaderAuth("key2"),
-        ])
+        auth = CompositeAuth(
+            [
+                APIKeyHeaderAuth("key1"),
+                APIKeyHeaderAuth("key2"),
+            ]
+        )
         headers = auth.apply({})
         assert headers["x-api-key"] == "key2"

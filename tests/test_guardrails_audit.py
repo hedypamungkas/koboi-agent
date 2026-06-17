@@ -1,4 +1,5 @@
 """Tests for koboi/guardrails/audit.py -- Audit trail and approval."""
+
 from __future__ import annotations
 
 import time
@@ -51,9 +52,7 @@ class TestAuditTrail:
     def test_summary(self):
         trail = AuditTrail()
         trail.record(_entry(event_type="input_check", details="passed"))
-        trail.record(_entry(
-            event_type="tool_call", tool_name="shell", details="denied", result="blocked"
-        ))
+        trail.record(_entry(event_type="tool_call", tool_name="shell", details="denied", result="blocked"))
         s = trail.summary()
         assert s["total_events"] == 2
         assert s["blocked"] >= 1
@@ -156,11 +155,13 @@ class TestCLIApprovalHandler:
 class TestSQLiteAuditTrail:
     def test_record_persists(self, tmp_path):
         from koboi.guardrails.audit import SQLiteAuditTrail
+
         db_path = str(tmp_path / "test_audit.db")
         trail = SQLiteAuditTrail(db_path=db_path)
         trail.record(_entry(event_type="tool_call", tool_name="shell", details="ran"))
         trail.close()
         import sqlite3
+
         conn = sqlite3.connect(db_path)
         rows = conn.execute("SELECT event_type, tool_name FROM audit_entries").fetchall()
         conn.close()
@@ -169,6 +170,7 @@ class TestSQLiteAuditTrail:
 
     def test_query_db_filters(self, tmp_path):
         from koboi.guardrails.audit import SQLiteAuditTrail
+
         db_path = str(tmp_path / "test_audit.db")
         trail = SQLiteAuditTrail(db_path=db_path)
         trail.record(_entry(event_type="input_check", details="passed"))
@@ -182,6 +184,7 @@ class TestSQLiteAuditTrail:
 
     def test_in_memory_list_still_populated(self, tmp_path):
         from koboi.guardrails.audit import SQLiteAuditTrail
+
         db_path = str(tmp_path / "test_audit.db")
         trail = SQLiteAuditTrail(db_path=db_path)
         trail.record(_entry(event_type="test", details="info"))
@@ -191,14 +194,14 @@ class TestSQLiteAuditTrail:
 
     def test_schema_indexes(self, tmp_path):
         from koboi.guardrails.audit import SQLiteAuditTrail
+
         db_path = str(tmp_path / "test_audit.db")
         trail = SQLiteAuditTrail(db_path=db_path)
         trail.close()
         import sqlite3
+
         conn = sqlite3.connect(db_path)
-        indexes = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        ).fetchall()
+        indexes = conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
         conn.close()
         names = {r[0] for r in indexes}
         assert "idx_audit_event" in names
@@ -207,6 +210,7 @@ class TestSQLiteAuditTrail:
 
     def test_close_releases_connection(self, tmp_path):
         from koboi.guardrails.audit import SQLiteAuditTrail
+
         db_path = str(tmp_path / "test_audit.db")
         trail = SQLiteAuditTrail(db_path=db_path)
         trail.close()
@@ -214,6 +218,7 @@ class TestSQLiteAuditTrail:
 
     def test_memory_list_capped(self, tmp_path):
         from koboi.guardrails.audit import SQLiteAuditTrail
+
         db_path = str(tmp_path / "test_audit.db")
         trail = SQLiteAuditTrail(db_path=db_path)
         cap = trail._memory_cap
@@ -227,6 +232,7 @@ class TestSQLiteAuditTrail:
 
     def test_risk_level_serialized(self, tmp_path):
         from koboi.guardrails.audit import SQLiteAuditTrail
+
         db_path = str(tmp_path / "test_audit.db")
         trail = SQLiteAuditTrail(db_path=db_path)
         trail.record(_entry(event_type="tool_call", risk_level=RiskLevel.DESTRUCTIVE))

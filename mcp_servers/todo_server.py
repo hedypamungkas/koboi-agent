@@ -1,4 +1,5 @@
 """Todo MCP Server — example MCP server for todo management."""
+
 from koboi.mcp.server import MCPServer
 
 server = MCPServer(name="todo-server", version="1.0.0")

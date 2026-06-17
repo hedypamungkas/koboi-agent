@@ -38,8 +38,7 @@ def resolve_retriever(config: dict, chunks: list[Chunk], client: LLMClient | Non
 
 class BaseRetriever(ABC):
     @abstractmethod
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
-        ...
+    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]: ...
 
 
 class KeywordRetriever(BaseRetriever):
@@ -64,27 +63,20 @@ class KeywordRetriever(BaseRetriever):
             for term in counts:
                 doc_freq[term] = doc_freq.get(term, 0) + 1
 
-        self._idf = {
-            term: math.log((total_docs + 1) / (freq + 1)) + 1
-            for term, freq in doc_freq.items()
-        }
+        self._idf = {term: math.log((total_docs + 1) / (freq + 1)) + 1 for term, freq in doc_freq.items()}
 
         for i, counts in enumerate(term_counts_per_chunk):
             chunk_id = self._chunks[i].id
             total_terms = sum(counts.values()) or 1
             self._tfidf_index[chunk_id] = {
-                term: (count / total_terms) * self._idf.get(term, 1.0)
-                for term, count in counts.items()
+                term: (count / total_terms) * self._idf.get(term, 1.0) for term, count in counts.items()
             }
 
     def _score(self, query_terms: list[str], chunk_id: str) -> float:
         chunk_vec = self._tfidf_index.get(chunk_id, {})
         query_counts = Counter(query_terms)
         total = sum(query_counts.values()) or 1
-        query_vec = {
-            term: (count / total) * self._idf.get(term, 1.0)
-            for term, count in query_counts.items()
-        }
+        query_vec = {term: (count / total) * self._idf.get(term, 1.0) for term, count in query_counts.items()}
 
         dot = sum(query_vec.get(t, 0) * chunk_vec.get(t, 0) for t in query_vec)
         norm_q = sum(v * v for v in query_vec.values()) ** 0.5
@@ -99,10 +91,7 @@ class KeywordRetriever(BaseRetriever):
         if not query_terms:
             return []
 
-        scored = [
-            (chunk, self._score(query_terms, chunk.id))
-            for chunk in self._chunks
-        ]
+        scored = [(chunk, self._score(query_terms, chunk.id)) for chunk in self._chunks]
         scored.sort(key=lambda x: x[1], reverse=True)
 
         return [
@@ -147,8 +136,7 @@ class SemanticRetriever(BaseRetriever):
             self._embedding_available = False
             self._fallback = KeywordRetriever(self._chunks)
             _logger.warning(
-                "SemanticRetriever: no embedding client provided -- "
-                "falling back to keyword retrieval for %d chunks",
+                "SemanticRetriever: no embedding client provided -- falling back to keyword retrieval for %d chunks",
                 len(self._chunks),
             )
             return
@@ -207,8 +195,7 @@ class SemanticRetriever(BaseRetriever):
         scored.sort(key=lambda x: x[1], reverse=True)
 
         return [
-            RetrievalResult(chunk=chunk, score=score, retrieval_method="semantic")
-            for chunk, score in scored[:top_k]
+            RetrievalResult(chunk=chunk, score=score, retrieval_method="semantic") for chunk, score in scored[:top_k]
         ]
 
 

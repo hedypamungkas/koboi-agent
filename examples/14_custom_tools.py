@@ -11,6 +11,7 @@ Run:
     python examples/14_custom_tools.py                  # automatic mode
     python examples/14_custom_tools.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -46,13 +47,15 @@ QUESTIONS = [
 
 def _run_tool_registration_demo():
     """Demonstrates 3 ways to register custom tools."""
-    console.print(Panel(
-        "[bold]Part 1: Three Ways to Register Custom Tools[/bold]\n\n"
-        "1. [cyan]@tool decorator[/cyan] -- declarative\n"
-        "2. [cyan]Manual registry.register()[/cyan] -- flexible\n"
-        "3. [cyan]register_decorated() from module[/cyan] -- modular",
-        title="Custom Tools",
-    ))
+    console.print(
+        Panel(
+            "[bold]Part 1: Three Ways to Register Custom Tools[/bold]\n\n"
+            "1. [cyan]@tool decorator[/cyan] -- declarative\n"
+            "2. [cyan]Manual registry.register()[/cyan] -- flexible\n"
+            "3. [cyan]register_decorated() from module[/cyan] -- modular",
+            title="Custom Tools",
+        )
+    )
 
     from koboi.tools.registry import ToolRegistry, tool, register_decorated
     from koboi.types import RiskLevel
@@ -62,22 +65,42 @@ def _run_tool_registration_demo():
     # Approach 1: @tool decorator
     console.print("\n[bold cyan]Approach 1: @tool decorator[/bold cyan]")
 
-    @tool(name="reverse_text", description="Reverse the character order of text",
-          parameters={"type": "object", "properties": {"text": {"type": "string", "description": "Text to reverse"}}, "required": ["text"]})
+    @tool(
+        name="reverse_text",
+        description="Reverse the character order of text",
+        parameters={
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Text to reverse"}},
+            "required": ["text"],
+        },
+    )
     def reverse_text(text: str) -> str:
         return text[::-1]
 
-    registry.register(name=reverse_text._tool_def.name, description=reverse_text._tool_def.description,
-                      parameters=reverse_text._tool_def.parameters, fn=reverse_text, risk_level=reverse_text._tool_def.risk_level)
+    registry.register(
+        name=reverse_text._tool_def.name,
+        description=reverse_text._tool_def.description,
+        parameters=reverse_text._tool_def.parameters,
+        fn=reverse_text,
+        risk_level=reverse_text._tool_def.risk_level,
+    )
     console.print(f"  Registered: [cyan]reverse_text[/cyan]")
     result = run_async(registry.execute("reverse_text", '{"text": "koboi"}'))
     console.print(f"  Test: reverse_text('koboi') = [green]{result}[/green]")
 
     # Approach 2: Manual register
     console.print("\n[bold cyan]Approach 2: Manual registry.register()[/bold cyan]")
-    registry.register(name="uppercase", description="Convert text to uppercase",
-                      parameters={"type": "object", "properties": {"text": {"type": "string", "description": "Text to convert"}}, "required": ["text"]},
-                      fn=lambda text: text.upper(), risk_level=RiskLevel.SAFE)
+    registry.register(
+        name="uppercase",
+        description="Convert text to uppercase",
+        parameters={
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "Text to convert"}},
+            "required": ["text"],
+        },
+        fn=lambda text: text.upper(),
+        risk_level=RiskLevel.SAFE,
+    )
     console.print(f"  Registered: [cyan]uppercase[/cyan]")
     result = run_async(registry.execute("uppercase", '{"text": "hello koboi"}'))
     console.print(f"  Test: uppercase('hello koboi') = [green]{result}[/green]")
@@ -85,6 +108,7 @@ def _run_tool_registration_demo():
     # Approach 3: register_decorated from module
     console.print("\n[bold cyan]Approach 3: register_decorated() from module[/bold cyan]")
     from examples.data.custom_tools import weather, translate
+
     register_decorated(registry, weather)
     console.print(f"  Registered from weather: [cyan]get_weather[/cyan]")
     register_decorated(registry, translate)

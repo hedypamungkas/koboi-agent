@@ -1,4 +1,5 @@
 """themes.py -- Koboi Agent TUI theme definitions."""
+
 from __future__ import annotations
 
 from textual.app import App

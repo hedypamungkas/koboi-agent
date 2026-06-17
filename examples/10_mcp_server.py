@@ -11,6 +11,7 @@ Run:
     python examples/09_mcp_server.py                  # automatic mode
     python examples/09_mcp_server.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import os
@@ -182,16 +183,18 @@ def run_automatic():
             pass
 
     console.print()
-    console.print(Panel(
-        "MCP server lifecycle completed successfully:\n"
-        "  1. Server code written to temporary file\n"
-        "  2. Client connect + initialize handshake\n"
-        "  3. 2 tools discovered: greet, farewell\n"
-        "  4. 3 tool calls succeeded (greet x2, farewell x1)\n"
-        "  5. Client disconnect + cleanup",
-        title="Summary",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            "MCP server lifecycle completed successfully:\n"
+            "  1. Server code written to temporary file\n"
+            "  2. Client connect + initialize handshake\n"
+            "  3. 2 tools discovered: greet, farewell\n"
+            "  4. 3 tool calls succeeded (greet x2, farewell x1)\n"
+            "  5. Client disconnect + cleanup",
+            title="Summary",
+            border_style="green",
+        )
+    )
 
 
 def run_interactive():

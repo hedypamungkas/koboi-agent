@@ -1,4 +1,5 @@
 """Tests for orchestration/factory.py helpers and AgentFactory."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -218,7 +219,11 @@ class TestDynamicAgentBuilder:
 
     async def test_generate_system_prompt_success(self):
         client = MagicMock()
-        client.complete = AsyncMock(return_value=MagicMock(content="You are an HR specialist agent at Acme Corp. You handle leave policies and employee benefits."))
+        client.complete = AsyncMock(
+            return_value=MagicMock(
+                content="You are an HR specialist agent at Acme Corp. You handle leave policies and employee benefits."
+            )
+        )
         builder = DynamicAgentBuilder(client=client)
         prompt = await builder.generate_system_prompt("leave", "hr", [])
         assert "specialist" in prompt.lower() or len(prompt) > 0

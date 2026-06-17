@@ -1,4 +1,5 @@
 """Tests for koboi.orchestration module."""
+
 from __future__ import annotations
 
 import json
@@ -41,9 +42,7 @@ class TestKeywordRouter:
 
 class TestLLMRouter:
     async def test_routes_via_llm(self):
-        resp = make_mock_response(
-            json.dumps({"agents": ["hr"], "confidence": 0.9, "reasoning": "about leave"})
-        )
+        resp = make_mock_response(json.dumps({"agents": ["hr"], "confidence": 0.9, "reasoning": "about leave"}))
         client = MockClient([resp])
         router = LLMRouter(client=client)
         result = await router.route("How many annual leave days?")
@@ -87,6 +86,7 @@ class TestOrchestrator:
 class TestAgentFactory:
     def test_create_agent_general(self):
         from koboi.orchestration.factory import AgentFactory
+
         resp = make_mock_response("General response")
         client = MockClient([resp])
         agent = AgentFactory.create_agent("general", client)
@@ -94,6 +94,7 @@ class TestAgentFactory:
 
     def test_create_agent_hr(self):
         from koboi.orchestration.factory import AgentFactory
+
         resp = make_mock_response("HR response")
         client = MockClient([resp])
         agent = AgentFactory.create_agent("hr", client)
@@ -159,9 +160,7 @@ class TestDynamicAgentBuilder:
         """Test DynamicAgentBuilder domain classification."""
         from koboi.orchestration.factory import DynamicAgentBuilder
 
-        resp = make_mock_response(
-            json.dumps({"domain": "hr", "is_known": True})
-        )
+        resp = make_mock_response(json.dumps({"domain": "hr", "is_known": True}))
         client = MockClient([resp])
 
         builder = DynamicAgentBuilder(client=client)
@@ -207,9 +206,7 @@ class TestDynamicAgentBuilder:
         """Test DynamicAgentBuilder builds complete blueprint."""
         from koboi.orchestration.factory import DynamicAgentBuilder
 
-        resp = make_mock_response(
-            json.dumps({"domain": "support", "is_known": False})
-        )
+        resp = make_mock_response(json.dumps({"domain": "support", "is_known": False}))
         resp2 = make_mock_response("You are a support specialist.")
         client = MockClient([resp, resp2])
 
@@ -301,13 +298,7 @@ class TestHybridRouter:
         """Test low confidence triggers LLM routing."""
         from koboi.orchestration.router import HybridRouter
 
-        resp = make_mock_response(
-            json.dumps({
-                "agents": ["hr"],
-                "confidence": 0.8,
-                "reasoning": "LLM analysis"
-            })
-        )
+        resp = make_mock_response(json.dumps({"agents": ["hr"], "confidence": 0.8, "reasoning": "LLM analysis"}))
         client = MockClient([resp])
         router = HybridRouter(client=client, confidence_threshold=0.9)
 
@@ -335,11 +326,7 @@ class TestHybridRouter:
 
         # LLM finds additional domain
         resp = make_mock_response(
-            json.dumps({
-                "agents": ["hr", "sales"],
-                "confidence": 0.8,
-                "reasoning": "Multi-domain query"
-            })
+            json.dumps({"agents": ["hr", "sales"], "confidence": 0.8, "reasoning": "Multi-domain query"})
         )
         client = MockClient([resp])
         router = HybridRouter(client=client, confidence_threshold=0.3)
@@ -355,9 +342,7 @@ class TestQualityEvaluator:
         """Test QualityEvaluator returns quality score."""
         from koboi.orchestration.orchestrator import QualityEvaluator
 
-        resp = make_mock_response(
-            json.dumps({"score": 0.8, "feedback": "Good answer", "needs_revision": False})
-        )
+        resp = make_mock_response(json.dumps({"score": 0.8, "feedback": "Good answer", "needs_revision": False}))
         client = MockClient([resp])
 
         evaluator = QualityEvaluator(client=client, threshold=0.7)
@@ -371,9 +356,7 @@ class TestQualityEvaluator:
         """Test low score triggers revision."""
         from koboi.orchestration.orchestrator import QualityEvaluator
 
-        resp = make_mock_response(
-            json.dumps({"score": 0.4, "feedback": "Too vague", "needs_revision": True})
-        )
+        resp = make_mock_response(json.dumps({"score": 0.4, "feedback": "Too vague", "needs_revision": True}))
         client = MockClient([resp])
 
         evaluator = QualityEvaluator(client=client, threshold=0.7)

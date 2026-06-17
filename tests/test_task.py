@@ -1,4 +1,5 @@
 """tests/test_task.py -- Tests for TaskManager, task tools, and TaskHook."""
+
 from __future__ import annotations
 
 import json
@@ -289,6 +290,7 @@ class TestTaskTools:
 
     def _register_tools(self) -> ToolRegistry:
         from koboi.tools.builtin import task as task_mod
+
         registry = ToolRegistry()
         registry.set_dep("manager", self._mgr)
         register_decorated(registry, task_mod)
@@ -304,10 +306,15 @@ class TestTaskTools:
     @pytest.mark.asyncio
     async def test_task_create_with_description(self):
         registry = self._register_tools()
-        result = await registry.execute("task_create", json.dumps({
-            "subject": "Fix bug",
-            "description": "The login page crashes",
-        }))
+        result = await registry.execute(
+            "task_create",
+            json.dumps(
+                {
+                    "subject": "Fix bug",
+                    "description": "The login page crashes",
+                }
+            ),
+        )
         assert "t_0001" in result
         assert "Fix bug" in result
 
@@ -354,26 +361,37 @@ class TestTaskTools:
     async def test_task_update_status(self):
         self._mgr.create("Test task")
         registry = self._register_tools()
-        result = await registry.execute("task_update", json.dumps({
-            "task_id": "t_0001",
-            "status": "completed",
-        }))
+        result = await registry.execute(
+            "task_update",
+            json.dumps(
+                {
+                    "task_id": "t_0001",
+                    "status": "completed",
+                }
+            ),
+        )
         assert "completed" in result
         assert self._mgr.get("t_0001").status == "completed"
 
     @pytest.mark.asyncio
     async def test_task_update_not_found(self):
         registry = self._register_tools()
-        result = await registry.execute("task_update", json.dumps({
-            "task_id": "t_9999",
-            "status": "completed",
-        }))
+        result = await registry.execute(
+            "task_update",
+            json.dumps(
+                {
+                    "task_id": "t_9999",
+                    "status": "completed",
+                }
+            ),
+        )
         assert "not found" in result
 
     @pytest.mark.asyncio
     async def test_tools_without_manager(self):
         """Tools should return error strings when manager is not set."""
         from koboi.tools.builtin import task as task_mod
+
         registry = ToolRegistry()
         # Don't set dep "manager" -- simulates uninitialized state
         register_decorated(registry, task_mod)
@@ -384,10 +402,15 @@ class TestTaskTools:
     async def test_task_create_with_blocked_by(self):
         registry = self._register_tools()
         await registry.execute("task_create", json.dumps({"subject": "Step 1"}))
-        result = await registry.execute("task_create", json.dumps({
-            "subject": "Step 2",
-            "blocked_by": ["t_0001"],
-        }))
+        result = await registry.execute(
+            "task_create",
+            json.dumps(
+                {
+                    "subject": "Step 2",
+                    "blocked_by": ["t_0001"],
+                }
+            ),
+        )
         assert "t_0002" in result
         assert "blocked" in result.lower()
 
@@ -395,28 +418,48 @@ class TestTaskTools:
     async def test_task_update_blocked_fails(self):
         registry = self._register_tools()
         await registry.execute("task_create", json.dumps({"subject": "Step 1"}))
-        await registry.execute("task_create", json.dumps({
-            "subject": "Step 2",
-            "blocked_by": ["t_0001"],
-        }))
-        result = await registry.execute("task_update", json.dumps({
-            "task_id": "t_0002",
-            "status": "in_progress",
-        }))
+        await registry.execute(
+            "task_create",
+            json.dumps(
+                {
+                    "subject": "Step 2",
+                    "blocked_by": ["t_0001"],
+                }
+            ),
+        )
+        result = await registry.execute(
+            "task_update",
+            json.dumps(
+                {
+                    "task_id": "t_0002",
+                    "status": "in_progress",
+                }
+            ),
+        )
         assert "Cannot start" in result or "Blocked" in result
 
     @pytest.mark.asyncio
     async def test_task_complete_unblocks(self):
         registry = self._register_tools()
         await registry.execute("task_create", json.dumps({"subject": "Step 1"}))
-        await registry.execute("task_create", json.dumps({
-            "subject": "Step 2",
-            "blocked_by": ["t_0001"],
-        }))
-        result = await registry.execute("task_update", json.dumps({
-            "task_id": "t_0001",
-            "status": "completed",
-        }))
+        await registry.execute(
+            "task_create",
+            json.dumps(
+                {
+                    "subject": "Step 2",
+                    "blocked_by": ["t_0001"],
+                }
+            ),
+        )
+        result = await registry.execute(
+            "task_update",
+            json.dumps(
+                {
+                    "task_id": "t_0001",
+                    "status": "completed",
+                }
+            ),
+        )
         assert "Unblocked" in result or "unblocked" in result.lower()
 
     @pytest.mark.asyncio
@@ -424,10 +467,15 @@ class TestTaskTools:
         registry = self._register_tools()
         await registry.execute("task_create", json.dumps({"subject": "Step 1"}))
         await registry.execute("task_create", json.dumps({"subject": "Step 2"}))
-        result = await registry.execute("task_add_dependency", json.dumps({
-            "task_id": "t_0002",
-            "depends_on": "t_0001",
-        }))
+        result = await registry.execute(
+            "task_add_dependency",
+            json.dumps(
+                {
+                    "task_id": "t_0002",
+                    "depends_on": "t_0001",
+                }
+            ),
+        )
         assert "t_0001" in result
         assert self._mgr.get("t_0002").status == "blocked"
 
@@ -435,24 +483,39 @@ class TestTaskTools:
     async def test_task_add_dependency_circular(self):
         registry = self._register_tools()
         await registry.execute("task_create", json.dumps({"subject": "Step 1"}))
-        await registry.execute("task_create", json.dumps({
-            "subject": "Step 2",
-            "blocked_by": ["t_0001"],
-        }))
-        result = await registry.execute("task_add_dependency", json.dumps({
-            "task_id": "t_0001",
-            "depends_on": "t_0002",
-        }))
+        await registry.execute(
+            "task_create",
+            json.dumps(
+                {
+                    "subject": "Step 2",
+                    "blocked_by": ["t_0001"],
+                }
+            ),
+        )
+        result = await registry.execute(
+            "task_add_dependency",
+            json.dumps(
+                {
+                    "task_id": "t_0001",
+                    "depends_on": "t_0002",
+                }
+            ),
+        )
         assert "Circular" in result
 
     @pytest.mark.asyncio
     async def test_task_list_shows_blocked(self):
         registry = self._register_tools()
         await registry.execute("task_create", json.dumps({"subject": "Step 1"}))
-        await registry.execute("task_create", json.dumps({
-            "subject": "Step 2",
-            "blocked_by": ["t_0001"],
-        }))
+        await registry.execute(
+            "task_create",
+            json.dumps(
+                {
+                    "subject": "Step 2",
+                    "blocked_by": ["t_0001"],
+                }
+            ),
+        )
         result = await registry.execute("task_list", json.dumps({}))
         assert "blocked" in result
         assert "t_0001" in result
@@ -473,6 +536,7 @@ class TestTaskHook:
     @pytest.mark.asyncio
     async def test_hook_no_tasks_no_injection(self):
         from koboi.hooks.task_hook import TaskHook
+
         hook = TaskHook(reminder_interval=1, manager=self._mgr)
         ctx = HookContext(event=HookEvent.POST_LLM_CALL)
         result = await hook.execute(ctx)
@@ -481,6 +545,7 @@ class TestTaskHook:
     @pytest.mark.asyncio
     async def test_hook_injects_after_interval(self):
         from koboi.hooks.task_hook import TaskHook
+
         hook = TaskHook(reminder_interval=2, manager=self._mgr)
         self._mgr.create("Pending task")
 
@@ -498,6 +563,7 @@ class TestTaskHook:
     @pytest.mark.asyncio
     async def test_hook_resets_counter_on_injection(self):
         from koboi.hooks.task_hook import TaskHook
+
         hook = TaskHook(reminder_interval=1, manager=self._mgr)
         self._mgr.create("Task")
 
@@ -508,6 +574,7 @@ class TestTaskHook:
     @pytest.mark.asyncio
     async def test_hook_resets_when_no_active_tasks(self):
         from koboi.hooks.task_hook import TaskHook
+
         hook = TaskHook(reminder_interval=5, manager=self._mgr)
         self._mgr.create("Task")
         self._mgr.update("t_0001", status="completed")
@@ -520,6 +587,7 @@ class TestTaskHook:
     @pytest.mark.asyncio
     async def test_hook_handles_no_manager(self):
         from koboi.hooks.task_hook import TaskHook
+
         hook = TaskHook(reminder_interval=1)  # no manager
         ctx = HookContext(event=HookEvent.POST_LLM_CALL)
         result = await hook.execute(ctx)

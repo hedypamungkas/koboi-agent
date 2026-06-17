@@ -3,6 +3,7 @@
 AgentFactory: creates pre-configured agents (hr, sales, finance, general).
 DynamicAgentBuilder: builds specialist agents on-the-fly for unknown domains.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,10 @@ CHUNKER = ParagraphChunker(max_chunk_size=1000)
 # Knowledge splitting
 # ---------------------------------------------------------------------------
 
+
 def _split_catalog() -> tuple[str, str]:
     from koboi.rag.sample_documents import get_product_catalog
+
     full = get_product_catalog()
     for marker in ("4. TERMS AND CONDITIONS", "## Payment Terms"):
         idx = full.find(marker)
@@ -40,6 +43,7 @@ def _split_catalog() -> tuple[str, str]:
 
 def _chunk_all() -> list[Chunk]:
     from koboi.rag.sample_documents import get_all_documents
+
     chunks: list[Chunk] = []
     for title, content in get_all_documents():
         doc_id = title.replace(" ", "_").lower()
@@ -117,6 +121,7 @@ GENERAL_PROMPT = (
 # AgentFactory
 # ---------------------------------------------------------------------------
 
+
 class AgentFactory:
     _defaults = {
         "top_k": 3,
@@ -150,6 +155,7 @@ class AgentFactory:
         logger: AgentLogger | None = None,
     ) -> Agent:
         from koboi.orchestration.factory import DynamicAgentBuilder
+
         builder = DynamicAgentBuilder(client=client, logger=logger)
         return builder.build_agent(blueprint)
 
@@ -163,8 +169,12 @@ class AgentFactory:
         aug_entry = augmentation_registry.get("in_memory")
         aug = aug_entry.cls(retriever=retriever, top_k=cls._defaults["top_k"], logger=logger)
         return Agent(
-            client=client, system_prompt=prompt, augmentation=aug,
-            max_context_tokens=cls._defaults["max_context_tokens"], logger=logger, verbose=False,
+            client=client,
+            system_prompt=prompt,
+            augmentation=aug,
+            max_context_tokens=cls._defaults["max_context_tokens"],
+            logger=logger,
+            verbose=False,
         )
 
     @classmethod
@@ -180,7 +190,10 @@ class AgentFactory:
         from koboi.loop import AgentCore as Agent
 
         augmentation = cls.build_rag_from_config(
-            agent_def.rag_config, parent_rag_config, logger, client=client,
+            agent_def.rag_config,
+            parent_rag_config,
+            logger,
+            client=client,
         )
 
         max_ctx = cls._defaults["max_context_tokens"]
@@ -215,12 +228,16 @@ class AgentFactory:
             child_logger = None
             if logger:
                 from koboi.logger import AgentLogger
+
                 child_logger = AgentLogger(
                     log_dir=logger.log_dir,
                     session_id=f"{logger.session_id}_{ad.name}",
                 )
             agents[ad.name] = cls.create_configured_agent(
-                ad, client, child_logger, parent_rag_config,
+                ad,
+                client,
+                child_logger,
+                parent_rag_config,
                 hook_chain=hook_chain,
             )
         return agents
@@ -240,6 +257,7 @@ class AgentFactory:
             register_all(registry)
             # Inject per-agent memory store so sub-agents don't share state
             from koboi.tools.builtin.memory import _MemoryStore
+
             memory_file = tools_config.get("memory_file", ".agent_memory.json")
             registry.set_dep("memory_store_ref", _MemoryStore(filepath=memory_file))
             registry.keep_only(builtin_list)
@@ -261,6 +279,7 @@ class AgentFactory:
             return None
 
         from koboi.rag.registry import build_rag
+
         return build_rag(rag_conf, client=client, logger=logger)
 
 
@@ -359,14 +378,18 @@ class DynamicAgentBuilder:
         return [r.chunk for r in results if r.score > 0]
 
     async def generate_system_prompt(
-        self, query: str, domain_label: str, sample_chunks: list[Chunk],
+        self,
+        query: str,
+        domain_label: str,
+        sample_chunks: list[Chunk],
     ) -> str:
-        sample_context = "\n".join(
-            c.content[:200] for c in sample_chunks[:3]
-        ) if sample_chunks else "(no context available)"
+        sample_context = (
+            "\n".join(c.content[:200] for c in sample_chunks[:3]) if sample_chunks else "(no context available)"
+        )
 
         prompt = SYSTEM_PROMPT_GENERATION_PROMPT.format(
-            domain_label=domain_label, sample_context=sample_context,
+            domain_label=domain_label,
+            sample_context=sample_context,
         )
         try:
             resp = await self.client.complete(
@@ -415,7 +438,9 @@ class DynamicAgentBuilder:
             retriever = ret_entry.cls(blueprint.chunks)
             aug_entry = augmentation_registry.get("in_memory")
             aug = aug_entry.cls(
-                retriever=retriever, top_k=blueprint.retriever_top_k, logger=self.logger,
+                retriever=retriever,
+                top_k=blueprint.retriever_top_k,
+                logger=self.logger,
             )
         else:
             aug = None

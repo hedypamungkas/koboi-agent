@@ -9,6 +9,7 @@ Run:
     python examples/05_context_management.py                  # automatic mode
     python examples/05_context_management.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -170,8 +171,15 @@ def run_automatic(verbose: bool):
             managed_count = len(managed)
             managed_tokens = estimate_tokens(managed)
 
-            token_log.append({"turn": i, "messages": msg_count, "tokens": token_est,
-                              "managed_messages": managed_count, "managed_tokens": managed_tokens})
+            token_log.append(
+                {
+                    "turn": i,
+                    "messages": msg_count,
+                    "tokens": token_est,
+                    "managed_messages": managed_count,
+                    "managed_tokens": managed_tokens,
+                }
+            )
             if managed_count < msg_count:
                 console.print(
                     f"  [dim]  -> stored: {msg_count} msgs, ~{token_est} tokens | "
@@ -241,6 +249,7 @@ def run_interactive(verbose: bool):
         try:
             result = run_async(core.run(user_input))
             from rich.markdown import Markdown
+
             console.print(Panel(Markdown(str(result)), title=f"Agent ({selected_label})", border_style="green"))
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")

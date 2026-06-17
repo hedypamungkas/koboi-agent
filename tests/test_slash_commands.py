@@ -1,4 +1,5 @@
 """Tests for slash command handling in the Textual TUI."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -32,6 +33,7 @@ class TestSlashCommands:
     @pytest.mark.asyncio
     async def test_help_command(self):
         from koboi.tui.screens.help_overlay import HelpOverlayScreen
+
         agent = _make_mock_agent()
         app = KoboiApp(agent)
         async with app.run_test() as pilot:
@@ -107,6 +109,7 @@ class TestSlashCommands:
 
         async def mock_stream(msg):
             from koboi.events import CompleteEvent
+
             yield CompleteEvent(content="response")
 
         agent.run_stream = mock_stream

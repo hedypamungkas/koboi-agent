@@ -1,4 +1,5 @@
 """Authentication service for user management."""
+
 import hashlib
 import sqlite3
 import time

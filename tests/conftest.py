@@ -1,4 +1,5 @@
 """Shared test fixtures for koboi-agent tests."""
+
 from __future__ import annotations
 
 import json
@@ -45,6 +46,7 @@ class MockClient(LLMClient):
 
     async def complete_stream(self, messages: list[dict], tools: list[dict] | None = None):
         from koboi.events import TextDeltaEvent, CompleteEvent
+
         resp = await self.complete(messages, tools)
         if resp.content:
             yield TextDeltaEvent(content=resp.content)
@@ -59,6 +61,7 @@ class MockClient(LLMClient):
 
 class MockToolCall:
     """Test double for ToolCall."""
+
     def __init__(self, id: str = "tc_1", name: str = "test_tool", arguments: str = "{}"):
         self.id = id
         self.name = name
@@ -121,6 +124,7 @@ def simple_config(tmp_path):
     }
     config_path = tmp_path / "test_config.yaml"
     import yaml
+
     with open(config_path, "w") as f:
         yaml.dump(config_data, f)
     return Config.from_yaml(config_path)

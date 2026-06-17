@@ -1,4 +1,5 @@
 """Tests for G11 (sub-agent monitor), G12 (configurable keybindings), G15 (vim mode)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -54,22 +55,26 @@ class TestKeybindings:
 
     def test_load_keybindings_override(self):
         """YAML overrides change the key for an action."""
-        config = Config.from_dict({
-            "agent": {"name": "test"},
-            "llm": {"model": "gpt-4o"},
-            "keybindings": {"f1": "help_overlay", "ctrl+p": "command_palette"},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test"},
+                "llm": {"model": "gpt-4o"},
+                "keybindings": {"f1": "help_overlay", "ctrl+p": "command_palette"},
+            }
+        )
         bindings = load_keybindings(config)
         help_binding = next(b for b in bindings if b.action == "help_overlay")
         assert help_binding.key == "f1"
 
     def test_load_keybindings_empty_override(self):
         """Empty overrides keep defaults."""
-        config = Config.from_dict({
-            "agent": {"name": "test"},
-            "llm": {"model": "gpt-4o"},
-            "keybindings": {},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test"},
+                "llm": {"model": "gpt-4o"},
+                "keybindings": {},
+            }
+        )
         bindings = load_keybindings(config)
         assert len(bindings) == 13
 
@@ -92,22 +97,26 @@ class TestKeybindings:
 
     def test_get_keybinding_display_override(self):
         """Display reflects overridden keys."""
-        config = Config.from_dict({
-            "agent": {"name": "test"},
-            "llm": {"model": "gpt-4o"},
-            "keybindings": {"f5": "cycle_theme"},  # key->action format
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test"},
+                "llm": {"model": "gpt-4o"},
+                "keybindings": {"f5": "cycle_theme"},  # key->action format
+            }
+        )
         display = get_keybinding_display(config)
         theme_entry = next(d for d in display if d[1] == "Toggle Theme")
         assert theme_entry[0] == "f5"
 
     def test_config_keybindings_property(self):
         """Config.keybindings returns the keybindings dict."""
-        config = Config.from_dict({
-            "agent": {"name": "test"},
-            "llm": {"model": "gpt-4o"},
-            "keybindings": {"ctrl+x": "custom_action"},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test"},
+                "llm": {"model": "gpt-4o"},
+                "keybindings": {"ctrl+x": "custom_action"},
+            }
+        )
         assert config.keybindings == {"ctrl+x": "custom_action"}
 
     def test_config_keybindings_default_empty(self):
@@ -372,20 +381,21 @@ class TestSubagentMonitor:
     async def test_agent_states_updated_on_dispatch(self):
         """Agent dispatch events update _agent_states."""
         from koboi.tui.bridge import StreamAgentDispatch, StreamRoutingDecision
+
         agent = _make_mock_agent()
         app = KoboiApp(agent)
         async with app.run_test() as pilot:
-            app.on_stream_routing_decision(StreamRoutingDecision(
-                agents=["hr", "sales"], confidence=0.9, method="keyword", reasoning=""
-            ))
+            app.on_stream_routing_decision(
+                StreamRoutingDecision(agents=["hr", "sales"], confidence=0.9, method="keyword", reasoning="")
+            )
             await pilot.pause()
             assert "hr" in app._agent_states
             assert "sales" in app._agent_states
             assert app._agent_states["hr"]["status"] == "pending"
 
-            app.on_stream_agent_dispatch(StreamAgentDispatch(
-                agent_name="hr", agent_index=0, total_agents=2, mode="sequential"
-            ))
+            app.on_stream_agent_dispatch(
+                StreamAgentDispatch(agent_name="hr", agent_index=0, total_agents=2, mode="sequential")
+            )
             await pilot.pause()
             assert app._agent_states["hr"]["status"] == "running"
 
@@ -397,18 +407,19 @@ class TestSubagentMonitor:
             StreamAgentResult,
             StreamRoutingDecision,
         )
+
         agent = _make_mock_agent()
         app = KoboiApp(agent)
         async with app.run_test() as pilot:
-            app.on_stream_routing_decision(StreamRoutingDecision(
-                agents=["hr"], confidence=0.9, method="keyword", reasoning=""
-            ))
-            app.on_stream_agent_dispatch(StreamAgentDispatch(
-                agent_name="hr", agent_index=0, total_agents=1, mode="sequential"
-            ))
-            app.on_stream_agent_result(StreamAgentResult(
-                agent_name="hr", answer="done", elapsed_seconds=1.5, failed=False
-            ))
+            app.on_stream_routing_decision(
+                StreamRoutingDecision(agents=["hr"], confidence=0.9, method="keyword", reasoning="")
+            )
+            app.on_stream_agent_dispatch(
+                StreamAgentDispatch(agent_name="hr", agent_index=0, total_agents=1, mode="sequential")
+            )
+            app.on_stream_agent_result(
+                StreamAgentResult(agent_name="hr", answer="done", elapsed_seconds=1.5, failed=False)
+            )
             await pilot.pause()
             assert app._agent_states["hr"]["status"] == "done"
             assert app._agent_states["hr"]["elapsed"] == 1.5
@@ -421,18 +432,19 @@ class TestSubagentMonitor:
             StreamAgentResult,
             StreamRoutingDecision,
         )
+
         agent = _make_mock_agent()
         app = KoboiApp(agent)
         async with app.run_test() as pilot:
-            app.on_stream_routing_decision(StreamRoutingDecision(
-                agents=["sales"], confidence=0.8, method="keyword", reasoning=""
-            ))
-            app.on_stream_agent_dispatch(StreamAgentDispatch(
-                agent_name="sales", agent_index=0, total_agents=1, mode="sequential"
-            ))
-            app.on_stream_agent_result(StreamAgentResult(
-                agent_name="sales", answer="", elapsed_seconds=0.5, failed=True
-            ))
+            app.on_stream_routing_decision(
+                StreamRoutingDecision(agents=["sales"], confidence=0.8, method="keyword", reasoning="")
+            )
+            app.on_stream_agent_dispatch(
+                StreamAgentDispatch(agent_name="sales", agent_index=0, total_agents=1, mode="sequential")
+            )
+            app.on_stream_agent_result(
+                StreamAgentResult(agent_name="sales", answer="", elapsed_seconds=0.5, failed=True)
+            )
             await pilot.pause()
             assert app._agent_states["sales"]["status"] == "failed"
 
@@ -440,13 +452,14 @@ class TestSubagentMonitor:
     async def test_agent_states_cleared_on_new_routing(self):
         """New routing decision clears previous agent states."""
         from koboi.tui.bridge import StreamRoutingDecision
+
         agent = _make_mock_agent()
         app = KoboiApp(agent)
         async with app.run_test() as pilot:
             app._agent_states["old_agent"] = {"name": "old_agent", "status": "done"}
-            app.on_stream_routing_decision(StreamRoutingDecision(
-                agents=["new_agent"], confidence=0.9, method="keyword", reasoning=""
-            ))
+            app.on_stream_routing_decision(
+                StreamRoutingDecision(agents=["new_agent"], confidence=0.9, method="keyword", reasoning="")
+            )
             await pilot.pause()
             assert "old_agent" not in app._agent_states
             assert "new_agent" in app._agent_states
@@ -455,6 +468,7 @@ class TestSubagentMonitor:
     async def test_subagent_dispatch_updates_states(self):
         """SubagentUIHook dispatch events update _agent_states."""
         from koboi.hooks.subagent_hook import _SubagentDispatch
+
         agent = _make_mock_agent()
         app = KoboiApp(agent)
         async with app.run_test() as pilot:
@@ -467,6 +481,7 @@ class TestSubagentMonitor:
     async def test_subagent_result_updates_states(self):
         """SubagentUIHook result events update _agent_states."""
         from koboi.hooks.subagent_hook import _SubagentDispatch, _SubagentResult
+
         agent = _make_mock_agent()
         app = KoboiApp(agent)
         async with app.run_test() as pilot:

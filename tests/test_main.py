@@ -1,4 +1,5 @@
 """Tests for koboi/__main__.py entry point."""
+
 from __future__ import annotations
 
 import runpy
@@ -11,6 +12,7 @@ class TestMainModule:
     def test_main_module_importable(self):
         """__main__.py should be importable without error."""
         import koboi.__main__
+
         assert koboi.__main__ is not None
 
     @patch("koboi.tui.app.main")

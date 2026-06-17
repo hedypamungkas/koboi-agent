@@ -1,4 +1,5 @@
 """Tests for koboi.tools.builtin.memory module."""
+
 from __future__ import annotations
 
 import json
@@ -112,6 +113,7 @@ class TestMemoryRecall:
 
         # Use a different filename to avoid existing data
         from koboi.tools.builtin.memory import _MemoryStore
+
         store = _MemoryStore(filepath=".test_empty_memory.json")
 
         result = store.recall()
@@ -291,7 +293,7 @@ class TestEdgeCases:
         """Test storing values with special characters."""
         monkeypatch.chdir(tmp_path)
 
-        special_value = 'Value with "quotes" and \'apostrophes\' and\n newlines\t tabs'
+        special_value = "Value with \"quotes\" and 'apostrophes' and\n newlines\t tabs"
         result = memory_store(key="special", value=special_value)
         assert "Successfully saved" in result
 

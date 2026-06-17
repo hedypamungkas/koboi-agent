@@ -1,4 +1,5 @@
 """koboi/tui/app.py — CLI entry point for koboi-agent."""
+
 from __future__ import annotations
 
 import asyncio
@@ -87,8 +88,16 @@ async def _chat_print_mode(agent) -> None:
     """Interactive chat with JSON line output (no TUI)."""
     from koboi.events import event_to_dict
 
-    print(json.dumps({"type": "session_start", "agent": agent.config.agent_name,
-                       "model": f"{agent.config.provider}/{agent.config.model}"}), flush=True)
+    print(
+        json.dumps(
+            {
+                "type": "session_start",
+                "agent": agent.config.agent_name,
+                "model": f"{agent.config.provider}/{agent.config.model}",
+            }
+        ),
+        flush=True,
+    )
 
     while True:
         try:
@@ -181,6 +190,7 @@ def chat(config_path: str, verbose: bool, no_stream: bool, no_tui: bool, print_m
         asyncio.run(_run_interactive(agent, stream=not no_stream))
     else:
         from koboi.tui.textual_app import KoboiApp
+
         KoboiApp(agent).run()
 
 
@@ -194,8 +204,10 @@ def eval(config_path: str, cases: str | None):
         from koboi.eval.runner import EvalRunner
         from koboi.types import EvalCase
         from koboi.eval.scorers import (
-            ToolUsageScorer, KeywordPresenceScorer,
-            OutputLengthScorer, IterationEfficiencyScorer,
+            ToolUsageScorer,
+            KeywordPresenceScorer,
+            OutputLengthScorer,
+            IterationEfficiencyScorer,
         )
     except ImportError as e:
         console.print(f"[red bold]Import error:[/red bold] {e}")
@@ -215,6 +227,7 @@ def eval(config_path: str, cases: str | None):
     eval_cases = []
     if cases and Path(cases).exists():
         import yaml
+
         with open(cases) as f:
             data = yaml.safe_load(f) or {}
         for case_data in data.get("cases", []):
@@ -280,15 +293,17 @@ def validate(config_path: str):
             console.print(f"  [red]-[/red] {issue}")
         raise SystemExit(1)
     else:
-        console.print(Panel(
-            f"[green bold]Config is valid[/green bold]\n\n"
-            f"Agent: {config.agent_name}\n"
-            f"Model: {config.provider}/{config.model}\n"
-            f"RAG: {'enabled' if config.rag_enabled else 'disabled'}\n"
-            f"Max iterations: {config.max_iterations}",
-            title="Validation Result",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[green bold]Config is valid[/green bold]\n\n"
+                f"Agent: {config.agent_name}\n"
+                f"Model: {config.provider}/{config.model}\n"
+                f"RAG: {'enabled' if config.rag_enabled else 'disabled'}\n"
+                f"Max iterations: {config.max_iterations}",
+                title="Validation Result",
+                border_style="green",
+            )
+        )
 
 
 @main.command()

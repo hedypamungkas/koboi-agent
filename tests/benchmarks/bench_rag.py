@@ -1,4 +1,5 @@
 """RAG pipeline benchmarks."""
+
 import pytest
 
 from koboi.rag.chunker import FixedSizeChunker, SentenceChunker, ParagraphChunker
@@ -61,6 +62,7 @@ def test_keyword_retrieval(benchmark, keyword_retriever):
 def test_keyword_retrieval_single_chunk(benchmark, sample_chunks):
     """Benchmark KeywordRetriever with single chunk."""
     import asyncio
+
     retriever = KeywordRetriever(chunks=sample_chunks[:1])
 
     def run_retrieve():
@@ -83,6 +85,7 @@ def test_keyword_retrieval_top_10(benchmark, keyword_retriever):
 
 def test_keyword_indexing(benchmark, sample_chunks):
     """Benchmark building TF-IDF index."""
+
     def build_index():
         return KeywordRetriever(chunks=sample_chunks)
 
@@ -110,9 +113,7 @@ def test_augmentation_in_memory_no_results(benchmark):
     from koboi.rag.retriever import KeywordRetriever
     from koboi.rag.types import Chunk
 
-    empty_retriever = KeywordRetriever(chunks=[
-        Chunk(id="c1", doc_id="d1", content="Unrelated content", metadata={})
-    ])
+    empty_retriever = KeywordRetriever(chunks=[Chunk(id="c1", doc_id="d1", content="Unrelated content", metadata={})])
     augmentation = InMemoryAugmentation(retriever=empty_retriever, top_k=3)
 
     def run_augment():
@@ -143,6 +144,7 @@ def test_chunk_creation(benchmark):
 
 def test_document_creation(benchmark, sample_text_50kb):
     """Benchmark creating Document objects."""
+
     def make_doc():
         return Document(
             id="doc_1",

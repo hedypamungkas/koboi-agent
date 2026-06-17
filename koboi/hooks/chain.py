@@ -4,6 +4,7 @@ Provides structured intervention points at every stage of the agent loop:
 before/after tool execution, LLM calls, compaction, session boundaries,
 input processing, and output generation.
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,6 +40,7 @@ class HookEvent(Enum):
 
 class HookOutcome(Enum):
     """Result of a single hook execution within a chain emit."""
+
     SUCCESS = "success"
     ERRORED = "errored"
 
@@ -50,6 +52,7 @@ class AgentInfo:
     Prevents bidirectional coupling between hooks and AgentCore.
     Add fields here only when a hook genuinely needs them.
     """
+
     model: str = ""
     agent_name: str = ""
     iteration: int = 0
@@ -231,15 +234,14 @@ class Hook(ABC):
         60-79: Post-processing (audit, carryover)
         80-100: Cleanup (notifications)
     """
+
     priority: int = 50
 
     @abstractmethod
-    def handles(self) -> list[HookEvent]:
-        ...
+    def handles(self) -> list[HookEvent]: ...
 
     @abstractmethod
-    async def execute(self, ctx: HookContext) -> HookContext:
-        ...
+    async def execute(self, ctx: HookContext) -> HookContext: ...
 
 
 class HookChain:
@@ -261,7 +263,9 @@ class HookChain:
             except Exception as exc:
                 _logger.warning(
                     "Hook %s raised %s: %s -- setting abort",
-                    hook_name, type(exc).__name__, exc,
+                    hook_name,
+                    type(exc).__name__,
+                    exc,
                 )
                 ctx.hook_outcomes.append((hook_name, HookOutcome.ERRORED, str(exc)))
                 ctx.abort = True

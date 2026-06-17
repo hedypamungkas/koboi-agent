@@ -1,4 +1,5 @@
 """file_suggester.py -- @ file path autocomplete with fuzzy matching."""
+
 from __future__ import annotations
 
 import os
@@ -8,9 +9,18 @@ from textual.suggester import Suggester
 
 # Directories to skip during recursive scan
 _SKIP_DIRS = {
-    ".git", "__pycache__", "node_modules", ".venv", "venv",
-    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
-    ".eggs", "*.egg-info",
+    ".git",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    "dist",
+    "build",
+    ".eggs",
+    "*.egg-info",
 }
 
 
@@ -34,10 +44,7 @@ class FileSuggester(Suggester):
         try:
             for root, dirs, filenames in os.walk(self._base_dir):
                 # Prune skipped directories in-place
-                dirs[:] = [
-                    d for d in dirs
-                    if d not in _SKIP_DIRS and not d.endswith(".egg-info")
-                ]
+                dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.endswith(".egg-info")]
                 # Include directories (with trailing /)
                 for d in dirs:
                     full = Path(root) / d
@@ -63,7 +70,7 @@ class FileSuggester(Suggester):
         if at_idx == -1:
             return None
 
-        partial = value[at_idx + 1:]
+        partial = value[at_idx + 1 :]
         if not partial:
             return None
 
@@ -93,9 +100,7 @@ class FileSuggester(Suggester):
         except (OSError, ValueError):
             return None
 
-    async def _fallback_get_suggestion(
-        self, value: str, at_idx: int, partial: str
-    ) -> str | None:
+    async def _fallback_get_suggestion(self, value: str, at_idx: int, partial: str) -> str | None:
         """Prefix-matching fallback when rapidfuzz is unavailable."""
         try:
             if "/" in partial:

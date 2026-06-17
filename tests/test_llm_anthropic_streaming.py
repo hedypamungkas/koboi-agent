@@ -1,4 +1,5 @@
 """Tests for Anthropic adapter streaming and uncovered paths."""
+
 from __future__ import annotations
 
 import json
@@ -40,10 +41,12 @@ def _sse_line(data: dict) -> bytes:
 
 class TestAnthropicAdapterComplete:
     async def test_basic_complete(self):
-        transport = MockTransport(post_response={
-            "content": [{"type": "text", "text": "Hello!"}],
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        })
+        transport = MockTransport(
+            post_response={
+                "content": [{"type": "text", "text": "Hello!"}],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
         adapter = AnthropicAdapter(model="claude-sonnet-4-20250514", transport=transport)
         result = await adapter.complete(
             messages=[{"role": "user", "content": "Hi"}],
@@ -53,10 +56,12 @@ class TestAnthropicAdapterComplete:
         assert result.usage.prompt_tokens == 10
 
     async def test_complete_with_tools(self):
-        transport = MockTransport(post_response={
-            "content": [{"type": "tool_use", "id": "tc1", "name": "calc", "input": {"expr": "1+1"}}],
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        })
+        transport = MockTransport(
+            post_response={
+                "content": [{"type": "tool_use", "id": "tc1", "name": "calc", "input": {"expr": "1+1"}}],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
         adapter = AnthropicAdapter(model="claude-sonnet-4-20250514", transport=transport)
         result = await adapter.complete(
             messages=[{"role": "user", "content": "calc"}],
@@ -66,9 +71,11 @@ class TestAnthropicAdapterComplete:
         assert result.tool_calls[0].name == "calc"
 
     async def test_complete_with_system_message(self):
-        transport = MockTransport(post_response={
-            "content": [{"type": "text", "text": "ok"}],
-        })
+        transport = MockTransport(
+            post_response={
+                "content": [{"type": "text", "text": "ok"}],
+            }
+        )
         adapter = AnthropicAdapter(model="claude-sonnet-4-20250514", transport=transport)
         result = await adapter.complete(
             messages=[
@@ -79,17 +86,21 @@ class TestAnthropicAdapterComplete:
         assert transport.last_post_body["system"] == "You are helpful."
 
     async def test_complete_with_temperature(self):
-        transport = MockTransport(post_response={
-            "content": [{"type": "text", "text": "ok"}],
-        })
+        transport = MockTransport(
+            post_response={
+                "content": [{"type": "text", "text": "ok"}],
+            }
+        )
         adapter = AnthropicAdapter(model="claude-sonnet-4-20250514", transport=transport, temperature=0.5)
         await adapter.complete(messages=[{"role": "user", "content": "Hi"}])
         assert transport.last_post_body["temperature"] == 0.5
 
     async def test_complete_with_logger(self):
-        transport = MockTransport(post_response={
-            "content": [{"type": "text", "text": "ok"}],
-        })
+        transport = MockTransport(
+            post_response={
+                "content": [{"type": "text", "text": "ok"}],
+            }
+        )
         logger = MagicMock()
         adapter = AnthropicAdapter(model="claude-sonnet-4-20250514", transport=transport, logger=logger)
         await adapter.complete(messages=[{"role": "user", "content": "Hi"}])
@@ -97,9 +108,11 @@ class TestAnthropicAdapterComplete:
         logger.log_llm_response.assert_called_once()
 
     async def test_complete_empty_response(self):
-        transport = MockTransport(post_response={
-            "content": [],
-        })
+        transport = MockTransport(
+            post_response={
+                "content": [],
+            }
+        )
         adapter = AnthropicAdapter(model="claude-sonnet-4-20250514", transport=transport)
         result = await adapter.complete(messages=[{"role": "user", "content": "Hi"}])
         assert result.content is None
@@ -125,6 +138,7 @@ class TestAnthropicAdapterStreaming:
             events.append(event)
 
         from koboi.events import TextDeltaEvent, CompleteEvent
+
         text_events = [e for e in events if isinstance(e, TextDeltaEvent)]
         assert len(text_events) == 2
         assert text_events[0].content == "Hello"
@@ -137,9 +151,27 @@ class TestAnthropicAdapterStreaming:
     async def test_tool_call_streaming(self):
         lines = [
             _sse_line({"type": "message_start", "message": {"usage": {"input_tokens": 10}}}),
-            _sse_line({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "tc1", "name": "calc"}}),
-            _sse_line({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": '{"ex'}}),
-            _sse_line({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": 'pr":"1+1"}'}}),
+            _sse_line(
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "tool_use", "id": "tc1", "name": "calc"},
+                }
+            ),
+            _sse_line(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": '{"ex'},
+                }
+            ),
+            _sse_line(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": 'pr":"1+1"}'},
+                }
+            ),
             _sse_line({"type": "content_block_stop", "index": 0}),
             _sse_line({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}),
             _sse_line({"type": "message_stop"}),
@@ -152,6 +184,7 @@ class TestAnthropicAdapterStreaming:
             events.append(event)
 
         from koboi.events import ToolCallEvent
+
         tc_events = [e for e in events if isinstance(e, ToolCallEvent)]
         assert len(tc_events) == 1
         assert tc_events[0].tool_name == "calc"
@@ -294,7 +327,9 @@ class TestAnthropicAdapterHelpers:
         assert result == []
 
     def test_translate_tools(self):
-        tools = [{"type": "function", "function": {"name": "calc", "description": "calc", "parameters": {"type": "object"}}}]
+        tools = [
+            {"type": "function", "function": {"name": "calc", "description": "calc", "parameters": {"type": "object"}}}
+        ]
         result = AnthropicAdapter._translate_tools(tools)
         assert result[0]["name"] == "calc"
         assert result[0]["input_schema"]["type"] == "object"

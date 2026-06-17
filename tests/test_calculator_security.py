@@ -1,4 +1,5 @@
 """Tests for the AST-based safe calculator in koboi.tools.builtin.calculator."""
+
 from __future__ import annotations
 
 from koboi.tools.builtin.calculator import calculate, _safe_eval
@@ -152,20 +153,24 @@ class TestSafeEvalInternal:
 
     def test_safe_eval_with_names(self):
         import math
+
         result = _safe_eval("sqrt(16)", {"sqrt": math.sqrt})
         assert result == 4.0
 
     def test_safe_eval_rejects_attribute(self):
         import pytest
+
         with pytest.raises(ValueError, match="Disallowed"):
             _safe_eval("x.__class__", {"x": 42})
 
     def test_safe_eval_rejects_subscript(self):
         import pytest
+
         with pytest.raises(ValueError, match="Disallowed"):
             _safe_eval("[1, 2, 3][0]", {})
 
     def test_safe_eval_rejects_compare(self):
         import pytest
+
         with pytest.raises(ValueError, match="Disallowed"):
             _safe_eval("1 < 2", {})

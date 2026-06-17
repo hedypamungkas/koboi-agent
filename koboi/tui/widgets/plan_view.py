@@ -1,4 +1,5 @@
 """plan_view.py -- Numbered plan checklist widget for PLAN mode."""
+
 from __future__ import annotations
 
 import re
@@ -13,6 +14,7 @@ from textual.widgets import Static
 @dataclass
 class PlanStep:
     """A single step in the plan."""
+
     index: int
     description: str
     completed: bool = False

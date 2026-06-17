@@ -1,4 +1,5 @@
 """koboi/notifications.py -- Desktop notifications and sound alerts."""
+
 from __future__ import annotations
 
 import subprocess
@@ -57,6 +58,7 @@ def _notify_linux(title: str, message: str, *, sound: bool = False) -> None:
 def _notify_windows(title: str, message: str) -> None:
     try:
         from plyer import notification
+
         notification.notify(title=title, message=message, timeout=5)
     except ImportError:
         pass
@@ -67,14 +69,17 @@ def _play_sound_macos(sound_name: str) -> None:
         sound_name = "Ping"
     subprocess.run(
         ["osascript", "-e", f'play sound "{sound_name}"'],
-        capture_output=True, timeout=5,
+        capture_output=True,
+        timeout=5,
     )
 
 
 def _play_sound_linux() -> None:
-    for cmd in (["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"],
-                ["aplay", "/usr/share/sounds/alsa/Front_Center.wav"],
-                ["beep"]):
+    for cmd in (
+        ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"],
+        ["aplay", "/usr/share/sounds/alsa/Front_Center.wav"],
+        ["beep"],
+    ):
         try:
             subprocess.run(cmd, capture_output=True, timeout=5)
             return
@@ -84,4 +89,5 @@ def _play_sound_linux() -> None:
 
 def _play_sound_windows() -> None:
     import winsound
+
     winsound.MessageBeep()

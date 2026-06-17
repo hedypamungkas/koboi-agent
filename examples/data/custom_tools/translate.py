@@ -1,4 +1,5 @@
 """Custom translate tool example -- mock translation for demo purposes."""
+
 from __future__ import annotations
 
 from koboi.tools.registry import tool

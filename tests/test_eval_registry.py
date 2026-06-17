@@ -1,4 +1,5 @@
 """Tests for koboi/eval/registry.py -- Scorer and loader registries."""
+
 from __future__ import annotations
 
 import pytest

@@ -12,6 +12,7 @@ Run:
     python examples/25_subagent_delegation.py                  # automatic mode
     python examples/25_subagent_delegation.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,11 +41,9 @@ QUESTIONS = [
     "Compare the pros and cons of Python vs Go for building web APIs. "
     "You MUST use the delegate_tasks tool to analyze performance, ecosystem, "
     "and developer experience as 3 separate parallel subtasks.",
-
     "I need a market analysis for a new coffee shop. "
     "You MUST use the delegate_tasks tool to research target demographics, "
     "pricing strategy, and location factors as 3 separate parallel subtasks.",
-
     "Help me plan a 2-week trip to Japan. "
     "You MUST use the delegate_tasks tool to research the best season to visit, "
     "must-see cities, and budget estimate as 3 separate parallel subtasks.",
@@ -69,16 +68,18 @@ def _show_subagent_config(agent) -> None:
 
 def _show_lifecycle_info() -> None:
     """Explain the lifecycle management features."""
-    console.print(Panel(
-        "[bold]Subagent Lifecycle Management[/bold]\n\n"
-        "Subagents are managed automatically:\n"
-        "  - [cyan]Timeout[/cyan]: each subagent has a configurable time limit\n"
-        "  - [cyan]Auto-cleanup[/cyan]: resources freed after completion, timeout, or cancel\n"
-        "  - [cyan]Cancel[/cyan]: use /kill or Ctrl+K in TUI to cancel running subagents\n"
-        "  - [cyan]Status[/cyan]: use /subagents in TUI to list running subagents\n\n"
-        "[dim]Config: subagent.timeout, subagent.max_iterations in YAML[/dim]",
-        title="Lifecycle",
-    ))
+    console.print(
+        Panel(
+            "[bold]Subagent Lifecycle Management[/bold]\n\n"
+            "Subagents are managed automatically:\n"
+            "  - [cyan]Timeout[/cyan]: each subagent has a configurable time limit\n"
+            "  - [cyan]Auto-cleanup[/cyan]: resources freed after completion, timeout, or cancel\n"
+            "  - [cyan]Cancel[/cyan]: use /kill or Ctrl+K in TUI to cancel running subagents\n"
+            "  - [cyan]Status[/cyan]: use /subagents in TUI to list running subagents\n\n"
+            "[dim]Config: subagent.timeout, subagent.max_iterations in YAML[/dim]",
+            title="Lifecycle",
+        )
+    )
 
 
 def _run_with_monitoring_demo() -> None:
@@ -132,6 +133,7 @@ def main(mode: str, verbose: bool):
 
     # Register RichSubagentHook so subagent activity is visible in console
     from koboi.hooks.rich_subagent_hook import RichSubagentHook
+
     if agent.core is not None:
         agent.core.hooks.add(RichSubagentHook(console=console))
         console.print("[dim]RichSubagentHook registered -- subagent activity will be printed below.[/dim]\n")

@@ -1,4 +1,5 @@
 """Tests for koboi/orchestration/factory.py -- Agent factory."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -89,6 +90,7 @@ class TestDynamicAgentBuilder:
 
     def test_build_agent_from_blueprint(self):
         from koboi.types import AgentBlueprint
+
         client = MagicMock()
         builder = DynamicAgentBuilder(client=client)
         blueprint = AgentBlueprint(
@@ -107,6 +109,7 @@ class TestDynamicAgentBuilder:
     def test_build_agent_with_chunks(self):
         from koboi.types import AgentBlueprint
         from koboi.rag.types import Chunk
+
         client = MagicMock()
         builder = DynamicAgentBuilder(client=client)
         chunks = [Chunk(id="c1", doc_id="d1", content="test content")]

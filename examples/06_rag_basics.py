@@ -9,6 +9,7 @@ Run:
     python examples/05_rag_basics.py                  # automatic mode
     python examples/05_rag_basics.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -39,12 +40,14 @@ def _show_retrieved_context(augmentation, question: str):
     try:
         context, _ = run_async(augmentation._retrieve_and_format(question))
         if context:
-            console.print(Panel(
-                context[:500] + ("..." if len(context) > 500 else ""),
-                title="[dim]Retrieved Context[/dim]",
-                border_style="dim",
-                style="dim",
-            ))
+            console.print(
+                Panel(
+                    context[:500] + ("..." if len(context) > 500 else ""),
+                    title="[dim]Retrieved Context[/dim]",
+                    border_style="dim",
+                    style="dim",
+                )
+            )
     except Exception:
         pass
 
@@ -65,7 +68,9 @@ def main(mode: str, verbose: bool):
 
     augmentation = agent.core.augmentation
     if augmentation:
-        console.print(f"[dim]RAG: enabled | Retriever: {type(augmentation.retriever).__name__} | Top-K: {augmentation.top_k}[/dim]\n")
+        console.print(
+            f"[dim]RAG: enabled | Retriever: {type(augmentation.retriever).__name__} | Top-K: {augmentation.top_k}[/dim]\n"
+        )
     else:
         console.print("[dim]RAG: not loaded (documents not found?)[/dim]\n")
 
@@ -76,7 +81,8 @@ def main(mode: str, verbose: bool):
         )
     else:
         automatic_batch(
-            agent, QUESTIONS,
+            agent,
+            QUESTIONS,
             pre_question=lambda q, i, total: _show_retrieved_context(
                 augmentation, q if isinstance(q, str) else q.get("input", "")
             ),

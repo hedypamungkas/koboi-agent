@@ -53,11 +53,7 @@ class AgentLogger:
         self._logger.info(text)
 
     def _separator(self, title: str) -> None:
-        self._append(
-            f"\n{'='*80}\n"
-            f"[{datetime.now().strftime('%H:%M:%S')}] {title}\n"
-            f"{'='*80}\n"
-        )
+        self._append(f"\n{'=' * 80}\n[{datetime.now().strftime('%H:%M:%S')}] {title}\n{'=' * 80}\n")
 
     def _format_messages(self, messages: list[dict]) -> str:
         lines = [f"Messages ({len(messages)}):"]
@@ -171,8 +167,7 @@ class AgentLogger:
         self._append(f"Total time: {orch_result.total_elapsed_seconds:.2f}s\n")
         for ar in orch_result.agent_results:
             self._append(
-                f"  - {ar.agent_name}: {ar.elapsed_seconds:.2f}s, "
-                f"{ar.tokens_used} tok, {ar.revision_count} revisions\n"
+                f"  - {ar.agent_name}: {ar.elapsed_seconds:.2f}s, {ar.tokens_used} tok, {ar.revision_count} revisions\n"
             )
         self._append(f"\nFinal answer:\n{orch_result.final_answer}\n\n")
 
@@ -182,7 +177,9 @@ class AgentLogger:
         self._append(f"Domain: {blueprint.domain_label}\n")
         self._append(f"Source: {blueprint.source}\n")
         self._append(f"Chunks: {len(blueprint.chunks)}\n")
-        prompt_preview = blueprint.system_prompt[:300] + "..." if len(blueprint.system_prompt) > 300 else blueprint.system_prompt
+        prompt_preview = (
+            blueprint.system_prompt[:300] + "..." if len(blueprint.system_prompt) > 300 else blueprint.system_prompt
+        )
         self._append(f"System prompt: {prompt_preview}\n\n")
 
     def log_domain_analysis(self, query: str, domain_label: str, is_known: bool) -> None:

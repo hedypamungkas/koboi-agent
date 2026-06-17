@@ -1,4 +1,5 @@
 """DiffViewWidget -- unified and side-by-side diff renderers."""
+
 from __future__ import annotations
 
 from rich.text import Text

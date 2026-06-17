@@ -18,6 +18,7 @@ by declaring entry points in their pyproject.toml:
 Each entry point should be a callable that takes no arguments and registers
 itself with the appropriate registry.
 """
+
 from __future__ import annotations
 
 import logging

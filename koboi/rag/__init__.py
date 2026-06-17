@@ -1,21 +1,39 @@
 """koboi/rag -- RAG (Retrieval-Augmented Generation) pipeline."""
+
 from __future__ import annotations
 
 from koboi.rag.types import Chunk, Document, RetrievalResult
 from koboi.rag.chunker import (
-    BaseChunker, FixedSizeChunker, SentenceChunker, ParagraphChunker, SemanticChunker, resolve_chunker,
+    BaseChunker,
+    FixedSizeChunker,
+    SentenceChunker,
+    ParagraphChunker,
+    SemanticChunker,
+    resolve_chunker,
 )
 from koboi.rag.retriever import (
-    BaseRetriever, KeywordRetriever, SemanticRetriever, HybridRetriever, resolve_retriever,
+    BaseRetriever,
+    KeywordRetriever,
+    SemanticRetriever,
+    HybridRetriever,
+    resolve_retriever,
 )
 from koboi.rag.augmentation import (
-    AugmentationStrategy, InMemoryAugmentation, OnTheFlyAugmentation, RerankerRetriever,
+    AugmentationStrategy,
+    InMemoryAugmentation,
+    OnTheFlyAugmentation,
+    RerankerRetriever,
 )
 from koboi.rag.registry import (
-    ComponentRegistry, ComponentEntry,
-    chunker_registry, retriever_registry, augmentation_registry,
+    ComponentRegistry,
+    ComponentEntry,
+    chunker_registry,
+    retriever_registry,
+    augmentation_registry,
     build_rag,
-    register_chunker, register_retriever, register_augmentation,
+    register_chunker,
+    register_retriever,
+    register_augmentation,
     load_custom_components,
 )
 
@@ -30,17 +48,36 @@ _reg_augmentations()
 
 __all__ = [
     # Types
-    "Chunk", "Document", "RetrievalResult",
+    "Chunk",
+    "Document",
+    "RetrievalResult",
     # Chunkers
-    "BaseChunker", "FixedSizeChunker", "SentenceChunker", "ParagraphChunker", "SemanticChunker", "resolve_chunker",
+    "BaseChunker",
+    "FixedSizeChunker",
+    "SentenceChunker",
+    "ParagraphChunker",
+    "SemanticChunker",
+    "resolve_chunker",
     # Retrievers
-    "BaseRetriever", "KeywordRetriever", "SemanticRetriever", "HybridRetriever", "resolve_retriever",
+    "BaseRetriever",
+    "KeywordRetriever",
+    "SemanticRetriever",
+    "HybridRetriever",
+    "resolve_retriever",
     # Augmentations
-    "AugmentationStrategy", "InMemoryAugmentation", "OnTheFlyAugmentation", "RerankerRetriever",
+    "AugmentationStrategy",
+    "InMemoryAugmentation",
+    "OnTheFlyAugmentation",
+    "RerankerRetriever",
     # Registry
-    "ComponentRegistry", "ComponentEntry",
-    "chunker_registry", "retriever_registry", "augmentation_registry",
+    "ComponentRegistry",
+    "ComponentEntry",
+    "chunker_registry",
+    "retriever_registry",
+    "augmentation_registry",
     "build_rag",
-    "register_chunker", "register_retriever", "register_augmentation",
+    "register_chunker",
+    "register_retriever",
+    "register_augmentation",
     "load_custom_components",
 ]

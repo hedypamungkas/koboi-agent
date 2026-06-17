@@ -1,4 +1,5 @@
 """Tests for koboi/exceptions.py -- Exception hierarchy."""
+
 from __future__ import annotations
 
 from koboi.exceptions import (

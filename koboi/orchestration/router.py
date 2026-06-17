@@ -6,6 +6,7 @@ Provides:
 - LLMRouter: LLM-based routing with fallback
 - HybridRouter: combines keyword + LLM routing
 """
+
 from __future__ import annotations
 
 import json
@@ -23,41 +24,89 @@ if TYPE_CHECKING:
 # Router
 # ---------------------------------------------------------------------------
 
+
 class BaseRouter(ABC):
     @abstractmethod
-    async def route(self, query: str) -> RoutingDecision:
-        ...
+    async def route(self, query: str) -> RoutingDecision: ...
 
 
 class KeywordRouter(BaseRouter):
     _DEFAULT_KEYWORD_MAP: dict[str, list[str]] = {
         "hr": [
-            "leave", "allowance", "working hours", "overtime", "remote", "office",
-            "uniform", "office", "training", "certification", "discipline",
-            "sanction", "warning letter", "contract employee", "permanent employee", "holiday bonus",
-            "probation", "training budget", "insurance", "social security",
-            "policy", "guide", "handbook", "new employee", "benefit",
+            "leave",
+            "allowance",
+            "working hours",
+            "overtime",
+            "remote",
+            "office",
+            "uniform",
+            "office",
+            "training",
+            "certification",
+            "discipline",
+            "sanction",
+            "warning letter",
+            "contract employee",
+            "permanent employee",
+            "holiday bonus",
+            "probation",
+            "training budget",
+            "insurance",
+            "social security",
+            "policy",
+            "guide",
+            "handbook",
+            "new employee",
+            "benefit",
         ],
         "sales": [
-            "package", "service", "price", "discount", "promo", "starter",
-            "professional", "enterprise", "feature", "sla", "support",
-            "storage", "ticketing", "knowledge base", "add-on", "premium",
-            "integration", "migration", "subscription", "comparison",
+            "package",
+            "service",
+            "price",
+            "discount",
+            "promo",
+            "starter",
+            "professional",
+            "enterprise",
+            "feature",
+            "sla",
+            "support",
+            "storage",
+            "ticketing",
+            "knowledge base",
+            "add-on",
+            "premium",
+            "integration",
+            "migration",
+            "subscription",
+            "comparison",
             "subscription cost",
         ],
         "finance": [
-            "payment", "pay", "invoice", "billing", "due date",
-            "penalty", "transfer", "virtual account", "cancellation",
-            "upgrade", "downgrade", "prorata", "refund", "fund",
-            "terms and conditions", "t&c", "billing period", "notification",
+            "payment",
+            "pay",
+            "invoice",
+            "billing",
+            "due date",
+            "penalty",
+            "transfer",
+            "virtual account",
+            "cancellation",
+            "upgrade",
+            "downgrade",
+            "prorata",
+            "refund",
+            "fund",
+            "terms and conditions",
+            "t&c",
+            "billing period",
+            "notification",
         ],
     }
 
     def __init__(self, agent_defs: list[AgentDef] | None = None):
         if agent_defs:
-            self.keyword_map = {
-                ad.name: ad.keywords for ad in agent_defs if ad.keywords
-            }
+            self.keyword_map = {ad.name: ad.keywords for ad in agent_defs if ad.keywords}
         else:
             self.keyword_map = self._DEFAULT_KEYWORD_MAP
 
@@ -130,9 +179,7 @@ class LLMRouter(BaseRouter):
 
     @staticmethod
     def _build_prompt(agent_defs: list[AgentDef]) -> str:
-        agent_lines = "\n".join(
-            f"- {ad.name}: {ad.description}" for ad in agent_defs
-        )
+        agent_lines = "\n".join(f"- {ad.name}: {ad.description}" for ad in agent_defs)
         return (
             "You are a router. Determine which agent should handle the question.\n\n"
             "Available agents:\n"
@@ -196,8 +243,10 @@ class HybridRouter(BaseRouter):
     ):
         self.keyword_router = KeywordRouter(agent_defs=agent_defs)
         self.llm_router = LLMRouter(
-            client=client, fallback=self.keyword_router,
-            enable_dynamic=enable_dynamic, agent_defs=agent_defs,
+            client=client,
+            fallback=self.keyword_router,
+            enable_dynamic=enable_dynamic,
+            agent_defs=agent_defs,
         )
         self.confidence_threshold = confidence_threshold
 

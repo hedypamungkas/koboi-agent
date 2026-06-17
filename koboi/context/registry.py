@@ -3,6 +3,7 @@
 Provides @register_context_strategy decorator and a build_context() factory
 that resolves strategies from config, following the same pattern as rag/registry.py.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -67,7 +68,9 @@ def load_custom_context_modules(custom_modules: list[str]) -> None:
             importlib.import_module(module_path)
         except ImportError as e:
             _logger.warning(
-                "Failed to import custom context module '%s': %s", module_path, e,
+                "Failed to import custom context module '%s': %s",
+                module_path,
+                e,
             )
 
 

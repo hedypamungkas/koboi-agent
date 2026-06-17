@@ -1,4 +1,5 @@
 """Tests for koboi.skills module."""
+
 from __future__ import annotations
 
 import os
@@ -13,9 +14,7 @@ class TestSkillDiscovery:
         skill_dir = tmp_path / "my_skill"
         skill_dir.mkdir()
         skill_md = skill_dir / "SKILL.md"
-        skill_md.write_text(
-            "---\nname: my-skill\ndescription: A test skill\n---\n\n# My Skill\n\nDo stuff.\n"
-        )
+        skill_md.write_text("---\nname: my-skill\ndescription: A test skill\n---\n\n# My Skill\n\nDo stuff.\n")
         skills = discover_skills([str(tmp_path)])
         assert len(skills) == 1
         assert skills[0].name == "my-skill"
@@ -43,9 +42,7 @@ class TestSkillRegistry:
         registry = SkillRegistry()
         skill_dir = tmp_path / "test_skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: test-skill\ndescription: Test\n---\n\n# Body content here\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: test-skill\ndescription: Test\n---\n\n# Body content here\n")
         skill = SkillDefinition(name="test-skill", description="Test", skill_dir=str(skill_dir))
         registry._skills[skill.name] = skill
         body = registry.activate("test-skill")
@@ -63,9 +60,7 @@ class TestSkillRegistry:
         registry = SkillRegistry()
         skill_dir = tmp_path / "act_skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(
-            "---\nname: act-skill\ndescription: Test\n---\n\nBody\n"
-        )
+        (skill_dir / "SKILL.md").write_text("---\nname: act-skill\ndescription: Test\n---\n\nBody\n")
         skill = SkillDefinition(name="act-skill", description="Test", skill_dir=str(skill_dir))
         registry._skills[skill.name] = skill
         assert registry.is_activated("act-skill") is False

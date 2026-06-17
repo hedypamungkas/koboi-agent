@@ -16,6 +16,7 @@ def _resolve_env(value: str) -> str:
         var = match.group(1)
         default = match.group(2)
         return os.environ.get(var, default if default is not None else match.group(0))
+
     return _ENV_PATTERN.sub(_replace, value)
 
 
@@ -75,6 +76,7 @@ class Config:
 
     def _validate(self) -> None:
         from koboi.config_models import KoboiConfig
+
         try:
             self._schema = KoboiConfig(**self._data)
         except Exception as exc:
@@ -407,9 +409,7 @@ class ConfigBuilder:
         if augmentation is not None:
             section["augmentation"] = augmentation
         if documents is not None:
-            section["documents"] = [
-                d if isinstance(d, dict) else {"path": d} for d in documents
-            ]
+            section["documents"] = [d if isinstance(d, dict) else {"path": d} for d in documents]
         return self
 
     def guardrails(

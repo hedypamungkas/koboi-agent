@@ -2,6 +2,7 @@
 
 Parses the `eval` section from YAML config and builds scorers/suites.
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +20,7 @@ _logger = logging.getLogger(__name__)
 @dataclass
 class SuiteConfig:
     """Configuration for a single eval suite."""
+
     name: str
     framework: str = "yaml"
     source: str = ""
@@ -31,6 +33,7 @@ class SuiteConfig:
 @dataclass
 class RegressionConfig:
     """Configuration for regression tracking."""
+
     baseline_dir: str = "eval_baselines"
     alert_on_regression: bool = True
     regression_threshold: float = 0.05
@@ -47,9 +50,7 @@ class EvalConfig:
         self.default_scorers: list[str] = data.get("scorers", [])
 
         raw_suites = data.get("suites", [])
-        self.suites: list[SuiteConfig] = [
-            self._parse_suite(s) for s in raw_suites
-        ]
+        self.suites: list[SuiteConfig] = [self._parse_suite(s) for s in raw_suites]
 
         raw_regression = data.get("regression", {})
         self.regression = RegressionConfig(
@@ -106,9 +107,7 @@ class EvalConfig:
 
         suite = self.get_suite(suite_name)
         if not suite:
-            raise ValueError(
-                f"Suite '{suite_name}' not found. Available: {[s.name for s in self.suites]}"
-            )
+            raise ValueError(f"Suite '{suite_name}' not found. Available: {[s.name for s in self.suites]}")
 
         loader = LoaderRegistry.get(suite.framework)
         cases = await loader.load(suite.source, max_cases=suite.max_cases)

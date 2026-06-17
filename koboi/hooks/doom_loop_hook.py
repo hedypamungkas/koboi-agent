@@ -2,6 +2,7 @@
 
 Records tool calls and checks for doom loop patterns after each tool execution.
 """
+
 from __future__ import annotations
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent

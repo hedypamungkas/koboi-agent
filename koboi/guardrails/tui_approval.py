@@ -2,6 +2,7 @@
 
 Moved to koboi.tui.approval to keep core guardrails free of TUI dependencies.
 """
+
 from koboi.tui.approval import (
     PermissionRequest,
     PermissionResponse,

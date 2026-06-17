@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/context_hook.py — ContextHook (0% → >85%)."""
+
 from __future__ import annotations
 
 import pytest
@@ -51,9 +52,7 @@ class TestContextHook:
     async def test_recent_messages_preserved(self):
         """Most recent messages should be preserved based on preserve_recent."""
         hook = ContextHook(preserve_recent=3, max_messages=3, preserve_system=False)
-        messages = [
-            {"role": "user", "content": f"Message {i}"} for i in range(10)
-        ]
+        messages = [{"role": "user", "content": f"Message {i}"} for i in range(10)]
         ctx = HookContext(event=HookEvent.POST_COMPACT, messages=messages)
         result = await hook.execute(ctx)
         # Should keep last 3 messages (max_messages=3 limits the total)
@@ -64,9 +63,7 @@ class TestContextHook:
     async def test_recent_messages_greater_than_total(self):
         """When preserve_recent > total messages, all messages should be kept."""
         hook = ContextHook(preserve_recent=10)
-        messages = [
-            {"role": "user", "content": f"Message {i}"} for i in range(5)
-        ]
+        messages = [{"role": "user", "content": f"Message {i}"} for i in range(5)]
         ctx = HookContext(event=HookEvent.POST_COMPACT, messages=messages)
         result = await hook.execute(ctx)
         assert len(result.messages) == 5
@@ -74,9 +71,7 @@ class TestContextHook:
     async def test_middle_messages_fill_up_to_max_messages(self):
         """Middle messages should fill remaining slots up to max_messages."""
         hook = ContextHook(max_messages=5, preserve_system=False, preserve_recent=2)
-        messages = [
-            {"role": "user", "content": f"Message {i}"} for i in range(10)
-        ]
+        messages = [{"role": "user", "content": f"Message {i}"} for i in range(10)]
         ctx = HookContext(event=HookEvent.POST_COMPACT, messages=messages)
         result = await hook.execute(ctx)
         # Should have 5 messages: 2 recent + 3 middle (first 3)
@@ -105,9 +100,7 @@ class TestContextHook:
     async def test_messages_trimmed_when_managed_less_than_original(self):
         """Messages should be trimmed when managed < original count."""
         hook = ContextHook(max_messages=3, preserve_system=False, preserve_recent=2)
-        messages = [
-            {"role": "user", "content": f"Message {i}"} for i in range(10)
-        ]
+        messages = [{"role": "user", "content": f"Message {i}"} for i in range(10)]
         ctx = HookContext(event=HookEvent.POST_COMPACT, messages=messages)
         original_length = len(ctx.messages)
         result = await hook.execute(ctx)
@@ -117,9 +110,7 @@ class TestContextHook:
     async def test_messages_not_trimmed_when_fit_in_max(self):
         """Messages should not be trimmed when they fit within max_messages."""
         hook = ContextHook(max_messages=100)
-        messages = [
-            {"role": "user", "content": f"Message {i}"} for i in range(10)
-        ]
+        messages = [{"role": "user", "content": f"Message {i}"} for i in range(10)]
         ctx = HookContext(event=HookEvent.POST_COMPACT, messages=messages)
         result = await hook.execute(ctx)
         assert len(result.messages) == 10
@@ -129,7 +120,7 @@ class TestContextHook:
         hook = ContextHook(preserve_system=True, preserve_recent=2, max_messages=10)
         messages = [
             {"role": "system", "content": "System prompt"},
-            *[{"role": "user", "content": f"Message {i}"} for i in range(10)]
+            *[{"role": "user", "content": f"Message {i}"} for i in range(10)],
         ]
         ctx = HookContext(event=HookEvent.POST_COMPACT, messages=messages)
         result = await hook.execute(ctx)

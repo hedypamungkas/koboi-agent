@@ -36,9 +36,7 @@ def ensure_tool_integrity(messages: list[dict]) -> list[dict]:
             result.append(m)
 
     # Pass 3: check assistant messages with tool_calls have all their results
-    existing_result_ids = {
-        m.get("tool_call_id") for m in result if m.get("role") == "tool"
-    }
+    existing_result_ids = {m.get("tool_call_id") for m in result if m.get("role") == "tool"}
     final = []
     for m in result:
         if m.get("role") == "assistant" and m.get("tool_calls"):
@@ -68,11 +66,7 @@ def ensure_tool_integrity(messages: list[dict]) -> list[dict]:
     # Pass 4: merge consecutive same-role messages (API rejects adjacent same roles)
     merged = []
     for m in final:
-        if (
-            merged
-            and merged[-1].get("role") == m.get("role")
-            and m.get("role") != "system"
-        ):
+        if merged and merged[-1].get("role") == m.get("role") and m.get("role") != "system":
             prev = merged[-1]
             prev_content = prev.get("content", "") or ""
             curr_content = m.get("content", "") or ""
@@ -125,7 +119,9 @@ class ContextManager(ABC):
 
     @abstractmethod
     async def _build_result(
-        self, system_msgs: list[dict], non_system: list[dict],
+        self,
+        system_msgs: list[dict],
+        non_system: list[dict],
     ) -> tuple[list[dict], str]:
         """Strategy-specific message selection.
 
@@ -180,7 +176,7 @@ class TruncationManager(ContextManager):
         return "TRUNCATION"
 
     async def _build_result(self, system_msgs, non_system):
-        kept = non_system[-self.keep_last:]
+        kept = non_system[-self.keep_last :]
         return system_msgs + kept, f"kept last {self.keep_last}"
 
 
@@ -205,7 +201,7 @@ class SmartTruncationManager(ContextManager):
             else:
                 rest.append(m)
 
-        recent = rest[-self.keep_last:]
+        recent = rest[-self.keep_last :]
         result = list(system_msgs)
         if first_user:
             result.append(first_user)
@@ -296,7 +292,7 @@ class SlidingWindowManager(ContextManager):
             role = m.get("role", "?")
             content = m.get("content", "")
             if content:
-                lines.append(f"  {role}: {content[:self._summarization_truncation]}")
+                lines.append(f"  {role}: {content[: self._summarization_truncation]}")
             if m.get("tool_calls"):
                 for tc in m["tool_calls"]:
                     fn = tc.get("function", {})
@@ -304,8 +300,7 @@ class SlidingWindowManager(ContextManager):
 
         prompt = (
             "Summarize the following conversation in 2-3 sentences. "
-            "Focus on important data (numbers, facts, tool results).\n\n"
-            + "\n".join(lines)
+            "Focus on important data (numbers, facts, tool results).\n\n" + "\n".join(lines)
         )
 
         try:

@@ -3,6 +3,7 @@
 Collects session data, config, telemetry, logs, and conversation history
 into a ZIP file for debugging and support purposes.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,9 +73,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
         # -- Telemetry --
         try:
             hook_chain = agent.core.hooks
-            telemetry_hook = hook_chain.find_hook(
-                lambda h: type(h).__name__ == "TelemetryHook"
-            )
+            telemetry_hook = hook_chain.find_hook(lambda h: type(h).__name__ == "TelemetryHook")
             if telemetry_hook and hasattr(telemetry_hook, "_telemetry"):
                 tc = telemetry_hook._telemetry
                 zf.writestr("telemetry.json", json.dumps(tc.report(), indent=2, default=str))
@@ -84,9 +83,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
         # -- Harness state --
         try:
             hook_chain = agent.core.hooks
-            carryover_hook = hook_chain.find_hook(
-                lambda h: type(h).__name__ == "CarryoverHook"
-            )
+            carryover_hook = hook_chain.find_hook(lambda h: type(h).__name__ == "CarryoverHook")
             if carryover_hook and hasattr(carryover_hook, "_state"):
                 zf.writestr("carryover.txt", carryover_hook._state.summary())
         except Exception as e:
@@ -117,10 +114,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
         # -- Hooks --
         try:
             hooks = agent.core.hooks.list_hooks()
-            hooks_info = [
-                {"name": h["name"], "events": h["events"]}
-                for h in hooks
-            ]
+            hooks_info = [{"name": h["name"], "events": h["events"]} for h in hooks]
             zf.writestr("hooks.json", json.dumps(hooks_info, indent=2))
         except Exception:
             pass
@@ -149,6 +143,7 @@ def _get_version() -> str:
     """Get koboi version from package metadata."""
     try:
         from importlib.metadata import version
+
         return version("koboi-agent")
     except Exception:
         return "unknown"

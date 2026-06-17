@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/doom_loop_hook.py — DoomLoopHook (0% → >85%)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, AsyncMock

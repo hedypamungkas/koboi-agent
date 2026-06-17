@@ -1,4 +1,5 @@
 """Tests for the subagent feature: SubAgentManager, delegate_tasks tool, and SubagentUIHook."""
+
 from __future__ import annotations
 
 import json
@@ -63,10 +64,12 @@ class TestConversationSummary:
 class TestSubAgentManager:
     @pytest.fixture
     def manager(self):
-        client = MockClient(responses=[
-            make_mock_response(content="Subagent answer for task 1"),
-            make_mock_response(content="Subagent answer for task 2"),
-        ])
+        client = MockClient(
+            responses=[
+                make_mock_response(content="Subagent answer for task 1"),
+                make_mock_response(content="Subagent answer for task 2"),
+            ]
+        )
         tools = ToolRegistry()
         hooks = HookChain()
         return SubAgentManager(
@@ -168,10 +171,12 @@ class TestDelegateTasksTool:
         assert "Error" in result
 
     async def test_tool_returns_formatted_results(self):
-        client = MockClient(responses=[
-            make_mock_response(content="Answer 1"),
-            make_mock_response(content="Answer 2"),
-        ])
+        client = MockClient(
+            responses=[
+                make_mock_response(content="Answer 1"),
+                make_mock_response(content="Answer 2"),
+            ]
+        )
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(client=client, tools=tools, hook_chain=hooks, max_iterations=2)
@@ -189,9 +194,11 @@ class TestDelegateTasksTool:
         assert "---" in result  # separator between results
 
     async def test_tool_with_parent_memory(self):
-        client = MockClient(responses=[
-            make_mock_response(content="Contextual answer"),
-        ])
+        client = MockClient(
+            responses=[
+                make_mock_response(content="Contextual answer"),
+            ]
+        )
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(client=client, tools=tools, hook_chain=hooks, max_iterations=2)
@@ -207,9 +214,11 @@ class TestDelegateTasksTool:
 
     async def test_tool_inherits_parent_tools(self):
         """Verify child agents can use the parent's tools."""
-        client = MockClient(responses=[
-            make_mock_response(content="Tool result"),
-        ])
+        client = MockClient(
+            responses=[
+                make_mock_response(content="Tool result"),
+            ]
+        )
         tools = ToolRegistry()
         tools.register(
             name="get_weather",
@@ -226,9 +235,11 @@ class TestDelegateTasksTool:
 
     async def test_child_tools_exclude_delegate_tasks(self):
         """Verify child agents cannot call delegate_tasks (prevents recursion)."""
-        client = MockClient(responses=[
-            make_mock_response(content="Done"),
-        ])
+        client = MockClient(
+            responses=[
+                make_mock_response(content="Done"),
+            ]
+        )
         tools = ToolRegistry()
         tools.register(
             name="delegate_tasks",
@@ -353,19 +364,24 @@ class TestSubagentIntegration:
                     complete_events.append(ctx.metadata)
                 return ctx
 
-        client = MockClient(responses=[
-            make_mock_response(content="Result A"),
-            make_mock_response(content="Result B"),
-        ])
+        client = MockClient(
+            responses=[
+                make_mock_response(content="Result A"),
+                make_mock_response(content="Result B"),
+            ]
+        )
         tools = ToolRegistry()
         hooks = HookChain()
         hooks.add(CollectorHook())
         manager = SubAgentManager(client=client, tools=tools, hook_chain=hooks, max_iterations=2)
 
-        result = await delegate_tasks([
-            {"task": "Do A", "label": "a"},
-            {"task": "Do B", "label": "b"},
-        ], _deps={"manager": manager})
+        result = await delegate_tasks(
+            [
+                {"task": "Do A", "label": "a"},
+                {"task": "Do B", "label": "b"},
+            ],
+            _deps={"manager": manager},
+        )
 
         assert len(dispatch_events) == 2
         assert len(complete_events) == 2
@@ -392,8 +408,11 @@ class TestSubagentLifecycle:
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(
-            client=client, tools=tools, hook_chain=hooks,
-            max_iterations=3, timeout=0.2,
+            client=client,
+            tools=tools,
+            hook_chain=hooks,
+            max_iterations=3,
+            timeout=0.2,
         )
 
         tasks = [SubagentTask(task="Slow task", label="slow")]
@@ -420,8 +439,11 @@ class TestSubagentLifecycle:
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(
-            client=client, tools=tools, hook_chain=hooks,
-            max_iterations=3, timeout=60.0,
+            client=client,
+            tools=tools,
+            hook_chain=hooks,
+            max_iterations=3,
+            timeout=60.0,
         )
 
         async def run_and_cancel():
@@ -466,8 +488,11 @@ class TestSubagentLifecycle:
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(
-            client=client, tools=tools, hook_chain=hooks,
-            max_iterations=3, timeout=60.0,
+            client=client,
+            tools=tools,
+            hook_chain=hooks,
+            max_iterations=3,
+            timeout=60.0,
         )
 
         async def run_and_cancel():
@@ -505,8 +530,11 @@ class TestSubagentLifecycle:
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(
-            client=client, tools=tools, hook_chain=hooks,
-            max_iterations=3, timeout=60.0,
+            client=client,
+            tools=tools,
+            hook_chain=hooks,
+            max_iterations=3,
+            timeout=60.0,
         )
 
         async def check_running():
@@ -528,14 +556,19 @@ class TestSubagentLifecycle:
 
     async def test_resource_cleanup_after_completion(self):
         """Child agent memory is cleared after task completes."""
-        client = MockClient(responses=[
-            make_mock_response(content="Clean me up"),
-        ])
+        client = MockClient(
+            responses=[
+                make_mock_response(content="Clean me up"),
+            ]
+        )
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(
-            client=client, tools=tools, hook_chain=hooks,
-            max_iterations=2, timeout=10.0,
+            client=client,
+            tools=tools,
+            hook_chain=hooks,
+            max_iterations=2,
+            timeout=10.0,
         )
 
         tasks = [SubagentTask(task="Cleanup test", label="clean")]
@@ -558,8 +591,11 @@ class TestSubagentLifecycle:
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(
-            client=client, tools=tools, hook_chain=hooks,
-            max_iterations=3, timeout=0.2,
+            client=client,
+            tools=tools,
+            hook_chain=hooks,
+            max_iterations=3,
+            timeout=0.2,
         )
 
         tasks = [SubagentTask(task="Timeout cleanup", label="tclean")]
@@ -584,8 +620,11 @@ class TestSubagentLifecycle:
         tools = ToolRegistry()
         hooks = HookChain()
         manager = SubAgentManager(
-            client=client, tools=tools, hook_chain=hooks,
-            max_iterations=3, timeout=60.0,
+            client=client,
+            tools=tools,
+            hook_chain=hooks,
+            max_iterations=3,
+            timeout=60.0,
         )
 
         async def run_and_cancel():
@@ -604,19 +643,23 @@ class TestSubagentLifecycle:
 class TestSubagentConfig:
     def test_config_subagent_property(self):
         """Config.subagent returns the subagent config dict."""
-        config = Config.from_dict({
-            "agent": {"name": "test", "system_prompt": "hi"},
-            "llm": {"model": "gpt-4o"},
-            "subagent": {"timeout": 30, "max_iterations": 3},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test", "system_prompt": "hi"},
+                "llm": {"model": "gpt-4o"},
+                "subagent": {"timeout": 30, "max_iterations": 3},
+            }
+        )
         assert config.subagent == {"timeout": 30, "max_iterations": 3}
 
     def test_config_subagent_defaults_empty(self):
         """Config.subagent returns empty dict when not configured."""
-        config = Config.from_dict({
-            "agent": {"name": "test", "system_prompt": "hi"},
-            "llm": {"model": "gpt-4o"},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test", "system_prompt": "hi"},
+                "llm": {"model": "gpt-4o"},
+            }
+        )
         assert config.subagent == {}
 
     async def test_setup_subagent_reads_config(self):
@@ -632,11 +675,13 @@ class TestSubagentConfig:
             fn=lambda tasks: "ok",
         )
         hooks = HookChain()
-        config = Config.from_dict({
-            "agent": {"name": "test", "system_prompt": "hi"},
-            "llm": {"model": "gpt-4o"},
-            "subagent": {"timeout": 42, "max_iterations": 7},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test", "system_prompt": "hi"},
+                "llm": {"model": "gpt-4o"},
+                "subagent": {"timeout": 42, "max_iterations": 7},
+            }
+        )
 
         _setup_subagent(tools, client, hooks, None, config=config)
 
@@ -658,10 +703,12 @@ class TestSubagentConfig:
             fn=lambda tasks: "ok",
         )
         hooks = HookChain()
-        config = Config.from_dict({
-            "agent": {"name": "test", "system_prompt": "hi"},
-            "llm": {"model": "gpt-4o"},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "test", "system_prompt": "hi"},
+                "llm": {"model": "gpt-4o"},
+            }
+        )
 
         _setup_subagent(tools, client, hooks, None, config=config)
 

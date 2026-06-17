@@ -1,4 +1,5 @@
 """Tests for koboi.llm.anthropic_adapter module."""
+
 from __future__ import annotations
 
 import json
@@ -68,9 +69,17 @@ class TestTranslateMessages:
         adapter = _make_adapter()
         messages = [
             {"role": "user", "content": "Weather?"},
-            {"role": "assistant", "content": "Let me check.", "tool_calls": [
-                {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"SF\"}"}},
-            ]},
+            {
+                "role": "assistant",
+                "content": "Let me check.",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
+                    },
+                ],
+            },
         ]
         result = adapter._translate_messages(messages)
         assert len(result) == 2
@@ -87,9 +96,13 @@ class TestTranslateMessages:
         adapter = _make_adapter()
         messages = [
             {"role": "user", "content": "Weather?"},
-            {"role": "assistant", "content": "Checking.", "tool_calls": [
-                {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{}"}},
-            ]},
+            {
+                "role": "assistant",
+                "content": "Checking.",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{}"}},
+                ],
+            },
             {"role": "tool", "tool_call_id": "call_1", "content": "Sunny, 25C"},
         ]
         result = adapter._translate_messages(messages)
@@ -104,10 +117,14 @@ class TestTranslateMessages:
         adapter = _make_adapter()
         messages = [
             {"role": "user", "content": "Compare"},
-            {"role": "assistant", "content": None, "tool_calls": [
-                {"id": "call_1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
-                {"id": "call_2", "type": "function", "function": {"name": "b", "arguments": "{}"}},
-            ]},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
+                    {"id": "call_2", "type": "function", "function": {"name": "b", "arguments": "{}"}},
+                ],
+            },
             {"role": "tool", "tool_call_id": "call_1", "content": "Result A"},
             {"role": "tool", "tool_call_id": "call_2", "content": "Result B"},
         ]
@@ -156,9 +173,15 @@ class TestTranslateMessages:
 
     def test_invalid_arguments_json_handled(self):
         adapter = _make_adapter()
-        messages = [{"role": "assistant", "content": None, "tool_calls": [
-            {"id": "call_1", "type": "function", "function": {"name": "x", "arguments": "not-valid-json"}},
-        ]}]
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "x", "arguments": "not-valid-json"}},
+                ],
+            }
+        ]
         result = adapter._translate_messages(messages)
         assert result[0]["role"] == "user"
         tool_use_block = result[1]["content"][0]
@@ -168,11 +191,14 @@ class TestTranslateMessages:
 class TestTranslateTools:
     def test_converts_openai_to_anthropic_format(self):
         tools = [
-            {"type": "function", "function": {
-                "name": "calculator",
-                "description": "Do math",
-                "parameters": {"type": "object", "properties": {"expr": {"type": "string"}}},
-            }},
+            {
+                "type": "function",
+                "function": {
+                    "name": "calculator",
+                    "description": "Do math",
+                    "parameters": {"type": "object", "properties": {"expr": {"type": "string"}}},
+                },
+            },
         ]
         result = AnthropicAdapter._translate_tools(tools)
         assert len(result) == 1
@@ -267,17 +293,24 @@ class TestAnthropicAdapterComplete:
     async def test_full_flow_builds_correct_request(self):
         adapter = _make_adapter()
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "content": [{"type": "text", "text": "Response"}],
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "content": [{"type": "text", "text": "Response"}],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+        )
 
         result = await adapter.complete(
             messages=[
                 {"role": "system", "content": "You are helpful."},
                 {"role": "user", "content": "Hello"},
             ],
-            tools=[{"type": "function", "function": {"name": "calc", "description": "math", "parameters": {"type": "object"}}}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {"name": "calc", "description": "math", "parameters": {"type": "object"}},
+                }
+            ],
         )
 
         call_args = adapter._transport.post.call_args
@@ -300,10 +333,12 @@ class TestAnthropicAdapterComplete:
     async def test_no_system_no_tools(self):
         adapter = _make_adapter()
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "content": [{"type": "text", "text": "Hi"}],
-            "usage": {},
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "content": [{"type": "text", "text": "Hi"}],
+                "usage": {},
+            }
+        )
 
         await adapter.complete(messages=[{"role": "user", "content": "Hello"}])
 

@@ -1,4 +1,5 @@
 """Tests for facade.py uncovered paths -- on(), add_hook()."""
+
 from __future__ import annotations
 
 import asyncio

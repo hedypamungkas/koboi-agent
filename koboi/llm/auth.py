@@ -1,4 +1,5 @@
 """koboi/llm/auth.py -- Authentication strategy pattern for LLM providers."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -6,8 +7,7 @@ from abc import ABC, abstractmethod
 
 class AuthStrategy(ABC):
     @abstractmethod
-    def apply(self, headers: dict[str, str]) -> dict[str, str]:
-        ...
+    def apply(self, headers: dict[str, str]) -> dict[str, str]: ...
 
 
 class BearerAuth(AuthStrategy):

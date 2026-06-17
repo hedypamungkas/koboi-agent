@@ -1,4 +1,5 @@
 """Tests for MCPServer dispatch edge cases and MCPClient transport."""
+
 from __future__ import annotations
 
 import json
@@ -24,18 +25,24 @@ class TestMCPServerDispatch:
 
     def test_handle_tools_list_with_tools(self):
         server = MCPServer(name="test")
+
         @server.tool("calc", "Calculate", {"type": "object"})
         def calc():
             return 42
+
         result = server._handle_tools_list(1, {})
         assert len(result["tools"]) == 1
         assert result["tools"][0]["name"] == "calc"
 
     def test_handle_tools_call_success(self):
         server = MCPServer(name="test")
-        @server.tool("add", "Add numbers", {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}})
+
+        @server.tool(
+            "add", "Add numbers", {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}}
+        )
         def add(a, b):
             return a + b
+
         result = server._handle_tools_call(1, {"name": "add", "arguments": {"a": 2, "b": 3}})
         assert result["content"][0]["text"] == "5"
 
@@ -59,9 +66,11 @@ class TestMCPServerDispatch:
 
     def test_dispatch_handler_exception(self):
         server = MCPServer(name="test")
+
         @server.tool("bad", "Bad tool", {"type": "object"})
         def bad():
             raise ValueError("oops")
+
         responses = []
         server._write_response = lambda msg: responses.append(msg)
         server._dispatch({"method": "tools/call", "id": 1, "params": {"name": "bad", "arguments": {}}})
@@ -101,6 +110,7 @@ class TestMCPClientTransport:
 
     def test_close_with_timeout_kill(self):
         import subprocess
+
         client = MCPClient(["echo", "test"])
         mock_process = MagicMock()
         mock_process.poll.return_value = None
@@ -120,9 +130,11 @@ class TestMCPClientTransport:
         client._process = MagicMock()
         # Mock _write and _read
         client._write = MagicMock()
-        client._read = MagicMock(return_value={
-            "error": {"code": -32600, "message": "Invalid Request"},
-        })
+        client._read = MagicMock(
+            return_value={
+                "error": {"code": -32600, "message": "Invalid Request"},
+            }
+        )
         with pytest.raises(MCPError) as exc_info:
             client._send_request("test")
         assert exc_info.value.code == -32600
@@ -136,13 +148,15 @@ class TestMCPClientTransport:
 
     def test_call_tool_sync(self):
         client = MCPClient(["echo", "test"])
-        client._send_request = MagicMock(return_value={
-            "content": [
-                {"type": "text", "text": "result1"},
-                {"type": "text", "text": "result1"},  # duplicate
-                {"type": "text", "text": "result2"},
-            ],
-        })
+        client._send_request = MagicMock(
+            return_value={
+                "content": [
+                    {"type": "text", "text": "result1"},
+                    {"type": "text", "text": "result1"},  # duplicate
+                    {"type": "text", "text": "result2"},
+                ],
+            }
+        )
         result = client._call_tool_sync("test_tool", {"arg": "val"})
         assert "result1" in result
         assert "result2" in result

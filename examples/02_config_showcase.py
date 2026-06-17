@@ -9,6 +9,7 @@ Demonstrates:
 Run:
     python examples/02_config_showcase.py
 """
+
 from __future__ import annotations
 
 import os
@@ -326,12 +327,14 @@ def print_tuning_guide():
 
 
 def main():
-    console.print(Panel(
-        "[bold]Config Showcase[/bold]\n\n"
-        "Loading and comparing all production YAML configs.\n"
-        "No API key required -- config inspection only.",
-        title="Example 02",
-    ))
+    console.print(
+        Panel(
+            "[bold]Config Showcase[/bold]\n\n"
+            "Loading and comparing all production YAML configs.\n"
+            "No API key required -- config inspection only.",
+            title="Example 02",
+        )
+    )
 
     configs = load_configs()
     if not configs:

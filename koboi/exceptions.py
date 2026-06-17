@@ -1,4 +1,5 @@
 """koboi/exceptions.py -- Agent-level exception hierarchy."""
+
 from __future__ import annotations
 
 

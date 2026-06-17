@@ -3,6 +3,7 @@
 Provides @register_chunker, @register_retriever, @register_augmentation
 decorators and a build_rag() orchestrator that composes them from config.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -146,7 +147,10 @@ def register_chunker(
 
     def decorator(cls: type) -> type:
         chunker_registry.register(
-            name, cls, description=description, config_aliases=config_aliases,
+            name,
+            cls,
+            description=description,
+            config_aliases=config_aliases,
         )
         return cls
 
@@ -170,7 +174,10 @@ def register_retriever(
 
     def decorator(cls: type) -> type:
         retriever_registry.register(
-            name, cls, description=description, inject=inject,
+            name,
+            cls,
+            description=description,
+            inject=inject,
         )
         return cls
 
@@ -247,7 +254,8 @@ def _build_retriever(
 
 
 def _resolve_kwargs(
-    entry: ComponentEntry, rag_conf: dict[str, Any],
+    entry: ComponentEntry,
+    rag_conf: dict[str, Any],
 ) -> dict[str, Any]:
     """Resolve constructor kwargs from config using entry metadata."""
     config_aliases = entry.config_aliases
@@ -375,5 +383,7 @@ def load_custom_components(custom_modules: list[str]) -> None:
             importlib.import_module(module_path)
         except ImportError as e:
             _logger.warning(
-                "Failed to import custom RAG module '%s': %s", module_path, e,
+                "Failed to import custom RAG module '%s': %s",
+                module_path,
+                e,
             )

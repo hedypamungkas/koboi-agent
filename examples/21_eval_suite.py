@@ -10,6 +10,7 @@ Run:
     python examples/21_eval_suite.py                  # automatic mode
     python examples/21_eval_suite.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -33,11 +34,41 @@ def _build_cases():
     from koboi.types import EvalCase
 
     return [
-        EvalCase(name="Product pricing", user_message="How much does AcmeERP Enterprise cost?", expected_keywords=["15000", "perpetual"], expected_tools=[], max_iterations=10),
-        EvalCase(name="Calculate total", user_message="What is the total for 15 AcmeCRM users for one year?", expected_keywords=["4500"], expected_tools=["calculate"], max_iterations=10),
-        EvalCase(name="Recommendation", user_message="Which product is suitable for a retail business with 5 outlets?", expected_keywords=["AcmePOS"], expected_tools=[], max_iterations=10),
-        EvalCase(name="Consultation", user_message="How much does 2 days of IT consultation cost?", expected_keywords=["200", "consultation"], expected_tools=["calculate"], max_iterations=10),
-        EvalCase(name="SaaS plans", user_message="Explain the available SaaS plans", expected_keywords=["Starter", "Professional", "Enterprise"], expected_tools=[], max_iterations=10),
+        EvalCase(
+            name="Product pricing",
+            user_message="How much does AcmeERP Enterprise cost?",
+            expected_keywords=["15000", "perpetual"],
+            expected_tools=[],
+            max_iterations=10,
+        ),
+        EvalCase(
+            name="Calculate total",
+            user_message="What is the total for 15 AcmeCRM users for one year?",
+            expected_keywords=["4500"],
+            expected_tools=["calculate"],
+            max_iterations=10,
+        ),
+        EvalCase(
+            name="Recommendation",
+            user_message="Which product is suitable for a retail business with 5 outlets?",
+            expected_keywords=["AcmePOS"],
+            expected_tools=[],
+            max_iterations=10,
+        ),
+        EvalCase(
+            name="Consultation",
+            user_message="How much does 2 days of IT consultation cost?",
+            expected_keywords=["200", "consultation"],
+            expected_tools=["calculate"],
+            max_iterations=10,
+        ),
+        EvalCase(
+            name="SaaS plans",
+            user_message="Explain the available SaaS plans",
+            expected_keywords=["Starter", "Professional", "Enterprise"],
+            expected_tools=[],
+            max_iterations=10,
+        ),
     ]
 
 
@@ -101,7 +132,9 @@ def run_automatic(verbose: bool):
     case_table.add_column("Tools", style="magenta", width=15)
 
     for i, c in enumerate(cases, 1):
-        case_table.add_row(str(i), c.name, c.user_message, ", ".join(c.expected_keywords), ", ".join(c.expected_tools) or "-")
+        case_table.add_row(
+            str(i), c.name, c.user_message, ", ".join(c.expected_keywords), ", ".join(c.expected_tools) or "-"
+        )
 
     console.print(case_table)
     console.print()
@@ -123,14 +156,16 @@ def run_automatic(verbose: bool):
     avg_score = sum(r.overall_score for r in results) / total if total else 0
     total_duration = sum(r.duration_seconds for r in results)
 
-    console.print(Panel(
-        f"[bold]Summary[/bold]\n\n"
-        f"Passed: {passed}/{total}\n"
-        f"Average Score: {avg_score:.1%}\n"
-        f"Total Duration: {total_duration:.1f}s",
-        title="Evaluation Summary",
-        border_style="green" if passed == total else "yellow",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Summary[/bold]\n\n"
+            f"Passed: {passed}/{total}\n"
+            f"Average Score: {avg_score:.1%}\n"
+            f"Total Duration: {total_duration:.1f}s",
+            title="Evaluation Summary",
+            border_style="green" if passed == total else "yellow",
+        )
+    )
 
 
 def run_interactive(verbose: bool):

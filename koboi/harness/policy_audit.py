@@ -3,6 +3,7 @@
 Writes all policy decisions to a JSONL file for compliance auditing.
 Arguments are hashed (SHA-256) so sensitive data is not stored in the log.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -53,14 +54,17 @@ class PolicyAuditLog:
             return
         with open(self._path, "a") as f:
             for entry in self._buffer:
-                line = json.dumps({
-                    "ts": entry.timestamp,
-                    "tool": entry.tool_name,
-                    "args_hash": entry.arguments_hash,
-                    "decision": entry.decision,
-                    "rule": entry.rule,
-                    "risk": entry.risk_level,
-                }, ensure_ascii=False)
+                line = json.dumps(
+                    {
+                        "ts": entry.timestamp,
+                        "tool": entry.tool_name,
+                        "args_hash": entry.arguments_hash,
+                        "decision": entry.decision,
+                        "rule": entry.rule,
+                        "risk": entry.risk_level,
+                    },
+                    ensure_ascii=False,
+                )
                 f.write(line + "\n")
         self._buffer.clear()
 

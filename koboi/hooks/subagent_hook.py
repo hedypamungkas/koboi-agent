@@ -3,6 +3,7 @@
 Listens for AGENT_DISPATCHED and AGENT_COMPLETED events from SubAgentManager
 and posts Textual messages so the TUI shows subagent progress.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

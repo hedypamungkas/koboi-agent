@@ -1,4 +1,5 @@
 """Tests for koboi/tools/builtin/web.py — web_search and web_fetch expanded coverage."""
+
 from __future__ import annotations
 
 import pytest
@@ -60,10 +61,10 @@ class TestWebSearch:
 
 class TestDDGResultParser:
     def test_parse_results(self):
-        html = '''
+        html = """
         <a class="result__a" href="https://example.com">Example</a>
         <a class="result__snippet">A description</a>
-        '''
+        """
         parser = _DDGResultParser()
         parser.feed(html)
         assert len(parser.results) == 1

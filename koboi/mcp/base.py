@@ -1,4 +1,5 @@
 """koboi/mcp/base.py -- Abstract base class and shared utilities for MCP clients."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -108,11 +109,14 @@ class BaseMCPClient(ABC):
         Args:
             connect_desc: Command list or URL string for logging purposes.
         """
-        result = self._send_request_impl("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "koboi-agent", "version": "0.1.0"},
-        })
+        result = self._send_request_impl(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "koboi-agent", "version": "0.1.0"},
+            },
+        )
         self._server_info = result
         self._send_notification_impl("initialized")
 
@@ -155,9 +159,11 @@ def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry) -> list[st
     registered: list[str] = []
 
     for info in tool_infos:
+
         def make_handler(tool_name: str, mcp_client: BaseMCPClient):
             async def handler(**kwargs) -> str:
                 return await mcp_client.call_tool(tool_name, kwargs)
+
             return handler
 
         handler = make_handler(info.name, client)

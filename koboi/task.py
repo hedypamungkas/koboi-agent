@@ -1,4 +1,5 @@
 """koboi/task.py -- Task data model and in-memory TaskManager."""
+
 from __future__ import annotations
 
 import time
@@ -70,13 +71,11 @@ class TaskManager:
             if status == "in_progress" and task.blocked_by:
                 # Check if all dependencies are completed
                 unfinished = [
-                    dep for dep in task.blocked_by
-                    if dep in self._tasks and self._tasks[dep].status != "completed"
+                    dep for dep in task.blocked_by if dep in self._tasks and self._tasks[dep].status != "completed"
                 ]
                 if unfinished:
                     dep_subjects = [
-                        f"{dep} ({self._tasks[dep].subject})" if dep in self._tasks else dep
-                        for dep in unfinished
+                        f"{dep} ({self._tasks[dep].subject})" if dep in self._tasks else dep for dep in unfinished
                     ]
                     reason = f"Blocked by: {', '.join(dep_subjects)}"
                     return task, reason
@@ -133,8 +132,7 @@ class TaskManager:
             if task.status != "blocked":
                 continue
             unfinished = [
-                dep for dep in task.blocked_by
-                if dep in self._tasks and self._tasks[dep].status != "completed"
+                dep for dep in task.blocked_by if dep in self._tasks and self._tasks[dep].status != "completed"
             ]
             if not unfinished:
                 task.blocked_by = []

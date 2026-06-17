@@ -1,4 +1,5 @@
 """Tests for koboi.client module."""
+
 from __future__ import annotations
 
 import pytest
@@ -106,10 +107,14 @@ class TestClientCompleteDelegation:
         async def _get_embeddings(self, t):
             return None
 
-        client._impl = type("MockImpl", (), {
-            "complete": _complete,
-            "get_embeddings": _get_embeddings,
-        })()
+        client._impl = type(
+            "MockImpl",
+            (),
+            {
+                "complete": _complete,
+                "get_embeddings": _get_embeddings,
+            },
+        )()
         result = await client.complete([{"role": "user", "content": "hi"}])
         assert result.content == "test"
 
@@ -122,10 +127,14 @@ class TestClientCompleteDelegation:
         async def _get_embeddings(self, t):
             return [0.1, 0.2]
 
-        client._impl = type("MockImpl", (), {
-            "complete": _complete,
-            "get_embeddings": _get_embeddings,
-        })()
+        client._impl = type(
+            "MockImpl",
+            (),
+            {
+                "complete": _complete,
+                "get_embeddings": _get_embeddings,
+            },
+        )()
         result = await client.get_embeddings("hello")
         assert result == [0.1, 0.2]
 

@@ -3,6 +3,7 @@
 Intercepts POST_COMPACT to set up the augmentation strategy before the LLM call.
 Injects retrieved context into the message stream.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -42,12 +43,8 @@ class RAGHook(Hook):
             rag_results = ctx.metadata.get("rag_results", [])
             if rag_results and self.strategy == "prepend":
                 # Build augmentation text from results
-                chunks_text = "\n".join(
-                    f"[{i+1}] {r}" for i, r in enumerate(rag_results)
-                )
-                augmentation = (
-                    f"<retrieved-context>\n{chunks_text}\n</retrieved-context>"
-                )
+                chunks_text = "\n".join(f"[{i + 1}] {r}" for i, r in enumerate(rag_results))
+                augmentation = f"<retrieved-context>\n{chunks_text}\n</retrieved-context>"
                 ctx.metadata["rag_augmentation"] = augmentation
 
         return ctx

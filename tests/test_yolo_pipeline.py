@@ -1,4 +1,5 @@
 """Tests for YOLO mode bypass behavior in ToolExecutionPipeline."""
+
 from __future__ import annotations
 
 import pytest
@@ -60,7 +61,10 @@ class TestYoloPipelineBypass:
         rl = RateLimiter(RateLimitConfig(max_tool_calls_per_session=0))
         mgr = ModeManager(AgentMode.YOLO)
         pipeline = ToolExecutionPipeline(
-            tools=registry, memory=memory, rate_limiter=rl, mode_manager=mgr,
+            tools=registry,
+            memory=memory,
+            rate_limiter=rl,
+            mode_manager=mgr,
         )
         result = await pipeline.execute_tool_call(_tc(), iteration=0)
         assert not result.skipped
@@ -75,8 +79,10 @@ class TestYoloPipelineBypass:
 
         mgr = ModeManager(AgentMode.YOLO)
         pipeline = ToolExecutionPipeline(
-            tools=registry, memory=memory,
-            approval_handler=AlwaysDeny(), mode_manager=mgr,
+            tools=registry,
+            memory=memory,
+            approval_handler=AlwaysDeny(),
+            mode_manager=mgr,
         )
         result = await pipeline.execute_tool_call(_tc(), iteration=0)
         assert not result.skipped
@@ -87,7 +93,10 @@ class TestYoloPipelineBypass:
         chain.add(_AbortHook())
         mgr = ModeManager(AgentMode.YOLO)
         pipeline = ToolExecutionPipeline(
-            tools=registry, memory=memory, hook_chain=chain, mode_manager=mgr,
+            tools=registry,
+            memory=memory,
+            hook_chain=chain,
+            mode_manager=mgr,
         )
         result = await pipeline.execute_tool_call(_tc(), iteration=0)
         assert result.skipped
@@ -101,7 +110,10 @@ class TestYoloPipelineBypass:
         rl = RateLimiter(RateLimitConfig(max_tool_calls_per_session=0))
         mgr = ModeManager(AgentMode.AUTO)
         pipeline = ToolExecutionPipeline(
-            tools=registry, memory=memory, rate_limiter=rl, mode_manager=mgr,
+            tools=registry,
+            memory=memory,
+            rate_limiter=rl,
+            mode_manager=mgr,
         )
         result = await pipeline.execute_tool_call(_tc(), iteration=0)
         assert result.skipped
@@ -115,7 +127,8 @@ class TestYoloPipelineBypass:
                 return False
 
         pipeline = ToolExecutionPipeline(
-            tools=registry, memory=memory,
+            tools=registry,
+            memory=memory,
             approval_handler=AlwaysDeny(),
         )
         result = await pipeline.execute_tool_call(_tc(), iteration=0)
@@ -126,7 +139,9 @@ class TestYoloPipelineBypass:
         chain = HookChain()
         chain.add(_AbortHook())
         pipeline = ToolExecutionPipeline(
-            tools=registry, memory=memory, hook_chain=chain,
+            tools=registry,
+            memory=memory,
+            hook_chain=chain,
         )
         result = await pipeline.execute_tool_call(_tc(), iteration=0)
         assert result.skipped

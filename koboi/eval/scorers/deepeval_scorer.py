@@ -5,6 +5,7 @@ Bias, Toxicity) for use in koboi's eval system.
 
 Requires: pip install deepeval
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,6 +26,7 @@ try:
         ToxicityMetric,
     )
     from deepeval.test_case import LLMTestCase
+
     _DEEPEVAL_AVAILABLE = True
 except ImportError:
     pass
@@ -101,11 +103,7 @@ class DeepEvalScorer(BaseScorer):
 
         tool_calls = context.get("tool_calls")
         if tool_calls:
-            kwargs["tools_called"] = [
-                {"name": tc.name, "description": ""}
-                for tc in tool_calls
-                if hasattr(tc, 'name')
-            ]
+            kwargs["tools_called"] = [{"name": tc.name, "description": ""} for tc in tool_calls if hasattr(tc, "name")]
 
         return LLMTestCase(**kwargs)
 

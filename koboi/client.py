@@ -1,4 +1,5 @@
 """koboi/client.py -- Async LLM client facade with retry logic."""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +21,7 @@ _UNRESOLVED_PATTERN = re.compile(r"^\$\{")
 
 class RetryClientError(LLMError):
     pass
+
 
 ClientError = RetryClientError
 
@@ -51,7 +53,10 @@ class RetryClient(LLMClient):
 
         resolved = ProviderRegistry.resolve_env(
             provider,
-            api_key=api_key, base_url=base_url, model=model, auth_token=auth_token,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            auth_token=auth_token,
         )
         self.api_key = resolved["api_key"]
         self.base_url = resolved["base_url"]
@@ -101,11 +106,10 @@ class RetryClient(LLMClient):
             return
         if self._is_placeholder(self.api_key):
             from koboi.llm.registry import ProviderRegistry
+
             desc = ProviderRegistry.get(self.provider)
             env_key = desc.env_key_api if desc else "OPENAI_API_KEY"
-            raise RetryClientError(
-                f"API key not configured. Set {env_key} in .env or config YAML."
-            )
+            raise RetryClientError(f"API key not configured. Set {env_key} in .env or config YAML.")
 
     async def complete(
         self,
@@ -119,7 +123,7 @@ class RetryClient(LLMClient):
             except _RETRYABLE_ERRORS as e:
                 last_error = e
                 if attempt < self.max_retries:
-                    wait = self.retry_backoff_base ** attempt
+                    wait = self.retry_backoff_base**attempt
                     if isinstance(e, LLMRateLimitError) and e.retry_after:
                         wait = e.retry_after
                     await asyncio.sleep(wait)
@@ -149,7 +153,7 @@ class RetryClient(LLMClient):
                 if yielded:
                     raise  # can't retry mid-stream
                 if attempt < self.max_retries:
-                    wait = self.retry_backoff_base ** attempt
+                    wait = self.retry_backoff_base**attempt
                     if isinstance(e, LLMRateLimitError) and e.retry_after:
                         wait = e.retry_after
                     await asyncio.sleep(wait)

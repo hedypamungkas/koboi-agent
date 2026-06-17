@@ -1,4 +1,5 @@
 """koboi/hooks/task_hook.py -- Inject task reminders into conversation context."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -34,8 +35,7 @@ class TaskHook(Hook):
 
         if self._calls_since_reminder >= self._reminder_interval:
             ctx.inject_message = (
-                f"[Task Reminder]\n{summary}\n"
-                "Use task_update to mark tasks as in_progress or completed."
+                f"[Task Reminder]\n{summary}\nUse task_update to mark tasks as in_progress or completed."
             )
             self._calls_since_reminder = 0
 

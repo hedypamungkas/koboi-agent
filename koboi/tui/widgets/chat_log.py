@@ -1,4 +1,5 @@
 """ChatLog -- scrollable message list replacing the old ChatArea(RichLog)."""
+
 from __future__ import annotations
 
 import time

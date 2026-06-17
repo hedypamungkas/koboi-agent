@@ -8,6 +8,7 @@ Run:
     python examples/01_simple_chat.py                  # automatic mode
     python examples/01_simple_chat.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -36,8 +37,7 @@ def main(mode: str, verbose: bool):
     """Example 01: Simple chat without tools."""
     setup_example(
         "Example 01: Simple Chat",
-        "Basic chat without tools. Agent uses LLM only.\n\n"
-        "[dim]Run with -m interactive for chat mode.[/dim]",
+        "Basic chat without tools. Agent uses LLM only.\n\n[dim]Run with -m interactive for chat mode.[/dim]",
     )
 
     agent = create_agent("01_simple_chat", verbose=verbose)

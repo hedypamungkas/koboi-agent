@@ -1,4 +1,5 @@
 """Tests for koboi.hooks.carryover_hook module."""
+
 from __future__ import annotations
 
 from koboi.hooks.chain import HookContext, HookEvent
@@ -164,8 +165,7 @@ class TestCarryoverHookPostCompact:
         result = await hook.execute(ctx)
 
         carryover_msgs = [
-            m for m in result.messages
-            if m.get("role") == "system" and "<harness-carryover>" in m.get("content", "")
+            m for m in result.messages if m.get("role") == "system" and "<harness-carryover>" in m.get("content", "")
         ]
         assert len(carryover_msgs) == 1
 

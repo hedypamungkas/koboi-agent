@@ -1,4 +1,5 @@
 """koboi/llm/openai_adapter.py -- OpenAI-compatible provider adapter (async)."""
+
 from __future__ import annotations
 
 import json
@@ -91,7 +92,7 @@ class OpenAIAdapter(LLMClient):
             if not line.startswith("data: "):
                 continue
 
-            payload = line[len("data: "):]
+            payload = line[len("data: ") :]
             if payload == "[DONE]":
                 break
 
@@ -142,9 +143,13 @@ class OpenAIAdapter(LLMClient):
         parsed_tool_calls = []
         for idx in sorted(tool_calls_acc):
             tc = tool_calls_acc[idx]
-            parsed_tool_calls.append(ToolCall(
-                id=tc["id"], name=tc["name"], arguments=tc["arguments"],
-            ))
+            parsed_tool_calls.append(
+                ToolCall(
+                    id=tc["id"],
+                    name=tc["name"],
+                    arguments=tc["arguments"],
+                )
+            )
             yield ToolCallEvent(
                 tool_name=tc["name"],
                 tool_call_id=tc["id"],
@@ -162,16 +167,20 @@ class OpenAIAdapter(LLMClient):
 
     async def get_embeddings(self, text: str) -> list[float] | None:
         try:
-            data = await self._transport.post("/embeddings", {
-                "model": self._embedding_model,
-                "input": text,
-            })
+            data = await self._transport.post(
+                "/embeddings",
+                {
+                    "model": self._embedding_model,
+                    "input": text,
+                },
+            )
             return data["data"][0]["embedding"]
         except Exception as e:
             if "405" in str(e):
                 _logger.warning(
                     "Embedding endpoint not available (server returned 405). "
-                    "SemanticRetriever will fall back to keyword retrieval. Error: %s", e,
+                    "SemanticRetriever will fall back to keyword retrieval. Error: %s",
+                    e,
                 )
             else:
                 _logger.warning("Embedding request failed: %s", e)
@@ -184,11 +193,13 @@ class OpenAIAdapter(LLMClient):
         calls = []
         for tc in raw:
             func = tc.get("function", {})
-            calls.append(ToolCall(
-                id=tc.get("id", ""),
-                name=func.get("name", ""),
-                arguments=func.get("arguments", "{}"),
-            ))
+            calls.append(
+                ToolCall(
+                    id=tc.get("id", ""),
+                    name=func.get("name", ""),
+                    arguments=func.get("arguments", "{}"),
+                )
+            )
         return calls
 
     @staticmethod

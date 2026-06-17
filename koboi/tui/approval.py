@@ -4,6 +4,7 @@ Replaces CLIApprovalHandler's stdin-based prompt with a Textual message-based
 flow. The agent worker pauses via asyncio.Future while the user responds in a
 PermissionDialog modal overlay.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -75,9 +76,7 @@ class TUIApprovalHandler(ApprovalHandler):
         self.audit_trail = audit_trail
         self._pending_future: asyncio.Future | None = None
 
-    async def should_approve(
-        self, tool_name: str, arguments: str, risk_level: RiskLevel
-    ) -> bool:
+    async def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
         # 1. Check trust DB for auto-approval
         if self._trust_db:
             trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level)
@@ -90,12 +89,14 @@ class TUIApprovalHandler(ApprovalHandler):
         self._pending_future = future
 
         # 3. Post permission request to the app (will show dialog)
-        self._app.post_message(PermissionRequest(
-            tool_name=tool_name,
-            arguments=arguments,
-            risk_level=risk_level.value,
-            future=future,
-        ))
+        self._app.post_message(
+            PermissionRequest(
+                tool_name=tool_name,
+                arguments=arguments,
+                risk_level=risk_level.value,
+                future=future,
+            )
+        )
 
         # 4. Await user response (non-blocking for Textual event loop)
         try:
@@ -116,7 +117,10 @@ class TUIApprovalHandler(ApprovalHandler):
 
         # 6. Audit
         self._audit(
-            tool_name, arguments, risk_level, response.approved,
+            tool_name,
+            arguments,
+            risk_level,
+            response.approved,
             "always_allow" if response.always_allow else "one_shot",
         )
 
@@ -141,12 +145,14 @@ class TUIApprovalHandler(ApprovalHandler):
         details: str,
     ) -> None:
         if self.audit_trail:
-            self.audit_trail.record(AuditEntry(
-                timestamp=time.time(),
-                event_type="tool_approved" if approved else "tool_denied",
-                tool_name=tool_name,
-                arguments=arguments[:500],
-                result="approved" if approved else "denied",
-                risk_level=risk_level.value,
-                details=f"TUI approval: {details}",
-            ))
+            self.audit_trail.record(
+                AuditEntry(
+                    timestamp=time.time(),
+                    event_type="tool_approved" if approved else "tool_denied",
+                    tool_name=tool_name,
+                    arguments=arguments[:500],
+                    result="approved" if approved else "denied",
+                    risk_level=risk_level.value,
+                    details=f"TUI approval: {details}",
+                )
+            )

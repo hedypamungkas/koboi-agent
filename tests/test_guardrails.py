@@ -1,4 +1,5 @@
 """Tests for koboi.guardrails modules."""
+
 from __future__ import annotations
 
 from koboi.guardrails.input import InputGuardrail

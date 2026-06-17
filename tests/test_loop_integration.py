@@ -1,4 +1,5 @@
 """Tests for koboi.loop integration paths with guardrails, rate limiting, and approval."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -85,10 +86,12 @@ class TestRateLimiterIntegration:
         limiter = RateLimiter(config=config)
         registry = make_tool_registry()
         tc = make_mock_tool_call("get_weather", {"city": "Jakarta"})
-        client = MockClient([
-            make_mock_response(None, [tc]),
-            make_mock_response("Weather retrieved!"),
-        ])
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("Weather retrieved!"),
+            ]
+        )
         agent = AgentCore(
             client=client,
             memory=ConversationMemory(),
@@ -104,10 +107,12 @@ class TestRateLimiterIntegration:
         limiter = RateLimiter(config=config)
         registry = make_tool_registry()
         tc = make_mock_tool_call("get_weather", {"city": "Jakarta"})
-        client = MockClient([
-            make_mock_response(None, [tc]),
-            make_mock_response("Sunny in Jakarta!"),
-        ])
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("Sunny in Jakarta!"),
+            ]
+        )
         agent = AgentCore(
             client=client,
             memory=ConversationMemory(),
@@ -126,10 +131,12 @@ class TestRateLimiterIntegration:
         limiter = RateLimiter(config=config)
         registry = make_tool_registry()
         tc = make_mock_tool_call("get_weather", {"city": "Jakarta"})
-        client = MockClient([
-            make_mock_response(None, [tc]),
-            make_mock_response("Final answer"),
-        ])
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("Final answer"),
+            ]
+        )
         agent = AgentCore(
             client=client,
             memory=ConversationMemory(),
@@ -152,10 +159,12 @@ class TestApprovalHandlerIntegration:
             risk_level=RiskLevel.DESTRUCTIVE,
         )
         tc = make_mock_tool_call("delete_file", {"path": "/tmp/important.txt"})
-        client = MockClient([
-            make_mock_response(None, [tc]),
-            make_mock_response("Could not delete the file."),
-        ])
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("Could not delete the file."),
+            ]
+        )
         agent = AgentCore(
             client=client,
             memory=ConversationMemory(),
@@ -169,10 +178,12 @@ class TestApprovalHandlerIntegration:
     async def test_approval_handler_allows_safe_tools(self):
         registry = make_tool_registry()
         tc = make_mock_tool_call("get_weather", {"city": "Jakarta"})
-        client = MockClient([
-            make_mock_response(None, [tc]),
-            make_mock_response("The weather is sunny."),
-        ])
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("The weather is sunny."),
+            ]
+        )
         agent = AgentCore(
             client=client,
             memory=ConversationMemory(),
@@ -193,10 +204,12 @@ class TestApprovalHandlerIntegration:
             risk_level=RiskLevel.DESTRUCTIVE,
         )
         tc = make_mock_tool_call("delete_file", {"path": "/tmp/data"})
-        client = MockClient([
-            make_mock_response(None, [tc]),
-            make_mock_response("Operation was denied."),
-        ])
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("Operation was denied."),
+            ]
+        )
         handler = CallbackApprovalHandler(callback=lambda name, args, risk: False)
         agent = AgentCore(
             client=client,
@@ -287,10 +300,12 @@ class TestCombinedGuardrails:
             risk_level=RiskLevel.DESTRUCTIVE,
         )
         tc = make_mock_tool_call("delete_file", {"path": "/tmp/x"})
-        client = MockClient([
-            make_mock_response(None, [tc]),
-            make_mock_response("Done trying."),
-        ])
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("Done trying."),
+            ]
+        )
         handler = CallbackApprovalHandler(callback=lambda n, a, r: True)
         agent = AgentCore(
             client=client,

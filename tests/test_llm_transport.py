@@ -1,4 +1,5 @@
 """Tests for koboi.llm.http_transport module."""
+
 from __future__ import annotations
 
 import json
@@ -100,17 +101,13 @@ class TestHttpTransportErrorMapping:
 class TestHttpTransportConnectionErrors:
     async def test_connect_error_raises_connection_error(self):
         transport = _make_transport()
-        with patch.object(
-            transport._client, "post", side_effect=httpx.ConnectError("refused")
-        ):
+        with patch.object(transport._client, "post", side_effect=httpx.ConnectError("refused")):
             with pytest.raises(LLMConnectionError, match="Connection failed"):
                 await transport.post("/chat/completions", {})
 
     async def test_timeout_raises_connection_error(self):
         transport = _make_transport()
-        with patch.object(
-            transport._client, "post", side_effect=httpx.TimeoutException("timed out")
-        ):
+        with patch.object(transport._client, "post", side_effect=httpx.TimeoutException("timed out")):
             with pytest.raises(LLMConnectionError, match="timed out"):
                 await transport.post("/chat/completions", {})
 
@@ -153,9 +150,7 @@ class TestHttpTransportRetry:
             json={"result": "ok"},
             request=httpx.Request("POST", "https://api.test.com/v1/chat/completions"),
         )
-        with patch.object(
-            transport._client, "post", side_effect=[error_response, success_response]
-        ):
+        with patch.object(transport._client, "post", side_effect=[error_response, success_response]):
             result = await transport.post("/chat/completions", {})
         assert result == {"result": "ok"}
 
@@ -166,9 +161,7 @@ class TestHttpTransportRetry:
             json={"error": {"message": "still broken"}},
             request=httpx.Request("POST", "https://api.test.com/v1/chat/completions"),
         )
-        with patch.object(
-            transport._client, "post", return_value=error_response
-        ):
+        with patch.object(transport._client, "post", return_value=error_response):
             with pytest.raises(LLMServerError, match="HTTP 500"):
                 await transport.post("/chat/completions", {})
 
@@ -180,6 +173,7 @@ class TestHttpTransportRetry:
             request=httpx.Request("POST", "https://api.test.com/v1/chat/completions"),
         )
         call_count = 0
+
         def count_calls(*a, **kw):
             nonlocal call_count
             call_count += 1

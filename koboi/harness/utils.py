@@ -1,4 +1,5 @@
 """koboi/harness/utils -- Shared helpers for harness hooks."""
+
 from __future__ import annotations
 
 import re

@@ -1,4 +1,5 @@
 """Tests for koboi/guardrails/tui_approval.py -- TUI approval handler."""
+
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,5 @@
 """koboi/tools/builtin/git -- Git repository operations (status, log, diff)."""
+
 from __future__ import annotations
 
 import os
@@ -49,8 +50,13 @@ def _run_git(args: list[str], repo_path: str, tool_config: dict | None = None) -
 
 
 STATUS_MAP = {
-    "M": "modified", "A": "added", "D": "deleted", "R": "renamed",
-    "C": "copied", "?": "untracked", "!": "ignored",
+    "M": "modified",
+    "A": "added",
+    "D": "deleted",
+    "R": "renamed",
+    "C": "copied",
+    "?": "untracked",
+    "!": "ignored",
 }
 
 

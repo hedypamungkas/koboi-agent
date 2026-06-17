@@ -1,4 +1,5 @@
 """Tests for DiffView and PlanView widgets -- unit-level without Textual app."""
+
 from __future__ import annotations
 
 import pytest

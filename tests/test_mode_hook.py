@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/mode_hook.py -- Mode-aware hook."""
+
 from __future__ import annotations
 
 import pytest

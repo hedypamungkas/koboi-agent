@@ -1,4 +1,5 @@
 """Tests for koboi.mcp.http_client -- StreamableHTTPMCPClient."""
+
 from __future__ import annotations
 
 import json
@@ -32,14 +33,18 @@ def _init_response(session_id=None):
     headers = {}
     if session_id:
         headers["mcp-session-id"] = session_id
-    return _make_response(json_data={
-        "jsonrpc": "2.0", "id": 1,
-        "result": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "test-server", "version": "1.0"},
+    return _make_response(
+        json_data={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "test-server", "version": "1.0"},
+            },
         },
-    }, headers=headers)
+        headers=headers,
+    )
 
 
 def _notification_response():
@@ -51,26 +56,35 @@ def _tools_list_response(tools=None):
     """Mock tools/list response."""
     if tools is None:
         tools = [{"name": "echo", "description": "Echo input", "inputSchema": {"type": "object"}}]
-    return _make_response(json_data={
-        "jsonrpc": "2.0", "id": 2,
-        "result": {"tools": tools},
-    })
+    return _make_response(
+        json_data={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {"tools": tools},
+        }
+    )
 
 
 def _tool_call_response(text="hello world"):
     """Mock tools/call response."""
-    return _make_response(json_data={
-        "jsonrpc": "2.0", "id": 3,
-        "result": {"content": [{"type": "text", "text": text}]},
-    })
+    return _make_response(
+        json_data={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "result": {"content": [{"type": "text", "text": text}]},
+        }
+    )
 
 
 def _error_response(code=-32600, message="Invalid request"):
     """Mock JSON-RPC error response."""
-    return _make_response(json_data={
-        "jsonrpc": "2.0", "id": 1,
-        "error": {"code": code, "message": message},
-    })
+    return _make_response(
+        json_data={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {"code": code, "message": message},
+        }
+    )
 
 
 # --- Tests ---
@@ -147,7 +161,8 @@ class TestStreamableHTTPMCPClientConnect:
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_connect_http_error(self, MockClient):
         MockClient.return_value.post.return_value = _make_response(
-            status=401, text="Unauthorized",
+            status=401,
+            text="Unauthorized",
         )
 
         client = StreamableHTTPMCPClient(url="https://example.com/mcp")
@@ -188,7 +203,11 @@ class TestStreamableHTTPMCPClientDiscoverTools:
     def test_discover_multiple_tools(self, MockClient):
         tools_data = [
             {"name": "tool1", "description": "First", "inputSchema": {"type": "object"}},
-            {"name": "tool2", "description": "Second", "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}}},
+            {
+                "name": "tool2",
+                "description": "Second",
+                "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}},
+            },
         ]
         mock_client = MockClient.return_value
         mock_client.post.side_effect = [
@@ -230,14 +249,19 @@ class TestStreamableHTTPMCPClientCallTool:
         mock_client.post.side_effect = [
             _init_response(),
             _notification_response(),
-            _make_response(json_data={
-                "jsonrpc": "2.0", "id": 3,
-                "result": {"content": [
-                    {"type": "text", "text": "same"},
-                    {"type": "text", "text": "same"},
-                    {"type": "text", "text": "different"},
-                ]},
-            }),
+            _make_response(
+                json_data={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {
+                        "content": [
+                            {"type": "text", "text": "same"},
+                            {"type": "text", "text": "same"},
+                            {"type": "text", "text": "different"},
+                        ]
+                    },
+                }
+            ),
             _notification_response(),
         ]
 
@@ -254,10 +278,13 @@ class TestStreamableHTTPMCPClientCallTool:
         mock_client.post.side_effect = [
             _init_response(),
             _notification_response(),
-            _make_response(json_data={
-                "jsonrpc": "2.0", "id": 3,
-                "result": {"content": []},
-            }),
+            _make_response(
+                json_data={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "result": {"content": []},
+                }
+            ),
             _notification_response(),
         ]
 
@@ -272,9 +299,7 @@ class TestStreamableHTTPMCPClientCallTool:
 class TestStreamableHTTPMCPClientSSE:
     def test_parse_sse_response(self):
         sse_text = (
-            "event: message\n"
-            'data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}\n'
-            "\n"
+            'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}\n\n'
         )
         response = _make_response(text=sse_text, content_type="text/event-stream")
 
@@ -341,7 +366,9 @@ class TestStreamableHTTPMCPClientSession:
 
         # Check that session ID was included in tools/list request
         tools_call = mock_client.post.call_args_list[2]  # 3rd call is tools/list
-        headers = tools_call[1].get("headers") or tools_call[0][2] if len(tools_call[0]) > 2 else tools_call[1].get("headers")
+        headers = (
+            tools_call[1].get("headers") or tools_call[0][2] if len(tools_call[0]) > 2 else tools_call[1].get("headers")
+        )
         # The headers are passed as keyword arg
         call_kwargs = mock_client.post.call_args_list[2]
         sent_headers = call_kwargs.kwargs.get("headers", call_kwargs[1].get("headers", {}))
@@ -433,6 +460,7 @@ class TestStreamableHTTPMCPClientErrorHandling:
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_connection_error(self, MockClient):
         import httpx
+
         MockClient.return_value.post.side_effect = httpx.ConnectError("Connection refused")
 
         client = StreamableHTTPMCPClient(url="https://example.com/mcp")
@@ -442,6 +470,7 @@ class TestStreamableHTTPMCPClientErrorHandling:
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_timeout_error(self, MockClient):
         import httpx
+
         MockClient.return_value.post.side_effect = httpx.TimeoutException("Timed out")
 
         client = StreamableHTTPMCPClient(url="https://example.com/mcp")
@@ -467,6 +496,7 @@ class TestRegisterMCPToolsHTTP:
         client.call_tool = AsyncMock(return_value="ok")
 
         from koboi.mcp.base import register_mcp_tools
+
         registered = register_mcp_tools(client, registry)
 
         assert registered == ["tool1"]

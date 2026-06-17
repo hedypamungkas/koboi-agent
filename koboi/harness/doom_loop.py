@@ -5,6 +5,7 @@ Detects three doom-loop patterns:
 2. Repeating pattern -- same sequence of tools repeated (A,B,C -> A,B,C)
 3. Error retry -- same tool+args producing errors repeatedly (even if interleaved)
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -129,7 +130,7 @@ class DoomLoopDetector:
             repeats = 0
             pos = 0
             while pos + pattern_len <= len(tail):
-                if tail[pos:pos + pattern_len] == pattern:
+                if tail[pos : pos + pattern_len] == pattern:
                     repeats += 1
                     pos += pattern_len
                 else:
@@ -181,7 +182,4 @@ class DoomLoopDetector:
     def build_recovery_message(result: DoomLoopResult) -> str:
         if not result.detected:
             return ""
-        return (
-            f"\n\n[DOOM LOOP WARNING] {result.recovery_hint}\n"
-            f"Detected pattern: {result.pattern_description}"
-        )
+        return f"\n\n[DOOM LOOP WARNING] {result.recovery_hint}\nDetected pattern: {result.pattern_description}"

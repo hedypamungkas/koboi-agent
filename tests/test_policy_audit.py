@@ -1,4 +1,5 @@
 """Tests for koboi/harness/policy_audit.py -- JSONL audit log."""
+
 from __future__ import annotations
 
 import json

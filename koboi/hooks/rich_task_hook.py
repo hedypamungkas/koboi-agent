@@ -3,6 +3,7 @@
 Prints task creation/updates to a Rich Console, useful for
 non-TUI contexts (examples, scripts, CLI).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -31,33 +32,19 @@ class RichTaskHook(Hook):
 
         if ctx.tool_name == "task_create":
             if "blocked by" in result:
-                self._console.print(
-                    f"  [bold cyan]+[/bold cyan] Task created (blocked): [bold]{result}[/bold]"
-                )
+                self._console.print(f"  [bold cyan]+[/bold cyan] Task created (blocked): [bold]{result}[/bold]")
             else:
-                self._console.print(
-                    f"  [bold cyan]+[/bold cyan] Task created: [bold]{result}[/bold]"
-                )
+                self._console.print(f"  [bold cyan]+[/bold cyan] Task created: [bold]{result}[/bold]")
         elif ctx.tool_name == "task_update":
             if "completed" in result:
-                self._console.print(
-                    f"  [bold green]✓[/bold green] Task completed: {result}"
-                )
+                self._console.print(f"  [bold green]✓[/bold green] Task completed: {result}")
             elif "in_progress" in result:
-                self._console.print(
-                    f"  [bold yellow]►[/bold yellow] Task started: {result}"
-                )
+                self._console.print(f"  [bold yellow]►[/bold yellow] Task started: {result}")
             elif "Cannot start" in result:
-                self._console.print(
-                    f"  [bold red]⊘[/bold red] Task blocked: {result}"
-                )
+                self._console.print(f"  [bold red]⊘[/bold red] Task blocked: {result}")
             else:
-                self._console.print(
-                    f"  [bold blue]↻[/bold blue] Task updated: {result}"
-                )
+                self._console.print(f"  [bold blue]↻[/bold blue] Task updated: {result}")
         elif ctx.tool_name == "task_add_dependency":
-            self._console.print(
-                f"  [bold magenta]⤳[/bold magenta] Dependency added: {result}"
-            )
+            self._console.print(f"  [bold magenta]⤳[/bold magenta] Dependency added: {result}")
 
         return ctx

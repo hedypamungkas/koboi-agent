@@ -3,6 +3,7 @@
 Tier 2 tests: screenshot capture, terminal resize behavior, and
 slash command autocomplete integration.
 """
+
 from __future__ import annotations
 
 import time

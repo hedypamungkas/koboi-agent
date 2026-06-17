@@ -1,4 +1,5 @@
 """Tests for koboi/skills/registry.py — Skill discovery and activation."""
+
 from __future__ import annotations
 
 import os
@@ -33,12 +34,7 @@ def multi_skill_dir(tmp_path):
         skill_path.mkdir()
         skill_md = skill_path / "SKILL.md"
         skill_md.write_text(
-            f"---\n"
-            f"name: {name}\n"
-            f"description: {name.title()} skill\n"
-            f"version: 1.0\n"
-            f"---\n"
-            f"You help with {name}.\n"
+            f"---\nname: {name}\ndescription: {name.title()} skill\nversion: 1.0\n---\nYou help with {name}.\n"
         )
     return tmp_path
 

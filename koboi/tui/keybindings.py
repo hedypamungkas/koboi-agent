@@ -10,6 +10,7 @@ Example YAML::
       f1: help_overlay
       ctrl+m: subagent_monitor
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

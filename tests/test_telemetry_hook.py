@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/telemetry_hook.py — TelemetryHook (42% → >85%)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -266,31 +267,39 @@ class TestTelemetryHookIntegration:
 
         # First iteration
         messages = [{"role": "user", "content": "Hello"}]
-        await hook.execute(HookContext(
-            event=HookEvent.PRE_LLM_CALL,
-            messages=messages,
-        ))
+        await hook.execute(
+            HookContext(
+                event=HookEvent.PRE_LLM_CALL,
+                messages=messages,
+            )
+        )
 
         response = AgentResponse(
             content="Hi!",
             usage=TokenUsage(prompt_tokens=5, completion_tokens=2),
         )
-        await hook.execute(HookContext(
-            event=HookEvent.POST_LLM_CALL,
-            iteration=0,
-            llm_response=response,
-        ))
+        await hook.execute(
+            HookContext(
+                event=HookEvent.POST_LLM_CALL,
+                iteration=0,
+                llm_response=response,
+            )
+        )
 
         # Tool use
-        await hook.execute(HookContext(
-            event=HookEvent.PRE_TOOL_USE,
-            tool_name="test_tool",
-        ))
+        await hook.execute(
+            HookContext(
+                event=HookEvent.PRE_TOOL_USE,
+                tool_name="test_tool",
+            )
+        )
 
-        await hook.execute(HookContext(
-            event=HookEvent.POST_TOOL_USE,
-            tool_result="Success",
-        ))
+        await hook.execute(
+            HookContext(
+                event=HookEvent.POST_TOOL_USE,
+                tool_result="Success",
+            )
+        )
 
         # Session end
         await hook.execute(HookContext(event=HookEvent.SESSION_END))
@@ -322,22 +331,28 @@ class TestTelemetryHookIntegration:
         hook = TelemetryHook(telemetry=collector)
 
         # Use tool1
-        await hook.execute(HookContext(
-            event=HookEvent.PRE_TOOL_USE,
-            tool_name="tool1",
-        ))
+        await hook.execute(
+            HookContext(
+                event=HookEvent.PRE_TOOL_USE,
+                tool_name="tool1",
+            )
+        )
 
         # Use tool2
-        await hook.execute(HookContext(
-            event=HookEvent.PRE_TOOL_USE,
-            tool_name="tool2",
-        ))
+        await hook.execute(
+            HookContext(
+                event=HookEvent.PRE_TOOL_USE,
+                tool_name="tool2",
+            )
+        )
 
         # Use tool1 again
-        await hook.execute(HookContext(
-            event=HookEvent.PRE_TOOL_USE,
-            tool_name="tool1",
-        ))
+        await hook.execute(
+            HookContext(
+                event=HookEvent.PRE_TOOL_USE,
+                tool_name="tool1",
+            )
+        )
 
         assert collector.snapshot.total_tool_calls == 3
         assert len(collector.snapshot.unique_tools_used) == 2

@@ -12,6 +12,7 @@ Run:
     python examples/26_task_management.py                  # automatic mode
     python examples/26_task_management.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys
@@ -41,10 +42,8 @@ QUESTIONS = [
     "Create tasks for: (1) finding a restaurant, (2) collecting dietary restrictions, "
     "(3) sending invitations, (4) making a reservation. "
     "Mark each task as completed as you finish it.",
-
     "Help me write a Python script that reads a CSV, filters rows by date, "
     "and outputs a summary. Create tasks for each step and mark them done as you go.",
-
     # Dependency demo: tasks with ordering constraints
     "I want to deploy a web app. Create these tasks WITH dependencies:\n"
     "  1. Set up database (no dependencies)\n"
@@ -59,30 +58,32 @@ QUESTIONS = [
 
 def _show_task_tools_info() -> None:
     """Explain the task management tools."""
-    console.print(Panel(
-        "[bold]Task Management Tools[/bold]\n\n"
-        "  [cyan]task_create[/cyan]         -- Create a new task with subject, description, and optional blocked_by\n"
-        "  [cyan]task_list[/cyan]           -- List all tasks, optionally filtered by status\n"
-        "  [cyan]task_get[/cyan]            -- Get details of a specific task by ID\n"
-        "  [cyan]task_update[/cyan]         -- Update task status (pending -> in_progress -> completed)\n"
-        "  [cyan]task_add_dependency[/cyan] -- Add a dependency between tasks\n\n"
-        "[bold]Dependency Support:[/bold]\n"
-        "  Tasks can depend on other tasks via [cyan]blocked_by[/cyan].\n"
-        "  A blocked task cannot start until all dependencies are completed.\n"
-        "  Completing a task auto-unblocks its dependents.\n\n"
-        "[bold]What you'll see below:[/bold]\n"
-        "  1. [yellow]+[/yellow] Task created     -- when the agent creates a task\n"
-        "  2. [yellow]>[/yellow] Task started      -- when the agent marks a task in_progress\n"
-        "  3. [green]✓[/green] Task completed    -- when the agent marks a task done\n"
-        "  4. [red]⊘[/red] Task blocked      -- when a task can't start (deps not met)\n"
-        "  5. [magenta]⤳[/magenta] Dependency added -- when a dependency is declared\n"
-        "  6. A summary table after each question showing all task states\n\n"
-        "[bold]Auto-Reminder Hook[/bold]\n"
-        "  Injects a reminder every 3rd LLM call when tasks are active.\n"
-        "  Keeps the agent on track without manual prompting.\n\n"
-        "[dim]Config: tools.builtin includes task tools, harness.tasks.enabled = true[/dim]",
-        title="Task Management",
-    ))
+    console.print(
+        Panel(
+            "[bold]Task Management Tools[/bold]\n\n"
+            "  [cyan]task_create[/cyan]         -- Create a new task with subject, description, and optional blocked_by\n"
+            "  [cyan]task_list[/cyan]           -- List all tasks, optionally filtered by status\n"
+            "  [cyan]task_get[/cyan]            -- Get details of a specific task by ID\n"
+            "  [cyan]task_update[/cyan]         -- Update task status (pending -> in_progress -> completed)\n"
+            "  [cyan]task_add_dependency[/cyan] -- Add a dependency between tasks\n\n"
+            "[bold]Dependency Support:[/bold]\n"
+            "  Tasks can depend on other tasks via [cyan]blocked_by[/cyan].\n"
+            "  A blocked task cannot start until all dependencies are completed.\n"
+            "  Completing a task auto-unblocks its dependents.\n\n"
+            "[bold]What you'll see below:[/bold]\n"
+            "  1. [yellow]+[/yellow] Task created     -- when the agent creates a task\n"
+            "  2. [yellow]>[/yellow] Task started      -- when the agent marks a task in_progress\n"
+            "  3. [green]✓[/green] Task completed    -- when the agent marks a task done\n"
+            "  4. [red]⊘[/red] Task blocked      -- when a task can't start (deps not met)\n"
+            "  5. [magenta]⤳[/magenta] Dependency added -- when a dependency is declared\n"
+            "  6. A summary table after each question showing all task states\n\n"
+            "[bold]Auto-Reminder Hook[/bold]\n"
+            "  Injects a reminder every 3rd LLM call when tasks are active.\n"
+            "  Keeps the agent on track without manual prompting.\n\n"
+            "[dim]Config: tools.builtin includes task tools, harness.tasks.enabled = true[/dim]",
+            title="Task Management",
+        )
+    )
 
 
 def _show_task_state(label: str = "Current Tasks") -> None:
@@ -105,7 +106,9 @@ def _show_task_state(label: str = "Current Tasks") -> None:
     table.add_column("Status", style="yellow")
     table.add_column("Subject")
     for t in tasks:
-        status_color = {"pending": "yellow", "in_progress": "blue", "completed": "green", "blocked": "red"}.get(t.status, "white")
+        status_color = {"pending": "yellow", "in_progress": "blue", "completed": "green", "blocked": "red"}.get(
+            t.status, "white"
+        )
         status_icon = {"pending": "○", "in_progress": "►", "completed": "✓", "blocked": "⊘"}.get(t.status, "?")
         dep_info = f" [blocked by: {', '.join(t.blocked_by)}]" if t.blocked_by else ""
         table.add_row(t.id, f"[{status_color}]{status_icon} {t.status}[/{status_color}]", f"{t.subject}{dep_info}")
@@ -115,6 +118,7 @@ def _show_task_state(label: str = "Current Tasks") -> None:
 def _clear_tasks() -> None:
     """Clear all tasks between questions."""
     from koboi.tools.builtin.task import get_manager
+
     try:
         mgr = get_manager()
         mgr.clear()
@@ -148,6 +152,7 @@ def main(mode: str, verbose: bool):
 
     # Register RichTaskHook so task activity is visible in console
     from koboi.hooks.rich_task_hook import RichTaskHook
+
     if agent.core is not None:
         agent.core.hooks.add(RichTaskHook(console=console))
         console.print("[dim]RichTaskHook registered -- task activity will be printed below.[/dim]")

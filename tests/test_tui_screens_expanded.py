@@ -1,4 +1,5 @@
 """Tests for TUI screens -- subagent monitor helper functions."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -26,6 +27,7 @@ class TestSubagentMonitorLogic:
 
     def test_build_summary_empty(self):
         from koboi.tui.screens.subagent_monitor import SubagentMonitorScreen
+
         screen = SubagentMonitorScreen.__new__(SubagentMonitorScreen)
         screen._agent_states = {}
         summary = screen._build_summary()
@@ -33,6 +35,7 @@ class TestSubagentMonitorLogic:
 
     def test_build_summary_with_states(self):
         from koboi.tui.screens.subagent_monitor import SubagentMonitorScreen
+
         screen = SubagentMonitorScreen.__new__(SubagentMonitorScreen)
         screen._agent_states = {
             "a1": {"status": "running"},

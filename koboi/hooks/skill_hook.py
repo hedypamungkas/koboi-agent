@@ -2,6 +2,7 @@
 
 Detects skill activation patterns in LLM responses and records them.
 """
+
 from __future__ import annotations
 
 import re
@@ -45,10 +46,12 @@ class SkillHook(Hook):
         for match in self.SKILL_PATTERN.finditer(response_text):
             skill_name = match.group(1).lower()
             if not self.available_skills or skill_name in self.available_skills:
-                activated_skills.append({
-                    "name": skill_name,
-                    "arguments": "",
-                })
+                activated_skills.append(
+                    {
+                        "name": skill_name,
+                        "arguments": "",
+                    }
+                )
 
         if activated_skills:
             ctx.metadata["skills_detected"] = activated_skills

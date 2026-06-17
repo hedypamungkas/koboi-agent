@@ -9,6 +9,7 @@ Run:
     python examples/03_tool_use_multi.py                  # automatic mode
     python examples/03_tool_use_multi.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click

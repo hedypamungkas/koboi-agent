@@ -7,6 +7,7 @@ Compatible with Langfuse SDK v2 + Server v2.
 
 Fail-open: if langfuse SDK or credentials are missing, hook becomes no-op.
 """
+
 from __future__ import annotations
 
 import logging
@@ -21,6 +22,7 @@ _logger = logging.getLogger(__name__)
 _LANGFUSE_AVAILABLE = False
 try:
     from langfuse import Langfuse
+
     _LANGFUSE_AVAILABLE = True
 except ImportError:
     pass
@@ -126,7 +128,7 @@ class LangfuseTracingHook(Hook):
             sessionId=self._session_id,
             metadata={"environment": self._environment, "release": self._release},
         )
-        self._trace_id = getattr(self._trace, 'trace_id', None) or getattr(self._trace, 'id', None)
+        self._trace_id = getattr(self._trace, "trace_id", None) or getattr(self._trace, "id", None)
 
     def _on_session_end(self, ctx: HookContext) -> None:
         self.flush()

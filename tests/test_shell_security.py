@@ -1,4 +1,5 @@
 """Tests for the shell tool in koboi.tools.builtin.shell."""
+
 from __future__ import annotations
 
 import os

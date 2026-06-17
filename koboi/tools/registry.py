@@ -1,4 +1,5 @@
 """koboi/tools/registry.py -- Tool registry with async execution."""
+
 from __future__ import annotations
 
 import asyncio
@@ -102,9 +103,7 @@ class ToolRegistry:
             args = {k: v for k, v in args.items() if k in schema_props}
 
         effective_timeout = (
-            self._tools[name].timeout
-            if self._tools[name].timeout is not None
-            else self._default_timeout
+            self._tools[name].timeout if self._tools[name].timeout is not None else self._default_timeout
         )
 
         try:
@@ -154,6 +153,7 @@ def tool(
               the tool is wrapped with a closure that injects these dependencies
               from the registry's dep store as a ``_deps`` dict parameter.
     """
+
     def decorator(fn: Callable) -> Callable:
         fn._tool_def = ToolDefinition(
             name=name,
@@ -164,11 +164,14 @@ def tool(
         )
         fn._tool_deps = deps or []
         return fn
+
     return decorator
 
 
 def _wrap_with_deps(
-    fn: Callable, dep_names: list[str], registry: ToolRegistry,
+    fn: Callable,
+    dep_names: list[str],
+    registry: ToolRegistry,
 ) -> Callable:
     """Wrap a tool function to inject dependencies and config from the registry at call time."""
     import functools
@@ -182,6 +185,7 @@ def _wrap_with_deps(
         return fn
 
     if asyncio.iscoroutinefunction(fn):
+
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             if dep_names:
@@ -189,8 +193,10 @@ def _wrap_with_deps(
             if accepts_config:
                 kwargs["_tool_config"] = registry.get_tool_config(tool_name)
             return await fn(*args, **kwargs)
+
         return async_wrapper
     else:
+
         @functools.wraps(fn)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             if dep_names:
@@ -198,6 +204,7 @@ def _wrap_with_deps(
             if accepts_config:
                 kwargs["_tool_config"] = registry.get_tool_config(tool_name)
             return fn(*args, **kwargs)
+
         return sync_wrapper
 
 
@@ -209,5 +216,4 @@ def register_decorated(registry: ToolRegistry, module: Any) -> None:
             td = obj._tool_def
             dep_names = getattr(obj, "_tool_deps", [])
             fn = _wrap_with_deps(obj, dep_names, registry)
-            registry.register(td.name, td.description, td.parameters, fn,
-                              risk_level=td.risk_level, timeout=td.timeout)
+            registry.register(td.name, td.description, td.parameters, fn, risk_level=td.risk_level, timeout=td.timeout)

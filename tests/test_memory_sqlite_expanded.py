@@ -1,4 +1,5 @@
 """Tests for SQLiteMemory static methods and uncovered paths."""
+
 from __future__ import annotations
 
 import json

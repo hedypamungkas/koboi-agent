@@ -3,6 +3,7 @@
 Loads Berkeley Function Calling Leaderboard JSONL datasets into EvalCase lists.
 Source: https://github.com/ShishirPatil/gorilla/tree/main/berkeley-function-call-leaderboard
 """
+
 from __future__ import annotations
 
 import json
@@ -20,8 +21,16 @@ class BFCLLoader(DatasetLoader):
     """Loads BFCL JSONL datasets into EvalCase lists."""
 
     CATEGORIES = [
-        "simple", "multiple", "parallel", "parallel_multiple",
-        "chatting", "relevance", "rest_api", "sql", "java", "javascript",
+        "simple",
+        "multiple",
+        "parallel",
+        "parallel_multiple",
+        "chatting",
+        "relevance",
+        "rest_api",
+        "sql",
+        "java",
+        "javascript",
     ]
 
     async def load(
@@ -66,7 +75,10 @@ class BFCLLoader(DatasetLoader):
         return cases
 
     async def _load_v4_dir(
-        self, dir_path: Path, categories: list[str] | None, max_cases: int | None,
+        self,
+        dir_path: Path,
+        categories: list[str] | None,
+        max_cases: int | None,
     ) -> list[EvalCase]:
         """Load BFCL v4 format: separate questions_ and answers_ JSON files."""
         cases: list[EvalCase] = []
@@ -118,9 +130,7 @@ class BFCLLoader(DatasetLoader):
         if isinstance(question, list):
             if question and isinstance(question[0], list):
                 # Nested: [[msg1, msg2]] -> join content
-                user_message = " ".join(
-                    m.get("content", "") for m in question[0] if isinstance(m, dict)
-                )
+                user_message = " ".join(m.get("content", "") for m in question[0] if isinstance(m, dict))
             else:
                 user_message = " ".join(str(q) for q in question)
         else:
@@ -283,10 +293,12 @@ class BFCLLoader(DatasetLoader):
 
         for item in gt:
             if isinstance(item, dict):
-                result.append({
-                    "name": BFCLLoader._sanitize_name(item.get("name", "")),
-                    "arguments": item.get("arguments", {}),
-                })
+                result.append(
+                    {
+                        "name": BFCLLoader._sanitize_name(item.get("name", "")),
+                        "arguments": item.get("arguments", {}),
+                    }
+                )
             elif isinstance(item, str):
                 # Parse Python-style function call
                 parsed = _parse_python_call(item)

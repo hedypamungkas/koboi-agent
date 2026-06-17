@@ -1,4 +1,5 @@
 """Tests for koboi.harness modules."""
+
 from __future__ import annotations
 
 import json
@@ -33,12 +34,12 @@ class TestDoomLoopDetector:
     def test_reset(self):
         cfg = DoomLoopConfig(consecutive_identical_threshold=2)
         detector = DoomLoopDetector(cfg)
-        detector.record("t", '{}', is_error=False)
-        detector.record("t", '{}', is_error=False)
+        detector.record("t", "{}", is_error=False)
+        detector.record("t", "{}", is_error=False)
         result = detector.check()
         assert result.detected is True
         detector.reset()
-        detector.record("t", '{}', is_error=False)
+        detector.record("t", "{}", is_error=False)
         result = detector.check()
         assert result.detected is False
 
@@ -50,16 +51,20 @@ class TestPolicyEngine:
         assert decision.action == PolicyAction.ALLOW
 
     def test_deny_rule(self):
-        engine = PolicyEngine(rules=[
-            PolicyRule(name="deny_shell_rm", tool_pattern="run_shell", action=PolicyAction.DENY),
-        ])
+        engine = PolicyEngine(
+            rules=[
+                PolicyRule(name="deny_shell_rm", tool_pattern="run_shell", action=PolicyAction.DENY),
+            ]
+        )
         decision = engine.evaluate("run_shell", '{"cmd": "rm -rf /"}', RiskLevel.MODERATE)
         assert decision.action == PolicyAction.DENY
 
     def test_confirm_rule(self):
-        engine = PolicyEngine(rules=[
-            PolicyRule(name="confirm_delete", tool_pattern="delete_file", action=PolicyAction.CONFIRM),
-        ])
+        engine = PolicyEngine(
+            rules=[
+                PolicyRule(name="confirm_delete", tool_pattern="delete_file", action=PolicyAction.CONFIRM),
+            ]
+        )
         decision = engine.evaluate("delete_file", '{"path": "/tmp/x"}', RiskLevel.DESTRUCTIVE)
         assert decision.action == PolicyAction.CONFIRM
 

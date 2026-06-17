@@ -1,4 +1,5 @@
 """Tests for koboi/context/registry.py -- Context strategy registry."""
+
 from __future__ import annotations
 
 import copy
@@ -101,6 +102,7 @@ class TestBuildContext:
 
     def test_build_sliding_window_with_client(self):
         from unittest.mock import MagicMock
+
         mock_client = MagicMock()
         result = build_context("sliding_window", client=mock_client, keep_last=5)
         assert isinstance(result, SlidingWindowManager)

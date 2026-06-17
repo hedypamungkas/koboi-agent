@@ -2,6 +2,7 @@
 
 Adapted from agent/hooks.py LoggingHook and AuditHook.
 """
+
 from __future__ import annotations
 
 import time as _time
@@ -44,17 +45,19 @@ class AuditHook(Hook):
         self.audit_trail = audit_trail
 
     def handles(self) -> list[HookEvent]:
-        return [HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE,
-                HookEvent.DOOM_LOOP_DETECTED]
+        return [HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE, HookEvent.DOOM_LOOP_DETECTED]
 
     async def execute(self, ctx: HookContext) -> HookContext:
         from koboi.types import AuditEntry
-        self.audit_trail.record(AuditEntry(
-            timestamp=_time.time(),
-            event_type=f"harness_{ctx.event.value}",
-            tool_name=ctx.tool_name,
-            arguments=(ctx.tool_arguments or "")[:200],
-            result=(ctx.tool_result or "")[:200],
-            details=f"iteration={ctx.iteration}",
-        ))
+
+        self.audit_trail.record(
+            AuditEntry(
+                timestamp=_time.time(),
+                event_type=f"harness_{ctx.event.value}",
+                tool_name=ctx.tool_name,
+                arguments=(ctx.tool_arguments or "")[:200],
+                result=(ctx.tool_result or "")[:200],
+                details=f"iteration={ctx.iteration}",
+            )
+        )
         return ctx

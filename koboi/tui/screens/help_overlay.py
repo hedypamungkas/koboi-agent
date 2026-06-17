@@ -1,4 +1,5 @@
 """help_overlay.py -- Rich help overlay modal."""
+
 from __future__ import annotations
 
 from textual.app import ComposeResult

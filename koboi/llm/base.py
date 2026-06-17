@@ -1,4 +1,5 @@
 """koboi/llm/base.py -- Abstract base class and error hierarchy for LLM providers."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -52,12 +53,10 @@ class LLMClient(ABC):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
-    ) -> AgentResponse:
-        ...
+    ) -> AgentResponse: ...
 
     @abstractmethod
-    async def get_embeddings(self, text: str) -> list[float] | None:
-        ...
+    async def get_embeddings(self, text: str) -> list[float] | None: ...
 
     async def complete_stream(
         self,

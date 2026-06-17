@@ -1,4 +1,5 @@
 """Tests for koboi/eval/scorers/ -- Additional scorer coverage."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

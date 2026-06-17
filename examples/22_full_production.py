@@ -12,6 +12,7 @@ Run:
     python examples/22_full_production.py -m interactive   # interactive mode
     python examples/22_full_production.py -v               # automatic + verbose
 """
+
 from __future__ import annotations
 
 import time
@@ -39,6 +40,7 @@ from koboi.hooks.chain import Hook, HookContext, HookEvent  # noqa: E402
 # Custom hook: ProfilingHook
 # ---------------------------------------------------------------------------
 
+
 class ProfilingHook(Hook):
     """Production profiling hook: tracks per-tool and per-LLM-call timing."""
 
@@ -48,9 +50,12 @@ class ProfilingHook(Hook):
 
     def handles(self) -> list[HookEvent]:
         return [
-            HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE,
-            HookEvent.PRE_LLM_CALL, HookEvent.POST_LLM_CALL,
-            HookEvent.SESSION_START, HookEvent.SESSION_END,
+            HookEvent.PRE_TOOL_USE,
+            HookEvent.POST_TOOL_USE,
+            HookEvent.PRE_LLM_CALL,
+            HookEvent.POST_LLM_CALL,
+            HookEvent.SESSION_START,
+            HookEvent.SESSION_END,
         ]
 
     async def execute(self, ctx: HookContext) -> HookContext:
@@ -94,9 +99,7 @@ QUESTIONS = [
 
 def _find_telemetry_collector(agent):
     """Find the TelemetryCollector from the agent's hook chain."""
-    hook = agent.core.hooks.find_hook(
-        lambda h: hasattr(h, "telemetry") and hasattr(h.telemetry, "snapshot")
-    )
+    hook = agent.core.hooks.find_hook(lambda h: hasattr(h, "telemetry") and hasattr(h.telemetry, "snapshot"))
     return hook.telemetry if hook else None
 
 

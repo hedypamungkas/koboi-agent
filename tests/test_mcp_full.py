@@ -1,4 +1,5 @@
 """Tests for MCP server and client -- covering dispatch, handlers, transport."""
+
 from __future__ import annotations
 
 import json
@@ -57,7 +58,9 @@ class TestMCPServerDispatch:
         def bad_tool():
             raise ValueError("boom")
 
-        server._dispatch({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "bad", "arguments": {}}})
+        server._dispatch(
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "bad", "arguments": {}}}
+        )
         assert written[0]["result"]["isError"] is True
 
 
@@ -88,13 +91,22 @@ class TestMCPServerToolRegistration:
     def test_tools_call_success(self):
         server = MCPServer("test")
 
-        @server.tool("add", "Add numbers", {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}})
+        @server.tool(
+            "add", "Add numbers", {"type": "object", "properties": {"a": {"type": "number"}, "b": {"type": "number"}}}
+        )
         def add(a: int = 0, b: int = 0):
             return a + b
 
         written = []
         server._write_response = lambda msg: written.append(msg)
-        server._dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "add", "arguments": {"a": 2, "b": 3}}})
+        server._dispatch(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "add", "arguments": {"a": 2, "b": 3}},
+            }
+        )
         assert written[0]["result"]["content"][0]["text"] == "5"
 
 
@@ -179,16 +191,22 @@ class TestMCPClientCallToolSync:
         proc.poll.return_value = None
         client._process = proc
 
-        resp = json.dumps({
-            "jsonrpc": "2.0", "id": 1,
-            "result": {
-                "content": [
-                    {"type": "text", "text": "hello"},
-                    {"type": "text", "text": "hello"},  # duplicate
-                    {"type": "text", "text": "world"},
-                ]
-            }
-        }) + "\n"
+        resp = (
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "content": [
+                            {"type": "text", "text": "hello"},
+                            {"type": "text", "text": "hello"},  # duplicate
+                            {"type": "text", "text": "world"},
+                        ]
+                    },
+                }
+            )
+            + "\n"
+        )
         stdout.write(resp.encode())
         stdout.seek(0)
         stdin.seek(0)
@@ -206,10 +224,9 @@ class TestMCPClientCallToolSync:
         proc.poll.return_value = None
         client._process = proc
 
-        resp = json.dumps({
-            "jsonrpc": "2.0", "id": 1,
-            "result": {"content": [{"type": "image", "data": "base64"}]}
-        }) + "\n"
+        resp = (
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "image", "data": "base64"}]}}) + "\n"
+        )
         stdout.write(resp.encode())
         stdout.seek(0)
         stdin.seek(0)
@@ -232,6 +249,7 @@ class TestRegisterMCPTools:
         client.discover_tools.return_value = [t1, t2]
 
         from koboi.tools.registry import ToolRegistry
+
         registry = ToolRegistry()
         registered = register_mcp_tools(client, registry)
         assert len(registered) == 2
@@ -258,6 +276,7 @@ class TestMCPClientClose:
 
     def test_close_timeout_kills(self):
         import subprocess
+
         client = MCPClient(["test"])
         proc = MagicMock()
         proc.poll.return_value = None

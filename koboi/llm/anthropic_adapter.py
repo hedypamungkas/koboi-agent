@@ -1,4 +1,5 @@
 """koboi/llm/anthropic_adapter.py -- Anthropic Messages API provider adapter (async)."""
+
 from __future__ import annotations
 
 import json
@@ -101,7 +102,7 @@ class AnthropicAdapter(LLMClient):
             if not line.startswith("data: "):
                 continue
 
-            payload = line[len("data: "):]
+            payload = line[len("data: ") :]
             try:
                 chunk = json.loads(payload)
             except json.JSONDecodeError:
@@ -152,9 +153,13 @@ class AnthropicAdapter(LLMClient):
         parsed_tool_calls = []
         for idx in sorted(tool_calls_acc):
             tc = tool_calls_acc[idx]
-            parsed_tool_calls.append(ToolCall(
-                id=tc["id"], name=tc["name"], arguments=tc["arguments"],
-            ))
+            parsed_tool_calls.append(
+                ToolCall(
+                    id=tc["id"],
+                    name=tc["name"],
+                    arguments=tc["arguments"],
+                )
+            )
             yield ToolCallEvent(
                 tool_name=tc["name"],
                 tool_call_id=tc["id"],
@@ -224,12 +229,14 @@ class AnthropicAdapter(LLMClient):
                 args = json.loads(args_str)
             except (json.JSONDecodeError, ValueError):
                 args = {}
-            content.append({
-                "type": "tool_use",
-                "id": tc.get("id", ""),
-                "name": func.get("name", ""),
-                "input": args,
-            })
+            content.append(
+                {
+                    "type": "tool_use",
+                    "id": tc.get("id", ""),
+                    "name": func.get("name", ""),
+                    "input": args,
+                }
+            )
 
         if not content:
             content.append({"type": "text", "text": ""})
@@ -260,15 +267,19 @@ class AnthropicAdapter(LLMClient):
                     except (ValueError, IndexError):
                         media_type = "image/png"
                         data = url
-                    result.append({
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": media_type, "data": data},
-                    })
+                    result.append(
+                        {
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": media_type, "data": data},
+                        }
+                    )
                 else:
-                    result.append({
-                        "type": "image",
-                        "source": {"type": "url", "url": url},
-                    })
+                    result.append(
+                        {
+                            "type": "image",
+                            "source": {"type": "url", "url": url},
+                        }
+                    )
             else:
                 result.append(block)
         return result
@@ -280,11 +291,13 @@ class AnthropicAdapter(LLMClient):
         for j in range(start, len(messages)):
             if messages[j].get("role") != "tool":
                 break
-            blocks.append({
-                "type": "tool_result",
-                "tool_use_id": messages[j].get("tool_call_id", ""),
-                "content": messages[j].get("content", ""),
-            })
+            blocks.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": messages[j].get("tool_call_id", ""),
+                    "content": messages[j].get("content", ""),
+                }
+            )
             consumed += 1
         return blocks, consumed
 
@@ -305,8 +318,12 @@ class AnthropicAdapter(LLMClient):
                 elif isinstance(prev_content, str) and isinstance(curr_content, str):
                     prev["content"] = prev_content + "\n" + curr_content
                 else:
-                    prev_parts = prev_content if isinstance(prev_content, list) else [{"type": "text", "text": prev_content}]
-                    curr_parts = curr_content if isinstance(curr_content, list) else [{"type": "text", "text": curr_content}]
+                    prev_parts = (
+                        prev_content if isinstance(prev_content, list) else [{"type": "text", "text": prev_content}]
+                    )
+                    curr_parts = (
+                        curr_content if isinstance(curr_content, list) else [{"type": "text", "text": curr_content}]
+                    )
                     prev["content"] = prev_parts + curr_parts
             else:
                 merged.append(msg)
@@ -321,11 +338,13 @@ class AnthropicAdapter(LLMClient):
         result = []
         for tool in tools:
             func = tool.get("function", {})
-            result.append({
-                "name": func.get("name", ""),
-                "description": func.get("description", ""),
-                "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
-            })
+            result.append(
+                {
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+                }
+            )
         return result
 
     @staticmethod
@@ -340,11 +359,13 @@ class AnthropicAdapter(LLMClient):
             if block_type == "text":
                 text_parts.append(block.get("text", ""))
             elif block_type == "tool_use":
-                tool_calls.append(ToolCall(
-                    id=block.get("id", ""),
-                    name=block.get("name", ""),
-                    arguments=json.dumps(block.get("input", {})),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=block.get("id", ""),
+                        name=block.get("name", ""),
+                        arguments=json.dumps(block.get("input", {})),
+                    )
+                )
 
         content = "\n".join(text_parts) if text_parts else None
 

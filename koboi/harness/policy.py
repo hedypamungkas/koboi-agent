@@ -6,6 +6,7 @@ Replaces simple risk-level-based approval with an engine supporting:
 - Command deny patterns (regex-based)
 - Composable rules with first-match-wins priority
 """
+
 from __future__ import annotations
 
 import re
@@ -77,8 +78,7 @@ class PolicyEngine:
     def add_rule(self, rule: PolicyRule) -> None:
         self._rules.append(rule)
 
-    def evaluate(self, tool_name: str, arguments: str,
-                 risk_level: RiskLevel) -> PolicyDecision:
+    def evaluate(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> PolicyDecision:
         # 1. Hardcoded safety -- always checked first, cannot be overridden
         sensitive = self._check_sensitive_paths(arguments)
         if sensitive:
@@ -133,8 +133,7 @@ class PolicyEngine:
                 )
         return None
 
-    def _match_rule(self, rule: PolicyRule, tool_name: str,
-                    arguments: str, risk_level: RiskLevel) -> bool:
+    def _match_rule(self, rule: PolicyRule, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
         if not fnmatch(tool_name, rule.tool_pattern):
             return False
 
@@ -146,6 +145,7 @@ class PolicyEngine:
                 if arg_name.lower() not in arguments.lower():
                     return False
                 import json
+
                 try:
                     args_dict = json.loads(arguments)
                     val = str(args_dict.get(arg_name, ""))

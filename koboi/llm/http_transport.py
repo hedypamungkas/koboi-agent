@@ -1,4 +1,5 @@
 """koboi/llm/http_transport.py -- Shared async HTTP transport with error mapping."""
+
 from __future__ import annotations
 
 import asyncio
@@ -67,10 +68,15 @@ class HttpTransport:
 
             if response.status_code in _DEFAULT_RETRYABLE_STATUS and attempt < self._max_retries:
                 last_error = f"HTTP {response.status_code}: {detail}"
-                wait = float(retry_after) if retry_after else (2 ** attempt)
+                wait = float(retry_after) if retry_after else (2**attempt)
                 _logger.warning(
                     "Retrying %s (status %d, attempt %d/%d, wait %.1fs): %s",
-                    path, response.status_code, attempt + 1, self._max_retries, wait, detail,
+                    path,
+                    response.status_code,
+                    attempt + 1,
+                    self._max_retries,
+                    wait,
+                    detail,
                 )
                 await asyncio.sleep(wait)
                 continue

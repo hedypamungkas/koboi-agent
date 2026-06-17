@@ -1,4 +1,5 @@
 """Tests for TUI widgets -- slash_suggester, file_suggester (no Textual instantiation)."""
+
 from __future__ import annotations
 
 import pytest

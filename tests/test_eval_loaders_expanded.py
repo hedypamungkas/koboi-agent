@@ -1,4 +1,5 @@
 """Tests for eval loaders and scorers edge cases."""
+
 from __future__ import annotations
 
 import json

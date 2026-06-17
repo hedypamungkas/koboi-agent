@@ -1,4 +1,5 @@
 """Order pricing calculator with discount and tax handling."""
+
 from typing import Optional
 from dataclasses import dataclass, field
 
@@ -85,8 +86,7 @@ class OrderCalculator:
         discount = total * (coupon_percent / 100)
         return total - discount
 
-    def calculate_shipping(self, total: float, weight_kg: float,
-                           region: str) -> float:
+    def calculate_shipping(self, total: float, weight_kg: float, region: str) -> float:
         """Calculate shipping cost."""
         base_rate = 5.0
 

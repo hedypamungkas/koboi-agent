@@ -1,4 +1,5 @@
 """Tests for koboi.memory_sqlite module."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -21,9 +22,7 @@ class TestSQLiteMemory:
         cursor = conn.cursor()
 
         # Check table exists
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='messages'"
-        )
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'")
         result = cursor.fetchone()
         assert result is not None
 
@@ -40,9 +39,7 @@ class TestSQLiteMemory:
         assert columns["created_at"] == "REAL"
 
         # Check index exists
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_messages_session'"
-        )
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_messages_session'")
         result = cursor.fetchone()
         assert result is not None
 
@@ -246,9 +243,7 @@ class TestSQLiteMemory:
         db_path = tmp_path / "test.db"
         session_id = "test_session"
 
-        mem1 = SQLiteMemory(
-            db_path=str(db_path), session_id=session_id, system_prompt="System prompt"
-        )
+        mem1 = SQLiteMemory(db_path=str(db_path), session_id=session_id, system_prompt="System prompt")
         mem1.add_user_message("User message")
         mem1.close()
 
@@ -260,9 +255,7 @@ class TestSQLiteMemory:
         conn.close()
 
         # But it should still be in get_messages
-        mem2 = SQLiteMemory(
-            db_path=str(db_path), session_id=session_id, system_prompt="System prompt"
-        )
+        mem2 = SQLiteMemory(db_path=str(db_path), session_id=session_id, system_prompt="System prompt")
         messages = mem2.get_messages()
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -339,9 +332,7 @@ class TestSQLiteMemory:
     def test_len_returns_correct_count(self, tmp_path):
         """Test that __len__ returns correct message count (excluding system prompt)."""
         db_path = tmp_path / "test.db"
-        mem = SQLiteMemory(
-            db_path=str(db_path), session_id="test", system_prompt="System"
-        )
+        mem = SQLiteMemory(db_path=str(db_path), session_id="test", system_prompt="System")
 
         assert len(mem) == 0
         mem.add_user_message("User")
@@ -358,9 +349,7 @@ class TestSQLiteMemory:
         db_path = tmp_path / "test.db"
         sys_prompt = "You are a helpful assistant."
 
-        mem = SQLiteMemory(
-            db_path=str(db_path), session_id="test", system_prompt=sys_prompt
-        )
+        mem = SQLiteMemory(db_path=str(db_path), session_id="test", system_prompt=sys_prompt)
         mem.add_user_message("Hello")
 
         messages = mem.get_messages()

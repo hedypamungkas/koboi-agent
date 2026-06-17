@@ -1,4 +1,5 @@
 """Tests for framework-specific eval scorers: BFCL, GAIA, SWE-bench, RAGAS, DeepEval."""
+
 from __future__ import annotations
 
 import pytest
@@ -45,6 +46,7 @@ class TestToolCallingScorer:
     @pytest.mark.asyncio
     async def test_perfect_match(self):
         from unittest.mock import MagicMock
+
         s = ToolCallingScorer()
         case = _case(expected_tool_calls=[{"name": "read", "arguments": {"path": "f.py"}}])
         telemetry = MagicMock()
@@ -271,10 +273,12 @@ class TestRAGASScorer:
     async def test_not_installed(self):
         """If ragas is not installed, should return 0.0 gracefully."""
         import koboi.eval.scorers.ragas_scorer as mod
+
         original = mod._RAGAS_AVAILABLE
         mod._RAGAS_AVAILABLE = False
         try:
             from koboi.eval.scorers.ragas_scorer import RAGASScorer
+
             s = RAGASScorer("faithfulness")
             score = await s.score(_case(), "out", {})
             assert score.value == 0.0
@@ -291,10 +295,12 @@ class TestDeepEvalScorer:
     async def test_not_installed(self):
         """If deepeval is not installed, should return 0.0 gracefully."""
         import koboi.eval.scorers.deepeval_scorer as mod
+
         original = mod._DEEPEVAL_AVAILABLE
         mod._DEEPEVAL_AVAILABLE = False
         try:
             from koboi.eval.scorers.deepeval_scorer import DeepEvalScorer
+
             s = DeepEvalScorer("task_completion")
             score = await s.score(_case(), "out", {})
             assert score.value == 0.0
@@ -305,10 +311,12 @@ class TestDeepEvalScorer:
     @pytest.mark.asyncio
     async def test_safety_not_installed(self):
         import koboi.eval.scorers.deepeval_scorer as mod
+
         original = mod._DEEPEVAL_AVAILABLE
         mod._DEEPEVAL_AVAILABLE = False
         try:
             from koboi.eval.scorers.deepeval_scorer import DeepEvalSafetyScorer
+
             s = DeepEvalSafetyScorer()
             score = await s.score(_case(), "out", {})
             assert score.value == 0.5
@@ -318,10 +326,12 @@ class TestDeepEvalScorer:
     @pytest.mark.asyncio
     async def test_agentic_not_installed(self):
         import koboi.eval.scorers.deepeval_scorer as mod
+
         original = mod._DEEPEVAL_AVAILABLE
         mod._DEEPEVAL_AVAILABLE = False
         try:
             from koboi.eval.scorers.deepeval_scorer import DeepEvalAgenticScorer
+
             s = DeepEvalAgenticScorer()
             score = await s.score(_case(), "out", {})
             assert score.value == 0.0

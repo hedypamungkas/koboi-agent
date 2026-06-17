@@ -3,6 +3,7 @@
 When ContextManager truncates or summarizes messages, CarryoverState persists
 outside the message history and is re-injected after compaction completes.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,14 +38,14 @@ class CarryoverState:
         if goal not in self.user_goals:
             self.user_goals.append(goal)
             if len(self.user_goals) > self.max_goals:
-                self.user_goals = self.user_goals[-self.max_goals:]
+                self.user_goals = self.user_goals[-self.max_goals :]
 
     def complete_goal(self, goal: str) -> None:
         if goal in self.user_goals:
             self.user_goals.remove(goal)
             self.completed_goals.append(goal)
             if len(self.completed_goals) > self.max_goals:
-                self.completed_goals = self.completed_goals[-self.max_goals:]
+                self.completed_goals = self.completed_goals[-self.max_goals :]
 
     def add_artifact(self, name: str, description: str) -> None:
         self.active_artifacts[name] = description
@@ -56,19 +57,22 @@ class CarryoverState:
         if work_description not in self.verified_work:
             self.verified_work.append(work_description)
             if len(self.verified_work) > self.max_verified:
-                self.verified_work = self.verified_work[-self.max_verified:]
+                self.verified_work = self.verified_work[-self.max_verified :]
 
-    def record_tool_use(self, tool_name: str, arguments: str, result: str, *,
-                        iteration: int = 0, success: bool = True) -> None:
+    def record_tool_use(
+        self, tool_name: str, arguments: str, result: str, *, iteration: int = 0, success: bool = True
+    ) -> None:
         self.invoked_tools[tool_name] = self.invoked_tools.get(tool_name, 0) + 1
-        self.work_log.append(WorkLogEntry(
-            iteration=iteration,
-            action="tool_call",
-            detail=f"{tool_name}({arguments[:80]}) -> {result[:80]}",
-            success=success,
-        ))
+        self.work_log.append(
+            WorkLogEntry(
+                iteration=iteration,
+                action="tool_call",
+                detail=f"{tool_name}({arguments[:80]}) -> {result[:80]}",
+                success=success,
+            )
+        )
         if len(self.work_log) > self.max_log_entries:
-            self.work_log = self.work_log[-self.max_log_entries:]
+            self.work_log = self.work_log[-self.max_log_entries :]
 
     def record_skill(self, skill_name: str) -> None:
         if skill_name not in self.skills_used:
@@ -89,8 +93,16 @@ class CarryoverState:
             parts.append(f"Skills: {json.dumps(self.skills_used, ensure_ascii=False)}")
         if self.verified_work:
             parts.append(f"Verified: {json.dumps(self.verified_work, ensure_ascii=False)}")
-        if not any([self.user_goals, self.completed_goals, self.active_artifacts, self.invoked_tools,
-                     self.skills_used, self.verified_work]):
+        if not any(
+            [
+                self.user_goals,
+                self.completed_goals,
+                self.active_artifacts,
+                self.invoked_tools,
+                self.skills_used,
+                self.verified_work,
+            ]
+        ):
             return ""
         parts.append("</harness-carryover>")
         return "\n".join(parts)
@@ -109,19 +121,13 @@ class CarryoverState:
             elif line.startswith("Completed:"):
                 state.completed_goals = _try_json_parse_list(line.split("Completed:", 1)[1].strip())
             elif line.startswith("Artifacts:"):
-                state.active_artifacts = _try_json_parse_dict(
-                    line.split("Artifacts:", 1)[1].strip()
-                )
+                state.active_artifacts = _try_json_parse_dict(line.split("Artifacts:", 1)[1].strip())
             elif line.startswith("Tools used:"):
-                state.invoked_tools = _try_json_parse_counts(
-                    line.split("Tools used:", 1)[1].strip()
-                )
+                state.invoked_tools = _try_json_parse_counts(line.split("Tools used:", 1)[1].strip())
             elif line.startswith("Skills:"):
                 state.skills_used = _try_json_parse_list(line.split("Skills:", 1)[1].strip())
             elif line.startswith("Verified:"):
-                state.verified_work = _try_json_parse_list(
-                    line.split("Verified:", 1)[1].strip()
-                )
+                state.verified_work = _try_json_parse_list(line.split("Verified:", 1)[1].strip())
         return state
 
     def summary(self) -> dict:

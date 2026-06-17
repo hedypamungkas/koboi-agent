@@ -1,4 +1,5 @@
 """koboi/llm/factory.py -- Factory function for creating LLM clients."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -53,15 +54,20 @@ def create_client(
 
     desc = ProviderRegistry.get(normalized)
     if desc is None:
-        raise LLMInvalidRequestError(
-            f"Unknown provider: '{provider}'. Available: {ProviderRegistry.list_available()}"
-        )
+        raise LLMInvalidRequestError(f"Unknown provider: '{provider}'. Available: {ProviderRegistry.list_available()}")
 
     return desc.factory(
-        model=model, api_key=api_key, base_url=base_url, logger=logger,
-        timeout=timeout, max_tokens=max_tokens, auth_token=auth_token,
-        temperature=temperature, embedding_model=embedding_model,
-        api_version=api_version, transport_retries=transport_retries,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        logger=logger,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        auth_token=auth_token,
+        temperature=temperature,
+        embedding_model=embedding_model,
+        api_version=api_version,
+        transport_retries=transport_retries,
     )
 
 
@@ -87,8 +93,11 @@ def _create_openai(
         max_retries=transport_retries,
     )
     return OpenAIAdapter(
-        model=model, transport=transport, logger=logger,
-        embedding_model=embedding_model, temperature=temperature,
+        model=model,
+        transport=transport,
+        logger=logger,
+        embedding_model=embedding_model,
+        temperature=temperature,
     )
 
 

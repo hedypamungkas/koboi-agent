@@ -1,4 +1,5 @@
 """MessageBubble -- a single chat message widget with streaming markdown support."""
+
 from __future__ import annotations
 
 import time
@@ -207,7 +208,7 @@ class MessageBubble(Widget):
             match = pattern.search(self._content)
             if match:
                 thinking_text = match.group(1).strip()
-                self._content = (self._content[:match.start()] + self._content[match.end():]).strip()
+                self._content = (self._content[: match.start()] + self._content[match.end() :]).strip()
                 thinking_widget = ThinkingBlockWidget(thinking_text)
                 if self._markdown is not None:
                     self.mount(thinking_widget, before=self._markdown)

@@ -3,6 +3,7 @@
 Verifies answers using normalized exact matching with support for
 numeric tolerance, unit stripping, and custom verification functions.
 """
+
 from __future__ import annotations
 
 import re
@@ -38,14 +39,19 @@ class GAIAVerificationScorer(BaseScorer):
         # If case has custom verification_fn, use it
         if case.verification_fn:
             return self._run_custom_verification(
-                case.verification_fn, output, case.expected_answer,
+                case.verification_fn,
+                output,
+                case.expected_answer,
             )
 
         # Default: normalized exact match
         return self._normalized_match(output, case.expected_answer)
 
     def _run_custom_verification(
-        self, fn: Callable, output: str, expected: str,
+        self,
+        fn: Callable,
+        output: str,
+        expected: str,
     ) -> EvalScore:
         """Run custom verification function."""
         try:
@@ -79,7 +85,8 @@ class GAIAVerificationScorer(BaseScorer):
             return EvalScore("gaia_verification", 0.8, "Partial match (substring)")
 
         return EvalScore(
-            "gaia_verification", 0.0,
+            "gaia_verification",
+            0.0,
             f"Mismatch: expected='{norm_expected[:100]}', got='{norm_actual[:100]}'",
         )
 

@@ -9,6 +9,7 @@ Run:
     python examples/17_anthropic_provider.py                  # automatic mode (side-by-side)
     python examples/17_anthropic_provider.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import os
@@ -65,8 +66,11 @@ def _make_client(provider: str):
         auth_token = ""
 
     return create_client(
-        provider=provider, api_key=api_key, base_url=base_url,
-        model=model, auth_token=auth_token,
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        auth_token=auth_token,
     )
 
 
@@ -84,9 +88,14 @@ def run_side_by_side(query: str):
 
         try:
             client = _make_client(provider)
-            response = run_async(client.complete(
-                messages=[{"role": "system", "content": "Answer concisely and clearly."}, {"role": "user", "content": query}]
-            ))
+            response = run_async(
+                client.complete(
+                    messages=[
+                        {"role": "system", "content": "Answer concisely and clearly."},
+                        {"role": "user", "content": query},
+                    ]
+                )
+            )
             results[provider] = response.content or "(empty)"
         except Exception as e:
             results[provider] = f"[ERROR] {e}"
@@ -118,11 +127,13 @@ def run_interactive():
     key = _check_key(provider)
     if not key:
         env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
-        console.print(Panel(
-            f"[red]API key for {provider.upper()} not found.[/red]\n\n"
-            f"Set environment variable:\n  export {env_var}=sk-...",
-            title=f"[red]Missing {env_var}[/red]",
-        ))
+        console.print(
+            Panel(
+                f"[red]API key for {provider.upper()} not found.[/red]\n\n"
+                f"Set environment variable:\n  export {env_var}=sk-...",
+                title=f"[red]Missing {env_var}[/red]",
+            )
+        )
         return
 
     if provider == "anthropic":
@@ -143,13 +154,15 @@ def run_interactive():
         console.print(f"[red]Failed to create agent: {e}[/red]")
         return
 
-    console.print(Panel(
-        f"[bold]Provider: {provider.upper()}[/bold]\n"
-        f"Agent: {agent.config.agent_name}\n"
-        f"Model: {agent.config.model}\n\n"
-        "Type 'quit' to exit.",
-        title="Interactive Chat",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Provider: {provider.upper()}[/bold]\n"
+            f"Agent: {agent.config.agent_name}\n"
+            f"Model: {agent.config.model}\n\n"
+            "Type 'quit' to exit.",
+            title="Interactive Chat",
+        )
+    )
 
     interactive_loop(agent, title=f"Agent ({provider})")
 

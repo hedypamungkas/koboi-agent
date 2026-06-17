@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/skill_hook.py — SkillHook (0% → >85%)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

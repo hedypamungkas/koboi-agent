@@ -1,4 +1,5 @@
 """risk_bar.py -- Visual risk level indicator widget."""
+
 from __future__ import annotations
 
 from textual.reactive import reactive

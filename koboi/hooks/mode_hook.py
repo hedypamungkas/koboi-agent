@@ -4,6 +4,7 @@ Enforces mode constraints:
 - PRE_INPUT: Injects mode-specific system prompt suffix.
 - PRE_TOOL_USE: Blocks state-modifying tools in CHAT/PLAN modes.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -15,8 +16,15 @@ if TYPE_CHECKING:
 
 # Tools that are always read-only (allowed in CHAT/PLAN)
 _READ_ONLY_TOOLS = {
-    "read", "search", "grep", "find", "list", "glob",
-    "web_search", "web_fetch", "calculator",
+    "read",
+    "search",
+    "grep",
+    "find",
+    "list",
+    "glob",
+    "web_search",
+    "web_fetch",
+    "calculator",
     "delegate_tasks",
 }
 

@@ -5,6 +5,7 @@ scorers, and optionally sends results to Langfuse.
 
 Adapted from agent/eval.py.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -50,6 +51,7 @@ class EvalRunner:
         if not self._external_hook and not _LANGFUSE_AVAILABLE:
             return None
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         hook = LangfuseTracingHook(
             session_id=self._session_id,
         )
@@ -60,7 +62,7 @@ class EvalRunner:
         hook = self._create_hook()
         harness = self.harness_factory()
 
-        if hook and hasattr(harness, 'hook_chain') and harness.hook_chain:
+        if hook and hasattr(harness, "hook_chain") and harness.hook_chain:
             harness.hook_chain.add(hook)
 
         # Auto-attach telemetry hook if not present
@@ -83,7 +85,7 @@ class EvalRunner:
         finally:
             # Close HTTP client to avoid connection leaks between cases
             await harness.close()
-        output = result.content if hasattr(result, 'content') else str(result)
+        output = result.content if hasattr(result, "content") else str(result)
         duration = time.time() - start
 
         telemetry = self._extract_telemetry(harness)
@@ -93,12 +95,12 @@ class EvalRunner:
             context["telemetry"] = telemetry
 
         # Propagate token usage from RunResult
-        token_usage = getattr(result, 'token_usage', None)
+        token_usage = getattr(result, "token_usage", None)
         if token_usage:
             context["token_usage"] = token_usage
 
         # Propagate tool calls from RunResult
-        tool_calls = getattr(result, 'tool_calls_made', [])
+        tool_calls = getattr(result, "tool_calls_made", [])
         if tool_calls:
             context["tool_calls"] = tool_calls
 
@@ -151,20 +153,20 @@ class EvalRunner:
     @staticmethod
     def _inject_tool_definitions(harness, tool_definitions: list[dict]) -> None:
         """Inject tool definitions from eval case into harness tool registry."""
-        if hasattr(harness, 'inject_tool_definitions'):
+        if hasattr(harness, "inject_tool_definitions"):
             harness.inject_tool_definitions(tool_definitions)
 
     @staticmethod
     def _extract_telemetry(harness) -> object | None:
         """Extract telemetry from harness."""
-        if hasattr(harness, 'get_telemetry'):
+        if hasattr(harness, "get_telemetry"):
             return harness.get_telemetry()
         return None
 
     @staticmethod
     def _ensure_telemetry_hook(harness) -> None:
         """Attach a TelemetryHook if not already present."""
-        if hasattr(harness, 'ensure_telemetry_hook'):
+        if hasattr(harness, "ensure_telemetry_hook"):
             harness.ensure_telemetry_hook()
 
     async def run_suite(
@@ -189,7 +191,9 @@ class EvalRunner:
         return await self._run_suite_sequential(cases, effective_threshold)
 
     async def _run_suite_sequential(
-        self, cases: list[EvalCase], threshold: float,
+        self,
+        cases: list[EvalCase],
+        threshold: float,
     ) -> list[EvalResult]:
         results = []
         for i, case in enumerate(cases, 1):
@@ -204,7 +208,10 @@ class EvalRunner:
         return results
 
     async def _run_suite_parallel(
-        self, cases: list[EvalCase], max_concurrency: int, threshold: float,
+        self,
+        cases: list[EvalCase],
+        max_concurrency: int,
+        threshold: float,
     ) -> list[EvalResult]:
         semaphore = asyncio.Semaphore(max_concurrency)
         total = len(cases)
@@ -236,11 +243,10 @@ class EvalRunner:
         else:
             print(status_msg)
 
-    def _push_scores_to_langfuse(self, harness, trace_id: str | None,
-                                  scores: list[EvalScore]) -> None:
+    def _push_scores_to_langfuse(self, harness, trace_id: str | None, scores: list[EvalScore]) -> None:
         if not trace_id:
             return
-        if hasattr(harness, 'push_langfuse_scores'):
+        if hasattr(harness, "push_langfuse_scores"):
             harness.push_langfuse_scores(trace_id, scores)
 
     @staticmethod
@@ -283,6 +289,7 @@ class EvalRunner:
         # Render to string so print() works without a Rich Console
         from rich.console import Console
         from io import StringIO
+
         buf = StringIO()
         Console(file=buf, force_terminal=True, width=100).print(table)
         return buf.getvalue()
@@ -322,6 +329,7 @@ def _default_scorers() -> list[BaseScorer]:
         IterationEfficiencyScorer,
         HealthScoreScorer,
     )
+
     return [
         ToolUsageScorer(),
         KeywordPresenceScorer(),

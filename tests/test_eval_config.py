@@ -1,4 +1,5 @@
 """Tests for koboi/eval/config.py -- Eval configuration."""
+
 from __future__ import annotations
 
 import pytest
@@ -19,8 +20,12 @@ class TestSuiteConfig:
 
     def test_custom(self):
         s = SuiteConfig(
-            name="my_suite", framework="bfcl", source="data.json",
-            scorers=["tool_usage"], max_cases=100, tags=["fast"],
+            name="my_suite",
+            framework="bfcl",
+            source="data.json",
+            scorers=["tool_usage"],
+            max_cases=100,
+            tags=["fast"],
         )
         assert s.framework == "bfcl"
         assert s.max_cases == 100

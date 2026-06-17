@@ -9,6 +9,7 @@ Run:
     python examples/12_skills_discovery.py                  # automatic mode
     python examples/12_skills_discovery.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -41,11 +42,12 @@ DEMO_QUERIES = [
 
 def _run_registry_demo():
     """Part 1: Direct SkillRegistry demonstration."""
-    console.print(Panel(
-        "[bold]Part 1: Direct SkillRegistry[/bold]\n"
-        "Discover, list, route, and activate skills directly.",
-        title="Skills Discovery",
-    ))
+    console.print(
+        Panel(
+            "[bold]Part 1: Direct SkillRegistry[/bold]\nDiscover, list, route, and activate skills directly.",
+            title="Skills Discovery",
+        )
+    )
 
     from koboi.skills.registry import SkillRegistry
 
@@ -110,6 +112,7 @@ def main(mode: str, verbose: bool):
         console.print("[yellow]Warning: No skills loaded[/yellow]\n")
 
     if mode == "interactive":
+
         def _show_routed(user_input):
             if skills:
                 routed = skills.route(user_input)

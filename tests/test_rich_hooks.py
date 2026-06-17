@@ -1,4 +1,5 @@
 """Tests for rich_task_hook, notification_hook, rich_subagent_hook."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch, AsyncMock

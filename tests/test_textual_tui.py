@@ -1,4 +1,5 @@
 """Tests for Textual TUI widgets, bridge, and app."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -635,12 +636,14 @@ class TestThinkingBlockWidget:
 class TestToolCallWidget:
     def test_initial_state_running(self):
         import time
+
         widget = ToolCallWidget("calc", "tc_1", '{"x":1}', time.monotonic())
         assert widget._state == "running"
         assert widget.collapsed is True
 
     def test_set_result_updates_state(self):
         import time
+
         start = time.monotonic()
         widget = ToolCallWidget("calc", "tc_1", '{"x":1}', start)
         widget.set_result("42", start + 0.3)
@@ -650,8 +653,9 @@ class TestToolCallWidget:
 
     def test_set_result_error_state(self):
         import time
+
         start = time.monotonic()
-        widget = ToolCallWidget("calc", "tc_1", '{}', start)
+        widget = ToolCallWidget("calc", "tc_1", "{}", start)
         widget.set_result("Error: division by zero", start + 0.1)
         assert widget._state == "error"
 
@@ -669,15 +673,17 @@ class TestToolCallWidget:
 
     def test_render_header_running(self):
         import time
-        widget = ToolCallWidget("calculator", "tc_1", '{}', time.monotonic())
+
+        widget = ToolCallWidget("calculator", "tc_1", "{}", time.monotonic())
         header = widget._render_header()
         assert "running" in header
         assert "calculator" in header
 
     def test_render_header_completed(self):
         import time
+
         start = time.monotonic()
-        widget = ToolCallWidget("calculator", "tc_1", '{}', start)
+        widget = ToolCallWidget("calculator", "tc_1", "{}", start)
         widget._end_time = start + 0.5
         widget._result = "42"
         widget._state = "completed"
@@ -733,8 +739,8 @@ class TestChatLogPhase3:
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
             chat = app.query_one("#chat-area", ChatLog)
-            chat.add_tool_call("calc", "tc_1", '{}')
-            chat.add_tool_call("search", "tc_2", '{}')
+            chat.add_tool_call("calc", "tc_1", "{}")
+            chat.add_tool_call("search", "tc_2", "{}")
             await pilot.pause()
             chat.expand_all_tools()
             await pilot.pause()
@@ -748,7 +754,7 @@ class TestChatLogPhase3:
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
             chat = app.query_one("#chat-area", ChatLog)
-            chat.add_tool_call("calc", "tc_1", '{}')
+            chat.add_tool_call("calc", "tc_1", "{}")
             await pilot.pause()
             assert len(chat._tool_widgets) == 1
             chat.clear_messages()
@@ -824,8 +830,8 @@ class TestKoboiAppPhase3:
         app = KoboiApp(agent)
         async with app.run_test() as pilot:
             chat = app.query_one("#chat-area", ChatLog)
-            chat.add_tool_call("calc", "tc_1", '{}')
-            chat.add_tool_call("search", "tc_2", '{}')
+            chat.add_tool_call("calc", "tc_1", "{}")
+            chat.add_tool_call("search", "tc_2", "{}")
             await pilot.pause()
 
             # All start collapsed

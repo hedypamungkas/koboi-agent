@@ -37,6 +37,7 @@ class MCPServer:
 
     def tool(self, name: str, description: str, input_schema: dict):
         """Decorator to register function as MCP tool."""
+
         def decorator(fn: Callable) -> Callable:
             self._tools[name] = _MCPToolDef(
                 name=name,
@@ -45,6 +46,7 @@ class MCPServer:
                 handler=fn,
             )
             return fn
+
         return decorator
 
     # --- Protocol lifecycle ---
@@ -67,11 +69,13 @@ class MCPServer:
                 message = json.loads(line)
             except json.JSONDecodeError as e:
                 self._log_stderr(f"Invalid JSON: {e}")
-                self._write_response({
-                    "jsonrpc": "2.0",
-                    "id": None,
-                    "error": {"code": -32700, "message": f"Parse error: {e}"},
-                })
+                self._write_response(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32700, "message": f"Parse error: {e}"},
+                    }
+                )
                 continue
 
             self._log_stderr(f"<-- {message.get('method', '?')} (id={message.get('id', '-')})")
@@ -97,30 +101,36 @@ class MCPServer:
 
         handler = handlers.get(method)
         if handler is None:
-            self._write_response({
-                "jsonrpc": "2.0",
-                "id": id_,
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-            })
+            self._write_response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": id_,
+                    "error": {"code": -32601, "message": f"Method not found: {method}"},
+                }
+            )
             return
 
         try:
             result = handler(id_, params)
-            self._write_response({
-                "jsonrpc": "2.0",
-                "id": id_,
-                "result": result,
-            })
+            self._write_response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": id_,
+                    "result": result,
+                }
+            )
         except Exception as e:
             self._log_stderr(f"    ERROR: {e}\n{traceback.format_exc()}")
-            self._write_response({
-                "jsonrpc": "2.0",
-                "id": id_,
-                "result": {
-                    "content": [{"type": "text", "text": f"Error: {e}"}],
-                    "isError": True,
-                },
-            })
+            self._write_response(
+                {
+                    "jsonrpc": "2.0",
+                    "id": id_,
+                    "result": {
+                        "content": [{"type": "text", "text": f"Error: {e}"}],
+                        "isError": True,
+                    },
+                }
+            )
 
     def _handle_initialize(self, id_, params: dict) -> dict:
         return {

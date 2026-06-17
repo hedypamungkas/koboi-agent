@@ -1,4 +1,5 @@
 """welcome_screen.py -- First-run welcome overlay."""
+
 from __future__ import annotations
 
 from textual.app import ComposeResult

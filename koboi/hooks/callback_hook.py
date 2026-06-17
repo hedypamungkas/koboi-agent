@@ -1,4 +1,5 @@
 """koboi/hooks/callback_hook.py -- Convenience hook that wraps a plain callback."""
+
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,5 @@
 """koboi/config_models.py -- Pydantic v2 schemas for config validation."""
+
 from __future__ import annotations
 
 import logging

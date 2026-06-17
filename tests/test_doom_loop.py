@@ -1,4 +1,5 @@
 """Tests for koboi/harness/doom_loop.py -- Doom loop detection."""
+
 from __future__ import annotations
 
 import pytest
@@ -115,17 +116,21 @@ class TestDoomLoopDetector:
         assert d.get_effective_threshold() == 3
 
     def test_effective_threshold_complex(self):
-        d = DoomLoopDetector(DoomLoopConfig(
-            adaptive_threshold=True,
-            task_complexity_hint="complex",
-        ))
+        d = DoomLoopDetector(
+            DoomLoopConfig(
+                adaptive_threshold=True,
+                task_complexity_hint="complex",
+            )
+        )
         assert d.get_effective_threshold() > 3
 
     def test_effective_threshold_moderate(self):
-        d = DoomLoopDetector(DoomLoopConfig(
-            adaptive_threshold=True,
-            task_complexity_hint="moderate",
-        ))
+        d = DoomLoopDetector(
+            DoomLoopConfig(
+                adaptive_threshold=True,
+                task_complexity_hint="moderate",
+            )
+        )
         assert d.get_effective_threshold() >= 3
 
     def test_recovery_hint_present(self):

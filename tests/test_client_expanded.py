@@ -1,4 +1,5 @@
 """Tests for client.py -- retry logic, validation, edge cases."""
+
 from __future__ import annotations
 
 import asyncio

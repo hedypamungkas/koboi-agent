@@ -1,4 +1,5 @@
 """Tests for koboi.tools.builtin.filesystem module."""
+
 from __future__ import annotations
 
 import os
@@ -94,7 +95,7 @@ class TestWriteFile:
         """Test write_file to a directory path raises error."""
         result = write_file(path=str(tmp_path), content="content")
         assert "Error" in result
-        assert ("directory" in result.lower() or "is a dir" in result.lower())
+        assert "directory" in result.lower() or "is a dir" in result.lower()
 
 
 class TestDeleteFile:
@@ -282,6 +283,7 @@ class TestEdgeCases:
     def test_read_binary_file_returns_error(self, tmp_path):
         """Test read_file with binary file raises decode error."""
         import pytest
+
         test_file = tmp_path / "binary.bin"
         test_file.write_bytes(b"\x00\x01\x02\x03\xff\xfe")
 

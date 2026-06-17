@@ -1,4 +1,5 @@
 """Tests for koboi/notifications.py -- Desktop notifications."""
+
 from __future__ import annotations
 
 from unittest.mock import patch, MagicMock

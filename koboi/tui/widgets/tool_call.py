@@ -1,4 +1,5 @@
 """ToolCallWidget -- collapsible tool call with timing, args, result, and diff view."""
+
 from __future__ import annotations
 
 import json
@@ -134,7 +135,7 @@ class ToolCallWidget(Widget):
         """Truncate text with ellipsis if too long."""
         if len(text) <= max_len:
             return text
-        return text[:max_len - 3] + "..."
+        return text[: max_len - 3] + "..."
 
     def _arg_summary(self) -> str:
         """Extract a short, meaningful summary from the tool arguments JSON."""
@@ -147,8 +148,7 @@ class ToolCallWidget(Widget):
         if not isinstance(parsed, dict):
             return ""
         # Priority order for common tools
-        for key in ("path", "file_path", "directory", "command", "pattern",
-                     "query", "key", "title", "query", "url"):
+        for key in ("path", "file_path", "directory", "command", "pattern", "query", "key", "title", "query", "url"):
             if key in parsed:
                 val = str(parsed[key])
                 return self._shorten(val, 45)

@@ -1,4 +1,5 @@
 """Tests for Orchestrator streaming, revision, and uncovered paths."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,8 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from koboi.events import (
-    AgentDispatchEvent, AgentResultEvent, OrchestrationCompleteEvent,
-    RoutingDecisionEvent, TextDeltaEvent, CompleteEvent,
+    AgentDispatchEvent,
+    AgentResultEvent,
+    OrchestrationCompleteEvent,
+    RoutingDecisionEvent,
+    TextDeltaEvent,
+    CompleteEvent,
 )
 from koboi.orchestration.orchestrator import Orchestrator, QualityEvaluator
 from koboi.types import AgentResult, AgentResponse, RoutingDecision
@@ -50,9 +55,11 @@ class MockAgent:
 class TestQualityEvaluator:
     async def test_evaluate_success(self):
         client = MagicMock()
-        client.complete = AsyncMock(return_value=AgentResponse(
-            content='{"score": 0.8, "feedback": "good", "needs_revision": false}',
-        ))
+        client.complete = AsyncMock(
+            return_value=AgentResponse(
+                content='{"score": 0.8, "feedback": "good", "needs_revision": false}',
+            )
+        )
         evaluator = QualityEvaluator(client, threshold=0.6)
         score, feedback, needs = await evaluator.evaluate("q", "a")
         assert score == 0.8
@@ -61,9 +68,11 @@ class TestQualityEvaluator:
 
     async def test_evaluate_needs_revision(self):
         client = MagicMock()
-        client.complete = AsyncMock(return_value=AgentResponse(
-            content='{"score": 0.3, "feedback": "too short", "needs_revision": true}',
-        ))
+        client.complete = AsyncMock(
+            return_value=AgentResponse(
+                content='{"score": 0.3, "feedback": "too short", "needs_revision": true}',
+            )
+        )
         evaluator = QualityEvaluator(client, threshold=0.6)
         score, feedback, needs = await evaluator.evaluate("q", "a")
         assert score == 0.3
@@ -91,7 +100,8 @@ class TestOrchestratorRun:
         client = MagicMock()
         agent = MockAgent(answer="answer1")
         orch = Orchestrator(
-            client=client, router=router,
+            client=client,
+            router=router,
             agents_map={"agent1": agent},
         )
         result = await orch.run("test query", mode="sequential")
@@ -156,7 +166,9 @@ class TestOrchestratorRun:
         client = MagicMock()
         logger = MagicMock()
         orch = Orchestrator(
-            client=client, router=router, logger=logger,
+            client=client,
+            router=router,
+            logger=logger,
             agents_map={"agent1": MockAgent("ans")},
         )
         await orch.run("q")
@@ -166,13 +178,18 @@ class TestOrchestratorRun:
     async def test_revision_mode(self):
         router = MockRouter()
         client = MagicMock()
-        client.complete = AsyncMock(return_value=AgentResponse(
-            content='{"score": 0.9, "feedback": "good", "needs_revision": false}',
-        ))
+        client.complete = AsyncMock(
+            return_value=AgentResponse(
+                content='{"score": 0.9, "feedback": "good", "needs_revision": false}',
+            )
+        )
         evaluator = QualityEvaluator(client, threshold=0.6)
         orch = Orchestrator(
-            client=client, router=router, evaluator=evaluator,
-            use_revision=True, agents_map={"agent1": MockAgent("ans")},
+            client=client,
+            router=router,
+            evaluator=evaluator,
+            use_revision=True,
+            agents_map={"agent1": MockAgent("ans")},
         )
         result = await orch.run("q")
         assert result.execution_mode == "sequential+revision"
@@ -183,7 +200,8 @@ class TestOrchestratorStream:
         router = MockRouter()
         client = MagicMock()
         orch = Orchestrator(
-            client=client, router=router,
+            client=client,
+            router=router,
             agents_map={"agent1": MockAgent("ans")},
         )
         events = []

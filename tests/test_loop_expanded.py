@@ -1,4 +1,5 @@
 """Tests for koboi/loop.py — AgentCore expanded coverage for streaming, skills, guardrails."""
+
 from __future__ import annotations
 
 import pytest
@@ -94,7 +95,9 @@ class TestAgentCoreStreaming:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                resp = _make_response(content="checking", tool_calls=[_make_tool_call("get_weather", '{"city": "Tokyo"}')])
+                resp = _make_response(
+                    content="checking", tool_calls=[_make_tool_call("get_weather", '{"city": "Tokyo"}')]
+                )
                 yield TextDeltaEvent(content="Let me check")
                 yield CompleteEvent(response=resp, content="Let me check")
             else:
@@ -131,8 +134,7 @@ class TestAgentCoreStreaming:
     @pytest.mark.asyncio
     async def test_run_stream_input_guardrail_blocks(self, memory):
         guardrail = AsyncMock()
-        guardrail.check.return_value = MagicMock(passed=False, reason="Injection detected",
-                                                  sanitized_content=None)
+        guardrail.check.return_value = MagicMock(passed=False, reason="Injection detected", sanitized_content=None)
 
         client = MockStreamClient([])
         core = AgentCore(client=client, memory=memory, input_guardrail=guardrail)
@@ -147,9 +149,9 @@ class TestAgentCoreStreaming:
     @pytest.mark.asyncio
     async def test_run_stream_hook_abort(self, memory):
         hook_chain = MagicMock()
-        hook_chain.emit = AsyncMock(return_value=HookContext(
-            event=HookEvent.PRE_INPUT, abort=True, inject_message="Rejected"
-        ))
+        hook_chain.emit = AsyncMock(
+            return_value=HookContext(event=HookEvent.PRE_INPUT, abort=True, inject_message="Rejected")
+        )
 
         client = MockStreamClient([])
         core = AgentCore(client=client, memory=memory, hook_chain=hook_chain)
@@ -237,9 +239,7 @@ class TestAgentCoreGuardrails:
     @pytest.mark.asyncio
     async def test_run_input_guardrail_sanitizes(self, tools):
         guardrail = AsyncMock()
-        guardrail.check.return_value = MagicMock(
-            passed=True, reason="", sanitized_content="clean input"
-        )
+        guardrail.check.return_value = MagicMock(passed=True, reason="", sanitized_content="clean input")
 
         client = MagicMock()
         client.complete = AsyncMock(return_value=_make_response(content="ok"))
@@ -247,8 +247,7 @@ class TestAgentCoreGuardrails:
         client.close = AsyncMock()
 
         mem = ConversationMemory()
-        core = AgentCore(client=client, memory=mem, tools=tools,
-                        input_guardrail=guardrail, max_iterations=1)
+        core = AgentCore(client=client, memory=mem, tools=tools, input_guardrail=guardrail, max_iterations=1)
 
         result = await core.run("dirty input")
         assert result.success is True
@@ -256,14 +255,11 @@ class TestAgentCoreGuardrails:
     @pytest.mark.asyncio
     async def test_run_input_guardrail_blocks(self, tools):
         guardrail = AsyncMock()
-        guardrail.check.return_value = MagicMock(
-            passed=False, reason="Injection detected", sanitized_content=None
-        )
+        guardrail.check.return_value = MagicMock(passed=False, reason="Injection detected", sanitized_content=None)
 
         client = MagicMock()
         mem = ConversationMemory()
-        core = AgentCore(client=client, memory=mem, tools=tools,
-                        input_guardrail=guardrail, max_iterations=1)
+        core = AgentCore(client=client, memory=mem, tools=tools, input_guardrail=guardrail, max_iterations=1)
 
         with pytest.raises(AgentGuardrailError):
             await core.run("malicious")
@@ -271,9 +267,7 @@ class TestAgentCoreGuardrails:
     @pytest.mark.asyncio
     async def test_run_output_guardrail_warning(self, tools):
         output_guard = AsyncMock()
-        output_guard.check.return_value = MagicMock(
-            passed=False, reason="Contains API key"
-        )
+        output_guard.check.return_value = MagicMock(passed=False, reason="Contains API key")
 
         client = MagicMock()
         client.complete = AsyncMock(return_value=_make_response(content="secret data"))
@@ -281,8 +275,7 @@ class TestAgentCoreGuardrails:
         client.close = AsyncMock()
 
         mem = ConversationMemory()
-        core = AgentCore(client=client, memory=mem, tools=tools,
-                        output_guardrail=output_guard, max_iterations=1)
+        core = AgentCore(client=client, memory=mem, tools=tools, output_guardrail=output_guard, max_iterations=1)
 
         result = await core.run("get data")
         assert "GUARDRAIL WARNING" in result.content
@@ -296,6 +289,7 @@ class TestAgentCoreRateLimiter:
 
         client = MagicMock()
         call_count = 0
+
         async def mock_complete(messages, tools_arg=None, **kwargs):
             nonlocal call_count
             call_count += 1
@@ -306,8 +300,7 @@ class TestAgentCoreRateLimiter:
         client.complete = mock_complete
 
         mem = ConversationMemory()
-        core = AgentCore(client=client, memory=mem, tools=tools,
-                        rate_limiter=rl, max_iterations=3)
+        core = AgentCore(client=client, memory=mem, tools=tools, rate_limiter=rl, max_iterations=3)
 
         result = await core.run("check weather")
         assert result.success is True
@@ -321,6 +314,7 @@ class TestAgentCoreApproval:
 
         client = MagicMock()
         call_count = 0
+
         async def mock_complete(messages, tools_arg=None, **kwargs):
             nonlocal call_count
             call_count += 1
@@ -331,8 +325,7 @@ class TestAgentCoreApproval:
         client.complete = mock_complete
 
         mem = ConversationMemory()
-        core = AgentCore(client=client, memory=mem, tools=tools,
-                        approval_handler=approval, max_iterations=3)
+        core = AgentCore(client=client, memory=mem, tools=tools, approval_handler=approval, max_iterations=3)
 
         result = await core.run("check weather")
         assert result.success is True
@@ -599,6 +592,7 @@ class TestAgentCoreApprovalAsync:
 
         client = MagicMock()
         call_count = 0
+
         async def mock_complete(messages, tools_arg=None, **kwargs):
             nonlocal call_count
             call_count += 1
@@ -609,8 +603,7 @@ class TestAgentCoreApprovalAsync:
         client.complete = mock_complete
 
         mem = ConversationMemory()
-        core = AgentCore(client=client, memory=mem, tools=tools,
-                        approval_handler=approval, max_iterations=3)
+        core = AgentCore(client=client, memory=mem, tools=tools, approval_handler=approval, max_iterations=3)
 
         result = await core.run("check weather")
         approval.should_approve.assert_called_once()
@@ -633,6 +626,7 @@ class TestAgentCoreRunStreamModeBlocked:
 
         client = MagicMock()
         call_count = 0
+
         async def mock_stream(messages, tools_arg=None, **kwargs):
             nonlocal call_count
             call_count += 1
@@ -646,8 +640,7 @@ class TestAgentCoreRunStreamModeBlocked:
         client.complete_stream = mock_stream
 
         mem = ConversationMemory()
-        core = AgentCore(client=client, memory=mem, tools=tools,
-                        hook_chain=chain, max_iterations=3)
+        core = AgentCore(client=client, memory=mem, tools=tools, hook_chain=chain, max_iterations=3)
 
         collected = []
         async for event in core.run_stream("test"):

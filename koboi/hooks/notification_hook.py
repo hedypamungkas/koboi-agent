@@ -4,6 +4,7 @@ Subscribes to configurable hook events and sends desktop notifications
 with optional sound alerts. Primarily useful in --no-tui mode where the
 Textual app's built-in notification handlers are not active.
 """
+
 from __future__ import annotations
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent

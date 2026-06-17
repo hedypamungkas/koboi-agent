@@ -1,4 +1,5 @@
 """koboi/llm/registry.py -- Provider descriptor and registry for LLM providers."""
+
 from __future__ import annotations
 
 import logging
@@ -81,34 +82,40 @@ def register_builtin_providers() -> None:
     """Register built-in LLM providers. Called once at import time."""
     from koboi.llm.factory import _create_anthropic, _create_openai
 
-    ProviderRegistry.register(ProviderDescriptor(
-        name="openai",
-        env_key_api="OPENAI_API_KEY",
-        env_key_base_url="OPENAI_BASE_URL",
-        env_key_model="OPENAI_MODEL",
-        default_model="gpt-4o-mini",
-        default_base_url="https://api.openai.com/v1",
-        factory=_create_openai,
-    ))
+    ProviderRegistry.register(
+        ProviderDescriptor(
+            name="openai",
+            env_key_api="OPENAI_API_KEY",
+            env_key_base_url="OPENAI_BASE_URL",
+            env_key_model="OPENAI_MODEL",
+            default_model="gpt-4o-mini",
+            default_base_url="https://api.openai.com/v1",
+            factory=_create_openai,
+        )
+    )
 
-    ProviderRegistry.register(ProviderDescriptor(
-        name="anthropic",
-        env_key_api="ANTHROPIC_API_KEY",
-        env_key_base_url="ANTHROPIC_BASE_URL",
-        env_key_model="ANTHROPIC_MODEL",
-        default_model="claude-sonnet-4-20250514",
-        default_base_url="https://api.anthropic.com/v1",
-        factory=_create_anthropic,
-        extra_env={"auth_token": "ANTHROPIC_AUTH_TOKEN"},
-    ))
+    ProviderRegistry.register(
+        ProviderDescriptor(
+            name="anthropic",
+            env_key_api="ANTHROPIC_API_KEY",
+            env_key_base_url="ANTHROPIC_BASE_URL",
+            env_key_model="ANTHROPIC_MODEL",
+            default_model="claude-sonnet-4-20250514",
+            default_base_url="https://api.anthropic.com/v1",
+            factory=_create_anthropic,
+            extra_env={"auth_token": "ANTHROPIC_AUTH_TOKEN"},
+        )
+    )
 
-    ProviderRegistry.register(ProviderDescriptor(
-        name="cloudflare",
-        env_key_api="CLOUDFLARE_API_TOKEN",
-        env_key_base_url="CLOUDFLARE_BASE_URL",
-        env_key_model="CLOUDFLARE_MODEL",
-        default_model="@cf/meta/llama-3.1-70b-instruct",
-        default_base_url="",
-        factory=_create_openai,
-        extra_env={"account_id": "CLOUDFLARE_ACCOUNT_ID"},
-    ))
+    ProviderRegistry.register(
+        ProviderDescriptor(
+            name="cloudflare",
+            env_key_api="CLOUDFLARE_API_TOKEN",
+            env_key_base_url="CLOUDFLARE_BASE_URL",
+            env_key_model="CLOUDFLARE_MODEL",
+            default_model="@cf/meta/llama-3.1-70b-instruct",
+            default_base_url="",
+            factory=_create_openai,
+            extra_env={"account_id": "CLOUDFLARE_ACCOUNT_ID"},
+        )
+    )

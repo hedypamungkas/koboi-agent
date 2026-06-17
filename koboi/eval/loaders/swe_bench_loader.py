@@ -5,6 +5,7 @@ into EvalCase lists for coding agent evaluation.
 
 Source: https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +20,7 @@ _logger = logging.getLogger(__name__)
 _SWE_BENCH_AVAILABLE = False
 try:
     from datasets import load_dataset as hf_load_dataset
+
     _SWE_BENCH_AVAILABLE = True
 except ImportError:
     pass
@@ -53,7 +55,10 @@ class SWEBenchLoader(DatasetLoader):
         return "swe-bench"
 
     async def _load_from_hf(
-        self, source: str, split: str, max_cases: int | None,
+        self,
+        source: str,
+        split: str,
+        max_cases: int | None,
     ) -> list[EvalCase]:
         """Load from HuggingFace datasets."""
         try:
@@ -73,7 +78,9 @@ class SWEBenchLoader(DatasetLoader):
         return cases
 
     async def _load_from_local(
-        self, source: str, max_cases: int | None,
+        self,
+        source: str,
+        max_cases: int | None,
     ) -> list[EvalCase]:
         """Load from local Parquet files."""
         path = Path(source)
@@ -90,11 +97,14 @@ class SWEBenchLoader(DatasetLoader):
         return cases[:max_cases] if max_cases else cases
 
     async def _load_parquet(
-        self, path: Path, max_cases: int | None,
+        self,
+        path: Path,
+        max_cases: int | None,
     ) -> list[EvalCase]:
         """Load from a single Parquet file."""
         try:
             import pandas as pd
+
             df = pd.read_parquet(path)
         except Exception as e:
             _logger.warning("Failed to read Parquet %s: %s", path, e)

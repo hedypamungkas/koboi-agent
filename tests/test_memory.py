@@ -1,4 +1,5 @@
 """Tests for koboi.memory module."""
+
 from __future__ import annotations
 
 from koboi.memory import ConversationMemory

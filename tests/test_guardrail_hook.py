@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/guardrail_hook.py — GuardrailHook (0% → >85%)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, AsyncMock
@@ -13,6 +14,7 @@ from koboi.types import GuardrailResult
 
 class MockInputGuardrail:
     """Mock input guardrail for testing."""
+
     def __init__(self, passed=True, reason="OK", action="allow"):
         self._passed = passed
         self._reason = reason
@@ -24,6 +26,7 @@ class MockInputGuardrail:
 
 class MockOutputGuardrail:
     """Mock output guardrail for testing."""
+
     def __init__(self, passed=True, reason="OK", action="allow"):
         self._passed = passed
         self._reason = reason

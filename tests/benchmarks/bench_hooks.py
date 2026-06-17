@@ -1,4 +1,5 @@
 """Hook chain and telemetry benchmarks."""
+
 import pytest
 
 from koboi.hooks.chain import HookChain, Hook, HookContext, HookEvent
@@ -139,9 +140,7 @@ def test_doom_loop_check(benchmark):
 
 def test_doom_loop_consecutive_detection(benchmark):
     """Benchmark detecting consecutive identical pattern."""
-    detector = DoomLoopDetector(
-        DoomLoopConfig(consecutive_identical_threshold=3)
-    )
+    detector = DoomLoopDetector(DoomLoopConfig(consecutive_identical_threshold=3))
 
     # Record consecutive identical calls
     for _ in range(3):
@@ -172,9 +171,7 @@ def test_doom_loop_pattern_detection(benchmark):
 
 def test_doom_loop_error_retry(benchmark):
     """Benchmark detecting error retry pattern."""
-    detector = DoomLoopDetector(
-        DoomLoopConfig(error_retry_threshold=3)
-    )
+    detector = DoomLoopDetector(DoomLoopConfig(error_retry_threshold=3))
 
     # Record same call with errors
     for _ in range(3):

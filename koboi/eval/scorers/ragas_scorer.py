@@ -5,6 +5,7 @@ context_recall) for use in koboi's eval system.
 
 Requires: pip install ragas
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,6 +26,7 @@ try:
         context_precision,
         context_recall,
     )
+
     _RAGAS_AVAILABLE = True
 except ImportError:
     pass
@@ -54,15 +56,20 @@ def _create_ragas_llm():
 
         if provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
+
             model = os.environ.get("ANTHROPIC_MODEL", "mimo-v2.5-pro")
             api_key = os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY", "")
             base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
             llm = ChatAnthropic(
-                model=model, api_key=api_key, base_url=base_url,
-                max_tokens=8192, streaming=False,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                max_tokens=8192,
+                streaming=False,
             )
         else:
             from langchain_openai import ChatOpenAI
+
             model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
             api_key = os.environ.get("OPENAI_API_KEY", "")
             base_url = os.environ.get("OPENAI_BASE_URL", "")
@@ -122,13 +129,13 @@ class RAGASScorer(BaseScorer):
 
             # Extract score for the metric (RAGAS v0.4+ API)
             # result is dict-like: {'faithfulness': 1.0} or {'faithfulness': [1.0]}
-            if hasattr(result, '__getitem__'):
+            if hasattr(result, "__getitem__"):
                 raw = result[self.metric_name]
                 if isinstance(raw, list):
                     score_val = float(raw[0]) if raw else 0.0
                 else:
                     score_val = float(raw)
-            elif hasattr(result, 'scores'):
+            elif hasattr(result, "scores"):
                 score_val = float(result.scores[0]) if result.scores else 0.0
             else:
                 score_val = 0.0
@@ -187,10 +194,11 @@ class RAGASCompositeScorer(BaseScorer):
             result = ragas_evaluate(**evaluate_kwargs)
 
             import math
+
             scores: dict[str, float] = {}
             for name in self.weights:
                 try:
-                    if hasattr(result, '__getitem__'):
+                    if hasattr(result, "__getitem__"):
                         raw = result[name]
                         if isinstance(raw, list):
                             val = float(raw[0]) if raw else 0.0

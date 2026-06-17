@@ -3,6 +3,7 @@
 Allows config-driven eval composition by registering scorer factories
 by name, then creating them with keyword arguments from YAML config.
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,9 +27,7 @@ class ScorerRegistry:
     @classmethod
     def create(cls, name: str, **kwargs: Any) -> BaseScorer:
         if name not in cls._factories:
-            raise ValueError(
-                f"Unknown scorer '{name}'. Available: {cls.list_available()}"
-            )
+            raise ValueError(f"Unknown scorer '{name}'. Available: {cls.list_available()}")
         return cls._factories[name](**kwargs)
 
     @classmethod
@@ -87,6 +86,7 @@ def register_framework_scorers() -> None:
     # BFCL
     try:
         from koboi.eval.scorers.bfcl_scorer import ToolCallingScorer
+
         ScorerRegistry.register("tool_calling_accuracy", lambda **kw: ToolCallingScorer(**kw))
     except ImportError:
         pass
@@ -94,6 +94,7 @@ def register_framework_scorers() -> None:
     # RAGAS
     try:
         from koboi.eval.scorers.ragas_scorer import RAGASScorer, RAGASCompositeScorer
+
         ScorerRegistry.register("ragas_faithfulness", lambda **kw: RAGASScorer("faithfulness", **kw))
         ScorerRegistry.register("ragas_relevancy", lambda **kw: RAGASScorer("answer_relevancy", **kw))
         ScorerRegistry.register("ragas_precision", lambda **kw: RAGASScorer("context_precision", **kw))
@@ -105,6 +106,7 @@ def register_framework_scorers() -> None:
     # GAIA
     try:
         from koboi.eval.scorers.gaia_scorer import GAIAVerificationScorer
+
         ScorerRegistry.register("gaia_verification", lambda **kw: GAIAVerificationScorer(**kw))
     except ImportError:
         pass
@@ -112,6 +114,7 @@ def register_framework_scorers() -> None:
     # SWE-bench
     try:
         from koboi.eval.scorers.swe_bench_scorer import PatchGenerationScorer
+
         ScorerRegistry.register("patch_generation", lambda **kw: PatchGenerationScorer(**kw))
     except ImportError:
         pass
@@ -119,8 +122,11 @@ def register_framework_scorers() -> None:
     # DeepEval
     try:
         from koboi.eval.scorers.deepeval_scorer import (
-            DeepEvalScorer, DeepEvalAgenticScorer, DeepEvalSafetyScorer,
+            DeepEvalScorer,
+            DeepEvalAgenticScorer,
+            DeepEvalSafetyScorer,
         )
+
         ScorerRegistry.register("deepeval_task_completion", lambda **kw: DeepEvalScorer("task_completion", **kw))
         ScorerRegistry.register("deepeval_tool_correctness", lambda **kw: DeepEvalScorer("tool_correctness", **kw))
         ScorerRegistry.register("deepeval_hallucination", lambda **kw: DeepEvalScorer("hallucination", **kw))

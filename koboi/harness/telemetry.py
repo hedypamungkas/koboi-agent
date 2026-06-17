@@ -3,6 +3,7 @@
 Collects metrics during agent sessions to measure harness effectiveness:
 context efficiency, loop health, permission friction, compaction fidelity, etc.
 """
+
 from __future__ import annotations
 
 import time
@@ -81,8 +82,9 @@ class TelemetryCollector:
         self._iteration_start = time.time()
         self._tokens_at_iteration_start = tokens_current
 
-    def iteration_end(self, iteration: int, tool_names: list[str] | None = None,
-                      tokens_after: int = 0, was_productive: bool = True) -> None:
+    def iteration_end(
+        self, iteration: int, tool_names: list[str] | None = None, tokens_after: int = 0, was_productive: bool = True
+    ) -> None:
         duration = time.time() - self._iteration_start if self._iteration_start else 0
         record = IterationRecord(
             iteration=iteration,
@@ -96,24 +98,27 @@ class TelemetryCollector:
         self.snapshot.total_iterations += 1
         self.snapshot.tokens_consumed_total += max(0, tokens_after - self._tokens_at_iteration_start)
 
-    def record_compaction(self, iteration: int, messages_before: int,
-                          messages_after: int, tokens_before: int,
-                          tokens_after: int) -> None:
-        self.snapshot.compactions.append(CompactionRecord(
-            iteration=iteration,
-            messages_before=messages_before,
-            messages_after=messages_after,
-            tokens_before=tokens_before,
-            tokens_after=tokens_after,
-        ))
+    def record_compaction(
+        self, iteration: int, messages_before: int, messages_after: int, tokens_before: int, tokens_after: int
+    ) -> None:
+        self.snapshot.compactions.append(
+            CompactionRecord(
+                iteration=iteration,
+                messages_before=messages_before,
+                messages_after=messages_after,
+                tokens_before=tokens_before,
+                tokens_after=tokens_after,
+            )
+        )
 
-    def record_permission(self, tool_name: str, action: str,
-                          rule_name: str | None = None) -> None:
-        self.snapshot.permissions.append(PermissionRecord(
-            tool_name=tool_name,
-            action=action,
-            rule_name=rule_name,
-        ))
+    def record_permission(self, tool_name: str, action: str, rule_name: str | None = None) -> None:
+        self.snapshot.permissions.append(
+            PermissionRecord(
+                tool_name=tool_name,
+                action=action,
+                rule_name=rule_name,
+            )
+        )
 
     def record_doom_loop(self) -> None:
         self.snapshot.doom_loops_detected += 1
@@ -139,14 +144,10 @@ class TelemetryCollector:
     def context_efficiency(self) -> float:
         if not self.snapshot.iterations:
             return 1.0
-        total_tokens = sum(
-            rec.tokens_before for rec in self.snapshot.iterations
-        )
+        total_tokens = sum(rec.tokens_before for rec in self.snapshot.iterations)
         if total_tokens == 0:
             return 1.0
-        productive_tokens = sum(
-            rec.tokens_before for rec in self.snapshot.iterations if rec.was_productive
-        )
+        productive_tokens = sum(rec.tokens_before for rec in self.snapshot.iterations if rec.was_productive)
         return min(1.0, productive_tokens / total_tokens)
 
     def tool_utilization(self) -> dict[str, float]:

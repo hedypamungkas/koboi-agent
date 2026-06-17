@@ -4,6 +4,7 @@ Replaces the procedural _build_hooks() factory with a registry where each
 hook entry declares its config key, enablement predicate, and factory callable.
 Adding a new hook is zero-touch on the facade -- just append to _REGISTRY.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,6 +31,7 @@ class HookEntry:
         should_add: Predicate(Config, **runtime_kwargs) -> bool.
         factory: Callable(Config, **runtime_kwargs) -> Hook.
     """
+
     name: str
     config_key: str
     should_add: Callable[..., bool]
@@ -39,6 +41,7 @@ class HookEntry:
 def _build_notif_events(raw_events: list[str]) -> list:
     """Map string event names to HookEvent values."""
     from koboi.hooks.chain import HookEvent
+
     event_map = {
         "post_output": HookEvent.POST_OUTPUT,
         "session_end": HookEvent.SESSION_END,
@@ -118,34 +121,38 @@ _REGISTRY: list[HookEntry] = [
 
 def _create_audit_hook(audit_trail: object) -> Hook:
     from koboi.hooks.builtin import AuditHook
+
     return AuditHook(audit_trail=audit_trail)
 
 
-def _create_policy_hook(policy_engine: object, tool_registry: object | None = None, config: object | None = None) -> Hook:
+def _create_policy_hook(
+    policy_engine: object, tool_registry: object | None = None, config: object | None = None
+) -> Hook:
     from koboi.hooks.policy_hook import PolicyHook
+
     risk_lookup = {}
     if tool_registry is not None:
-        risk_lookup = {
-            name: tool.risk_level
-            for name, tool in tool_registry._tools.items()
-        }
+        risk_lookup = {name: tool.risk_level for name, tool in tool_registry._tools.items()}
     audit_log = None
     policy_conf = config.get("policy", default={}) if config else {}
     audit_path = policy_conf.get("audit_log")
     if audit_path:
         from koboi.harness.policy_audit import PolicyAuditLog
+
         audit_log = PolicyAuditLog(file_path=audit_path)
     return PolicyHook(policy_engine=policy_engine, risk_lookup=risk_lookup, audit_log=audit_log)
 
 
 def _create_mode_hook(mode_manager: object) -> Hook:
     from koboi.hooks.mode_hook import ModeHook
+
     return ModeHook(mode_manager=mode_manager)
 
 
 def _create_telemetry_hook(config: Config) -> Hook:
     from koboi.hooks.telemetry_hook import TelemetryHook
     from koboi.harness.telemetry import TelemetryCollector
+
     health_weights = config.get("harness", "health_weights")
     return TelemetryHook(telemetry=TelemetryCollector(health_weights=health_weights))
 
@@ -153,6 +160,7 @@ def _create_telemetry_hook(config: Config) -> Hook:
 def _create_carryover_hook(config: Config) -> Hook:
     from koboi.hooks.carryover_hook import CarryoverHook
     from koboi.harness.carryover import CarryoverState
+
     carryover_limits = config.get("harness", "carryover_limits", default={})
     if carryover_limits:
         state = CarryoverState(
@@ -169,6 +177,7 @@ def _create_carryover_hook(config: Config) -> Hook:
 def _create_doom_loop_hook(config: Config) -> Hook:
     from koboi.hooks.doom_loop_hook import DoomLoopHook
     from koboi.harness.doom_loop import DoomLoopConfig
+
     raw = config.harness.get("doom_loop", {})
     if isinstance(raw, dict):
         if "consecutive_threshold" in raw:
@@ -181,6 +190,7 @@ def _create_doom_loop_hook(config: Config) -> Hook:
 
 def _create_task_hook(config: Config) -> Hook:
     from koboi.hooks.task_hook import TaskHook
+
     tasks_conf = config.get("harness", "tasks", default={})
     reminder_interval = tasks_conf.get("reminder_interval", 3) if isinstance(tasks_conf, dict) else 3
     return TaskHook(reminder_interval=reminder_interval)
@@ -193,6 +203,7 @@ def _should_add_notifications(config: Config) -> bool:
 
 def _create_notification_hook(config: Config) -> Hook:
     from koboi.hooks.notification_hook import NotificationHook
+
     notif_conf = config.get("harness", "notifications", default={})
     raw_events = notif_conf.get("events", ["post_output"])
     events = _build_notif_events(raw_events)
@@ -205,6 +216,7 @@ def _create_notification_hook(config: Config) -> Hook:
 
 def _create_langfuse_hook(config: Config) -> Hook:
     from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
     tracing_conf = config.tracing
     return LangfuseTracingHook(
         public_key=tracing_conf.get("public_key", ""),

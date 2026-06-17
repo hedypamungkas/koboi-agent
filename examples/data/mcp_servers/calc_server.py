@@ -1,4 +1,5 @@
 """Calc MCP Server -- example MCP server exposing calculator tools."""
+
 from __future__ import annotations
 
 import math

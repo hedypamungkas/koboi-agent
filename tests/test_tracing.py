@@ -1,4 +1,5 @@
 """Tests for koboi tracing (LangfuseTracingHook)."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -12,11 +13,13 @@ class TestLangfuseTracingHook:
     def test_hook_is_noop_without_sdk(self):
         """Without langfuse installed or credentials, hook should be a no-op."""
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         hook = LangfuseTracingHook(public_key="", secret_key="")
         assert hook.available is False
 
     async def test_execute_returns_ctx_unchanged(self):
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         hook = LangfuseTracingHook(public_key="", secret_key="")
         ctx = HookContext(event=HookEvent.PRE_LLM_CALL, iteration=0, messages=[])
         result = await hook.execute(ctx)
@@ -24,16 +27,19 @@ class TestLangfuseTracingHook:
 
     def test_handles_all_events(self):
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         hook = LangfuseTracingHook(public_key="", secret_key="")
         assert set(hook.handles()) == set(HookEvent)
 
     def test_from_env(self):
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         hook = LangfuseTracingHook.from_env()
         assert isinstance(hook, LangfuseTracingHook)
 
     def test_flush_no_error_without_client(self):
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         hook = LangfuseTracingHook(public_key="", secret_key="")
         hook.flush()  # should not raise
 
@@ -42,6 +48,7 @@ class TestTracingIntegration:
     async def test_hook_chain_with_langfuse(self):
         """LangfuseTracingHook can be added to a HookChain without error."""
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         chain = HookChain()
         hook = LangfuseTracingHook(public_key="", secret_key="")
         chain.add(hook)
@@ -51,6 +58,7 @@ class TestTracingIntegration:
 
     def test_trace_id_none_without_client(self):
         from koboi.hooks.langfuse_hook import LangfuseTracingHook
+
         hook = LangfuseTracingHook(public_key="", secret_key="")
         assert hook.trace_id is None
 

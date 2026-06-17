@@ -1,4 +1,5 @@
 """Tests for koboi/rag/registry.py -- RAG component registry."""
+
 from __future__ import annotations
 
 import copy
@@ -45,10 +46,7 @@ def _clean_registries():
 
 @pytest.fixture
 def sample_chunks():
-    return [
-        Chunk(id=f"c{i}", doc_id="d1", content=f"Content chunk {i}")
-        for i in range(5)
-    ]
+    return [Chunk(id=f"c{i}", doc_id="d1", content=f"Content chunk {i}") for i in range(5)]
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +83,8 @@ class TestComponentRegistry:
         reg = ComponentRegistry("test")
         with pytest.raises(ValueError, match="config_aliases"):
             reg.register(
-                "bad", str,
+                "bad",
+                str,
                 config_aliases={"yaml_key": "nonexistent_param"},
             )
 
@@ -93,7 +92,10 @@ class TestComponentRegistry:
 class TestComponentEntry:
     def test_creation(self):
         entry = ComponentEntry(
-            cls=str, parameters={}, description="test", inject=["client"],
+            cls=str,
+            parameters={},
+            description="test",
+            inject=["client"],
         )
         assert entry.cls is str
         assert entry.description == "test"
@@ -147,14 +149,16 @@ class TestExtractParameters:
 class TestResolveKwargs:
     def test_basic_resolution(self):
         entry = ComponentEntry(
-            cls=str, parameters={"chunk_size": {"default": 500}},
+            cls=str,
+            parameters={"chunk_size": {"default": 500}},
         )
         kwargs = _resolve_kwargs(entry, {"chunk_size": 200})
         assert kwargs == {"chunk_size": 200}
 
     def test_uses_default_when_missing(self):
         entry = ComponentEntry(
-            cls=str, parameters={"chunk_size": {"default": 500}},
+            cls=str,
+            parameters={"chunk_size": {"default": 500}},
         )
         kwargs = _resolve_kwargs(entry, {})
         assert kwargs == {"chunk_size": 500}
@@ -214,6 +218,7 @@ class TestDecorators:
 class TestBuiltinRegistrations:
     def test_chunkers_registered(self):
         from koboi.rag.chunker import _register_builtins
+
         _register_builtins()
         assert "fixed" in chunker_registry.list_available()
         assert "sentence" in chunker_registry.list_available()
@@ -221,24 +226,28 @@ class TestBuiltinRegistrations:
 
     def test_retrievers_registered(self):
         from koboi.rag.retriever import _register_builtins
+
         _register_builtins()
         assert "keyword" in retriever_registry.list_available()
         assert "semantic" in retriever_registry.list_available()
 
     def test_augmentations_registered(self):
         from koboi.rag.augmentation import _register_builtins
+
         _register_builtins()
         assert "in_memory" in augmentation_registry.list_available()
         assert "on_the_fly" in augmentation_registry.list_available()
 
     def test_semantic_retriever_injects_client(self):
         from koboi.rag.retriever import _register_builtins
+
         _register_builtins()
         entry = retriever_registry.get("semantic")
         assert "client" in entry.inject
 
     def test_hybrid_retriever_registered(self):
         from koboi.rag.retriever import _register_builtins
+
         _register_builtins()
         assert "hybrid" in retriever_registry.list_available()
         entry = retriever_registry.get("hybrid")
@@ -246,6 +255,7 @@ class TestBuiltinRegistrations:
 
     def test_fixed_chunker_config_aliases(self):
         from koboi.rag.chunker import _register_builtins
+
         _register_builtins()
         entry = chunker_registry.get("fixed")
         assert "chunk_size" in entry.config_aliases
@@ -264,24 +274,28 @@ class TestBuildRag:
         assert build_rag(None) is None
 
     def test_no_documents_returns_none(self, tmp_path):
-        result = build_rag({
-            "enabled": True,
-            "documents": [{"path": str(tmp_path / "nonexistent.md")}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "documents": [{"path": str(tmp_path / "nonexistent.md")}],
+            }
+        )
         assert result is None
 
     def test_build_with_keyword_retriever(self, tmp_path):
         doc = tmp_path / "test.md"
         doc.write_text("This is a test document about Python programming.")
 
-        result = build_rag({
-            "enabled": True,
-            "chunker": "paragraph",
-            "retriever": "keyword",
-            "augmentation": "in_memory",
-            "top_k": 2,
-            "documents": [{"path": str(doc)}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "chunker": "paragraph",
+                "retriever": "keyword",
+                "augmentation": "in_memory",
+                "top_k": 2,
+                "documents": [{"path": str(doc)}],
+            }
+        )
         assert result is not None
         assert result.top_k == 2
 
@@ -289,49 +303,58 @@ class TestBuildRag:
         doc = tmp_path / "test.md"
         doc.write_text("Test content for on-the-fly augmentation.")
 
-        result = build_rag({
-            "enabled": True,
-            "retriever": "keyword",
-            "augmentation": "on_the_fly",
-            "documents": [{"path": str(doc)}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "retriever": "keyword",
+                "augmentation": "on_the_fly",
+                "documents": [{"path": str(doc)}],
+            }
+        )
         assert result is not None
         from koboi.rag.augmentation import OnTheFlyAugmentation
+
         assert isinstance(result, OnTheFlyAugmentation)
 
     def test_unknown_chunker_falls_back(self, tmp_path):
         doc = tmp_path / "test.md"
         doc.write_text("Test content.")
 
-        result = build_rag({
-            "enabled": True,
-            "chunker": "nonexistent",
-            "retriever": "keyword",
-            "documents": [{"path": str(doc)}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "chunker": "nonexistent",
+                "retriever": "keyword",
+                "documents": [{"path": str(doc)}],
+            }
+        )
         assert result is not None
 
     def test_unknown_retriever_falls_back(self, tmp_path):
         doc = tmp_path / "test.md"
         doc.write_text("Test content.")
 
-        result = build_rag({
-            "enabled": True,
-            "retriever": "nonexistent",
-            "documents": [{"path": str(doc)}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "retriever": "nonexistent",
+                "documents": [{"path": str(doc)}],
+            }
+        )
         assert result is not None
 
     def test_unknown_augmentation_falls_back(self, tmp_path):
         doc = tmp_path / "test.md"
         doc.write_text("Test content.")
 
-        result = build_rag({
-            "enabled": True,
-            "retriever": "keyword",
-            "augmentation": "nonexistent",
-            "documents": [{"path": str(doc)}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "retriever": "keyword",
+                "augmentation": "nonexistent",
+                "documents": [{"path": str(doc)}],
+            }
+        )
         assert result is not None
 
     def test_passes_logger(self, tmp_path):
@@ -364,27 +387,32 @@ class TestBuildRag:
         doc = tmp_path / "test.md"
         doc.write_text("Test content.")
 
-        result = build_rag({
-            "enabled": True,
-            "chunker": "custom_test",
-            "custom_param": 99,
-            "retriever": "keyword",
-            "documents": [{"path": str(doc)}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "chunker": "custom_test",
+                "custom_param": 99,
+                "retriever": "keyword",
+                "documents": [{"path": str(doc)}],
+            }
+        )
         assert result is not None
 
     def test_build_with_hybrid_retriever(self, tmp_path):
         doc = tmp_path / "test.md"
         doc.write_text("Python is a programming language. JavaScript runs in browsers.")
 
-        result = build_rag({
-            "enabled": True,
-            "retriever": "hybrid",
-            "augmentation": "in_memory",
-            "documents": [{"path": str(doc)}],
-        })
+        result = build_rag(
+            {
+                "enabled": True,
+                "retriever": "hybrid",
+                "augmentation": "in_memory",
+                "documents": [{"path": str(doc)}],
+            }
+        )
         assert result is not None
         from koboi.rag.augmentation import InMemoryAugmentation
+
         assert isinstance(result, InMemoryAugmentation)
         assert isinstance(result.retriever, HybridRetriever)
 
@@ -465,8 +493,10 @@ class TestSemanticChunker:
 
     def test_registered_in_registry(self):
         from koboi.rag.chunker import _register_builtins
+
         _register_builtins()
         from koboi.rag.registry import chunker_registry
+
         assert "semantic" in chunker_registry.list_available()
 
 
@@ -494,10 +524,7 @@ class TestRerankerRetriever:
         assert "Python" in results[0].chunk.content
 
     async def test_respects_top_k(self):
-        chunks = [
-            Chunk(id=f"c{i}", doc_id="d1", content=f"Content {i}")
-            for i in range(10)
-        ]
+        chunks = [Chunk(id=f"c{i}", doc_id="d1", content=f"Content {i}") for i in range(10)]
         base = KeywordRetriever(chunks)
         reranker = RerankerRetriever(base_retriever=base)
         results = await reranker.retrieve("Content", top_k=3)

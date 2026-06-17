@@ -1,4 +1,5 @@
 """Tests for SlidingWindowManager and context manager edge cases."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -6,8 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from koboi.context.manager import (
-    ContextManager, NoopContextManager, TruncationManager,
-    SmartTruncationManager, KeyFactsManager, SlidingWindowManager,
+    ContextManager,
+    NoopContextManager,
+    TruncationManager,
+    SmartTruncationManager,
+    KeyFactsManager,
+    SlidingWindowManager,
     ensure_tool_integrity,
 )
 from koboi.types import AgentResponse
@@ -130,10 +135,14 @@ class TestEnsureToolIntegrityEdge:
 
     def test_partial_tool_results(self):
         messages = [
-            {"role": "assistant", "content": "calling", "tool_calls": [
-                {"id": "tc1", "function": {"name": "a"}},
-                {"id": "tc2", "function": {"name": "b"}},
-            ]},
+            {
+                "role": "assistant",
+                "content": "calling",
+                "tool_calls": [
+                    {"id": "tc1", "function": {"name": "a"}},
+                    {"id": "tc2", "function": {"name": "b"}},
+                ],
+            },
             {"role": "tool", "tool_call_id": "tc1", "content": "result1"},
             # tc2 result is missing
         ]

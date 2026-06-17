@@ -5,6 +5,7 @@ or local Parquet files into EvalCase lists.
 
 Source: https://huggingface.co/datasets/gaia-benchmark/GAIA
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +20,7 @@ _logger = logging.getLogger(__name__)
 _GAIA_AVAILABLE = False
 try:
     from datasets import load_dataset as hf_load_dataset
+
     _GAIA_AVAILABLE = True
 except ImportError:
     pass
@@ -67,7 +69,7 @@ class GAIALoader(DatasetLoader):
 
         try:
             # Try loading all levels, then filter
-            for level in (levels or self.LEVELS):
+            for level in levels or self.LEVELS:
                 level_split = f"2023_level{level}"
                 try:
                     ds = hf_load_dataset(source, level_split, split=split)
@@ -122,6 +124,7 @@ class GAIALoader(DatasetLoader):
         """Load from a single Parquet file."""
         try:
             import pandas as pd
+
             df = pd.read_parquet(path)
         except Exception as e:
             _logger.warning("Failed to read Parquet %s: %s", path, e)

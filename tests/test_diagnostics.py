@@ -1,4 +1,5 @@
 """Tests for koboi/diagnostics.py -- session diagnostics bundle generator."""
+
 from __future__ import annotations
 
 import json
@@ -140,6 +141,7 @@ class TestCollectDiagnostics:
         mock_hook._state = mock_carryover._state
 
         call_count = [0]
+
         def find_hook(predicate):
             call_count[0] += 1
             if call_count[0] == 1:

@@ -1,4 +1,5 @@
 """SlashSuggester -- inline autocomplete for slash commands."""
+
 from __future__ import annotations
 
 from textual.suggester import Suggester

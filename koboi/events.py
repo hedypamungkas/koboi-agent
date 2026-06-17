@@ -1,4 +1,5 @@
 """koboi/events.py -- Sealed StreamEvent union type for streaming."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -50,6 +51,7 @@ class ErrorEvent:
 @dataclass
 class RoutingDecisionEvent:
     """Emitted when the router selects agents for a query."""
+
     agents: list[str]
     confidence: float
     method: str
@@ -60,6 +62,7 @@ class RoutingDecisionEvent:
 @dataclass
 class AgentDispatchEvent:
     """Emitted when a sub-agent is about to execute."""
+
     agent_name: str
     agent_index: int
     total_agents: int
@@ -69,6 +72,7 @@ class AgentDispatchEvent:
 @dataclass
 class AgentResultEvent:
     """Emitted when a sub-agent finishes execution."""
+
     agent_name: str
     answer: str
     elapsed_seconds: float
@@ -81,6 +85,7 @@ class AgentResultEvent:
 @dataclass
 class OrchestrationCompleteEvent:
     """Emitted when the orchestrator finishes."""
+
     final_answer: str
     elapsed_seconds: float
     agent_results: list
@@ -138,10 +143,12 @@ def event_to_dict(event: StreamEvent) -> dict:
                 "total_tokens": event.response.usage.total_tokens,
             }
         return {
-            "type": event_type, "content": event.content,
+            "type": event_type,
+            "content": event.content,
             "elapsed_seconds": round(event.elapsed_seconds, 2),
             "iterations_used": event.iterations_used,
-            "tools_used": event.tools_used, "token_usage": usage,
+            "tools_used": event.tools_used,
+            "token_usage": usage,
         }
     if isinstance(event, ErrorEvent):
         return {"type": event_type, "error": str(event.error)}

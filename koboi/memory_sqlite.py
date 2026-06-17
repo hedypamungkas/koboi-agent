@@ -1,4 +1,5 @@
 """koboi/memory_sqlite.py -- SQLite-backed conversation memory with async persistence."""
+
 from __future__ import annotations
 
 import json
@@ -82,8 +83,7 @@ class SQLiteMemory(ConversationMemory):
     def _load_from_db(self) -> None:
         conn = self._ensure_conn()
         rows = conn.execute(
-            "SELECT role, content, tool_calls_json, tool_call_id FROM messages "
-            "WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls_json, tool_call_id FROM messages WHERE session_id = ? ORDER BY id",
             (self._session_id,),
         ).fetchall()
         for role, content, tool_calls_json, tool_call_id in rows:
@@ -106,11 +106,13 @@ class SQLiteMemory(ConversationMemory):
                     msg["content"] = content or ""
                 self._messages.append(msg)
             elif role == "tool":
-                self._messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id or "",
-                    "content": content or "",
-                })
+                self._messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id or "",
+                        "content": content or "",
+                    }
+                )
             elif role == "system":
                 self._messages.append({"role": "system", "content": content or ""})
 
@@ -186,6 +188,7 @@ class SQLiteMemory(ConversationMemory):
         Returns the new session ID.
         """
         from uuid import uuid4
+
         new_id = new_session_id or uuid4().hex
         self.fork_session(self._db_path, self._session_id, new_id)
         self._session_id = new_id
@@ -248,8 +251,7 @@ class SQLiteMemory(ConversationMemory):
         """Load messages for any session (not just the current one)."""
         conn = SQLiteMemory._open_conn(db_path)
         rows = conn.execute(
-            "SELECT role, content, tool_calls_json, tool_call_id FROM messages "
-            "WHERE session_id = ? ORDER BY id",
+            "SELECT role, content, tool_calls_json, tool_call_id FROM messages WHERE session_id = ? ORDER BY id",
             (session_id,),
         ).fetchall()
         conn.close()

@@ -10,6 +10,7 @@ Run:
     python examples/28_custom_rag_registry.py                  # automatic mode
     python examples/28_custom_rag_registry.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys
@@ -117,6 +118,7 @@ class BM25Retriever(BaseRetriever):
 
     def _tokenize(self, text: str) -> list[str]:
         import re
+
         return re.findall(r"\w+", text.lower())
 
     def _build_index(self) -> None:
@@ -153,9 +155,7 @@ class BM25Retriever(BaseRetriever):
             tf = term_counts[qt]
             df = self._doc_freqs.get(qt, 0)
             idf = math.log((self._n - df + 0.5) / (df + 0.5) + 1)
-            tf_norm = (tf * (self._k1 + 1)) / (
-                tf + self._k1 * (1 - self._b + self._b * dl / (self._avg_dl + 1))
-            )
+            tf_norm = (tf * (self._k1 + 1)) / (tf + self._k1 * (1 - self._b + self._b * dl / (self._avg_dl + 1)))
             score += idf * tf_norm
 
         return score
@@ -165,10 +165,7 @@ class BM25Retriever(BaseRetriever):
         if not query_terms:
             return []
 
-        scored = [
-            (self._chunks[i], self._score(query_terms, i))
-            for i in range(len(self._chunks))
-        ]
+        scored = [(self._chunks[i], self._score(query_terms, i)) for i in range(len(self._chunks))]
         scored.sort(key=lambda x: x[1], reverse=True)
 
         return [
@@ -181,6 +178,7 @@ class BM25Retriever(BaseRetriever):
 # ---------------------------------------------------------------------------
 # Demo helpers
 # ---------------------------------------------------------------------------
+
 
 def load_documents() -> list[Document]:
     """Load sample documents from data/sample/."""
@@ -242,9 +240,11 @@ def compare_retrievers(documents: list[Document]):
         "chunker": "paragraph",
         "retriever": "keyword",
         "top_k": 3,
-        "documents": [{"path": str(Path(__file__).resolve().parent.parent / "data" / "sample" / f)}
-                      for f in ["company_policy.md", "product_catalog.md", "employee_handbook.md"]
-                      if (Path(__file__).resolve().parent.parent / "data" / "sample" / f).exists()],
+        "documents": [
+            {"path": str(Path(__file__).resolve().parent.parent / "data" / "sample" / f)}
+            for f in ["company_policy.md", "product_catalog.md", "employee_handbook.md"]
+            if (Path(__file__).resolve().parent.parent / "data" / "sample" / f).exists()
+        ],
     }
 
     # Custom BM25 retriever via registry
@@ -325,26 +325,30 @@ def run_automatic(verbose: bool):
         if (Path(__file__).resolve().parent.parent / "data" / "sample" / f).exists()
     ]
 
-    augmentation = build_rag({
-        "enabled": True,
-        "chunker": "word_count",
-        "words_per_chunk": 80,
-        "retriever": "bm25",
-        "top_k": 3,
-        "augmentation": "in_memory",
-        "documents": doc_paths,
-    })
+    augmentation = build_rag(
+        {
+            "enabled": True,
+            "chunker": "word_count",
+            "words_per_chunk": 80,
+            "retriever": "bm25",
+            "top_k": 3,
+            "augmentation": "in_memory",
+            "documents": doc_paths,
+        }
+    )
 
     if augmentation:
         query = "What software products does Acme Corp offer?"
         augmented_msg = run_async(augmentation.augment_for_memory(query))
 
         console.print(f"[bold green]Query:[/bold green] {query}")
-        console.print(Panel(
-            augmented_msg[:600] + ("..." if len(augmented_msg) > 600 else ""),
-            title="[dim]Augmented Message (with retrieved context)[/dim]",
-            border_style="dim",
-        ))
+        console.print(
+            Panel(
+                augmented_msg[:600] + ("..." if len(augmented_msg) > 600 else ""),
+                title="[dim]Augmented Message (with retrieved context)[/dim]",
+                border_style="dim",
+            )
+        )
     else:
         console.print("[yellow]Could not build RAG pipeline[/yellow]")
 
@@ -370,6 +374,7 @@ def run_interactive(verbose: bool):
     console.print()
 
     from rich.prompt import Prompt
+
     choice = Prompt.ask("Pick a pipeline", choices=["1", "2", "3"], default="3")
 
     doc_paths = [
@@ -433,11 +438,13 @@ def run_interactive(verbose: bool):
 
         try:
             result = run_async(core.run(user_input))
-            console.print(Panel(
-                Markdown(str(result)),
-                title=f"Agent ({pipeline_label})",
-                border_style="green",
-            ))
+            console.print(
+                Panel(
+                    Markdown(str(result)),
+                    title=f"Agent ({pipeline_label})",
+                    border_style="green",
+                )
+            )
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
 

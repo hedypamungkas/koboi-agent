@@ -1,4 +1,5 @@
 """Tests for koboi.hooks module."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -197,9 +198,11 @@ class TestCallbackHook:
 
     async def test_execute_with_sync_callback(self):
         """CallbackHook should execute synchronous callbacks."""
+
         def sync_callback(ctx):
             # Callback must return the context
             return ctx
+
         hook = CallbackHook(callback=sync_callback)
         ctx = HookContext(event=HookEvent.SESSION_START)
         result = await hook.execute(ctx)
@@ -207,6 +210,7 @@ class TestCallbackHook:
 
     async def test_execute_with_async_callback(self):
         """CallbackHook should execute async callbacks."""
+
         async def async_callback(ctx):
             ctx.metadata["async_called"] = True
             return ctx
@@ -218,6 +222,7 @@ class TestCallbackHook:
 
     async def test_callback_can_modify_context(self):
         """Callback should be able to modify and return context."""
+
         def modifying_callback(ctx):
             ctx.metadata["modified"] = True
             return ctx
@@ -229,6 +234,7 @@ class TestCallbackHook:
 
     async def test_callback_can_return_different_context(self):
         """Callback should be able to return a different context instance."""
+
         def new_context_callback(ctx):
             new_ctx = HookContext(event=ctx.event, iteration=999)
             return new_ctx
@@ -262,6 +268,7 @@ class TestHookErrorIsolation:
 
     async def test_crashing_hook_records_outcome(self):
         from koboi.hooks.chain import HookOutcome
+
         h1 = CrashingHook()
         chain = HookChain([h1])
         ctx = await chain.emit(HookContext(event=HookEvent.SESSION_START))
@@ -301,12 +308,16 @@ class TestHookErrorIsolation:
 class TestHookPriority:
     async def test_priority_ordering(self):
         order = []
+
         class TrackingHook(Hook):
             def __init__(self, name, p, events):
                 self.name = name
                 self.priority = p
                 self._events = events
-            def handles(self): return self._events
+
+            def handles(self):
+                return self._events
+
             async def execute(self, ctx):
                 order.append(self.name)
                 return ctx
@@ -319,11 +330,15 @@ class TestHookPriority:
 
     async def test_stable_sort_same_priority(self):
         order = []
+
         class TrackingHook(Hook):
             def __init__(self, name, events):
                 self.name = name
                 self._events = events
-            def handles(self): return self._events
+
+            def handles(self):
+                return self._events
+
             async def execute(self, ctx):
                 order.append(self.name)
                 return ctx
@@ -340,12 +355,16 @@ class TestHookPriority:
 
     async def test_add_resorts_chain(self):
         order = []
+
         class TrackingHook(Hook):
             def __init__(self, name, p, events):
                 self.name = name
                 self.priority = p
                 self._events = events
-            def handles(self): return self._events
+
+            def handles(self):
+                return self._events
+
             async def execute(self, ctx):
                 order.append(self.name)
                 return ctx

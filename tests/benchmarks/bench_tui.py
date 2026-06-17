@@ -12,6 +12,7 @@ Benchmarks measure real TUI operations to catch performance regressions:
 - Slash command building
 - Welcome panel construction
 """
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,6 +22,7 @@ from koboi.tui.loop import build_slash_commands
 
 # -- Helpers ------------------------------------------------------------------
 
+
 def _make_messages(n: int) -> list[dict]:
     """Generate n realistic conversation messages."""
     msgs = []
@@ -29,9 +31,7 @@ def _make_messages(n: int) -> list[dict]:
         content = f"Message {i}: " + "word " * 50
         msg: dict = {"role": role, "content": content}
         if role == "assistant" and i % 6 == 1:
-            msg["tool_calls"] = [
-                {"id": f"tc_{i}", "function": {"name": "read", "arguments": '{"path": "f.py"}'}}
-            ]
+            msg["tool_calls"] = [{"id": f"tc_{i}", "function": {"name": "read", "arguments": '{"path": "f.py"}'}}]
         msgs.append(msg)
     return msgs
 
@@ -41,16 +41,24 @@ def _make_messages_with_tool_calls(n: int) -> list[dict]:
     msgs = [{"role": "system", "content": "You are a helpful assistant."}]
     for i in range(n):
         msgs.append({"role": "user", "content": f"Question {i}: " + "word " * 30})
-        msgs.append({
-            "role": "assistant",
-            "content": f"Let me use a tool for question {i}.",
-            "tool_calls": [
-                {"id": f"tc_{i}_0", "type": "function",
-                 "function": {"name": "read", "arguments": '{"path": "f.py", "offset": 0}'}},
-                {"id": f"tc_{i}_1", "type": "function",
-                 "function": {"name": "write", "arguments": '{"path": "f.py", "content": "' + "x" * 200 + '"}'}},
-            ],
-        })
+        msgs.append(
+            {
+                "role": "assistant",
+                "content": f"Let me use a tool for question {i}.",
+                "tool_calls": [
+                    {
+                        "id": f"tc_{i}_0",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": '{"path": "f.py", "offset": 0}'},
+                    },
+                    {
+                        "id": f"tc_{i}_1",
+                        "type": "function",
+                        "function": {"name": "write", "arguments": '{"path": "f.py", "content": "' + "x" * 200 + '"}'},
+                    },
+                ],
+            }
+        )
         msgs.append({"role": "tool", "tool_call_id": f"tc_{i}_0", "content": "file content " * 20})
         msgs.append({"role": "tool", "tool_call_id": f"tc_{i}_1", "content": "ok"})
     return msgs
@@ -72,6 +80,7 @@ def _make_large_diff(n_lines: int) -> str:
 def test_export_markdown_50(benchmark):
     """Export 50 messages to markdown."""
     from koboi.tui.export import export_markdown
+
     msgs = _make_messages(50)
     result = benchmark(export_markdown, msgs)
     assert len(result) > 0
@@ -80,6 +89,7 @@ def test_export_markdown_50(benchmark):
 def test_export_markdown_500(benchmark):
     """Export 500 messages to markdown -- large conversation."""
     from koboi.tui.export import export_markdown
+
     msgs = _make_messages(500)
     result = benchmark(export_markdown, msgs)
     assert len(result) > 0
@@ -88,6 +98,7 @@ def test_export_markdown_500(benchmark):
 def test_export_json_500(benchmark):
     """Export 500 messages to JSON."""
     from koboi.tui.export import export_json
+
     msgs = _make_messages(500)
     result = benchmark(export_json, msgs)
     assert len(result) > 0
@@ -96,6 +107,7 @@ def test_export_json_500(benchmark):
 def test_export_html_500(benchmark):
     """Export 500 messages to HTML."""
     from koboi.tui.export import export_html
+
     msgs = _make_messages(500)
     result = benchmark(export_html, msgs)
     assert "<!DOCTYPE html>" in result
@@ -124,6 +136,7 @@ _LARGE_DIFF = _make_large_diff(200)
 def test_is_diff_content_positive(benchmark):
     """Detect diff content (positive case)."""
     from koboi.tui.widgets.diff_view import is_diff_content
+
     result = benchmark(is_diff_content, _LARGE_DIFF)
     assert result is True
 
@@ -131,6 +144,7 @@ def test_is_diff_content_positive(benchmark):
 def test_is_diff_content_negative(benchmark):
     """Detect non-diff content."""
     from koboi.tui.widgets.diff_view import is_diff_content
+
     plain = "This is just a regular message " * 20
     result = benchmark(is_diff_content, plain)
     assert result is False
@@ -139,6 +153,7 @@ def test_is_diff_content_negative(benchmark):
 def test_count_changes(benchmark):
     """Count additions/deletions in large diff."""
     from koboi.tui.widgets.diff_view import count_changes
+
     result = benchmark(count_changes, _LARGE_DIFF)
     assert result[0] > 0
     assert result[1] > 0
@@ -147,6 +162,7 @@ def test_count_changes(benchmark):
 def test_diff_parse(benchmark):
     """Parse large diff into (line, style) pairs."""
     from koboi.tui.widgets.diff_view import DiffViewWidget
+
     result = benchmark(DiffViewWidget._parse_diff, _LARGE_DIFF)
     assert len(result) > 200
 
@@ -154,26 +170,31 @@ def test_diff_parse(benchmark):
 def test_diff_build_rich_text(benchmark):
     """Build Rich Text object from large diff."""
     from koboi.tui.widgets.diff_view import DiffViewWidget
+
     result = benchmark(DiffViewWidget._build_rich_text, _LARGE_DIFF)
     assert len(result.plain) > 0
 
 
 # -- Thinking block regex extraction ------------------------------------------
 
-_THINKING_TEXT = "Before answer\n<thinking>\nLet me think about this carefully.\n" + \
-    "Step 1: analyze\nStep 2: conclude\n</thinking>\nHere is my answer."
+_THINKING_TEXT = (
+    "Before answer\n<thinking>\nLet me think about this carefully.\n"
+    + "Step 1: analyze\nStep 2: conclude\n</thinking>\nHere is my answer."
+)
 _NO_THINKING_TEXT = "This is a normal response without any thinking blocks. " * 50
 
 
 def test_thinking_pattern_match(benchmark):
     """Extract thinking block from content."""
     from koboi.tui.widgets.thinking_block import THINKING_PATTERNS
+
     def extract():
         for pattern in THINKING_PATTERNS:
             match = pattern.search(_THINKING_TEXT)
             if match:
                 return match.group(1).strip()
         return None
+
     result = benchmark(extract)
     assert "Step 1" in result
 
@@ -181,12 +202,14 @@ def test_thinking_pattern_match(benchmark):
 def test_thinking_pattern_no_match(benchmark):
     """Search for thinking block in content without one."""
     from koboi.tui.widgets.thinking_block import THINKING_PATTERNS
+
     def extract():
         for pattern in THINKING_PATTERNS:
             match = pattern.search(_NO_THINKING_TEXT)
             if match:
                 return match.group(1)
         return None
+
     result = benchmark(extract)
     assert result is None
 
@@ -194,18 +217,22 @@ def test_thinking_pattern_no_match(benchmark):
 def test_thinking_pattern_large_content(benchmark):
     """Search for thinking block in large content (10KB)."""
     from koboi.tui.widgets.thinking_block import THINKING_PATTERNS
+
     large = "Some text. " * 1000 + "<thinking>found it</thinking>" + " more text " * 100
+
     def extract():
         for pattern in THINKING_PATTERNS:
             match = pattern.search(large)
             if match:
                 return match.group(1)
         return None
+
     result = benchmark(extract)
     assert result == "found it"
 
 
 # -- Suggestion matching ------------------------------------------------------
+
 
 def test_slash_suggester_match(benchmark):
     """Find slash command suggestion -- sync linear scan."""
@@ -260,14 +287,17 @@ def test_composite_suggester_route(benchmark):
 
 # -- Bridge message creation throughput ---------------------------------------
 
+
 def test_bridge_message_creation(benchmark):
     """Create 1000 StreamDelta messages (bridge throughput)."""
     from koboi.tui.bridge import StreamDelta
+
     def create_messages():
         msgs = []
         for i in range(1000):
             msgs.append(StreamDelta(content=f"chunk {i} "))
         return msgs
+
     result = benchmark(create_messages)
     assert len(result) == 1000
 
@@ -275,9 +305,14 @@ def test_bridge_message_creation(benchmark):
 def test_bridge_mixed_message_creation(benchmark):
     """Create mixed bridge message types."""
     from koboi.tui.bridge import (
-        StreamDelta, StreamToolCall, StreamToolResult,
-        StreamIteration, StreamComplete, StreamError,
+        StreamDelta,
+        StreamToolCall,
+        StreamToolResult,
+        StreamIteration,
+        StreamComplete,
+        StreamError,
     )
+
     def create_messages():
         msgs = []
         for i in range(200):
@@ -287,11 +322,13 @@ def test_bridge_mixed_message_creation(benchmark):
             msgs.append(StreamIteration(iteration=i, messages_count=10, tokens_estimated=100))
         msgs.append(StreamComplete(content="Done"))
         return msgs
+
     result = benchmark(create_messages)
     assert len(result) == 801
 
 
 # -- Slash command building (kept from original) ------------------------------
+
 
 def test_slash_command_dispatch(benchmark):
     """Benchmark building slash commands."""
@@ -359,10 +396,9 @@ def test_slash_command_reset_call(benchmark):
 def test_slash_command_history_call(benchmark):
     """Benchmark calling /history command with messages."""
     mock_agent = MagicMock()
-    mock_agent.core.memory.get_messages = MagicMock(return_value=[
-        {"role": "user", "content": f"Message {i}: " + "test " * 10}
-        for i in range(50)
-    ])
+    mock_agent.core.memory.get_messages = MagicMock(
+        return_value=[{"role": "user", "content": f"Message {i}: " + "test " * 10} for i in range(50)]
+    )
     mock_console = MagicMock()
 
     commands = build_slash_commands(mock_agent)
@@ -375,6 +411,7 @@ def test_slash_command_history_call(benchmark):
 
 # -- Welcome panel (kept from original) ---------------------------------------
 
+
 def test_welcome_panel_building(benchmark):
     """Benchmark building welcome panel."""
     from koboi.tui.app import _build_welcome_panel
@@ -386,9 +423,7 @@ def test_welcome_panel_building(benchmark):
     mock_agent.config.max_iterations = 10
     mock_agent.config.rag_enabled = True
 
-    mock_agent.core.hooks.list_hooks.return_value = [
-        {"name": f"Hook{i}", "events": []} for i in range(5)
-    ]
+    mock_agent.core.hooks.list_hooks.return_value = [{"name": f"Hook{i}", "events": []} for i in range(5)]
 
     mock_agent.core.input_guardrail = MagicMock()
     mock_agent.core.output_guardrail = MagicMock()
@@ -400,26 +435,33 @@ def test_welcome_panel_building(benchmark):
 
     result = benchmark(_build_welcome_panel, mock_agent)
     from rich.panel import Panel
+
     assert isinstance(result, Panel)
 
 
 # -- Theme registration -------------------------------------------------------
 
+
 def test_theme_registration(benchmark):
     """Benchmark registering themes."""
     from koboi.tui.themes import register_themes
+
     mock_app = MagicMock()
+
     def do_register():
         register_themes(mock_app)
+
     benchmark(do_register)
     assert mock_app.theme == "koboi-dark"
 
 
 # -- Token estimation at scale (hot path) ------------------------------------
 
+
 def test_token_estimation_100_messages_with_tool_calls(benchmark):
     """estimate_tokens on 100 message cycles with tool_calls."""
     from koboi.tokens import estimate_tokens
+
     msgs = _make_messages_with_tool_calls(100)
     result = benchmark(estimate_tokens, msgs)
     assert result > 0
@@ -428,6 +470,7 @@ def test_token_estimation_100_messages_with_tool_calls(benchmark):
 def test_token_estimation_500_messages_with_tool_calls(benchmark):
     """estimate_tokens on 500 message cycles with tool_calls."""
     from koboi.tokens import estimate_tokens
+
     msgs = _make_messages_with_tool_calls(500)
     result = benchmark(estimate_tokens, msgs)
     assert result > 0
@@ -436,6 +479,7 @@ def test_token_estimation_500_messages_with_tool_calls(benchmark):
 def test_token_estimation_2000_messages_with_tool_calls(benchmark):
     """estimate_tokens on 2000 message cycles with tool_calls -- stress test."""
     from koboi.tokens import estimate_tokens
+
     msgs = _make_messages_with_tool_calls(2000)
     result = benchmark(estimate_tokens, msgs)
     assert result > 0
@@ -443,9 +487,11 @@ def test_token_estimation_2000_messages_with_tool_calls(benchmark):
 
 # -- Memory copy overhead -----------------------------------------------------
 
+
 def test_memory_get_messages_100(benchmark):
     """get_messages with 100 pre-loaded messages."""
     from koboi.memory import ConversationMemory
+
     mem = ConversationMemory()
     for msg in _make_messages_with_tool_calls(100):
         if msg["role"] == "user":
@@ -461,6 +507,7 @@ def test_memory_get_messages_100(benchmark):
 def test_memory_get_messages_1000(benchmark):
     """get_messages with 1000 pre-loaded messages."""
     from koboi.memory import ConversationMemory
+
     mem = ConversationMemory()
     for msg in _make_messages_with_tool_calls(1000):
         if msg["role"] == "user":
@@ -475,14 +522,17 @@ def test_memory_get_messages_1000(benchmark):
 
 # -- String accumulation (streaming pattern) ----------------------------------
 
+
 def test_string_concatenation_50kb(benchmark):
     """Simulate content += delta for 50KB (250 x 200-char deltas)."""
     delta = "x" * 200
+
     def accumulate():
         content = ""
         for _ in range(250):
             content += delta
         return content
+
     result = benchmark(accumulate)
     assert len(result) == 50000
 
@@ -490,27 +540,33 @@ def test_string_concatenation_50kb(benchmark):
 def test_string_concatenation_200kb(benchmark):
     """Simulate content += delta for 200KB (1000 x 200-char deltas)."""
     delta = "x" * 200
+
     def accumulate():
         content = ""
         for _ in range(1000):
             content += delta
         return content
+
     result = benchmark(accumulate)
     assert len(result) == 200000
 
 
 # -- Thinking block regex at scale -------------------------------------------
 
+
 def test_thinking_pattern_50kb_no_match(benchmark):
     """Run THINKING_PATTERNS on 50KB with no thinking block."""
     from koboi.tui.widgets.thinking_block import THINKING_PATTERNS
+
     large = "Normal content. " * 3500  # ~50KB
+
     def extract():
         for pattern in THINKING_PATTERNS:
             match = pattern.search(large)
             if match:
                 return match.group(1)
         return None
+
     result = benchmark(extract)
     assert result is None
 
@@ -518,22 +574,27 @@ def test_thinking_pattern_50kb_no_match(benchmark):
 def test_thinking_pattern_50kb_with_match(benchmark):
     """Run THINKING_PATTERNS on 50KB with thinking block in the middle."""
     from koboi.tui.widgets.thinking_block import THINKING_PATTERNS
+
     large = "Normal content. " * 1750 + "<thinking>found it</thinking>" + " more text " * 1750
+
     def extract():
         for pattern in THINKING_PATTERNS:
             match = pattern.search(large)
             if match:
                 return match.group(1)
         return None
+
     result = benchmark(extract)
     assert result == "found it"
 
 
 # -- Export at scale ----------------------------------------------------------
 
+
 def test_export_markdown_2000(benchmark):
     """Export 2000 messages with tool_calls to markdown."""
     from koboi.tui.export import export_markdown
+
     msgs = _make_messages(2000)
     result = benchmark(export_markdown, msgs)
     assert len(result) > 0
@@ -542,6 +603,7 @@ def test_export_markdown_2000(benchmark):
 def test_export_json_2000(benchmark):
     """Export 2000 messages with tool_calls to JSON."""
     from koboi.tui.export import export_json
+
     msgs = _make_messages(2000)
     result = benchmark(export_json, msgs)
     assert len(result) > 0
@@ -550,6 +612,7 @@ def test_export_json_2000(benchmark):
 def test_export_html_2000(benchmark):
     """Export 2000 messages with tool_calls to HTML."""
     from koboi.tui.export import export_html
+
     msgs = _make_messages(2000)
     result = benchmark(export_html, msgs)
     assert "<!DOCTYPE html>" in result
@@ -563,6 +626,7 @@ _DIFF_1000 = _make_large_diff(1000)
 def test_diff_parse_1000_lines(benchmark):
     """Parse 1000-line diff into (line, style) pairs."""
     from koboi.tui.widgets.diff_view import DiffViewWidget
+
     result = benchmark(DiffViewWidget._parse_diff, _DIFF_1000)
     assert len(result) > 500
 
@@ -570,11 +634,13 @@ def test_diff_parse_1000_lines(benchmark):
 def test_is_diff_content_1000_lines(benchmark):
     """Detect diff content in 1000-line diff."""
     from koboi.tui.widgets.diff_view import is_diff_content
+
     result = benchmark(is_diff_content, _DIFF_1000)
     assert result is True
 
 
 # -- Hook chain per-iteration cost -------------------------------------------
+
 
 def test_hook_chain_emit_6_events_per_iteration(benchmark):
     """Emit 6 hook events through 5 hooks (simulates one agent iteration)."""

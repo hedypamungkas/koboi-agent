@@ -1,4 +1,5 @@
 """koboi/tools/builtin/task.py -- Task management tools with dependency support."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -41,8 +42,9 @@ def get_manager() -> Any:
     risk_level=RiskLevel.SAFE,
     deps=["manager"],
 )
-def task_create(subject: str, description: str = "", blocked_by: list[str] | None = None,
-                _deps: dict | None = None) -> str:
+def task_create(
+    subject: str, description: str = "", blocked_by: list[str] | None = None, _deps: dict | None = None
+) -> str:
     try:
         mgr = _deps.get("manager") if _deps else None
         if mgr is None:
@@ -166,8 +168,9 @@ def task_get(task_id: str, _deps: dict | None = None) -> str:
     risk_level=RiskLevel.SAFE,
     deps=["manager"],
 )
-def task_update(task_id: str, status: str = "", subject: str = "", description: str = "",
-                _deps: dict | None = None) -> str:
+def task_update(
+    task_id: str, status: str = "", subject: str = "", description: str = "", _deps: dict | None = None
+) -> str:
     try:
         mgr = _deps.get("manager") if _deps else None
         if mgr is None:
@@ -203,8 +206,7 @@ def task_update(task_id: str, status: str = "", subject: str = "", description: 
 @tool(
     name="task_add_dependency",
     description=(
-        "Add a dependency between tasks. The target task will be blocked until "
-        "the dependency task is completed."
+        "Add a dependency between tasks. The target task will be blocked until the dependency task is completed."
     ),
     parameters={
         "type": "object",

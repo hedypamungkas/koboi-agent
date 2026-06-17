@@ -1,4 +1,5 @@
 """Tests for koboi/tui/export.py -- Conversation export formatters."""
+
 from __future__ import annotations
 
 import json
@@ -9,9 +10,11 @@ from koboi.tui.export import export_html, export_json, export_markdown, _escape_
 SAMPLE_MESSAGES = [
     {"role": "user", "content": "Hello"},
     {"role": "assistant", "content": "Hi there!"},
-    {"role": "assistant", "content": "Using tool", "tool_calls": [
-        {"function": {"name": "read", "arguments": '{"path":"f.py"}'}}
-    ]},
+    {
+        "role": "assistant",
+        "content": "Using tool",
+        "tool_calls": [{"function": {"name": "read", "arguments": '{"path":"f.py"}'}}],
+    },
     {"role": "tool", "content": "file contents"},
     {"role": "system", "content": "system prompt"},
 ]

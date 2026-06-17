@@ -1,4 +1,5 @@
 """Tests for koboi.config module."""
+
 from __future__ import annotations
 
 import os
@@ -64,11 +65,13 @@ class TestConfig:
         assert config.get("a", "b", "missing", default="fallback") == "fallback"
 
     def test_convenience_accessors(self):
-        config = Config({
-            "agent": {"name": "my-agent", "system_prompt": "Hello"},
-            "llm": {"model": "gpt-4o", "api_key": "key", "base_url": "http://api"},
-            "rag": {"enabled": True},
-        })
+        config = Config(
+            {
+                "agent": {"name": "my-agent", "system_prompt": "Hello"},
+                "llm": {"model": "gpt-4o", "api_key": "key", "base_url": "http://api"},
+                "rag": {"enabled": True},
+            }
+        )
         assert config.agent_name == "my-agent"
         assert config.system_prompt == "Hello"
         assert config.model == "gpt-4o"
@@ -92,17 +95,19 @@ class TestConfig:
         assert config.provider == "anthropic"
 
     def test_anthropic_llm_properties(self):
-        config = Config({
-            "llm": {
-                "provider": "anthropic",
-                "model": "claude-sonnet-4-20250514",
-                "api_key": "sk-ant-test",
-                "base_url": "https://api.anthropic.com/v1",
-                "timeout": 60.0,
-                "max_tokens": 8192,
-                "auth_token": "oauth-tok",
-            },
-        })
+        config = Config(
+            {
+                "llm": {
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-20250514",
+                    "api_key": "sk-ant-test",
+                    "base_url": "https://api.anthropic.com/v1",
+                    "timeout": 60.0,
+                    "max_tokens": 8192,
+                    "auth_token": "oauth-tok",
+                },
+            }
+        )
         assert config.provider == "anthropic"
         assert config.model == "claude-sonnet-4-20250514"
         assert config.llm_timeout == 60.0
@@ -112,10 +117,12 @@ class TestConfig:
 
 class TestConfigFromDict:
     def test_from_dict_basic(self):
-        config = Config.from_dict({
-            "agent": {"name": "dict-agent", "max_iterations": 7},
-            "llm": {"model": "gpt-4o", "api_key": "sk-test"},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "dict-agent", "max_iterations": 7},
+                "llm": {"model": "gpt-4o", "api_key": "sk-test"},
+            }
+        )
         assert config.agent_name == "dict-agent"
         assert config.max_iterations == 7
         assert config.model == "gpt-4o"
@@ -132,16 +139,20 @@ class TestConfigFromDict:
 
     def test_from_dict_with_env_vars(self, monkeypatch):
         monkeypatch.setenv("DICT_TEST_KEY", "resolved")
-        config = Config.from_dict({"agent": {"name": "env-agent"}, "llm": {"api_key": "${DICT_TEST_KEY}", "model": "x"}})
+        config = Config.from_dict(
+            {"agent": {"name": "env-agent"}, "llm": {"api_key": "${DICT_TEST_KEY}", "model": "x"}}
+        )
         assert config.api_key == "resolved"
 
     def test_from_dict_preserves_nested(self):
-        config = Config.from_dict({
-            "agent": {"name": "nested-agent"},
-            "llm": {"model": "gpt-4"},
-            "rag": {"enabled": True, "top_k": 5},
-            "guardrails": {"input": {"max_length": 1000}},
-        })
+        config = Config.from_dict(
+            {
+                "agent": {"name": "nested-agent"},
+                "llm": {"model": "gpt-4"},
+                "rag": {"enabled": True, "top_k": 5},
+                "guardrails": {"input": {"max_length": 1000}},
+            }
+        )
         assert config.rag_enabled is True
         assert config.get("rag", "top_k") == 5
         assert config.get("guardrails", "input", "max_length") == 1000
@@ -204,8 +215,11 @@ class TestConfigInheritance:
         assert config.max_iterations == 5
 
     def test_deep_merge(self, tmp_path):
-        base = {"agent": {"name": "base"}, "guardrails": {"input": {"max_length": 100}, "output": {"detect": True}},
-                "llm": {"model": "gpt-4"}}
+        base = {
+            "agent": {"name": "base"},
+            "guardrails": {"input": {"max_length": 100}, "output": {"detect": True}},
+            "llm": {"model": "gpt-4"},
+        }
         child = {"extends": "base.yaml", "guardrails": {"input": {"max_length": 500}}}
         self._write_yaml(tmp_path / "base.yaml", base)
         self._write_yaml(tmp_path / "child.yaml", child)
@@ -266,8 +280,7 @@ class TestConfigValidation:
 
     def test_invalid_max_iterations_raises(self):
         with pytest.raises(ValueError, match="greater than or equal"):
-            Config({"agent": {"name": "x", "max_iterations": 0}, "llm": {"model": "y"}},
-                   validate=True)
+            Config({"agent": {"name": "x", "max_iterations": 0}, "llm": {"model": "y"}}, validate=True)
 
     def test_validation_opt_in(self):
         config = Config({"agent": {"name": "x"}, "llm": {"model": "y"}})

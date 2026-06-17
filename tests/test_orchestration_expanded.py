@@ -1,4 +1,5 @@
 """Tests for koboi/harness/telemetry.py — TelemetryCollector expanded."""
+
 from __future__ import annotations
 
 import pytest
@@ -52,8 +53,7 @@ class TestTelemetryCollectorMetrics:
 
     def test_record_compaction(self):
         tc = TelemetryCollector()
-        tc.record_compaction(iteration=3, messages_before=50, messages_after=20,
-                            tokens_before=5000, tokens_after=2000)
+        tc.record_compaction(iteration=3, messages_before=50, messages_after=20, tokens_before=5000, tokens_after=2000)
         assert len(tc.snapshot.compactions) == 1
         assert tc.snapshot.compactions[0].messages_before == 50
 

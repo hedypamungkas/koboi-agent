@@ -1,4 +1,5 @@
 """StatusBar -- bottom status line showing context, tokens, turns, mode."""
+
 from textual.reactive import reactive
 from textual.widgets import Static
 
@@ -46,7 +47,9 @@ class StatusBar(Static):
             parts.append("waiting for approval")
         elif self.state == "orchestrating":
             if self.orchestration_current:
-                parts.append(f"orchestrating: {self.orchestration_current} ({self.orchestration_completed}/{self.orchestration_agents})")
+                parts.append(
+                    f"orchestrating: {self.orchestration_current} ({self.orchestration_completed}/{self.orchestration_agents})"
+                )
             else:
                 parts.append(f"orchestrating ({self.orchestration_completed}/{self.orchestration_agents})")
 

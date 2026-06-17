@@ -1,4 +1,5 @@
 """koboi/guardrails/base.py -- Base guardrail ABC and pattern-based guardrail."""
+
 from __future__ import annotations
 
 import re
@@ -15,8 +16,7 @@ class BaseGuardrail(ABC):
     """
 
     @abstractmethod
-    async def check(self, content: str) -> GuardrailResult:
-        ...
+    async def check(self, content: str) -> GuardrailResult: ...
 
 
 class PatternGuardrail(BaseGuardrail):
@@ -48,6 +48,8 @@ class PatternGuardrail(BaseGuardrail):
         for pattern, description in self.patterns:
             if re.search(pattern, content):
                 return GuardrailResult(
-                    passed=False, reason=description, action=self.default_action,
+                    passed=False,
+                    reason=description,
+                    action=self.default_action,
                 )
         return None

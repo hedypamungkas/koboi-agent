@@ -3,6 +3,7 @@
 In CLI, approval is a y/n prompt. For programmatic usage,
 can be skipped with auto_approve=True or overridden with custom callback.
 """
+
 from __future__ import annotations
 
 import time
@@ -19,6 +20,7 @@ try:
     from rich.console import Console
     from rich.panel import Panel
     from rich.prompt import Confirm
+
     _rich_available = True
 except ImportError:
     pass
@@ -54,13 +56,15 @@ class CLIApprovalHandler(ApprovalHandler):
 
         if _rich_available and _console is not None:
             color = _risk_color(risk_level)
-            _console.print(Panel(
-                f"[bold]Tool:[/bold] {tool_name}\n"
-                f"[bold]Risk:[/bold] [{color}]{risk_level.value}[/{color}]\n"
-                f"[bold]Args:[/bold] {arguments[:200]}",
-                title="[bold yellow]Approval Required[/bold yellow]",
-                border_style="yellow",
-            ))
+            _console.print(
+                Panel(
+                    f"[bold]Tool:[/bold] {tool_name}\n"
+                    f"[bold]Risk:[/bold] [{color}]{risk_level.value}[/{color}]\n"
+                    f"[bold]Args:[/bold] {arguments[:200]}",
+                    title="[bold yellow]Approval Required[/bold yellow]",
+                    border_style="yellow",
+                )
+            )
             try:
                 approved = Confirm.ask("Approve execution?", default=False)
             except (EOFError, KeyboardInterrupt):
@@ -75,15 +79,17 @@ class CLIApprovalHandler(ApprovalHandler):
 
         if self.audit_trail:
             event = "tool_approved" if approved else "tool_denied"
-            self.audit_trail.record(AuditEntry(
-                timestamp=time.time(),
-                event_type=event,
-                tool_name=tool_name,
-                arguments=arguments[:500],
-                result="approved" if approved else "denied",
-                risk_level=risk_level.value,
-                details=f"Human approval via CLI: {'yes' if approved else 'no'}",
-            ))
+            self.audit_trail.record(
+                AuditEntry(
+                    timestamp=time.time(),
+                    event_type=event,
+                    tool_name=tool_name,
+                    arguments=arguments[:500],
+                    result="approved" if approved else "denied",
+                    risk_level=risk_level.value,
+                    details=f"Human approval via CLI: {'yes' if approved else 'no'}",
+                )
+            )
 
         return approved
 
@@ -104,14 +110,16 @@ class CallbackApprovalHandler(ApprovalHandler):
 
         if self.audit_trail:
             event = "tool_approved" if approved else "tool_denied"
-            self.audit_trail.record(AuditEntry(
-                timestamp=time.time(),
-                event_type=event,
-                tool_name=tool_name,
-                arguments=arguments[:500],
-                result="approved" if approved else "denied",
-                risk_level=risk_level.value,
-                details=f"Callback approval: {'yes' if approved else 'no'}",
-            ))
+            self.audit_trail.record(
+                AuditEntry(
+                    timestamp=time.time(),
+                    event_type=event,
+                    tool_name=tool_name,
+                    arguments=arguments[:500],
+                    result="approved" if approved else "denied",
+                    risk_level=risk_level.value,
+                    details=f"Callback approval: {'yes' if approved else 'no'}",
+                )
+            )
 
         return approved

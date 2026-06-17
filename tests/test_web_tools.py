@@ -1,4 +1,5 @@
 """Tests for koboi.tools.builtin.web module (web_fetch tool)."""
+
 from __future__ import annotations
 
 import socket
@@ -20,6 +21,7 @@ from koboi.tools.builtin.web import (
 
 
 # ── Helpers ──
+
 
 def _mock_response(
     status_code: int = 200,
@@ -44,6 +46,7 @@ def _mock_dns(*ips: str):
 
 
 # ── TestStripHtml ──
+
 
 class TestExtractHtmlContent:
     def test_removes_scripts_and_styles(self):
@@ -80,7 +83,7 @@ class TestExtractHtmlContent:
         assert "Real content here" in result
 
     def test_spa_shell_returns_extracted_parts(self):
-        html = "<html><head><title>SPA App</title></head><body><div id=\"root\"></div></body></html>"
+        html = '<html><head><title>SPA App</title></head><body><div id="root"></div></body></html>'
         result = _extract_html_content(html)
         assert "SPA App" in result
 
@@ -92,6 +95,7 @@ class TestExtractHtmlContent:
 
 
 # ── TestResolveAndCheck ──
+
 
 class TestResolveAndCheck:
     def test_returns_ips_for_public_hostname(self):
@@ -121,6 +125,7 @@ class TestResolveAndCheck:
 
 # ── TestCheckUrlSsrf ──
 
+
 class TestCheckUrlSsrf:
     def test_rejects_no_hostname(self):
         with pytest.raises(ValueError, match="hostname not found"):
@@ -132,6 +137,7 @@ class TestCheckUrlSsrf:
 
 
 # ── TestWebFetchSuccess ──
+
 
 class TestWebFetchSuccess:
     async def test_fetch_plain_text(self):
@@ -170,6 +176,7 @@ class TestWebFetchSuccess:
 
 
 # ── TestWebFetchSSRFProtection ──
+
 
 class TestWebFetchSSRFProtection:
     async def test_blocks_localhost(self):

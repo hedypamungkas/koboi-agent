@@ -1,4 +1,5 @@
 """Tests for koboi/notifications.py -- platform dispatch and sound."""
+
 from __future__ import annotations
 
 import sys
@@ -7,9 +8,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from koboi.notifications import (
-    notify, play_sound,
-    _notify_macos, _notify_linux, _notify_windows,
-    _play_sound_macos, _play_sound_linux, _play_sound_windows,
+    notify,
+    play_sound,
+    _notify_macos,
+    _notify_linux,
+    _notify_windows,
+    _play_sound_macos,
+    _play_sound_linux,
+    _play_sound_windows,
 )
 
 

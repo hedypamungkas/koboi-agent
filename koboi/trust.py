@@ -3,6 +3,7 @@
 Learns from user approval decisions to reduce permission fatigue.
 When a user says "always allow" for a tool type, future calls auto-approve.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ from koboi.types import RiskLevel
 @dataclass
 class TrustDecision:
     """Result of a trust lookup."""
+
     auto_approve: bool
     matched_rule: str | None = None
     reason: str = ""
@@ -25,6 +27,7 @@ class TrustDecision:
 @dataclass
 class TrustRule:
     """A stored trust rule."""
+
     id: int
     tool_pattern: str
     risk_level: str
@@ -156,9 +159,7 @@ class TrustDatabase:
     def clear_rules(self, tool_pattern: str | None = None) -> int:
         """Clear trust rules. Returns number of rules removed."""
         if tool_pattern:
-            cursor = self._conn.execute(
-                "DELETE FROM trust_rules WHERE tool_pattern = ?", (tool_pattern,)
-            )
+            cursor = self._conn.execute("DELETE FROM trust_rules WHERE tool_pattern = ?", (tool_pattern,))
         else:
             cursor = self._conn.execute("DELETE FROM trust_rules")
         self._conn.commit()

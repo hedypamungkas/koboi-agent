@@ -1,4 +1,5 @@
 """koboi/tui/commands.py -- Shared slash command registry for TUI and console."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
 @dataclass
 class CommandContext:
     """Context passed to every slash command handler."""
+
     agent: KoboiAgent
     output: Callable[[str], None]
     args: str = ""
@@ -20,6 +22,7 @@ class CommandContext:
 @dataclass
 class CommandResult:
     """Return value from a command handler."""
+
     message: str | None = None  # user message to send (triggers agent response)
     clear_chat: bool = False  # clear the chat area (TUI-specific)
     repopulate_messages: bool = False  # reload messages from memory after clear
@@ -29,6 +32,7 @@ class CommandResult:
 @dataclass
 class SlashCommand:
     """Metadata for a registered command."""
+
     name: str
     description: str
     aliases: list[str] = field(default_factory=list)
@@ -74,6 +78,7 @@ class SlashCommandRegistry:
 # ---------------------------------------------------------------------------
 # Command handlers
 # ---------------------------------------------------------------------------
+
 
 async def _cmd_reset(ctx: CommandContext) -> CommandResult:
     ctx.agent.reset()
@@ -159,6 +164,7 @@ async def _cmd_theme(ctx: CommandContext) -> CommandResult:
         ctx.output("Theme switching requires the TUI.")
         return CommandResult()
     from koboi.tui.themes import THEMES
+
     themes = list(THEMES.keys())
     idx = themes.index(ctx.app.theme) if ctx.app.theme in themes else 0
     ctx.app.theme = themes[(idx + 1) % len(themes)]
@@ -192,6 +198,7 @@ async def _cmd_export(ctx: CommandContext) -> CommandResult:
     from datetime import datetime
     from pathlib import Path
     from koboi.tui.export import export_markdown, export_json, export_html
+
     messages = ctx.agent.core.memory.get_messages()
     metadata = {
         "agent_name": ctx.agent.config.agent_name,
@@ -226,6 +233,7 @@ async def _cmd_skills(ctx: CommandContext) -> CommandResult:
 
 async def _cmd_mode(ctx: CommandContext) -> CommandResult:
     from koboi.modes import ModeManager, AgentMode
+
     if not ctx.args:
         if ctx.app is not None:
             current = ctx.app._mode_manager.current_mode.value
@@ -243,6 +251,7 @@ async def _cmd_mode(ctx: CommandContext) -> CommandResult:
         confirmed = False
         if ctx.app is not None:
             from koboi.tui.screens.yolo_confirm import YoloConfirmDialog
+
             confirmed = await ctx.app.push_screen_wait(YoloConfirmDialog())
         else:
             ctx.output(
@@ -273,6 +282,7 @@ async def _cmd_mode(ctx: CommandContext) -> CommandResult:
 
 async def _cmd_tasks(ctx: CommandContext) -> CommandResult:
     from koboi.tools.builtin.task import get_manager
+
     try:
         mgr = get_manager()
     except RuntimeError:
@@ -298,6 +308,7 @@ async def _cmd_compact(ctx: CommandContext) -> CommandResult:
         ctx.output("No context strategy configured. Set context.strategy in YAML.")
         return CommandResult()
     from koboi.tokens import estimate_tokens
+
     messages = core.memory.get_messages()
     tokens_before = estimate_tokens(messages)
     compacted = await core.context_manager.manage(messages, max_tokens=0)
@@ -328,6 +339,7 @@ async def _cmd_model(ctx: CommandContext) -> CommandResult:
     raw = ctx.args.strip()
     try:
         from koboi.client import Client
+
         old_client = client
         # Parse "provider/model" format
         if "/" in raw:
@@ -373,6 +385,7 @@ async def _cmd_editor(ctx: CommandContext) -> CommandResult:
     import os
     import subprocess
     import tempfile
+
     editor = os.environ.get("EDITOR", "vim")
     with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
         f.write("")
@@ -393,6 +406,7 @@ async def _cmd_editor(ctx: CommandContext) -> CommandResult:
 
 async def _cmd_undo(ctx: CommandContext) -> CommandResult:
     import subprocess as _subprocess
+
     n = 1
     if ctx.args:
         try:
@@ -404,10 +418,7 @@ async def _cmd_undo(ctx: CommandContext) -> CommandResult:
         ctx.output("Can only revert 1-10 commits at a time.")
         return CommandResult()
     try:
-        log_result = _subprocess.run(
-            ["git", "log", f"-{n}", "--oneline"],
-            capture_output=True, text=True, timeout=10
-        )
+        log_result = _subprocess.run(["git", "log", f"-{n}", "--oneline"], capture_output=True, text=True, timeout=10)
         if log_result.returncode != 0:
             ctx.output(f"Git error: {log_result.stderr.strip()}")
             return CommandResult()
@@ -418,10 +429,7 @@ async def _cmd_undo(ctx: CommandContext) -> CommandResult:
     reverted = 0
     for i in range(n):
         try:
-            result = _subprocess.run(
-                ["git", "revert", "HEAD", "--no-edit"],
-                capture_output=True, text=True, timeout=30
-            )
+            result = _subprocess.run(["git", "revert", "HEAD", "--no-edit"], capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 reverted += 1
             else:
@@ -465,6 +473,7 @@ async def _cmd_copy(ctx: CommandContext) -> CommandResult:
     copied = False
     try:
         import pyperclip
+
         pyperclip.copy(last_assistant)
         copied = True
     except ImportError:
@@ -472,6 +481,7 @@ async def _cmd_copy(ctx: CommandContext) -> CommandResult:
     if not copied:
         import shutil
         import subprocess as _sp
+
         if shutil.which("pbcopy"):
             _sp.run(["pbcopy"], input=last_assistant.encode(), check=True)
             copied = True
@@ -494,11 +504,13 @@ async def _cmd_run(ctx: CommandContext) -> CommandResult:
     config_path = run_parts[0]
     run_message = run_parts[1] if len(run_parts) > 1 else ""
     from pathlib import Path
+
     if not Path(config_path).exists():
         ctx.output(f"Config not found: {config_path}")
         return CommandResult()
     try:
         from koboi.facade import KoboiAgent
+
         new_agent = KoboiAgent.from_config(config_path)
         if ctx.app is not None:
             # TUI mode: swap agent reference, close old agent
@@ -509,6 +521,7 @@ async def _cmd_run(ctx: CommandContext) -> CommandResult:
             ctx.app.query_one("#header-bar").agent_name = new_agent.config.agent_name
             ctx.app.query_one("#header-bar").model = f"{new_agent.config.provider}/{new_agent.config.model}"
             import asyncio
+
             asyncio.get_event_loop().create_task(old_agent.close())
         else:
             # Console mode: update original agent in-place
@@ -523,6 +536,7 @@ async def _cmd_run(ctx: CommandContext) -> CommandResult:
 
 async def _cmd_kill(ctx: CommandContext) -> CommandResult:
     from koboi.tools.builtin.subagent import get_manager
+
     manager = get_manager()
     if not manager:
         ctx.output("Subagent system not initialized.")
@@ -553,6 +567,7 @@ async def _cmd_subagents(ctx: CommandContext) -> CommandResult:
         ctx.app.action_subagent_monitor()
         return CommandResult()
     from koboi.tools.builtin.subagent import get_manager
+
     manager = get_manager()
     if not manager:
         ctx.output("Subagent system not initialized.")
@@ -573,6 +588,7 @@ async def _cmd_diagnostics(ctx: CommandContext) -> CommandResult:
     from datetime import datetime
     from pathlib import Path
     from koboi.diagnostics import collect_diagnostics
+
     try:
         data = collect_diagnostics(ctx.agent)
         filename = f"diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
@@ -596,6 +612,7 @@ async def _cmd_quit(ctx: CommandContext) -> CommandResult:
 # ---------------------------------------------------------------------------
 # Registry factory
 # ---------------------------------------------------------------------------
+
 
 def build_registry() -> SlashCommandRegistry:
     """Build the default slash command registry with all built-in commands."""

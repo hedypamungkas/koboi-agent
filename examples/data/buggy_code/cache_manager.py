@@ -1,4 +1,5 @@
 """Thread-safe cache manager with TTL-based eviction."""
+
 import time
 import threading
 from typing import Any, Optional
@@ -43,7 +44,7 @@ class CacheManager:
     def _evict_oldest(self) -> None:
         """Evict the oldest cache entry."""
         oldest_key = None
-        oldest_time = float('inf')
+        oldest_time = float("inf")
 
         for key, entry in self._cache.items():
             if entry["timestamp"] < oldest_time:

@@ -1,4 +1,5 @@
 """koboi/tools/builtin/memory -- Persistent key-value memory store."""
+
 from __future__ import annotations
 
 import json

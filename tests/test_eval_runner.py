@@ -1,4 +1,5 @@
 """Tests for koboi/eval/runner.py -- Evaluation runner."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,8 +12,10 @@ from koboi.types import EvalCase, EvalResult, EvalScore, RunResult, TokenUsage
 
 def _make_case(name="test_case", msg="hello", tools=None, keywords=None):
     return EvalCase(
-        name=name, user_message=msg,
-        expected_tools=tools or [], expected_keywords=keywords or [],
+        name=name,
+        user_message=msg,
+        expected_tools=tools or [],
+        expected_keywords=keywords or [],
         max_iterations=5,
     )
 
@@ -119,8 +122,12 @@ class TestEvalRunner:
     def test_format_results_plain(self):
         results = [
             EvalResult(
-                case_name="c1", output="out", scores=[EvalScore("s", 0.8, "ok")],
-                overall_score=0.8, passed=True, duration_seconds=1.5,
+                case_name="c1",
+                output="out",
+                scores=[EvalScore("s", 0.8, "ok")],
+                overall_score=0.8,
+                passed=True,
+                duration_seconds=1.5,
             )
         ]
         text = EvalRunner.format_results_plain(results, threshold=0.6)
@@ -130,8 +137,12 @@ class TestEvalRunner:
     def test_format_results_rich(self):
         results = [
             EvalResult(
-                case_name="c1", output="out", scores=[EvalScore("s", 0.8, "ok")],
-                overall_score=0.8, passed=True, duration_seconds=1.5,
+                case_name="c1",
+                output="out",
+                scores=[EvalScore("s", 0.8, "ok")],
+                overall_score=0.8,
+                passed=True,
+                duration_seconds=1.5,
             )
         ]
         text = EvalRunner.format_results(results, threshold=0.6)

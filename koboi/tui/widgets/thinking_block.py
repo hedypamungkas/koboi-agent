@@ -1,4 +1,5 @@
 """ThinkingBlockWidget -- collapsible thinking/reasoning block."""
+
 from __future__ import annotations
 
 import re

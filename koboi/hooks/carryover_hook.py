@@ -2,6 +2,7 @@
 
 Preserves and updates metadata across context compaction boundaries.
 """
+
 from __future__ import annotations
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent
@@ -74,7 +75,10 @@ class CarryoverHook(Hook):
                 if msg.get("role") == "system" and "<harness-carryover>" in (msg.get("content", "")):
                     return
             # Inject as a system message
-            ctx.messages.insert(1, {
-                "role": "system",
-                "content": carryover_msg,
-            })
+            ctx.messages.insert(
+                1,
+                {
+                    "role": "system",
+                    "content": carryover_msg,
+                },
+            )

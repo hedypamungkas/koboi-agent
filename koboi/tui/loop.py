@@ -1,4 +1,5 @@
 """koboi/tui/loop.py -- Async interactive loop with streaming support."""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,8 +14,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from koboi.events import (
-    CompleteEvent, ErrorEvent, IterationEvent,
-    TextDeltaEvent, ToolCallEvent, ToolResultEvent,
+    CompleteEvent,
+    ErrorEvent,
+    IterationEvent,
+    TextDeltaEvent,
+    ToolCallEvent,
+    ToolResultEvent,
 )
 
 if TYPE_CHECKING:
@@ -38,9 +43,7 @@ async def interactive_loop(
 
     while True:
         try:
-            user_input = await asyncio.to_thread(
-                console.input, "[bold green]You[/bold green] > "
-            )
+            user_input = await asyncio.to_thread(console.input, "[bold green]You[/bold green] > ")
         except (KeyboardInterrupt, EOFError):
             _print_summary(console, turn_count, start_time, agent)
             break
@@ -58,6 +61,7 @@ async def interactive_loop(
             handled = False
             if command_registry is not None:
                 from koboi.tui.commands import CommandContext
+
                 parts = stripped.split(maxsplit=1)
                 cmd_word = parts[0]
                 args = parts[1] if len(parts) > 1 else ""
@@ -76,12 +80,13 @@ async def interactive_loop(
             elif extra_commands:
                 cmd_word = stripped.split()[0]
                 if cmd_word in extra_commands:
-                    args = stripped[len(cmd_word):].strip()
+                    args = stripped[len(cmd_word) :].strip()
                     try:
                         result = extra_commands[cmd_word](agent, console, args)
                     except TypeError:
                         result = extra_commands[cmd_word](agent, console)
                     import asyncio as _aio
+
                     if _aio.iscoroutine(result):
                         result = await result
                     if result and isinstance(result, str):
@@ -116,12 +121,14 @@ async def _stream_response(agent, user_input: str, console: Console, title: str)
                 live.update(Panel(Markdown(text_buffer), title=title, border_style="green"))
 
             elif isinstance(event, ToolCallEvent):
-                live.update(Panel(
-                    Markdown(text_buffer) if text_buffer else "",
-                    subtitle=f"[dim]{event.tool_name}[/dim]",
-                    title=title,
-                    border_style="green",
-                ))
+                live.update(
+                    Panel(
+                        Markdown(text_buffer) if text_buffer else "",
+                        subtitle=f"[dim]{event.tool_name}[/dim]",
+                        title=title,
+                        border_style="green",
+                    )
+                )
 
             elif isinstance(event, ToolResultEvent):
                 pass
@@ -135,11 +142,13 @@ async def _stream_response(agent, user_input: str, console: Console, title: str)
                 live.update(Panel(Markdown(text_buffer), title=title, border_style="green"))
 
             elif isinstance(event, ErrorEvent):
-                live.update(Panel(
-                    f"[red]{event.error}[/red]",
-                    title=title,
-                    border_style="red",
-                ))
+                live.update(
+                    Panel(
+                        f"[red]{event.error}[/red]",
+                        title=title,
+                        border_style="red",
+                    )
+                )
 
 
 def _print_summary(console: Console, turns: int, start_time: float, agent=None) -> None:
@@ -190,7 +199,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         table.add_column("Risk Level")
         for name in sorted(tools_dict.keys()):
             td = tools_dict[name]
-            risk = str(td.risk_level.value) if hasattr(td, 'risk_level') else "safe"
+            risk = str(td.risk_level.value) if hasattr(td, "risk_level") else "safe"
             risk_style = {"safe": "green", "moderate": "yellow", "destructive": "red"}.get(risk, "white")
             table.add_row(name, f"[{risk_style}]{risk}[/{risk_style}]")
         console.print(table)
@@ -204,11 +213,13 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         config_path = parts[0]
         run_message = parts[1] if len(parts) > 1 else ""
         from pathlib import Path
+
         if not Path(config_path).exists():
             console.print(f"[red]Config not found: {config_path}[/red]")
             return
         try:
             from koboi.facade import KoboiAgent
+
             new_agent = KoboiAgent.from_config(config_path)
             agent.replace_from(new_agent)
             console.print(f"[green]Loaded config: {config_path}[/green]")
@@ -224,14 +235,17 @@ def build_slash_commands(agent) -> dict[str, Callable]:
             console.print("[yellow]No context strategy configured.[/yellow]")
             return
         from koboi.tokens import estimate_tokens
+
         messages = core.memory.get_messages()
         tokens_before = estimate_tokens(messages)
         compacted = await core.context_manager.manage(messages, max_tokens=0)
         tokens_after = estimate_tokens(compacted)
         removed = len(messages) - len(compacted)
         core.memory.replace_messages(compacted)
-        console.print(f"[green]Compacted: {len(messages)} -> {len(compacted)} messages "
-                       f"({tokens_before} -> {tokens_after} tokens, {removed} removed)[/green]")
+        console.print(
+            f"[green]Compacted: {len(messages)} -> {len(compacted)} messages "
+            f"({tokens_before} -> {tokens_after} tokens, {removed} removed)[/green]"
+        )
 
     def cmd_model(agent, console, args=""):
         # Resolve client from core or orchestrator
@@ -250,6 +264,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         raw = args.strip()
         try:
             from koboi.client import Client
+
             old_client = client
             # Parse "provider/model" format
             if "/" in raw:
@@ -291,6 +306,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         import os
         import subprocess
         import tempfile
+
         editor = os.environ.get("EDITOR", "vim")
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False) as f:
             f.write("")
@@ -310,6 +326,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
 
     def cmd_undo(agent, console, args=""):
         import subprocess as _sp
+
         n = 1
         if args:
             try:
@@ -321,10 +338,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
             console.print("[yellow]Can only revert 1-10 commits.[/yellow]")
             return
         try:
-            log_result = _sp.run(
-                ["git", "log", f"-{n}", "--oneline"],
-                capture_output=True, text=True, timeout=10
-            )
+            log_result = _sp.run(["git", "log", f"-{n}", "--oneline"], capture_output=True, text=True, timeout=10)
             if log_result.returncode != 0:
                 console.print(f"[red]Git error: {log_result.stderr.strip()}[/red]")
                 return
@@ -335,14 +349,11 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         reverted = 0
         for i in range(n):
             try:
-                result = _sp.run(
-                    ["git", "revert", "HEAD", "--no-edit"],
-                    capture_output=True, text=True, timeout=30
-                )
+                result = _sp.run(["git", "revert", "HEAD", "--no-edit"], capture_output=True, text=True, timeout=30)
                 if result.returncode == 0:
                     reverted += 1
                 else:
-                    console.print(f"[red]Revert failed at commit {i+1}: {result.stderr.strip()}[/red]")
+                    console.print(f"[red]Revert failed at commit {i + 1}: {result.stderr.strip()}[/red]")
                     break
             except Exception as e:
                 console.print(f"[red]Revert error: {e}[/red]")
@@ -362,6 +373,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         copied = False
         try:
             import pyperclip
+
             pyperclip.copy(last_assistant)
             copied = True
         except ImportError:
@@ -369,6 +381,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         if not copied:
             import shutil
             import subprocess as _sp
+
             if shutil.which("pbcopy"):
                 _sp.run(["pbcopy"], input=last_assistant.encode(), check=True)
                 copied = True
@@ -385,6 +398,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         from datetime import datetime
         from pathlib import Path
         from koboi.diagnostics import collect_diagnostics
+
         try:
             data = collect_diagnostics(agent)
             filename = f"diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
@@ -395,23 +409,25 @@ def build_slash_commands(agent) -> dict[str, Callable]:
             console.print(f"[red]Error generating diagnostics: {e}[/red]")
 
     def cmd_help(agent, console):
-        console.print(Panel(
-            "[bold]Commands:[/bold]\n"
-            "  /reset   -- Clear conversation memory\n"
-            "  /info    -- Show agent configuration\n"
-            "  /history -- Show conversation history\n"
-            "  /tools   -- List registered tools\n"
-            "  /run <config> [msg] -- Hot-load a config\n"
-            "  /compact -- Manually compact context window\n"
-            "  /model <name> -- Switch LLM model mid-session\n"
-            "  /editor  -- Open $EDITOR for long messages\n"
-            "  /undo [n] -- Revert last AI commit(s)\n"
-            "  /copy    -- Copy last response to clipboard\n"
-            "  /diagnostics -- Export session diagnostics ZIP\n"
-            "  /help    -- Show this help\n"
-            "  quit     -- Exit the session",
-            title="Help",
-        ))
+        console.print(
+            Panel(
+                "[bold]Commands:[/bold]\n"
+                "  /reset   -- Clear conversation memory\n"
+                "  /info    -- Show agent configuration\n"
+                "  /history -- Show conversation history\n"
+                "  /tools   -- List registered tools\n"
+                "  /run <config> [msg] -- Hot-load a config\n"
+                "  /compact -- Manually compact context window\n"
+                "  /model <name> -- Switch LLM model mid-session\n"
+                "  /editor  -- Open $EDITOR for long messages\n"
+                "  /undo [n] -- Revert last AI commit(s)\n"
+                "  /copy    -- Copy last response to clipboard\n"
+                "  /diagnostics -- Export session diagnostics ZIP\n"
+                "  /help    -- Show this help\n"
+                "  quit     -- Exit the session",
+                title="Help",
+            )
+        )
 
     return {
         "/reset": cmd_reset,

@@ -3,6 +3,7 @@
 Prints subagent dispatch/completion to a Rich Console, useful for
 non-TUI contexts (examples, scripts, CLI).
 """
+
 from __future__ import annotations
 
 from typing import Any

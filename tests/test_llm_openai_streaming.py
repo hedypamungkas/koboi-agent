@@ -1,4 +1,5 @@
 """Tests for OpenAI adapter streaming and uncovered paths."""
+
 from __future__ import annotations
 
 import json
@@ -38,22 +39,30 @@ def _sse_data(data: dict) -> bytes:
 
 class TestOpenAIAdapterComplete:
     async def test_basic_complete(self):
-        transport = MockTransport(post_response={
-            "choices": [{"message": {"content": "Hello!"}}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-        })
+        transport = MockTransport(
+            post_response={
+                "choices": [{"message": {"content": "Hello!"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        )
         adapter = OpenAIAdapter(model="gpt-4o", transport=transport)
         result = await adapter.complete(messages=[{"role": "user", "content": "Hi"}])
         assert result.content == "Hello!"
         assert result.usage.prompt_tokens == 10
 
     async def test_complete_with_tools(self):
-        transport = MockTransport(post_response={
-            "choices": [{"message": {
-                "content": None,
-                "tool_calls": [{"id": "tc1", "function": {"name": "calc", "arguments": '{"x": 1}'}}],
-            }}],
-        })
+        transport = MockTransport(
+            post_response={
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [{"id": "tc1", "function": {"name": "calc", "arguments": '{"x": 1}'}}],
+                        }
+                    }
+                ],
+            }
+        )
         adapter = OpenAIAdapter(model="gpt-4o", transport=transport)
         result = await adapter.complete(
             messages=[{"role": "user", "content": "calc"}],
@@ -63,17 +72,21 @@ class TestOpenAIAdapterComplete:
         assert transport.last_post_body["tool_choice"] == "auto"
 
     async def test_complete_with_temperature(self):
-        transport = MockTransport(post_response={
-            "choices": [{"message": {"content": "ok"}}],
-        })
+        transport = MockTransport(
+            post_response={
+                "choices": [{"message": {"content": "ok"}}],
+            }
+        )
         adapter = OpenAIAdapter(model="gpt-4o", transport=transport, temperature=0.7)
         await adapter.complete(messages=[{"role": "user", "content": "Hi"}])
         assert transport.last_post_body["temperature"] == 0.7
 
     async def test_complete_with_logger(self):
-        transport = MockTransport(post_response={
-            "choices": [{"message": {"content": "ok"}}],
-        })
+        transport = MockTransport(
+            post_response={
+                "choices": [{"message": {"content": "ok"}}],
+            }
+        )
         logger = MagicMock()
         adapter = OpenAIAdapter(model="gpt-4o", transport=transport, logger=logger)
         await adapter.complete(messages=[{"role": "user", "content": "Hi"}])
@@ -82,6 +95,7 @@ class TestOpenAIAdapterComplete:
 
     async def test_complete_bad_response_raises(self):
         from koboi.llm.base import LLMResponseParseError
+
         transport = MockTransport(post_response={"unexpected": "data"})
         adapter = OpenAIAdapter(model="gpt-4o", transport=transport)
         with pytest.raises(LLMResponseParseError):
@@ -104,6 +118,7 @@ class TestOpenAIAdapterStreaming:
             events.append(event)
 
         from koboi.events import TextDeltaEvent, CompleteEvent
+
         text_events = [e for e in events if isinstance(e, TextDeltaEvent)]
         assert len(text_events) == 2
         assert text_events[0].content == "Hello"
@@ -114,15 +129,45 @@ class TestOpenAIAdapterStreaming:
 
     async def test_tool_call_streaming(self):
         lines = [
-            _sse_data({"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "id": "tc1", "function": {"name": "calc"}},
-            ]}}]}),
-            _sse_data({"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "function": {"arguments": '{"x":'}},
-            ]}}]}),
-            _sse_data({"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "function": {"arguments": '1}'}},
-            ]}}]}),
+            _sse_data(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "id": "tc1", "function": {"name": "calc"}},
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
+            _sse_data(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "function": {"arguments": '{"x":'}},
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
+            _sse_data(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "function": {"arguments": "1}"}},
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
             b"data: [DONE]\n",
         ]
         transport = MockTransport(stream_lines=lines)
@@ -133,6 +178,7 @@ class TestOpenAIAdapterStreaming:
             events.append(event)
 
         from koboi.events import ToolCallEvent
+
         tc_events = [e for e in events if isinstance(e, ToolCallEvent)]
         assert len(tc_events) == 1
         assert tc_events[0].tool_name == "calc"
@@ -182,6 +228,7 @@ class TestOpenAIAdapterStreaming:
         async for event in adapter.complete_stream(messages=[{"role": "user", "content": "Hi"}]):
             events.append(event)
         from koboi.events import TextDeltaEvent
+
         assert any(isinstance(e, TextDeltaEvent) for e in events)
 
     async def test_streaming_skips_invalid_json(self):
@@ -196,6 +243,7 @@ class TestOpenAIAdapterStreaming:
         async for event in adapter.complete_stream(messages=[{"role": "user", "content": "Hi"}]):
             events.append(event)
         from koboi.events import TextDeltaEvent
+
         text_events = [e for e in events if isinstance(e, TextDeltaEvent)]
         assert len(text_events) == 1
 
@@ -219,9 +267,11 @@ class TestOpenAIAdapterHelpers:
         assert OpenAIAdapter._parse_usage(None) is None
 
     async def test_get_embeddings_success(self):
-        transport = MockTransport(post_response={
-            "data": [{"embedding": [0.1, 0.2, 0.3]}],
-        })
+        transport = MockTransport(
+            post_response={
+                "data": [{"embedding": [0.1, 0.2, 0.3]}],
+            }
+        )
         adapter = OpenAIAdapter(model="gpt-4o", transport=transport)
         result = await adapter.get_embeddings("test text")
         assert result == [0.1, 0.2, 0.3]

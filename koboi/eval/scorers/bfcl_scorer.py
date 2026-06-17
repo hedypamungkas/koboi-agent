@@ -3,6 +3,7 @@
 Compares actual tool calls against expected tool calls using function name
 matching and argument correctness (structural comparison).
 """
+
 from __future__ import annotations
 
 import json
@@ -41,10 +42,7 @@ class ToolCallingScorer(BaseScorer):
         if not actual_calls:
             tool_calls = context.get("tool_calls", [])
             if tool_calls:
-                actual_calls = [
-                    {"name": tc.name, "arguments": self._parse_args(tc.arguments)}
-                    for tc in tool_calls
-                ]
+                actual_calls = [{"name": tc.name, "arguments": self._parse_args(tc.arguments)} for tc in tool_calls]
 
         if not actual_calls:
             return EvalScore("tool_calling_accuracy", 0.0, "No telemetry or tool calls available")
@@ -55,7 +53,8 @@ class ToolCallingScorer(BaseScorer):
         """Compare expected vs actual tool calls."""
         if not actual and expected:
             return EvalScore(
-                "tool_calling_accuracy", 0.0,
+                "tool_calling_accuracy",
+                0.0,
                 f"Expected {len(expected)} tool calls, got 0",
             )
 
@@ -84,10 +83,7 @@ class ToolCallingScorer(BaseScorer):
         # Composite: 50% name match + 50% argument match
         composite = 0.5 * name_score + 0.5 * avg_arg_score
 
-        details = (
-            f"Names: {name_matches}/{len(expected)} matched, "
-            f"Args: {avg_arg_score:.2f} avg accuracy"
-        )
+        details = f"Names: {name_matches}/{len(expected)} matched, Args: {avg_arg_score:.2f} avg accuracy"
         return EvalScore("tool_calling_accuracy", round(composite, 3), details)
 
     def _compare_args(self, expected: dict, actual: dict) -> float:
@@ -150,19 +146,21 @@ class ToolCallingScorer(BaseScorer):
     def _extract_from_telemetry(telemetry) -> list[dict]:
         """Extract tool calls from telemetry snapshot."""
         calls: list[dict] = []
-        snapshot = getattr(telemetry, 'snapshot', None)
+        snapshot = getattr(telemetry, "snapshot", None)
         if not snapshot:
             return calls
 
         # TelemetryCollector tracks tool calls in iterations
-        iterations = getattr(snapshot, 'iterations', [])
+        iterations = getattr(snapshot, "iterations", [])
         for iteration in iterations:
-            tools = getattr(iteration, 'tools', []) or []
+            tools = getattr(iteration, "tools", []) or []
             for tool in tools:
-                calls.append({
-                    "name": getattr(tool, 'name', ''),
-                    "arguments": getattr(tool, 'arguments', {}),
-                })
+                calls.append(
+                    {
+                        "name": getattr(tool, "name", ""),
+                        "arguments": getattr(tool, "arguments", {}),
+                    }
+                )
 
         return calls
 

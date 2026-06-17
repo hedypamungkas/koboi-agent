@@ -11,6 +11,7 @@ Run:
     python examples/24_config_driven_orchestration.py                  # automatic mode
     python examples/24_config_driven_orchestration.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys
@@ -76,10 +77,10 @@ def run_automatic(verbose: bool):
     for name, ag in orch._agents_map.items():
         # Get keywords from router if available
         keywords = []
-        if hasattr(orch.router, 'keyword_map'):
+        if hasattr(orch.router, "keyword_map"):
             keywords = orch.router.keyword_map.get(name, [])
         kw_str = ", ".join(keywords[:5]) + ("..." if len(keywords) > 5 else "")
-        agent_table.add_row(name, getattr(ag, 'system_prompt', '')[:50] + "...", kw_str)
+        agent_table.add_row(name, getattr(ag, "system_prompt", "")[:50] + "...", kw_str)
 
     console.print(agent_table)
 
@@ -150,10 +151,7 @@ def run_interactive(verbose: bool):
             routing_method = meta.get("routing_method", "unknown")
             agents_used = meta.get("agents_used", [])
 
-            console.print(
-                f"[dim]Routed: {routing_method} -> "
-                f"[cyan]{', '.join(agents_used)}[/cyan][/dim]"
-            )
+            console.print(f"[dim]Routed: {routing_method} -> [cyan]{', '.join(agents_used)}[/cyan][/dim]")
             console.print(
                 Panel(
                     Markdown(result.content),

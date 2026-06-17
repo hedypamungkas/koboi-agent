@@ -1,4 +1,5 @@
 """Shared fixtures for benchmarks."""
+
 import pytest
 from koboi.config import Config
 from koboi.memory import ConversationMemory

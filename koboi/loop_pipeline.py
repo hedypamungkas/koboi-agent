@@ -3,6 +3,7 @@
 Encapsulates the 8-step tool execution flow used by both AgentCore.run()
 and AgentCore.run_stream(), eliminating ~50 lines of duplication.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +32,7 @@ EventCallback = Callable[[str, dict], None]
 @dataclass
 class ToolPipelineResult:
     """Result of processing a single tool call through the pipeline."""
+
     tool_call_id: str
     tool_name: str
     result: str
@@ -88,10 +90,7 @@ class ToolExecutionPipeline:
         """
         self._log(f"tool: {tc.name}({tc.arguments})")
 
-        is_yolo = (
-            self.mode_manager is not None
-            and self.mode_manager.current_mode == AgentMode.YOLO
-        )
+        is_yolo = self.mode_manager is not None and self.mode_manager.current_mode == AgentMode.YOLO
 
         # 1. Rate limiter check (skipped in YOLO mode)
         if not is_yolo and self.rate_limiter:
@@ -101,13 +100,20 @@ class ToolExecutionPipeline:
                 self._audit("rate_limit", tool_name=tc.name, details=rl_result.reason)
                 self.memory.add_tool_result(tc.id, f"Error: {rl_result.reason}")
                 if on_event:
-                    on_event("tool_result", {
-                        "tool_name": tc.name, "tool_call_id": tc.id,
-                        "result": f"Error: {rl_result.reason}",
-                    })
+                    on_event(
+                        "tool_result",
+                        {
+                            "tool_name": tc.name,
+                            "tool_call_id": tc.id,
+                            "result": f"Error: {rl_result.reason}",
+                        },
+                    )
                 return ToolPipelineResult(
-                    tool_call_id=tc.id, tool_name=tc.name,
-                    result=f"Error: {rl_result.reason}", skipped=True, skip_reason="rate_limit",
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result=f"Error: {rl_result.reason}",
+                    skipped=True,
+                    skip_reason="rate_limit",
                 )
             # Record immediately after check passes so subsequent checks
             # see the correct count (prevents off-by-one burst over-limit).
@@ -124,24 +130,42 @@ class ToolExecutionPipeline:
                 approved = self.approval_handler.should_approve(tc.name, tc.arguments, risk)
             if not approved:
                 self._log(f"Tool denied: {tc.name}")
-                self._audit("tool_denied", tool_name=tc.name, arguments=tc.arguments[:200],
-                            risk_level=risk.value, details="Denied by human")
+                self._audit(
+                    "tool_denied",
+                    tool_name=tc.name,
+                    arguments=tc.arguments[:200],
+                    risk_level=risk.value,
+                    details="Denied by human",
+                )
                 self.memory.add_tool_result(tc.id, "Error: Tool execution denied by user")
                 if on_event:
-                    on_event("tool_result", {
-                        "tool_name": tc.name, "tool_call_id": tc.id,
-                        "result": "Error: Denied by user",
-                    })
+                    on_event(
+                        "tool_result",
+                        {
+                            "tool_name": tc.name,
+                            "tool_call_id": tc.id,
+                            "result": "Error: Denied by user",
+                        },
+                    )
                 return ToolPipelineResult(
-                    tool_call_id=tc.id, tool_name=tc.name,
-                    result="Error: Denied by user", skipped=True, skip_reason="denied",
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result="Error: Denied by user",
+                    skipped=True,
+                    skip_reason="denied",
                 )
 
         # 4. PRE_TOOL_USE hook
         if self.hooks:
             from koboi.hooks.chain import HookContext, HookEvent
-            pre_ctx = HookContext(event=HookEvent.PRE_TOOL_USE, agent=None, iteration=iteration,
-                                 tool_name=tc.name, tool_arguments=tc.arguments)
+
+            pre_ctx = HookContext(
+                event=HookEvent.PRE_TOOL_USE,
+                agent=None,
+                iteration=iteration,
+                tool_name=tc.name,
+                tool_arguments=tc.arguments,
+            )
             pre_ctx = await self.hooks.emit(pre_ctx)
             for msg in pre_ctx.inject_messages:
                 self.memory.add_context_message(msg, label="hook_inject")
@@ -150,17 +174,23 @@ class ToolExecutionPipeline:
             if pre_ctx.abort:
                 reason = pre_ctx.inject_message or "Blocked by policy"
                 self._log(f"Tool aborted by policy: {tc.name}")
-                self._audit("policy_denied", tool_name=tc.name, arguments=tc.arguments[:200],
-                            details=reason)
+                self._audit("policy_denied", tool_name=tc.name, arguments=tc.arguments[:200], details=reason)
                 self.memory.add_tool_result(tc.id, f"Error: {reason}")
                 if on_event:
-                    on_event("tool_result", {
-                        "tool_name": tc.name, "tool_call_id": tc.id,
-                        "result": f"Error: {reason}",
-                    })
+                    on_event(
+                        "tool_result",
+                        {
+                            "tool_name": tc.name,
+                            "tool_call_id": tc.id,
+                            "result": f"Error: {reason}",
+                        },
+                    )
                 return ToolPipelineResult(
-                    tool_call_id=tc.id, tool_name=tc.name,
-                    result=f"Error: {reason}", skipped=True, skip_reason="policy_denied",
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result=f"Error: {reason}",
+                    skipped=True,
+                    skip_reason="policy_denied",
                 )
 
             # 5. Mode block check (skipped in YOLO mode)
@@ -169,13 +199,20 @@ class ToolExecutionPipeline:
                 self._log(f"Mode blocked: {tc.name}")
                 self.memory.add_tool_result(tc.id, f"Error: {reason}")
                 if on_event:
-                    on_event("tool_result", {
-                        "tool_name": tc.name, "tool_call_id": tc.id,
-                        "result": f"Error: {reason}",
-                    })
+                    on_event(
+                        "tool_result",
+                        {
+                            "tool_name": tc.name,
+                            "tool_call_id": tc.id,
+                            "result": f"Error: {reason}",
+                        },
+                    )
                 return ToolPipelineResult(
-                    tool_call_id=tc.id, tool_name=tc.name,
-                    result=f"Error: {reason}", skipped=True, skip_reason="mode_blocked",
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result=f"Error: {reason}",
+                    skipped=True,
+                    skip_reason="mode_blocked",
                 )
 
         # 6. Execute tool
@@ -184,8 +221,15 @@ class ToolExecutionPipeline:
         # 7. POST_TOOL_USE hook
         if self.hooks:
             from koboi.hooks.chain import HookContext, HookEvent
-            post_ctx = HookContext(event=HookEvent.POST_TOOL_USE, agent=None, iteration=iteration,
-                                  tool_name=tc.name, tool_arguments=tc.arguments, tool_result=tool_result)
+
+            post_ctx = HookContext(
+                event=HookEvent.POST_TOOL_USE,
+                agent=None,
+                iteration=iteration,
+                tool_name=tc.name,
+                tool_arguments=tc.arguments,
+                tool_result=tool_result,
+            )
             post_ctx = await self.hooks.emit(post_ctx)
             for msg in post_ctx.inject_messages:
                 self.memory.add_context_message(msg, label="hook_inject")
@@ -194,15 +238,26 @@ class ToolExecutionPipeline:
         self._log(f"tool result: {tool_result[:200]}")
         self.memory.add_tool_result(tc.id, tool_result)
 
-        self._audit("tool_execute", tool_name=tc.name, arguments=tc.arguments[:200],
-                    result=tool_result[:200], risk_level=risk.value)
+        self._audit(
+            "tool_execute",
+            tool_name=tc.name,
+            arguments=tc.arguments[:200],
+            result=tool_result[:200],
+            risk_level=risk.value,
+        )
 
         if on_event:
-            on_event("tool_result", {
-                "tool_name": tc.name, "tool_call_id": tc.id,
-                "result": tool_result,
-            })
+            on_event(
+                "tool_result",
+                {
+                    "tool_name": tc.name,
+                    "tool_call_id": tc.id,
+                    "result": tool_result,
+                },
+            )
 
         return ToolPipelineResult(
-            tool_call_id=tc.id, tool_name=tc.name, result=tool_result,
+            tool_call_id=tc.id,
+            tool_name=tc.name,
+            result=tool_result,
         )

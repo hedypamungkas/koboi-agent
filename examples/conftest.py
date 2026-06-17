@@ -8,6 +8,7 @@ Provides dual-mode utilities:
 - automatic_batch: predefined questions loop with Rich UI
 - interactive_loop: free chat loop with Prompt.ask (wraps koboi.tui.loop)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -91,6 +92,7 @@ def sample_path(filename: str) -> Path:
 # Dual-mode helpers
 # ---------------------------------------------------------------------------
 
+
 def dual_mode_options(func):
     """Decorator: adds --mode and --verbose flags to a click command.
 
@@ -102,10 +104,14 @@ def dual_mode_options(func):
             ...
     """
     func = click.option(
-        "--verbose", "-v", is_flag=True, help="Show debug output",
+        "--verbose",
+        "-v",
+        is_flag=True,
+        help="Show debug output",
     )(func)
     func = click.option(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         type=click.Choice(["automatic", "interactive"]),
         default="automatic",
         help="Run mode (default: automatic)",
@@ -166,10 +172,13 @@ def interactive_loop(
         if extra_commands:
             adapted = {}
             for key, fn in extra_commands.items():
+
                 def _wrap(f=fn):
                     def wrapper(a, c):
                         return f(a)
+
                     return wrapper
+
                 adapted[key] = _wrap(fn)
 
         run_async(_tui_loop(agent, console, title=title, extra_commands=adapted))

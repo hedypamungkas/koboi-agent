@@ -1,4 +1,5 @@
 """CommandPaletteScreen -- Ctrl+P command palette overlay."""
+
 from __future__ import annotations
 
 from typing import Optional

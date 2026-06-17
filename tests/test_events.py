@@ -1,4 +1,5 @@
 """Tests for koboi/events.py -- StreamEvent types."""
+
 from __future__ import annotations
 
 from koboi.events import (
@@ -43,6 +44,7 @@ class TestStreamEvents:
 
     def test_complete_with_response(self):
         from koboi.types import AgentResponse
+
         resp = AgentResponse(content="ok", tool_calls=[], usage=None)
         e = CompleteEvent(response=resp)
         assert e.response.content == "ok"
@@ -80,6 +82,7 @@ class TestCompleteEventEnrichment:
 
     def test_all_enriched_fields(self):
         from koboi.types import AgentResponse
+
         resp = AgentResponse(content="result", tool_calls=[], usage=None)
         e = CompleteEvent(
             response=resp,

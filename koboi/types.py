@@ -1,4 +1,5 @@
 """koboi/types -- Core data types and dataclasses for the koboi framework."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -118,6 +119,7 @@ class AgentBlueprint:
 @dataclass
 class AgentDef:
     """Config-level definition of a single agent for orchestration."""
+
     name: str
     system_prompt: str = ""
     description: str = ""

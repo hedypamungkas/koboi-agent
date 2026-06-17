@@ -28,6 +28,7 @@ Run:
     python examples/23_swe_bug_hunter.py --run-mode eval                # eval suite
     python examples/23_swe_bug_hunter.py -m interactive --run-mode bug_hunt -v
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,6 +60,7 @@ from koboi.eval.scorers import BaseScorer  # noqa: E402
 # ---------------------------------------------------------------------------
 # Custom Hooks
 # ---------------------------------------------------------------------------
+
 
 class BugTrackerHook(Hook):
     """Tracks bugs found during analysis sessions.
@@ -107,8 +109,13 @@ class BugTrackerHook(Hook):
         re.compile(r"^\(?(?:off-by-one|silent|division|race|float)", re.IGNORECASE),
         re.compile(r"^\(?(?:no\s|missing\s|unvalidated)", re.IGNORECASE),
         re.compile(r"→\s*(?:attacker|user|malicious|adversary|exploit|Bug|P[0-3])", re.IGNORECASE),
-        re.compile(r"(?:attacker|adversary)\s+(?:can|gains|manipulates|injects|bypasses|executes|overwrites)", re.IGNORECASE),
-        re.compile(r"^\*\*(?:Wrap|Fix|Remove|Use|Evict|Apply|Implement|Clamp|Replace|Update|Introduce|Refactor|Ensure|Avoid|Set|Return|Check|Validate)\b", re.IGNORECASE),
+        re.compile(
+            r"(?:attacker|adversary)\s+(?:can|gains|manipulates|injects|bypasses|executes|overwrites)", re.IGNORECASE
+        ),
+        re.compile(
+            r"^\*\*(?:Wrap|Fix|Remove|Use|Evict|Apply|Implement|Clamp|Replace|Update|Introduce|Refactor|Ensure|Avoid|Set|Return|Check|Validate)\b",
+            re.IGNORECASE,
+        ),
         re.compile(r"^\*\*(?:I |Common |Categories |My |Our |The analysis|This )", re.IGNORECASE),
     ]
     # Section headers that indicate FIX recommendations, not bugs
@@ -123,7 +130,7 @@ class BugTrackerHook(Hook):
         re.compile(r"Top\s+Recommendations?\b", re.IGNORECASE),
     ]
     # Structural break that ends a fix section
-    _SECTION_BREAK = re.compile(r'\n(?:─{3,}|-{3,}|#{1,4}\s)', re.MULTILINE)
+    _SECTION_BREAK = re.compile(r"\n(?:─{3,}|-{3,}|#{1,4}\s)", re.MULTILINE)
     FILE_PATTERN = re.compile(r"(\w+\.py)(?::(\d+))?")
     LINE_PATTERN = re.compile(r"(?:Line|line)\s+#?(\d+)")
     TABLE_ROW_PATTERN = re.compile(r"^\s*(\d+(?:[–-]\d+)?)\s{2,}(.+?)\s{2,}P[0-3]", re.MULTILINE)
@@ -152,11 +159,19 @@ class BugTrackerHook(Hook):
         return ctx
 
     _SEV_WORD_TO_LEVEL = {
-        "critical": "P0", "high": "P1", "medium": "P2", "low": "P3",
+        "critical": "P0",
+        "high": "P1",
+        "medium": "P2",
+        "low": "P3",
     }
     _EMOJI_TO_LEVEL = {
-        "🔴": "P0", "🟠": "P1", "🟡": "P2", "🟢": "P3",
-        "⚠️": "P1", "🐛": "P2", "🔵": "P3",
+        "🔴": "P0",
+        "🟠": "P1",
+        "🟡": "P2",
+        "🟢": "P3",
+        "⚠️": "P1",
+        "🐛": "P2",
+        "🔵": "P3",
     }
 
     def _build_severity_map(self, text: str) -> list[tuple[int, str]]:
@@ -164,12 +179,14 @@ class BugTrackerHook(Hook):
         sections: list[tuple[int, str]] = []
         for m in re.finditer(
             r"Severity:\s*(?:[🔴🟠🟡🟢⚠️🐛🔵])?\s*(CRITICAL|HIGH|MEDIUM|LOW)",
-            text, re.IGNORECASE,
+            text,
+            re.IGNORECASE,
         ):
             sections.append((m.start(), self._SEV_WORD_TO_LEVEL.get(m.group(1).lower(), "unclassified")))
         for m in re.finditer(
             r"([🔴🟠🟡🟢⚠️🐛🔵])\s*(Critical|High|Medium|Low|Info|Warning)\s+Bugs?",
-            text, re.IGNORECASE | re.MULTILINE,
+            text,
+            re.IGNORECASE | re.MULTILINE,
         ):
             sections.append((m.start(), self._EMOJI_TO_LEVEL.get(m.group(1), "unclassified")))
         sections.sort(key=lambda x: x[0])
@@ -191,7 +208,8 @@ class BugTrackerHook(Hook):
         mapping: dict[int, str] = {}
         for m in re.finditer(
             r"^\s*(\d+)\s+([🔴🟠🟡🟢⚠️🐛🔵])\s*(Critical|High|Medium|Low|Info|Warning)",
-            text, re.IGNORECASE | re.MULTILINE,
+            text,
+            re.IGNORECASE | re.MULTILINE,
         ):
             bug_num = int(m.group(1))
             emoji = m.group(2)
@@ -225,19 +243,21 @@ class BugTrackerHook(Hook):
             if dedup_key in self._seen_keys or len(description) < 10:
                 continue
             self._seen_keys.add(dedup_key)
-            window = text[max(0, match.start() - 300):min(len(text), match.end() + 300)]
+            window = text[max(0, match.start() - 300) : min(len(text), match.end() + 300)]
             file_match = self.FILE_PATTERN.search(window)
             # Extract severity from the P[0-3] in the table row
             sev_match = re.search(r"P([0-3])", match.group(0))
             severity = f"P{sev_match.group(1)}" if sev_match else "unclassified"
-            self._bugs.append({
-                "description": description,
-                "file": file_match.group(1) if file_match else None,
-                "line": int(line_str) if line_str.isdigit() else None,
-                "severity": severity,
-                "source": source,
-                "found_at": time.time(),
-            })
+            self._bugs.append(
+                {
+                    "description": description,
+                    "file": file_match.group(1) if file_match else None,
+                    "line": int(line_str) if line_str.isdigit() else None,
+                    "severity": severity,
+                    "source": source,
+                    "found_at": time.time(),
+                }
+            )
 
         # Phase 2: regex patterns
         for pattern in self.BUG_PATTERNS:
@@ -269,7 +289,7 @@ class BugTrackerHook(Hook):
                     line_num = int(line_match.group(1))
                 # Infer severity: P-level → emoji → section header → table → keywords
                 severity = "unclassified"
-                match_line = text[max(0, match.start() - 5):match.end()]
+                match_line = text[max(0, match.start() - 5) : match.end()]
                 sev_level_match = re.search(r"\bP([0-3])\b", match_line)
                 if sev_level_match:
                     severity = f"P{sev_level_match.group(1)}"
@@ -292,14 +312,16 @@ class BugTrackerHook(Hook):
                         if kw in context_lower:
                             severity = level
                             break
-                self._bugs.append({
-                    "description": description,
-                    "file": file_name,
-                    "line": line_num,
-                    "severity": severity,
-                    "source": source,
-                    "found_at": time.time(),
-                })
+                self._bugs.append(
+                    {
+                        "description": description,
+                        "file": file_name,
+                        "line": line_num,
+                        "severity": severity,
+                        "source": source,
+                        "found_at": time.time(),
+                    }
+                )
 
     @property
     def bugs(self) -> list[dict]:
@@ -316,8 +338,7 @@ class BugTrackerHook(Hook):
             "files_affected": list({b["file"] for b in self._bugs if b.get("file")}),
             "severity_counts": sev_counts,
             "by_source": {
-                s: len([b for b in self._bugs if b["source"] == s])
-                for s in {b["source"] for b in self._bugs}
+                s: len([b for b in self._bugs if b["source"] == s]) for s in {b["source"] for b in self._bugs}
             },
         }
 
@@ -330,12 +351,33 @@ class SeverityAssessmentHook(Hook):
     """
 
     SEVERITY_MAP = {
-        "P0": ["critical", "security vulnerability", "injection", "data breach",
-                "hardcoded secret", "remote code execution"],
-        "P1": ["high", "logic error", "race condition", "resource leak",
-                "off-by-one", "division by zero", "null pointer", "key error"],
-        "P2": ["medium", "precision", "rounding", "missing validation",
-                "swallowed exception", "edge case", "floating point"],
+        "P0": [
+            "critical",
+            "security vulnerability",
+            "injection",
+            "data breach",
+            "hardcoded secret",
+            "remote code execution",
+        ],
+        "P1": [
+            "high",
+            "logic error",
+            "race condition",
+            "resource leak",
+            "off-by-one",
+            "division by zero",
+            "null pointer",
+            "key error",
+        ],
+        "P2": [
+            "medium",
+            "precision",
+            "rounding",
+            "missing validation",
+            "swallowed exception",
+            "edge case",
+            "floating point",
+        ],
         "P3": ["low", "cosmetic", "style", "naming", "documentation"],
     }
 
@@ -361,7 +403,12 @@ class SeverityAssessmentHook(Hook):
         return ctx
 
     _EMOJI_SEV_MAP = {
-        "🔴": "P0", "🟠": "P1", "🟡": "P2", "🟢": "P3", "⚠️": "P1", "🐛": "P2",
+        "🔴": "P0",
+        "🟠": "P1",
+        "🟡": "P2",
+        "🟢": "P3",
+        "⚠️": "P1",
+        "🐛": "P2",
     }
 
     def classify(self, output: str) -> dict[str, list[str]]:
@@ -380,14 +427,18 @@ class SeverityAssessmentHook(Hook):
         if not has_explicit:
             # Pass 2: emoji + severity word/level: 🔴 CRITICAL — Title or 🔴 P0 — Title
             emoji_sev_word = {
-                "🔴": "P0", "🟠": "P1", "🟡": "P2", "🟢": "P3",
-                "⚠️": "P1", "🐛": "P2",
+                "🔴": "P0",
+                "🟠": "P1",
+                "🟡": "P2",
+                "🟢": "P3",
+                "⚠️": "P1",
+                "🐛": "P2",
             }
-            sev_words = {"CRITICAL": "P0", "HIGH": "P1", "MEDIUM": "P2", "LOW": "P3",
-                         "WARNING": "P1", "INFO": "P3"}
+            sev_words = {"CRITICAL": "P0", "HIGH": "P1", "MEDIUM": "P2", "LOW": "P3", "WARNING": "P1", "INFO": "P3"}
             for match in re.finditer(
                 r"(🔴|🟠|🟡|🟢|⚠️|🐛)\s*(?:CRITICAL|HIGH|MEDIUM|LOW|INFO|WARNING|P[0-3])?\s*[—–:.-]\s*(.+?)(?:\n|$)",
-                output, re.IGNORECASE
+                output,
+                re.IGNORECASE,
             ):
                 emoji = match.group(1)
                 desc = match.group(2).strip()[:150]
@@ -434,8 +485,7 @@ class CodeAnalysisHook(Hook):
         self._file_sources: dict[str, str] = {}
 
     def handles(self) -> list[HookEvent]:
-        return [HookEvent.SESSION_START, HookEvent.PRE_TOOL_USE,
-                HookEvent.POST_TOOL_USE, HookEvent.SESSION_END]
+        return [HookEvent.SESSION_START, HookEvent.PRE_TOOL_USE, HookEvent.POST_TOOL_USE, HookEvent.SESSION_END]
 
     async def execute(self, ctx: HookContext) -> HookContext:
         if ctx.event == HookEvent.SESSION_START:
@@ -518,16 +568,39 @@ Output structured fix proposals with before/after code snippets."""
 
 AUDIT_KEYWORDS = {
     "static_analyzer": [
-        "analyze", "scan", "find bugs", "static", "review", "audit",
-        "check", "inspect", "examine", "look for", "vulnerability", "security",
+        "analyze",
+        "scan",
+        "find bugs",
+        "static",
+        "review",
+        "audit",
+        "check",
+        "inspect",
+        "examine",
+        "look for",
+        "vulnerability",
+        "security",
     ],
     "test_generator": [
-        "test", "generate test", "unit test", "pytest", "test case",
-        "write test", "coverage", "expose bug",
+        "test",
+        "generate test",
+        "unit test",
+        "pytest",
+        "test case",
+        "write test",
+        "coverage",
+        "expose bug",
     ],
     "fix_proposer": [
-        "fix", "repair", "patch", "resolve", "correct", "solution",
-        "suggestion", "how to fix", "proposal",
+        "fix",
+        "repair",
+        "patch",
+        "resolve",
+        "correct",
+        "solution",
+        "suggestion",
+        "how to fix",
+        "proposal",
     ],
 }
 
@@ -535,6 +608,7 @@ AUDIT_KEYWORDS = {
 # ---------------------------------------------------------------------------
 # Orchestrated Audit Mode
 # ---------------------------------------------------------------------------
+
 
 def _build_audit_orchestrator():
     """Create Orchestrator with specialist agents for audit mode."""
@@ -569,8 +643,7 @@ def _build_audit_orchestrator():
     def _make_agent(system_prompt: str) -> AgentCore:
         registry = ToolRegistry()
         register_all(registry)
-        registry.keep_only(["read_file", "grep_search", "run_shell", "calculate",
-                            "memory_store", "memory_recall"])
+        registry.keep_only(["read_file", "grep_search", "run_shell", "calculate", "memory_store", "memory_recall"])
         aug = OnTheFlyAugmentation(retriever=retriever, top_k=5, logger=logger) if retriever else None
         return AgentCore(
             client=client,
@@ -614,6 +687,7 @@ def _build_audit_orchestrator():
                     answer = await agent.run(query)
                 except Exception as e:
                     import logging
+
                     logging.getLogger(__name__).error("Agent %s failed: %s", agent_name, e, exc_info=True)
                     answer = f"Error: {e}"
                     failed = True
@@ -643,6 +717,7 @@ def _build_audit_orchestrator():
 # Custom Eval Scorers
 # ---------------------------------------------------------------------------
 
+
 class BugDetectionScorer(BaseScorer):
     """Scores whether the output contains structured bug reports."""
 
@@ -658,6 +733,7 @@ class BugDetectionScorer(BaseScorer):
 
     async def score(self, case, output: str, context: dict):
         from koboi.types import EvalScore
+
         matched = sum(1 for p in self.PATTERNS.values() if p.search(output))
         ratio = matched / len(self.PATTERNS)
         details = [name for name, p in self.PATTERNS.items() if p.search(output)]
@@ -673,6 +749,7 @@ class SeverityAccuracyScorer(BaseScorer):
 
     async def score(self, case, output: str, context: dict):
         from koboi.types import EvalScore
+
         p_counts = {}
         for level in ["P0", "P1", "P2", "P3"]:
             matches = re.findall(rf"\b{level}\b", output, re.IGNORECASE)
@@ -700,6 +777,7 @@ class CodeReferenceScorer(BaseScorer):
 
     async def score(self, case, output: str, context: dict):
         from koboi.types import EvalScore
+
         file_matches = set(self.FILE_REFS.findall(output))
         line_from_file = set(self.FILE_LINE.findall(output))
         line_from_text = self.LINE_NUM.findall(output)
@@ -722,6 +800,7 @@ class GroundTruthScorer(BaseScorer):
         if self._known_bugs is not None:
             return self._known_bugs
         from pathlib import Path
+
         bugs_file = Path(__file__).parent / "data" / "buggy_code" / "KNOWN_BUGS.md"
         if not bugs_file.exists():
             return []
@@ -743,6 +822,7 @@ class GroundTruthScorer(BaseScorer):
 
     async def score(self, case, output: str, context: dict):
         from koboi.types import EvalScore
+
         known = self._load_known_bugs()
         if not known:
             return EvalScore("ground_truth", 0.5, "No ground truth data available")
@@ -758,6 +838,7 @@ class GroundTruthScorer(BaseScorer):
 # ---------------------------------------------------------------------------
 # Eval Suite Builder
 # ---------------------------------------------------------------------------
+
 
 def _build_eval_cases():
     """Build 6 evaluation test cases for bug-hunting scenarios."""
@@ -812,10 +893,13 @@ def _build_eval_cases():
 def _build_scorers(client):
     """Build custom + built-in scorers for the eval suite."""
     from koboi.eval.scorers import (
-        ToolUsageScorer, KeywordPresenceScorer,
-        OutputLengthScorer, IterationEfficiencyScorer,
+        ToolUsageScorer,
+        KeywordPresenceScorer,
+        OutputLengthScorer,
+        IterationEfficiencyScorer,
         LLMJudgeScorer,
     )
+
     return [
         BugDetectionScorer(),
         SeverityAccuracyScorer(),
@@ -833,14 +917,14 @@ def _build_scorers(client):
 # Display Helpers
 # ---------------------------------------------------------------------------
 
+
 def _print_bug_summary(bug_tracker: BugTrackerHook) -> None:
     summary = bug_tracker.summary
     if summary["total_bugs"] == 0:
         console.print("  [dim]No bugs tracked yet[/dim]\n")
         return
 
-    table = Table(title=f"Bug Tracker ({summary['total_bugs']} found)", show_header=True,
-                  header_style="bold yellow")
+    table = Table(title=f"Bug Tracker ({summary['total_bugs']} found)", show_header=True, header_style="bold yellow")
     table.add_column("File", style="cyan", width=20)
     table.add_column("Line", width=6)
     table.add_column("Description", style="dim", ratio=1)
@@ -900,9 +984,7 @@ def _print_hooks(agent) -> None:
 
 
 def _find_telemetry(agent):
-    hook = agent.core.hooks.find_hook(
-        lambda h: hasattr(h, "telemetry") and hasattr(h.telemetry, "snapshot")
-    )
+    hook = agent.core.hooks.find_hook(lambda h: hasattr(h, "telemetry") and hasattr(h.telemetry, "snapshot"))
     return hook.telemetry if hook else None
 
 
@@ -933,9 +1015,11 @@ def run_bug_hunt_automatic(agent, bug_tracker, severity, analysis):
         telemetry = _find_telemetry(agent)
         if telemetry:
             snap = telemetry.snapshot
-            console.print(f"  [dim]telemetry: iters={snap.total_iterations} "
-                         f"tools={snap.total_tool_calls} "
-                         f"health={telemetry.health_score():.0f}[/dim]\n")
+            console.print(
+                f"  [dim]telemetry: iters={snap.total_iterations} "
+                f"tools={snap.total_tool_calls} "
+                f"health={telemetry.health_score():.0f}[/dim]\n"
+            )
 
     automatic_batch(agent, HUNT_QUESTIONS, post_answer=_post_answer)
 
@@ -990,13 +1074,15 @@ def run_bug_hunt_interactive(agent, bug_tracker, severity, analysis):
         post_receive=_post_receive,
     )
 
-    console.print(Panel(
-        f"Messages: {messages}\n"
-        f"Bugs Found: {bug_tracker.summary['total_bugs']}\n"
-        f"Files Scanned: {analysis.coverage['files_count']}",
-        title="Session Summary",
-        border_style="green",
-    ))
+    console.print(
+        Panel(
+            f"Messages: {messages}\n"
+            f"Bugs Found: {bug_tracker.summary['total_bugs']}\n"
+            f"Files Scanned: {analysis.coverage['files_count']}",
+            title="Session Summary",
+            border_style="green",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1025,8 +1111,10 @@ def run_audit_automatic():
     for q in AUDIT_QUERIES:
         decision = run_async(router.route(q))
         route_table.add_row(
-            q[:50], ", ".join(decision.agents),
-            f"{decision.confidence:.2f}", decision.method,
+            q[:50],
+            ", ".join(decision.agents),
+            f"{decision.confidence:.2f}",
+            decision.method,
         )
     console.print(route_table)
     console.print()
@@ -1036,17 +1124,22 @@ def run_audit_automatic():
         console.rule(f"[bold]Audit {i}: {q}[/bold]")
         try:
             result = run_async(orchestrator.run(q, mode="sequential"))
-            console.print(f"  Routing: {result.routing.method} -> "
-                         f"[cyan]{result.routing.agents}[/cyan] "
-                         f"(confidence: {result.routing.confidence:.2f})")
+            console.print(
+                f"  Routing: {result.routing.method} -> "
+                f"[cyan]{result.routing.agents}[/cyan] "
+                f"(confidence: {result.routing.confidence:.2f})"
+            )
             for ar in result.agent_results:
                 status = "[red]FAILED[/red]" if ar.failed else "[green]OK[/green]"
-                console.print(f"  Agent [cyan]{ar.agent_name}[/cyan]: "
-                             f"{ar.elapsed_seconds:.1f}s, {ar.tokens_used} tokens {status}")
-            console.print(Panel(
-                Markdown(result.final_answer[:2000]),
-                title=f"Synthesized Answer ({result.total_elapsed_seconds:.1f}s)",
-            ))
+                console.print(
+                    f"  Agent [cyan]{ar.agent_name}[/cyan]: {ar.elapsed_seconds:.1f}s, {ar.tokens_used} tokens {status}"
+                )
+            console.print(
+                Panel(
+                    Markdown(result.final_answer[:2000]),
+                    title=f"Synthesized Answer ({result.total_elapsed_seconds:.1f}s)",
+                )
+            )
         except Exception as e:
             console.print(f"  [red]Error: {e}[/red]")
         console.print()
@@ -1074,17 +1167,21 @@ def run_audit_interactive():
             continue
 
         decision = run_async(router.route(user_input))
-        console.print(f"[dim]Routed: {decision.method} -> "
-                     f"[cyan]{', '.join(decision.agents)}[/cyan] "
-                     f"(confidence: {decision.confidence:.2f})[/dim]")
+        console.print(
+            f"[dim]Routed: {decision.method} -> "
+            f"[cyan]{', '.join(decision.agents)}[/cyan] "
+            f"(confidence: {decision.confidence:.2f})[/dim]"
+        )
 
         try:
             result = run_async(orchestrator.run(user_input, mode="sequential"))
-            console.print(Panel(
-                Markdown(result.final_answer[:2000]),
-                title="Audit Result",
-                border_style="green",
-            ))
+            console.print(
+                Panel(
+                    Markdown(result.final_answer[:2000]),
+                    title="Audit Result",
+                    border_style="green",
+                )
+            )
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
 
@@ -1092,6 +1189,7 @@ def run_audit_interactive():
 # ---------------------------------------------------------------------------
 # Eval Mode
 # ---------------------------------------------------------------------------
+
 
 def run_eval(verbose: bool):
     """Run the full evaluation suite."""
@@ -1104,8 +1202,7 @@ def run_eval(verbose: bool):
     scorers = _build_scorers(agent.core.client)
 
     # Show test cases
-    case_table = Table(title="Bug Hunter Eval Cases", show_header=True,
-                       header_style="bold cyan")
+    case_table = Table(title="Bug Hunter Eval Cases", show_header=True, header_style="bold cyan")
     case_table.add_column("#", width=3)
     case_table.add_column("Name", style="cyan", width=25)
     case_table.add_column("Query", ratio=1)
@@ -1113,7 +1210,9 @@ def run_eval(verbose: bool):
 
     for i, c in enumerate(cases, 1):
         case_table.add_row(
-            str(i), c.name, c.user_message[:60],
+            str(i),
+            c.name,
+            c.user_message[:60],
             ", ".join(c.expected_keywords[:3]),
         )
     console.print(case_table)
@@ -1133,8 +1232,9 @@ def run_eval(verbose: bool):
         status = "PASS" if r.overall_score >= 0.6 else "FAIL"
         border = "green" if r.overall_score >= 0.6 else "red"
 
-        detail_table = Table(show_header=True, header_style="bold",
-                             title=f"[{status}] {r.case_name} -- {r.overall_score:.1%}")
+        detail_table = Table(
+            show_header=True, header_style="bold", title=f"[{status}] {r.case_name} -- {r.overall_score:.1%}"
+        )
         detail_table.add_column("Scorer", style="cyan", width=22)
         detail_table.add_column("Score", width=8)
         detail_table.add_column("Reason", style="dim", ratio=1)
@@ -1151,19 +1251,22 @@ def run_eval(verbose: bool):
     passed = sum(1 for r in results if r.overall_score >= 0.6)
     avg = sum(r.overall_score for r in results) / total if total else 0
 
-    console.print(Panel(
-        f"[bold]Evaluation Summary[/bold]\n\n"
-        f"Passed: {passed}/{total}\n"
-        f"Average Score: {avg:.1%}\n"
-        f"Total Duration: {sum(r.duration_seconds for r in results):.1f}s",
-        title="Bug Hunter Eval",
-        border_style="green" if passed == total else "yellow",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Evaluation Summary[/bold]\n\n"
+            f"Passed: {passed}/{total}\n"
+            f"Average Score: {avg:.1%}\n"
+            f"Total Duration: {sum(r.duration_seconds for r in results):.1f}s",
+            title="Bug Hunter Eval",
+            border_style="green" if passed == total else "yellow",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Stress Mode (guardrails, policy, rate limits)
 # ---------------------------------------------------------------------------
+
 
 def run_stress(verbose: bool):
     """Run guardrail and policy stress tests."""
@@ -1182,16 +1285,19 @@ def run_stress(verbose: bool):
 
     import yaml
     from koboi.types import EvalCase
+
     raw = yaml.safe_load(stress_file.read_text())
     cases = []
     for c in raw.get("cases", []):
-        cases.append(EvalCase(
-            name=c["name"],
-            user_message=c["input"],
-            expected_keywords=c.get("expected_keywords", []),
-            expected_tools=c.get("expected_tools", []),
-            max_iterations=c.get("max_iterations", 5),
-        ))
+        cases.append(
+            EvalCase(
+                name=c["name"],
+                user_message=c["input"],
+                expected_keywords=c.get("expected_keywords", []),
+                expected_tools=c.get("expected_tools", []),
+                max_iterations=c.get("max_iterations", 5),
+            )
+        )
 
     case_table = Table(title="Guardrail Stress Cases", show_header=True, header_style="bold yellow")
     case_table.add_column("#", width=3)
@@ -1211,8 +1317,10 @@ def run_stress(verbose: bool):
 
     for r in results:
         border = "yellow" if r.overall_score >= 0.3 else "red"
-        console.print(f"  [{border}]{'PASS' if r.overall_score >= 0.3 else 'FAIL'}[/{border}] "
-                      f"{r.case_name} -- {r.overall_score:.1%}")
+        console.print(
+            f"  [{border}]{'PASS' if r.overall_score >= 0.3 else 'FAIL'}[/{border}] "
+            f"{r.case_name} -- {r.overall_score:.1%}"
+        )
     console.print()
 
 
@@ -1220,10 +1328,12 @@ def run_stress(verbose: bool):
 # Main Entry Point
 # ---------------------------------------------------------------------------
 
+
 @click.command()
 @dual_mode_options
 @click.option(
-    "--run-mode", "-r",
+    "--run-mode",
+    "-r",
     type=click.Choice(["bug_hunt", "audit", "eval", "stress"]),
     default="bug_hunt",
     help="Run mode: bug_hunt (single agent), audit (orchestrated), eval (evaluation suite), stress (guardrail stress test)",

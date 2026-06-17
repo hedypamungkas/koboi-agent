@@ -9,6 +9,7 @@ Run:
     python examples/02_tool_use_single.py                  # automatic mode
     python examples/02_tool_use_single.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -50,9 +51,7 @@ def print_memory_summary(agent) -> None:
         tool_calls = msg.get("tool_calls")
         tc_str = ""
         if tool_calls:
-            tc_str = ", ".join(
-                tc.get("function", {}).get("name", "?") for tc in tool_calls
-            )
+            tc_str = ", ".join(tc.get("function", {}).get("name", "?") for tc in tool_calls)
         table.add_row(str(idx), role, content or "(empty)", tc_str)
 
     console.print(table)
@@ -84,7 +83,8 @@ def main(mode: str, verbose: bool):
         interactive_loop(agent)
     else:
         automatic_batch(
-            agent, QUESTIONS,
+            agent,
+            QUESTIONS,
             final_summary=lambda a, _: print_memory_summary(a),
         )
 

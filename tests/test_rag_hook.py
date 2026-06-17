@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/rag_hook.py — RAGHook (0% → >85%)."""
+
 from __future__ import annotations
 
 import pytest
@@ -159,7 +160,7 @@ class TestRAGHook:
     async def test_rag_results_with_special_characters(self):
         """RAG results with special characters should be handled."""
         hook = RAGHook(strategy="prepend")
-        rag_results = ["Content with <tags> & \"quotes\""]
+        rag_results = ['Content with <tags> & "quotes"']
         ctx = HookContext(
             event=HookEvent.POST_COMPACT,
             messages=[{"role": "user", "content": "Query"}],
@@ -167,7 +168,7 @@ class TestRAGHook:
         ctx.metadata["rag_results"] = rag_results
         result = await hook.execute(ctx)
         augmentation = result.metadata["rag_augmentation"]
-        assert "Content with <tags> & \"quotes\"" in augmentation
+        assert 'Content with <tags> & "quotes"' in augmentation
 
     async def test_strategy_lowercase_normalization(self):
         """Strategy should be stored as-is (case sensitive)."""

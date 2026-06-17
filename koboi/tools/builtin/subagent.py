@@ -1,4 +1,5 @@
 """koboi/tools/builtin/subagent.py -- delegate_tasks tool for spawning subagents."""
+
 from __future__ import annotations
 
 
@@ -72,10 +73,6 @@ async def delegate_tasks(tasks: list[dict], _deps: dict | None = None) -> str:
     parts = []
     for r in results:
         status = "OK" if r.success else f"FAILED: {r.error}"
-        parts.append(
-            f"[{r.label}] ({status}, {r.elapsed_seconds:.1f}s)\n"
-            f"Task: {r.task}\n"
-            f"Answer: {r.answer}"
-        )
+        parts.append(f"[{r.label}] ({status}, {r.elapsed_seconds:.1f}s)\nTask: {r.task}\nAnswer: {r.answer}")
 
     return "\n\n---\n\n".join(parts)

@@ -10,8 +10,15 @@ from koboi.guardrails.registry import GuardrailRegistry, register_builtin_guardr
 register_builtin_guardrails()
 
 __all__ = [
-    "BaseGuardrail", "PatternGuardrail", "InputGuardrail", "OutputGuardrail", "RateLimiter",
-    "AuditTrail", "SQLiteAuditTrail",
-    "ApprovalHandler", "CLIApprovalHandler", "CallbackApprovalHandler",
+    "BaseGuardrail",
+    "PatternGuardrail",
+    "InputGuardrail",
+    "OutputGuardrail",
+    "RateLimiter",
+    "AuditTrail",
+    "SQLiteAuditTrail",
+    "ApprovalHandler",
+    "CLIApprovalHandler",
+    "CallbackApprovalHandler",
     "GuardrailRegistry",
 ]

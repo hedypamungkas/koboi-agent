@@ -1,4 +1,5 @@
 """subagent_monitor.py -- Modal screen showing active and completed sub-agents."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

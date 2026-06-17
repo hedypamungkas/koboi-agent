@@ -1,4 +1,5 @@
 """InputBox -- text input with submit, suggester, history navigation, and vim mode."""
+
 from __future__ import annotations
 
 import base64
@@ -235,14 +236,14 @@ class InputBox(Input):
         if key == "x":
             if val and pos < len(val):
                 self._vim_buffer = val[pos]
-                self.value = val[:pos] + val[pos + 1:]
+                self.value = val[:pos] + val[pos + 1 :]
                 if self.cursor_position > len(self.value):
                     self.cursor_position = len(self.value)
             return
         if key == "X":
             if val and pos > 0:
                 self._vim_buffer = val[pos - 1]
-                self.value = val[:pos - 1] + val[pos:]
+                self.value = val[: pos - 1] + val[pos:]
                 self.cursor_position = pos - 1
             return
         if key == "d":
@@ -402,12 +403,14 @@ def _extract_images(text: str) -> list[dict]:
             media_type = f"image/{ext.lstrip('.')}"
         try:
             data = expanded.read_bytes()
-            images.append({
-                "type": "image",
-                "media_type": media_type,
-                "data": base64.b64encode(data).decode("ascii"),
-                "path": str(expanded),
-            })
+            images.append(
+                {
+                    "type": "image",
+                    "media_type": media_type,
+                    "data": base64.b64encode(data).decode("ascii"),
+                    "path": str(expanded),
+                }
+            )
         except (OSError, PermissionError):
             continue
     return images

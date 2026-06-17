@@ -1,4 +1,5 @@
 """Tests for koboi.logger module."""
+
 from __future__ import annotations
 
 import json
@@ -334,8 +335,11 @@ class TestMessageFormatting:
     def test_format_messages_with_tool_calls(self, tmp_path):
         logger = AgentLogger(log_dir=str(tmp_path), session_id="test")
         messages = [
-            {"role": "assistant", "content": "Let me search",
-             "tool_calls": [{"function": {"name": "search", "arguments": '{"q": "test"}'}}]}
+            {
+                "role": "assistant",
+                "content": "Let me search",
+                "tool_calls": [{"function": {"name": "search", "arguments": '{"q": "test"}'}}],
+            }
         ]
         logger.log_memory_snapshot(messages, "test")
         content = (tmp_path / "test.log").read_text()
@@ -344,9 +348,7 @@ class TestMessageFormatting:
 
     def test_format_messages_with_tool_call_id(self, tmp_path):
         logger = AgentLogger(log_dir=str(tmp_path), session_id="test")
-        messages = [
-            {"role": "tool", "tool_call_id": "tc_123", "content": "result"}
-        ]
+        messages = [{"role": "tool", "tool_call_id": "tc_123", "content": "result"}]
         logger.log_memory_snapshot(messages, "test")
         content = (tmp_path / "test.log").read_text()
         assert "tc_123" in content
@@ -356,28 +358,38 @@ class TestOrchestrationExtendedLogging:
     def test_log_orchestration_summary(self, tmp_path):
         logger = AgentLogger(log_dir=str(tmp_path), session_id="test")
         routing = type("R", (), {"method": "keyword", "agents": ["hr"]})()
-        agent_result = type("AR", (), {"agent_name": "hr", "elapsed_seconds": 1.0, "tokens_used": 50, "revision_count": 0})()
-        orch_result = type("OR", (), {
-            "query": "test query",
-            "routing": routing,
-            "execution_mode": "sequential",
-            "agent_results": [agent_result],
-            "total_elapsed_seconds": 1.0,
-            "final_answer": "Answer",
-        })()
+        agent_result = type(
+            "AR", (), {"agent_name": "hr", "elapsed_seconds": 1.0, "tokens_used": 50, "revision_count": 0}
+        )()
+        orch_result = type(
+            "OR",
+            (),
+            {
+                "query": "test query",
+                "routing": routing,
+                "execution_mode": "sequential",
+                "agent_results": [agent_result],
+                "total_elapsed_seconds": 1.0,
+                "final_answer": "Answer",
+            },
+        )()
         logger.log_orchestration_summary(orch_result)
         content = (tmp_path / "test.log").read_text()
         assert "ORCHESTRATION SUMMARY" in content
 
     def test_log_dynamic_agent_created(self, tmp_path):
         logger = AgentLogger(log_dir=str(tmp_path), session_id="test")
-        blueprint = type("B", (), {
-            "name": "finance-bot",
-            "domain_label": "Finance",
-            "source": "dynamic",
-            "chunks": ["chunk1"],
-            "system_prompt": "You are a finance assistant.",
-        })()
+        blueprint = type(
+            "B",
+            (),
+            {
+                "name": "finance-bot",
+                "domain_label": "Finance",
+                "source": "dynamic",
+                "chunks": ["chunk1"],
+                "system_prompt": "You are a finance assistant.",
+            },
+        )()
         logger.log_dynamic_agent_created(blueprint)
         content = (tmp_path / "test.log").read_text()
         assert "DYNAMIC AGENT CREATED" in content

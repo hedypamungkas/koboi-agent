@@ -6,10 +6,12 @@ Usage:
     agent = KoboiAgent.from_config("configs/sales_agent.yaml")
     result = await agent.run("What products are available?")
 """
+
 from __future__ import annotations
 
 try:
     from importlib.metadata import version as _get_version
+
     __version__ = _get_version("koboi-agent")
 except Exception:
     __version__ = "0.1.0"
@@ -18,12 +20,26 @@ except Exception:
 from koboi.config import Config, ConfigBuilder
 from koboi.facade import KoboiAgent
 from koboi.types import (
-    RiskLevel, ToolDefinition, ToolCall, ToolResult,
-    TokenUsage, AgentResponse, RunResult,
-    GuardrailResult, AuditEntry, RateLimitConfig,
-    RoutingDecision, AgentResult, OrchestratorResult, AgentBlueprint, AgentDef,
-    MCPToolInfo, SkillDefinition,
-    EvalScore, EvalResult, EvalCase,
+    RiskLevel,
+    ToolDefinition,
+    ToolCall,
+    ToolResult,
+    TokenUsage,
+    AgentResponse,
+    RunResult,
+    GuardrailResult,
+    AuditEntry,
+    RateLimitConfig,
+    RoutingDecision,
+    AgentResult,
+    OrchestratorResult,
+    AgentBlueprint,
+    AgentDef,
+    MCPToolInfo,
+    SkillDefinition,
+    EvalScore,
+    EvalResult,
+    EvalCase,
 )
 from koboi.client import RetryClient, Client, ClientError, RetryClientError
 from koboi.memory import ConversationMemory, MemoryBackend
@@ -31,13 +47,26 @@ from koboi.tools.registry import ToolRegistry, tool, register_decorated
 from koboi.logger import AgentLogger
 from koboi.tokens import estimate_tokens, estimate_single
 from koboi.exceptions import (
-    AgentError, AgentMaxIterationsError, AgentGuardrailError,
-    AgentToolError, AgentTimeoutError, AgentStreamError, AgentAbortedError,
+    AgentError,
+    AgentMaxIterationsError,
+    AgentGuardrailError,
+    AgentToolError,
+    AgentTimeoutError,
+    AgentStreamError,
+    AgentAbortedError,
 )
 from koboi.events import (
-    StreamEvent, TextDeltaEvent, ToolCallEvent, ToolResultEvent,
-    IterationEvent, CompleteEvent, ErrorEvent,
-    RoutingDecisionEvent, AgentDispatchEvent, AgentResultEvent, OrchestrationCompleteEvent,
+    StreamEvent,
+    TextDeltaEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+    IterationEvent,
+    CompleteEvent,
+    ErrorEvent,
+    RoutingDecisionEvent,
+    AgentDispatchEvent,
+    AgentResultEvent,
+    OrchestrationCompleteEvent,
 )
 from koboi.hooks import HookEvent, HookContext, Hook, HookChain, HookOutcome, AgentInfo
 from koboi.hooks.callback_hook import CallbackHook
@@ -70,6 +99,7 @@ def __getattr__(name: str):
     if name in _LAZY_IMPORTS:
         module_path, attr_name = _LAZY_IMPORTS[name]
         import importlib
+
         module = importlib.import_module(module_path)
         return getattr(module, attr_name)
     raise AttributeError(f"module 'koboi' has no attribute {name!r}")
@@ -78,44 +108,100 @@ def __getattr__(name: str):
 # Discover and load external plugins at import time
 try:
     from koboi.plugins import discover_plugins as _discover_plugins
+
     _discover_plugins()
 except Exception:
     pass  # Plugin discovery is best-effort
 
 __all__ = [
     # Core
-    "__version__", "KoboiAgent", "Config", "ConfigBuilder",
+    "__version__",
+    "KoboiAgent",
+    "Config",
+    "ConfigBuilder",
     # Orchestration
-    "BaseRouter", "KeywordRouter", "LLMRouter", "HybridRouter",
-    "Orchestrator", "QualityEvaluator", "AgentFactory", "DynamicAgentBuilder",
+    "BaseRouter",
+    "KeywordRouter",
+    "LLMRouter",
+    "HybridRouter",
+    "Orchestrator",
+    "QualityEvaluator",
+    "AgentFactory",
+    "DynamicAgentBuilder",
     # Types
-    "RiskLevel", "ToolDefinition", "ToolCall", "ToolResult",
-    "TokenUsage", "AgentResponse", "RunResult",
-    "GuardrailResult", "AuditEntry", "RateLimitConfig",
-    "RoutingDecision", "AgentResult", "OrchestratorResult", "AgentBlueprint", "AgentDef",
-    "MCPToolInfo", "SkillDefinition",
-    "EvalScore", "EvalResult", "EvalCase",
+    "RiskLevel",
+    "ToolDefinition",
+    "ToolCall",
+    "ToolResult",
+    "TokenUsage",
+    "AgentResponse",
+    "RunResult",
+    "GuardrailResult",
+    "AuditEntry",
+    "RateLimitConfig",
+    "RoutingDecision",
+    "AgentResult",
+    "OrchestratorResult",
+    "AgentBlueprint",
+    "AgentDef",
+    "MCPToolInfo",
+    "SkillDefinition",
+    "EvalScore",
+    "EvalResult",
+    "EvalCase",
     # Client
-    "RetryClient", "Client", "ClientError", "RetryClientError",
+    "RetryClient",
+    "Client",
+    "ClientError",
+    "RetryClientError",
     # Memory
-    "ConversationMemory", "MemoryBackend",
+    "ConversationMemory",
+    "MemoryBackend",
     # Tools
-    "ToolRegistry", "tool", "register_decorated",
+    "ToolRegistry",
+    "tool",
+    "register_decorated",
     # Logging
     "AgentLogger",
     # Tokens
-    "estimate_tokens", "estimate_single",
+    "estimate_tokens",
+    "estimate_single",
     # Exceptions
-    "AgentError", "AgentMaxIterationsError", "AgentGuardrailError",
-    "AgentToolError", "AgentTimeoutError", "AgentStreamError", "AgentAbortedError",
+    "AgentError",
+    "AgentMaxIterationsError",
+    "AgentGuardrailError",
+    "AgentToolError",
+    "AgentTimeoutError",
+    "AgentStreamError",
+    "AgentAbortedError",
     # Events
-    "StreamEvent", "TextDeltaEvent", "ToolCallEvent", "ToolResultEvent",
-    "IterationEvent", "CompleteEvent", "ErrorEvent",
-    "RoutingDecisionEvent", "AgentDispatchEvent", "AgentResultEvent", "OrchestrationCompleteEvent",
+    "StreamEvent",
+    "TextDeltaEvent",
+    "ToolCallEvent",
+    "ToolResultEvent",
+    "IterationEvent",
+    "CompleteEvent",
+    "ErrorEvent",
+    "RoutingDecisionEvent",
+    "AgentDispatchEvent",
+    "AgentResultEvent",
+    "OrchestrationCompleteEvent",
     # Hooks
-    "HookEvent", "HookContext", "Hook", "HookChain", "HookOutcome", "AgentInfo", "CallbackHook",
+    "HookEvent",
+    "HookContext",
+    "Hook",
+    "HookChain",
+    "HookOutcome",
+    "AgentInfo",
+    "CallbackHook",
     # LLM
-    "LLMClient", "LLMError", "LLMConnectionError", "LLMAuthenticationError",
-    "LLMRateLimitError", "LLMServerError", "LLMInvalidRequestError", "LLMResponseParseError",
+    "LLMClient",
+    "LLMError",
+    "LLMConnectionError",
+    "LLMAuthenticationError",
+    "LLMRateLimitError",
+    "LLMServerError",
+    "LLMInvalidRequestError",
+    "LLMResponseParseError",
     "create_client",
 ]

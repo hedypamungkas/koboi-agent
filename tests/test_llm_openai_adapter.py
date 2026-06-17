@@ -1,4 +1,5 @@
 """Tests for koboi.llm.openai_adapter module."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -30,15 +31,19 @@ class TestOpenAIAdapterComplete:
     async def test_simple_text_response(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "id": "chatcmpl-123",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hello!"},
-                "finish_reason": "stop",
-            }],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "id": "chatcmpl-123",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Hello!"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        )
 
         result = await adapter.complete(
             messages=[{"role": "user", "content": "Hi"}],
@@ -52,26 +57,32 @@ class TestOpenAIAdapterComplete:
     async def test_tool_call_response(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "id": "chatcmpl-456",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_abc",
-                        "type": "function",
-                        "function": {
-                            "name": "get_weather",
-                            "arguments": "{\"city\": \"Jakarta\"}",
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "id": "chatcmpl-456",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_abc",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "get_weather",
+                                        "arguments": '{"city": "Jakarta"}',
+                                    },
+                                }
+                            ],
                         },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
-            "usage": {"prompt_tokens": 20, "completion_tokens": 15},
-        })
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 15},
+            }
+        )
 
         result = await adapter.complete(
             messages=[{"role": "user", "content": "Weather in Jakarta?"}],
@@ -87,10 +98,12 @@ class TestOpenAIAdapterComplete:
     async def test_passes_tools_in_request(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
-            "usage": {},
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {},
+            }
+        )
 
         tools = [{"type": "function", "function": {"name": "calc", "parameters": {}}}]
         await adapter.complete(messages=[{"role": "user", "content": "test"}], tools=tools)
@@ -102,10 +115,12 @@ class TestOpenAIAdapterComplete:
     async def test_omits_tools_when_none(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
-            "usage": {},
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {},
+            }
+        )
 
         await adapter.complete(messages=[{"role": "user", "content": "test"}])
         call_body = adapter._transport.post.call_args[0][1]
@@ -131,19 +146,23 @@ class TestOpenAIAdapterComplete:
     async def test_multiple_tool_calls(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {"id": "call_1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
-                        {"id": "call_2", "type": "function", "function": {"name": "b", "arguments": "{\"x\":1}"}},
-                    ],
-                },
-            }],
-            "usage": {},
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {"id": "call_1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
+                                {"id": "call_2", "type": "function", "function": {"name": "b", "arguments": '{"x":1}'}},
+                            ],
+                        },
+                    }
+                ],
+                "usage": {},
+            }
+        )
 
         result = await adapter.complete(messages=[{"role": "user", "content": "go"}])
         assert len(result.tool_calls) == 2
@@ -154,9 +173,11 @@ class TestOpenAIAdapterEmbeddings:
     async def test_get_embeddings_success(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "data": [{"embedding": [0.1, 0.2, 0.3]}],
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "data": [{"embedding": [0.1, 0.2, 0.3]}],
+            }
+        )
 
         result = await adapter.get_embeddings("hello")
         assert result == [0.1, 0.2, 0.3]
@@ -174,9 +195,11 @@ class TestOpenAIAdapterUsageParsing:
     async def test_no_usage_returns_none(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+            }
+        )
 
         result = await adapter.complete(messages=[{"role": "user", "content": "hi"}])
         assert result.usage is None
@@ -184,10 +207,12 @@ class TestOpenAIAdapterUsageParsing:
     async def test_zero_tokens_parsed(self):
         adapter = OpenAIAdapter(model="gpt-4o-mini", transport=MagicMock())
         adapter._transport = MagicMock()
-        adapter._transport.post = AsyncMock(return_value={
-            "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": None, "completion_tokens": None},
-        })
+        adapter._transport.post = AsyncMock(
+            return_value={
+                "choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": None, "completion_tokens": None},
+            }
+        )
 
         result = await adapter.complete(messages=[{"role": "user", "content": "hi"}])
         assert result.usage.prompt_tokens == 0

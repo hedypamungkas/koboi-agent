@@ -9,6 +9,7 @@ Run:
     python examples/14_orchestration_keyword.py                  # automatic mode
     python examples/14_orchestration_keyword.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys
@@ -42,7 +43,19 @@ QUERIES = [
 
 DOMAIN_KEYWORDS = {
     "hr": ["leave", "vacation", "salary", "employee", "working hours", "remote", "time off"],
-    "sales": ["price", "product", "package", "promo", "discount", "buy", "order", "enterprise", "cost", "pricing", "subscription"],
+    "sales": [
+        "price",
+        "product",
+        "package",
+        "promo",
+        "discount",
+        "buy",
+        "order",
+        "enterprise",
+        "cost",
+        "pricing",
+        "subscription",
+    ],
     "finance": ["invoice", "payment", "billing", "due date", "refund"],
 }
 
@@ -89,10 +102,19 @@ def run_automatic():
         console.rule(f"[bold]Query {i}: {q}[/bold]")
         try:
             result = run_async(orchestrator.run(q, mode="sequential"))
-            console.print(f"  Routing: {result.routing.method} -> [cyan]{result.routing.agents}[/cyan] (confidence: {result.routing.confidence:.2f})")
+            console.print(
+                f"  Routing: {result.routing.method} -> [cyan]{result.routing.agents}[/cyan] (confidence: {result.routing.confidence:.2f})"
+            )
             for ar in result.agent_results:
-                console.print(f"  Agent [cyan]{ar.agent_name.upper()}[/cyan]: {ar.elapsed_seconds:.2f}s, {ar.tokens_used} tokens")
-            console.print(Panel(Markdown(result.final_answer), title=f"Answer (mode: {result.execution_mode}, total: {result.total_elapsed_seconds:.2f}s)"))
+                console.print(
+                    f"  Agent [cyan]{ar.agent_name.upper()}[/cyan]: {ar.elapsed_seconds:.2f}s, {ar.tokens_used} tokens"
+                )
+            console.print(
+                Panel(
+                    Markdown(result.final_answer),
+                    title=f"Answer (mode: {result.execution_mode}, total: {result.total_elapsed_seconds:.2f}s)",
+                )
+            )
         except Exception as e:
             console.print(f"  [red]Error: {e}[/red]")
         console.print()
@@ -120,7 +142,9 @@ def run_interactive():
 
         # Show routing
         decision = run_async(router.route(user_input))
-        console.print(f"[dim]Routed: {decision.method} -> [cyan]{', '.join(decision.agents)}[/cyan] (confidence: {decision.confidence:.2f})[/dim]")
+        console.print(
+            f"[dim]Routed: {decision.method} -> [cyan]{', '.join(decision.agents)}[/cyan] (confidence: {decision.confidence:.2f})[/dim]"
+        )
 
         try:
             result = run_async(orchestrator.run(user_input, mode="sequential"))
@@ -135,8 +159,7 @@ def main(mode: str, verbose: bool):
     """Example 15: Orchestration with KeywordRouter."""
     setup_example(
         "Example 15: Orchestration - KeywordRouter",
-        "Routing based on keyword mapping.\n\n"
-        "[dim]Run with -m interactive for free chat with routing.[/dim]",
+        "Routing based on keyword mapping.\n\n[dim]Run with -m interactive for free chat with routing.[/dim]",
     )
 
     if mode == "interactive":

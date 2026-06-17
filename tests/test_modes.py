@@ -1,4 +1,5 @@
 """Tests for koboi/modes.py -- Agent interaction modes."""
+
 from __future__ import annotations
 
 import pytest

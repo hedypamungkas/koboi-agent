@@ -10,6 +10,7 @@ Run:
     python examples/06_guardrails.py                  # automatic mode
     python examples/06_guardrails.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -72,9 +73,11 @@ def run_automatic(agent):
     ig = agent.core.input_guardrail
     og = agent.core.output_guardrail
     rl = agent.core.rate_limiter
-    console.print(f"[dim]Input guardrail: {'active' if ig else 'off'} | "
-                  f"Output guardrail: {'active' if og else 'off'} | "
-                  f"Rate limiter: {'active' if rl else 'off'}[/dim]\n")
+    console.print(
+        f"[dim]Input guardrail: {'active' if ig else 'off'} | "
+        f"Output guardrail: {'active' if og else 'off'} | "
+        f"Rate limiter: {'active' if rl else 'off'}[/dim]\n"
+    )
 
     results = []
 
@@ -105,7 +108,15 @@ def run_automatic(agent):
                 actual = "BLOCK"
                 reason = guardrail_result.reason
                 console.print(f"[red bold][{actual}][/red bold] Input rejected by guardrail: {reason}")
-                results.append({"test": tc["label"], "expected": expect, "actual": actual, "match": actual == expect, "reason": reason})
+                results.append(
+                    {
+                        "test": tc["label"],
+                        "expected": expect,
+                        "actual": actual,
+                        "match": actual == expect,
+                        "reason": reason,
+                    }
+                )
                 console.print()
                 continue
 
@@ -116,7 +127,15 @@ def run_automatic(agent):
                 actual = "BLOCK"
                 reason = rl_check.reason
                 console.print(f"[red bold][{actual}][/red bold] {reason}")
-                results.append({"test": tc["label"], "expected": expect, "actual": actual, "match": actual == expect, "reason": reason})
+                results.append(
+                    {
+                        "test": tc["label"],
+                        "expected": expect,
+                        "actual": actual,
+                        "match": actual == expect,
+                        "reason": reason,
+                    }
+                )
                 console.print()
                 continue
 
@@ -144,7 +163,9 @@ def run_automatic(agent):
         else:
             console.print(f"[red bold][{actual}][/red bold] {reason}")
 
-        results.append({"test": tc["label"], "expected": expect, "actual": actual, "match": actual == expect, "reason": reason})
+        results.append(
+            {"test": tc["label"], "expected": expect, "actual": actual, "match": actual == expect, "reason": reason}
+        )
         console.print()
 
     # Summary table
@@ -165,9 +186,12 @@ def run_automatic(agent):
             passed += 1
         actual_style = "green" if r["actual"] == "PASS" else "red"
         table.add_row(
-            str(i), r["test"], r["expected"],
+            str(i),
+            r["test"],
+            r["expected"],
             f"[{actual_style}]{r['actual']}[/{actual_style}]",
-            match_str, r["reason"][:50],
+            match_str,
+            r["reason"][:50],
         )
 
     console.print(table)

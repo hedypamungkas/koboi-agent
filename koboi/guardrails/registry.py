@@ -1,4 +1,5 @@
 """koboi/guardrails/registry.py -- Guardrail factory registry."""
+
 from __future__ import annotations
 
 import logging
@@ -22,9 +23,7 @@ class GuardrailRegistry:
     @classmethod
     def create(cls, name: str, **kwargs: Any) -> BaseGuardrail:
         if name not in cls._factories:
-            raise ValueError(
-                f"Unknown guardrail '{name}'. Available: {cls.list_available()}"
-            )
+            raise ValueError(f"Unknown guardrail '{name}'. Available: {cls.list_available()}")
         return cls._factories[name](**kwargs)
 
     @classmethod

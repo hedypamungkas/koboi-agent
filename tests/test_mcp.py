@@ -1,4 +1,5 @@
 """Tests for koboi.mcp module."""
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,11 @@ class TestMCPServer:
     def test_tool_registration(self):
         server = MCPServer(name="test-server", version="1.0.0")
 
-        @server.tool(name="add", description="Add numbers", input_schema={"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}})
+        @server.tool(
+            name="add",
+            description="Add numbers",
+            input_schema={"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}},
+        )
         def add(a: int, b: int) -> int:
             return a + b
 
@@ -21,6 +26,7 @@ class TestMCPServer:
 
     def test_multiple_tools(self):
         server = MCPServer(name="multi")
+
         @server.tool(name="t1", description="Tool 1", input_schema={})
         def t1():
             return "one"
@@ -84,11 +90,13 @@ class TestMCPToolRegistration:
         class FakeMCPClient:
             def discover_tools(self):
                 return mock_tools
+
             async def call_tool(self, name, arguments):
                 return f"Called {name}"
 
         registry = ToolRegistry()
         from koboi.mcp.client import register_mcp_tools
+
         registered = register_mcp_tools(FakeMCPClient(), registry)
 
         assert len(registered) == 2

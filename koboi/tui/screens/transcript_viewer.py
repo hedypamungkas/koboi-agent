@@ -1,4 +1,5 @@
 """transcript_viewer.py -- Full conversation transcript viewer."""
+
 from __future__ import annotations
 
 from typing import Any

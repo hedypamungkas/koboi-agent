@@ -2,6 +2,7 @@
 
 Store baselines, compare against new runs, detect regressions.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,6 +19,7 @@ _logger = logging.getLogger(__name__)
 @dataclass
 class RegressionReport:
     """Comparison between current and baseline eval results."""
+
     improved: list[str] = field(default_factory=list)
     regressed: list[str] = field(default_factory=list)
     unchanged: list[str] = field(default_factory=list)
@@ -65,10 +67,7 @@ class RegressionTracker:
                     "overall_score": r.overall_score,
                     "passed": r.passed,
                     "framework": r.framework,
-                    "scores": [
-                        {"name": s.name, "value": s.value, "reason": s.reason}
-                        for s in r.scores
-                    ],
+                    "scores": [{"name": s.name, "value": s.value, "reason": s.reason} for s in r.scores],
                     "duration_seconds": r.duration_seconds,
                 }
                 for r in results

@@ -9,6 +9,7 @@ Run:
     python examples/07_rag_advanced.py                  # automatic mode
     python examples/07_rag_advanced.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys
@@ -137,7 +138,15 @@ def run_automatic(verbose: bool):
             console.print(f"  Total chunks: {chunk_count}")
         query_results = run_queries(retriever, QUERIES, top_k=3)
         for qr in query_results:
-            all_rows.append({"config": label, "query": qr["query"], "chunk_count": chunk_count, "score": qr["score"], "snippet": qr["snippet"]})
+            all_rows.append(
+                {
+                    "config": label,
+                    "query": qr["query"],
+                    "chunk_count": chunk_count,
+                    "score": qr["score"],
+                    "snippet": qr["snippet"],
+                }
+            )
 
     # Results table
     table = Table(title="RAG Configuration Comparison", show_lines=True, title_style="bold magenta")
@@ -169,7 +178,9 @@ def run_automatic(verbose: bool):
         demo_client = Client()
         demo_agent = AgentCore(
             client=demo_client,
-            memory=ConversationMemory(system_prompt="You are an assistant that answers based on document context. Always cite the source."),
+            memory=ConversationMemory(
+                system_prompt="You are an assistant that answers based on document context. Always cite the source."
+            ),
             augmentation=augmentation,
             max_iterations=8,
             verbose=verbose,
@@ -230,15 +241,19 @@ def run_interactive(verbose: bool):
         client = None
 
     _, _, retriever = build_config(
-        chunker_map[selected[1]], retriever_map[selected[2]],
-        documents, client=client,
+        chunker_map[selected[1]],
+        retriever_map[selected[2]],
+        documents,
+        client=client,
     )
     augmentation = InMemoryAugmentation(retriever=retriever, top_k=3)
 
     demo_client = Client() if client is None else client
     core = AgentCore(
         client=demo_client,
-        memory=ConversationMemory(system_prompt="You are an assistant that answers based on document context. Always cite the source."),
+        memory=ConversationMemory(
+            system_prompt="You are an assistant that answers based on document context. Always cite the source."
+        ),
         augmentation=augmentation,
         max_iterations=8,
         verbose=verbose,

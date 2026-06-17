@@ -1,4 +1,5 @@
 """Time MCP Server -- example MCP server exposing time tools."""
+
 from __future__ import annotations
 
 import sys
@@ -18,6 +19,7 @@ server = MCPServer(name="time-server", version="1.0.0")
 )
 def get_current_time() -> str:
     from datetime import datetime
+
     return f"Current time: {datetime.now().strftime('%H:%M:%S')}"
 
 
@@ -28,6 +30,7 @@ def get_current_time() -> str:
 )
 def get_date() -> str:
     from datetime import datetime
+
     return f"Today's date: {datetime.now().strftime('%Y-%m-%d')}"
 
 
@@ -47,6 +50,7 @@ def get_date() -> str:
 )
 def calculate_days_until(target_date: str) -> str:
     from datetime import datetime
+
     try:
         target = datetime.strptime(target_date, "%Y-%m-%d").date()
         today = datetime.now().date()

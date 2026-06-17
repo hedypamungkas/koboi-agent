@@ -1,4 +1,5 @@
 """Integration tests for config-driven orchestration."""
+
 from __future__ import annotations
 
 import json
@@ -54,6 +55,7 @@ class TestParseAgentDefs:
         config = Config.from_yaml(path)
 
         import pytest
+
         with pytest.raises(ValueError, match="orchestration.agents must have at least one agent"):
             _parse_agent_defs(config)
 
@@ -119,9 +121,7 @@ class TestConfigDrivenRouters:
             AgentDef(name="sales", description="Handles sales"),
             AgentDef(name="support", description="Handles support"),
         ]
-        resp = make_mock_response(
-            json.dumps({"agents": ["support"], "confidence": 0.9, "reasoning": "support query"})
-        )
+        resp = make_mock_response(json.dumps({"agents": ["support"], "confidence": 0.9, "reasoning": "support query"}))
         client = MockClient([resp])
         router = LLMRouter(client=client, agent_defs=agent_defs)
 
@@ -137,9 +137,7 @@ class TestConfigDrivenRouters:
             AgentDef(name="beta", keywords=["beta"]),
         ]
         # LLM returns unknown agent name -- should fall back to keyword
-        resp = make_mock_response(
-            json.dumps({"agents": ["unknown_agent"], "confidence": 0.9, "reasoning": "test"})
-        )
+        resp = make_mock_response(json.dumps({"agents": ["unknown_agent"], "confidence": 0.9, "reasoning": "test"}))
         client = MockClient([resp])
         router = LLMRouter(client=client, agent_defs=agent_defs)
 

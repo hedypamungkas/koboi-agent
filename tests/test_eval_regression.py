@@ -1,4 +1,5 @@
 """Tests for koboi/eval/regression.py -- Regression tracking."""
+
 from __future__ import annotations
 
 from koboi.eval.regression import RegressionTracker, RegressionReport

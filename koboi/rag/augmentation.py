@@ -42,11 +42,7 @@ class AugmentationStrategy(ABC):
 
     @staticmethod
     def _build_augmented_message(context: str, user_message: str) -> str:
-        return (
-            f"Document context:\n"
-            f"---\n{context}\n---\n\n"
-            f"Question: {user_message}"
-        )
+        return f"Document context:\n---\n{context}\n---\n\nQuestion: {user_message}"
 
     async def augment_for_memory(self, user_message: str) -> str:
         return user_message
@@ -183,7 +179,7 @@ class RerankerRetriever:
             length_score = 1.0 / (1.0 + self._length_penalty * len(r.chunk.content) / 100)
 
             # Combined score
-            rerank_score = (coverage * 0.5 + tf_score * 0.3 + length_score * 0.2)
+            rerank_score = coverage * 0.5 + tf_score * 0.3 + length_score * 0.2
 
             rescored.append((r, rerank_score))
 
@@ -208,10 +204,6 @@ def _register_builtins() -> None:
     """Register built-in augmentation strategies. Called lazily on first use."""
     from koboi.rag.registry import register_augmentation as _reg
 
-    _reg("in_memory", description="Augments user message with retrieved context before storing")(
-        InMemoryAugmentation
-    )
+    _reg("in_memory", description="Augments user message with retrieved context before storing")(InMemoryAugmentation)
 
-    _reg("on_the_fly", description="Augments last user message in-place before each LLM call")(
-        OnTheFlyAugmentation
-    )
+    _reg("on_the_fly", description="Augments last user message in-place before each LLM call")(OnTheFlyAugmentation)

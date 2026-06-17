@@ -1,4 +1,5 @@
 """Tests for koboi/hooks/registry.py -- Hook registry and build_hook_chain."""
+
 from __future__ import annotations
 
 import yaml

@@ -1,4 +1,5 @@
 """Tests for koboi/facade.py — KoboiAgent facade expanded coverage."""
+
 from __future__ import annotations
 
 import os
@@ -218,10 +219,12 @@ class TestBuildPolicy:
 
     def test_with_rules(self, tmp_path):
         cfg = _base_config()
-        cfg["policy"] = {"rules": [
-            {"tool": "shell", "pattern": "rm -rf", "action": "deny"},
-            {"tool": "*", "action": "allow"},
-        ]}
+        cfg["policy"] = {
+            "rules": [
+                {"tool": "shell", "pattern": "rm -rf", "action": "deny"},
+                {"tool": "*", "action": "allow"},
+            ]
+        }
         config = Config.from_yaml(_write_config(tmp_path, cfg))
         result = _build_policy(config)
         assert result is not None
@@ -235,8 +238,8 @@ class TestKoboiAgent:
 
         core = MagicMock()
         from koboi.types import RunResult
-        core.run = AsyncMock(return_value=RunResult(content="ok", iterations_used=1,
-                                                      tool_calls_made=[], success=True))
+
+        core.run = AsyncMock(return_value=RunResult(content="ok", iterations_used=1, tool_calls_made=[], success=True))
 
         agent = KoboiAgent(core=core, config=config, logger=logger)
         result = await agent.run("test")
@@ -295,8 +298,10 @@ class TestKoboiAgent:
 
         core = MagicMock()
         from koboi.types import RunResult
-        core.run = AsyncMock(return_value=RunResult(content="sync ok", iterations_used=1,
-                                                      tool_calls_made=[], success=True))
+
+        core.run = AsyncMock(
+            return_value=RunResult(content="sync ok", iterations_used=1, tool_calls_made=[], success=True)
+        )
 
         agent = KoboiAgent(core=core, config=config, logger=logger)
         result = agent.run_sync("test")

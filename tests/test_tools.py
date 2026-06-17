@@ -1,4 +1,5 @@
 """Tests for koboi.tools.registry module."""
+
 from __future__ import annotations
 
 from koboi.tools.registry import ToolRegistry, tool, register_decorated
@@ -8,7 +9,9 @@ from koboi.types import RiskLevel
 class TestToolRegistry:
     async def test_register_and_execute(self):
         registry = ToolRegistry()
-        registry.register("echo", "Echo input", {"type": "object", "properties": {"msg": {"type": "string"}}}, lambda msg: msg)
+        registry.register(
+            "echo", "Echo input", {"type": "object", "properties": {"msg": {"type": "string"}}}, lambda msg: msg
+        )
         result = await registry.execute("echo", '{"msg": "hello"}')
         assert result == "hello"
 
@@ -34,7 +37,8 @@ class TestToolRegistry:
         calls = []
         registry = ToolRegistry()
         registry.register(
-            "test", "test",
+            "test",
+            "test",
             {"type": "object", "properties": {"a": {"type": "string"}}},
             lambda a: calls.append(a) or f"got {a}",
         )
@@ -51,9 +55,12 @@ class TestToolRegistry:
 
     async def test_timeout(self):
         import time
+
         registry = ToolRegistry()
         registry.register(
-            "slow", "slow tool", {},
+            "slow",
+            "slow tool",
+            {},
             lambda: time.sleep(10),
             timeout=0.1,
         )
@@ -72,6 +79,7 @@ class TestToolDecorator:
 
     async def test_register_decorated(self):
         import types
+
         mod = types.ModuleType("test_mod")
 
         @tool(name="mod_tool", description="Module tool", parameters={"type": "object", "properties": {}})

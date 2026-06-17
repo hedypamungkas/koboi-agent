@@ -1,4 +1,5 @@
 """koboi/loop.py -- AgentCore: async unified loop with built-in hook system."""
+
 from __future__ import annotations
 
 import logging as _logging
@@ -7,11 +8,17 @@ from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
 from koboi.events import (
-    CompleteEvent, ErrorEvent, IterationEvent,
-    TextDeltaEvent, ToolCallEvent, ToolResultEvent,
+    CompleteEvent,
+    ErrorEvent,
+    IterationEvent,
+    TextDeltaEvent,
+    ToolCallEvent,
+    ToolResultEvent,
 )
 from koboi.exceptions import (
-    AgentAbortedError, AgentGuardrailError, AgentMaxIterationsError,
+    AgentAbortedError,
+    AgentGuardrailError,
+    AgentMaxIterationsError,
 )
 from koboi.guardrails.base import BaseGuardrail
 from koboi.loop_pipeline import ToolExecutionPipeline
@@ -137,7 +144,7 @@ class AgentCore:
     async def _emit(self, event: HookEvent, **kwargs) -> HookContext:
         info = AgentInfo(
             model=self.client.model,
-            iteration=kwargs.get('iteration', 0),
+            iteration=kwargs.get("iteration", 0),
         )
         ctx = HookContext(event=event, agent=info, **kwargs)
         ctx = await self.hooks.emit(ctx)
@@ -189,7 +196,8 @@ class AgentCore:
 
     def _check_skill_activation(self, content: str) -> tuple[str, str] | None:
         import re as _re
-        match = _re.search(r'\[ACTIVATE_SKILL:\s*([a-z0-9_-]+)\]', content)
+
+        match = _re.search(r"\[ACTIVATE_SKILL:\s*([a-z0-9_-]+)\]", content)
         if match and self.skills and self.skills.get(match.group(1)):
             return (match.group(1), content.replace(match.group(0), "").strip())
         return None
@@ -197,6 +205,7 @@ class AgentCore:
     def _audit(self, event_type: str, **kwargs) -> None:
         if self.audit_trail:
             import time as _time
+
             self.audit_trail.record(AuditEntry(timestamp=_time.time(), event_type=event_type, **kwargs))
 
     @property
@@ -204,10 +213,15 @@ class AgentCore:
         """Lazy-initialized tool execution pipeline."""
         if not hasattr(self, "_tool_pipeline"):
             self._tool_pipeline = ToolExecutionPipeline(
-                tools=self.tools, memory=self.memory,
-                rate_limiter=self.rate_limiter, approval_handler=self.approval_handler,
-                hook_chain=self.hooks, logger=self.logger, verbose=self.verbose,
-                audit_fn=self._audit, mode_manager=self.mode_manager,
+                tools=self.tools,
+                memory=self.memory,
+                rate_limiter=self.rate_limiter,
+                approval_handler=self.approval_handler,
+                hook_chain=self.hooks,
+                logger=self.logger,
+                verbose=self.verbose,
+                audit_fn=self._audit,
+                mode_manager=self.mode_manager,
             )
         return self._tool_pipeline
 
@@ -220,8 +234,7 @@ class AgentCore:
                 self._log(f"Input blocked by {type(grd).__name__}: {result.reason}")
                 raise AgentGuardrailError(result.reason, direction="input")
 
-        ctx = await self._emit(HookEvent.PRE_INPUT, messages=self.memory.get_messages(),
-                               user_message=text_part)
+        ctx = await self._emit(HookEvent.PRE_INPUT, messages=self.memory.get_messages(), user_message=text_part)
         if ctx.abort:
             raise AgentAbortedError(ctx.inject_message or "Input rejected by hook")
 
@@ -273,23 +286,18 @@ class AgentCore:
             self.context_manager.last_actual_tokens = response.usage.prompt_tokens
         if total_usage is None:
             from koboi.types import TokenUsage
+
             total_usage = TokenUsage()
         total_usage.prompt_tokens += response.usage.prompt_tokens
         total_usage.completion_tokens += response.usage.completion_tokens
         return total_usage
 
-    async def _prepare_run(
-        self, user_message: str | list
-    ) -> tuple[str | list, list[dict] | None, float]:
+    async def _prepare_run(self, user_message: str | list) -> tuple[str | list, list[dict] | None, float]:
         """Shared setup for run() and run_stream().
 
         Returns (user_message, tool_defs, start_time).
         """
-        text_part = (
-            user_message
-            if isinstance(user_message, str)
-            else _extract_text(user_message)
-        )
+        text_part = user_message if isinstance(user_message, str) else _extract_text(user_message)
         self._last_user_message = text_part
         await self._emit(HookEvent.SESSION_START)
         await self._validate_input(text_part)
@@ -410,7 +418,8 @@ class AgentCore:
 
                     pipeline_result = await self._pipeline.execute_tool_call(tc, iteration=i)
                     yield ToolResultEvent(
-                        tool_name=tc.name, tool_call_id=tc.id,
+                        tool_name=tc.name,
+                        tool_call_id=tc.id,
                         result=pipeline_result.result,
                     )
 

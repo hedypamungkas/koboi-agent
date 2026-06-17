@@ -3,6 +3,7 @@
 Generates question-answer pairs from document files using an LLM,
 producing EvalCases suitable for RAGAS evaluation.
 """
+
 from __future__ import annotations
 
 import json
@@ -75,7 +76,9 @@ class RAGASDataGenerator:
             for chunk_idx, chunk in enumerate(chunks):
                 try:
                     qa_pairs = await self._generate_qa_pairs(
-                        chunk, num_questions_per_doc, difficulty,
+                        chunk,
+                        num_questions_per_doc,
+                        difficulty,
                     )
                     for qa_idx, qa in enumerate(qa_pairs):
                         case = EvalCase(
@@ -95,19 +98,24 @@ class RAGASDataGenerator:
                 except Exception as e:
                     _logger.warning(
                         "Failed to generate Q&A for %s chunk %d: %s",
-                        doc_path, chunk_idx, e,
+                        doc_path,
+                        chunk_idx,
+                        e,
                     )
 
         return cases
 
     async def _generate_qa_pairs(
-        self, context: str, count: int, difficulty: str,
+        self,
+        context: str,
+        count: int,
+        difficulty: str,
     ) -> list[dict[str, str]]:
         """Use LLM to generate question-answer pairs from context."""
         prompt = _QA_GENERATION_PROMPT.format(
             count=count,
             difficulty=difficulty,
-            context=context[:self.chunk_size],
+            context=context[: self.chunk_size],
         )
 
         response = await self.client.complete(
@@ -164,4 +172,4 @@ class RAGASDataGenerator:
         if current.strip():
             chunks.append(current.strip())
 
-        return chunks if chunks else [text[:self.chunk_size]]
+        return chunks if chunks else [text[: self.chunk_size]]

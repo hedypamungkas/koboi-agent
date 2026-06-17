@@ -3,6 +3,7 @@
 Connects to remote MCP servers over HTTP using JSON-RPC 2.0.
 Supports both JSON and SSE response formats per the MCP spec.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -81,10 +82,13 @@ class StreamableHTTPMCPClient(BaseMCPClient):
 
     def _call_tool_sync(self, name: str, arguments: dict) -> str:
         """Sync implementation of call_tool."""
-        result = self._send_request("tools/call", {
-            "name": name,
-            "arguments": arguments,
-        })
+        result = self._send_request(
+            "tools/call",
+            {
+                "name": name,
+                "arguments": arguments,
+            },
+        )
         return self._extract_tool_result(result)
 
     def close(self) -> None:

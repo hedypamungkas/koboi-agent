@@ -9,6 +9,7 @@ Run:
     python examples/18_doom_loop_detection.py                  # automatic mode
     python examples/18_doom_loop_detection.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -35,16 +36,23 @@ def _escape_rich(text: str) -> str:
 
 def _scenario_1():
     """Scenario 1: Consecutive identical calls."""
-    console.print(Panel(
-        "[bold]Scenario 1: Consecutive Identical Calls[/bold]\n"
-        "The same tool with the same arguments is called repeatedly.\n"
-        "Threshold: consecutive_identical_threshold=3",
-        border_style="red",
-    ))
+    console.print(
+        Panel(
+            "[bold]Scenario 1: Consecutive Identical Calls[/bold]\n"
+            "The same tool with the same arguments is called repeatedly.\n"
+            "Threshold: consecutive_identical_threshold=3",
+            border_style="red",
+        )
+    )
 
     from koboi.harness.doom_loop import DoomLoopConfig, DoomLoopDetector
 
-    config = DoomLoopConfig(consecutive_identical_threshold=3, repeating_pattern_window=4, repeating_pattern_threshold=2, error_retry_threshold=3)
+    config = DoomLoopConfig(
+        consecutive_identical_threshold=3,
+        repeating_pattern_window=4,
+        repeating_pattern_threshold=2,
+        error_retry_threshold=3,
+    )
     detector = DoomLoopDetector(config)
 
     tool_name = "web_search"
@@ -56,28 +64,38 @@ def _scenario_1():
         status = "[red]DETECTED[/red]" if result.detected else "[green]OK[/green]"
         console.print(f"  Step {step}: {tool_name}({arguments[:30]}...) -> {status}")
         if result.detected:
-            console.print(Panel(
-                f"[bold red]Doom Loop Detected![/bold red]\n\n"
-                f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
-                f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
-                title="Detection Result", border_style="red",
-            ))
+            console.print(
+                Panel(
+                    f"[bold red]Doom Loop Detected![/bold red]\n\n"
+                    f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
+                    f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
+                    title="Detection Result",
+                    border_style="red",
+                )
+            )
             break
     console.print()
 
 
 def _scenario_2():
     """Scenario 2: Repeating pattern (A, B, A, B)."""
-    console.print(Panel(
-        "[bold]Scenario 2: Repeating Pattern (A, B, A, B)[/bold]\n"
-        "Two tools alternating repeatedly.\n"
-        "Threshold: repeating_pattern_threshold=2, window=6",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            "[bold]Scenario 2: Repeating Pattern (A, B, A, B)[/bold]\n"
+            "Two tools alternating repeatedly.\n"
+            "Threshold: repeating_pattern_threshold=2, window=6",
+            border_style="yellow",
+        )
+    )
 
     from koboi.harness.doom_loop import DoomLoopConfig, DoomLoopDetector
 
-    config = DoomLoopConfig(consecutive_identical_threshold=3, repeating_pattern_window=6, repeating_pattern_threshold=2, error_retry_threshold=3)
+    config = DoomLoopConfig(
+        consecutive_identical_threshold=3,
+        repeating_pattern_window=6,
+        repeating_pattern_threshold=2,
+        error_retry_threshold=3,
+    )
     detector = DoomLoopDetector(config)
 
     pattern = [("web_search", '{"query": "AcmeERP"}'), ("memory_recall", '{"key": "pricing"}')]
@@ -89,28 +107,38 @@ def _scenario_2():
         status = "[red]DETECTED[/red]" if result.detected else "[green]OK[/green]"
         console.print(f"  Step {step}: {tool} -> {status}")
         if result.detected:
-            console.print(Panel(
-                f"[bold red]Doom Loop Detected![/bold red]\n\n"
-                f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
-                f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
-                title="Detection Result", border_style="red",
-            ))
+            console.print(
+                Panel(
+                    f"[bold red]Doom Loop Detected![/bold red]\n\n"
+                    f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
+                    f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
+                    title="Detection Result",
+                    border_style="red",
+                )
+            )
             break
     console.print()
 
 
 def _scenario_3():
     """Scenario 3: Error retry."""
-    console.print(Panel(
-        "[bold]Scenario 3: Error Retry[/bold]\n"
-        "The same tool fails repeatedly (is_error=True).\n"
-        "Threshold: error_retry_threshold=3",
-        border_style="magenta",
-    ))
+    console.print(
+        Panel(
+            "[bold]Scenario 3: Error Retry[/bold]\n"
+            "The same tool fails repeatedly (is_error=True).\n"
+            "Threshold: error_retry_threshold=3",
+            border_style="magenta",
+        )
+    )
 
     from koboi.harness.doom_loop import DoomLoopConfig, DoomLoopDetector
 
-    config = DoomLoopConfig(consecutive_identical_threshold=3, repeating_pattern_window=4, repeating_pattern_threshold=2, error_retry_threshold=3)
+    config = DoomLoopConfig(
+        consecutive_identical_threshold=3,
+        repeating_pattern_window=4,
+        repeating_pattern_threshold=2,
+        error_retry_threshold=3,
+    )
     detector = DoomLoopDetector(config)
 
     tool_name = "run_shell"
@@ -122,12 +150,15 @@ def _scenario_3():
         status = "[red]DETECTED[/red]" if result.detected else "[green]OK[/green]"
         console.print(f"  Step {step}: {tool_name} (error=True) -> {status}")
         if result.detected:
-            console.print(Panel(
-                f"[bold red]Doom Loop Detected![/bold red]\n\n"
-                f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
-                f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
-                title="Detection Result", border_style="red",
-            ))
+            console.print(
+                Panel(
+                    f"[bold red]Doom Loop Detected![/bold red]\n\n"
+                    f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
+                    f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
+                    title="Detection Result",
+                    border_style="red",
+                )
+            )
             break
     console.print()
 
@@ -148,19 +179,27 @@ def run_automatic():
     _scenario_2()
     _scenario_3()
 
-    console.print(Panel(
-        "[bold green]All scenarios completed.[/bold green]\n\n"
-        "Doom loop detection helps prevent agents from getting stuck\n"
-        "in unproductive tool call patterns.",
-        title="Summary", border_style="green",
-    ))
+    console.print(
+        Panel(
+            "[bold green]All scenarios completed.[/bold green]\n\n"
+            "Doom loop detection helps prevent agents from getting stuck\n"
+            "in unproductive tool call patterns.",
+            title="Summary",
+            border_style="green",
+        )
+    )
 
 
 def run_interactive():
     """Type tool calls and see doom loop detection in real-time."""
     from koboi.harness.doom_loop import DoomLoopConfig, DoomLoopDetector
 
-    config = DoomLoopConfig(consecutive_identical_threshold=3, repeating_pattern_window=6, repeating_pattern_threshold=2, error_retry_threshold=3)
+    config = DoomLoopConfig(
+        consecutive_identical_threshold=3,
+        repeating_pattern_window=6,
+        repeating_pattern_threshold=2,
+        error_retry_threshold=3,
+    )
     detector = DoomLoopDetector(config)
     step = 0
 
@@ -188,7 +227,9 @@ def run_interactive():
 
         if stripped == "status":
             result = detector.check()
-            console.print(f"  Detected: {'[red]YES[/red]' if result.detected else '[green]NO[/green]'} | Type: {result.loop_type or '-'}\n")
+            console.print(
+                f"  Detected: {'[red]YES[/red]' if result.detected else '[green]NO[/green]'} | Type: {result.loop_type or '-'}\n"
+            )
             continue
 
         if not user_input.strip():
@@ -212,11 +253,14 @@ def run_interactive():
         console.print(f"  Step {step}: {tool_name}{error_tag} -> {status}")
 
         if result.detected:
-            console.print(Panel(
-                f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
-                f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
-                title="Doom Loop Detected!", border_style="red",
-            ))
+            console.print(
+                Panel(
+                    f"Type: {result.loop_type}\nPattern: {_escape_rich(result.pattern_description)}\n"
+                    f"Recovery: {result.recovery_hint}\nWasted Iterations: {result.iterations_wasted}",
+                    title="Doom Loop Detected!",
+                    border_style="red",
+                )
+            )
             # Reset after detection
             detector = DoomLoopDetector(config)
             step = 0

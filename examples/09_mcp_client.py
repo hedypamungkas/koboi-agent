@@ -9,6 +9,7 @@ Run:
     python examples/08_mcp_client.py                  # automatic mode
     python examples/08_mcp_client.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys

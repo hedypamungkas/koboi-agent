@@ -1,4 +1,5 @@
 """koboi/tools/builtin/web -- Web search and URL fetching."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,37 +24,85 @@ WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "mock")
 
 SEARCH_INDEX: dict[str, list[dict]] = {
     "python": [
-        {"title": "Python Documentation", "url": "https://docs.python.org/3/", "snippet": "Official Python 3 documentation — tutorials, library reference, and guides."},
-        {"title": "Real Python", "url": "https://realpython.com/", "snippet": "Python tutorials, guides, and best practices for developers."},
+        {
+            "title": "Python Documentation",
+            "url": "https://docs.python.org/3/",
+            "snippet": "Official Python 3 documentation — tutorials, library reference, and guides.",
+        },
+        {
+            "title": "Real Python",
+            "url": "https://realpython.com/",
+            "snippet": "Python tutorials, guides, and best practices for developers.",
+        },
     ],
     "asyncio": [
-        {"title": "Async IO in Python", "url": "https://docs.python.org/3/library/asyncio.html", "snippet": "Coroutines, event loops, tasks, and futures for async programming."},
+        {
+            "title": "Async IO in Python",
+            "url": "https://docs.python.org/3/library/asyncio.html",
+            "snippet": "Coroutines, event loops, tasks, and futures for async programming.",
+        },
     ],
     "react": [
-        {"title": "React Documentation", "url": "https://react.dev/", "snippet": "Learn React — components, hooks, state management."},
+        {
+            "title": "React Documentation",
+            "url": "https://react.dev/",
+            "snippet": "Learn React — components, hooks, state management.",
+        },
     ],
     "typescript": [
-        {"title": "TypeScript Handbook", "url": "https://www.typescriptlang.org/docs/handbook/", "snippet": "TypeScript type system, interfaces, generics, and modules."},
+        {
+            "title": "TypeScript Handbook",
+            "url": "https://www.typescriptlang.org/docs/handbook/",
+            "snippet": "TypeScript type system, interfaces, generics, and modules.",
+        },
     ],
     "fastapi": [
-        {"title": "FastAPI Documentation", "url": "https://fastapi.tiangolo.com/", "snippet": "Modern Python web framework with automatic OpenAPI docs."},
+        {
+            "title": "FastAPI Documentation",
+            "url": "https://fastapi.tiangolo.com/",
+            "snippet": "Modern Python web framework with automatic OpenAPI docs.",
+        },
     ],
     "docker": [
-        {"title": "Docker Documentation", "url": "https://docs.docker.com/", "snippet": "Container platform — build, ship, and run applications."},
+        {
+            "title": "Docker Documentation",
+            "url": "https://docs.docker.com/",
+            "snippet": "Container platform — build, ship, and run applications.",
+        },
     ],
     "git": [
-        {"title": "Git Documentation", "url": "https://git-scm.com/doc", "snippet": "Version control system — branching, merging, and collaboration."},
+        {
+            "title": "Git Documentation",
+            "url": "https://git-scm.com/doc",
+            "snippet": "Version control system — branching, merging, and collaboration.",
+        },
     ],
     "ai": [
-        {"title": "Anthropic API Docs", "url": "https://docs.anthropic.com/", "snippet": "Claude API — messages, tool use, and streaming."},
-        {"title": "OpenAI API Docs", "url": "https://platform.openai.com/docs", "snippet": "GPT models, embeddings, and fine-tuning."},
+        {
+            "title": "Anthropic API Docs",
+            "url": "https://docs.anthropic.com/",
+            "snippet": "Claude API — messages, tool use, and streaming.",
+        },
+        {
+            "title": "OpenAI API Docs",
+            "url": "https://platform.openai.com/docs",
+            "snippet": "GPT models, embeddings, and fine-tuning.",
+        },
     ],
     "agent": [
-        {"title": "LangChain Docs", "url": "https://python.langchain.com/", "snippet": "Framework for building LLM-powered applications and agents."},
+        {
+            "title": "LangChain Docs",
+            "url": "https://python.langchain.com/",
+            "snippet": "Framework for building LLM-powered applications and agents.",
+        },
         {"title": "CrewAI", "url": "https://docs.crewai.com/", "snippet": "Multi-agent orchestration framework."},
     ],
     "mcp": [
-        {"title": "Model Context Protocol", "url": "https://modelcontextprotocol.io/", "snippet": "Open standard for connecting AI assistants to external tools and data."},
+        {
+            "title": "Model Context Protocol",
+            "url": "https://modelcontextprotocol.io/",
+            "snippet": "Open standard for connecting AI assistants to external tools and data.",
+        },
     ],
 }
 
@@ -120,11 +169,13 @@ class _DDGResultParser(HTMLParser):
         elif tag == "a" and self._in_snippet:
             self._in_snippet = False
             if self._current_title.strip() and self._current_url:
-                self.results.append({
-                    "title": self._current_title.strip(),
-                    "url": self._current_url.strip(),
-                    "snippet": self._current_snippet.strip() or "(no description)",
-                })
+                self.results.append(
+                    {
+                        "title": self._current_title.strip(),
+                        "url": self._current_url.strip(),
+                        "snippet": self._current_snippet.strip() or "(no description)",
+                    }
+                )
 
 
 async def _search_duckduckgo(query: str) -> str:
@@ -308,10 +359,13 @@ async def web_fetch(url: str, timeout: int = 15) -> str:
 
             if response.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
                 last_error = f"HTTP {response.status_code}: {response.reason_phrase}"
-                wait = 2 ** attempt
+                wait = 2**attempt
                 _logger.warning(
                     "Retrying %s (status %d, attempt %d/%d)",
-                    url, response.status_code, attempt + 1, MAX_RETRIES,
+                    url,
+                    response.status_code,
+                    attempt + 1,
+                    MAX_RETRIES,
                 )
                 await asyncio.sleep(wait)
                 continue
@@ -320,7 +374,7 @@ async def web_fetch(url: str, timeout: int = 15) -> str:
         else:
             return f"Error: Max retries exceeded: {last_error}"
 
-        raw = response.content[:MAX_RESPONSE_SIZE + 1]
+        raw = response.content[: MAX_RESPONSE_SIZE + 1]
         truncated = len(response.content) > MAX_RESPONSE_SIZE
 
         try:

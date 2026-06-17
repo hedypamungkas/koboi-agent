@@ -102,27 +102,17 @@ class SQLiteAuditTrail(AuditTrail):
                 details TEXT DEFAULT ''
             )
         """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_entries(event_type)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_entries(tool_name)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_entries(timestamp)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_entries(event_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_entries(tool_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_entries(timestamp)")
         conn.commit()
 
     def record(self, entry: AuditEntry) -> None:
         super().record(entry)
         if len(self._entries) > self._memory_cap:
-            self._entries = self._entries[-self._memory_cap:]
+            self._entries = self._entries[-self._memory_cap :]
         conn = self._ensure_conn()
-        risk = (
-            entry.risk_level.value
-            if isinstance(entry.risk_level, RiskLevel)
-            else entry.risk_level
-        )
+        risk = entry.risk_level.value if isinstance(entry.risk_level, RiskLevel) else entry.risk_level
         conn.execute(
             "INSERT INTO audit_entries "
             "(timestamp, event_type, tool_name, arguments, result, risk_level, details) "

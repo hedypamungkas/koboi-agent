@@ -1,4 +1,5 @@
 """Tests for TUI screens -- permission_dialog (no Textual widget instantiation)."""
+
 from __future__ import annotations
 
 import pytest
@@ -36,4 +37,5 @@ class TestPermissionDialog:
 
     def test_is_modal_screen(self):
         from textual.screen import ModalScreen
+
         assert issubclass(PermissionDialog, ModalScreen)

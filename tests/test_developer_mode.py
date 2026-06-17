@@ -1,4 +1,5 @@
 """Tests for developer mode features: __version__, ConfigBuilder, context manager, agent.on()."""
+
 from __future__ import annotations
 
 import asyncio
@@ -34,11 +35,13 @@ def _base_config_data() -> dict:
 class TestVersion:
     def test_version_is_string(self):
         import koboi
+
         assert isinstance(koboi.__version__, str)
         assert len(koboi.__version__) > 0
 
     def test_version_matches_pyproject(self):
         import koboi
+
         pyproject = Path(__file__).parent.parent / "pyproject.toml"
         if pyproject.exists():
             content = pyproject.read_text()
@@ -52,6 +55,7 @@ class TestVersion:
 
     def test_version_in_all(self):
         import koboi
+
         assert "__version__" in koboi.__all__
 
 
@@ -167,11 +171,7 @@ class TestConfigBuilder:
 
     def test_builder_rag_documents_as_strings(self):
         config = (
-            Config.builder()
-            .agent(name="rag-test")
-            .llm(model="gpt-4")
-            .rag(documents=["doc1.md", "doc2.md"])
-            .build()
+            Config.builder().agent(name="rag-test").llm(model="gpt-4").rag(documents=["doc1.md", "doc2.md"]).build()
         )
         docs = config.get("rag", "documents")
         assert docs == [{"path": "doc1.md"}, {"path": "doc2.md"}]
@@ -198,13 +198,7 @@ class TestConfigBuilder:
         assert config.get("tools", "custom") == [{"module": "my.module", "function": "my_func"}]
 
     def test_builder_multiple_calls_merge(self):
-        config = (
-            Config.builder()
-            .agent(name="merge-test")
-            .llm(model="gpt-4")
-            .llm(api_key="sk-new")
-            .build()
-        )
+        config = Config.builder().agent(name="merge-test").llm(model="gpt-4").llm(api_key="sk-new").build()
         assert config.model == "gpt-4"
         assert config.api_key == "sk-new"
 
@@ -219,6 +213,7 @@ class TestConfigBuilder:
 class TestContextManager:
     async def test_context_manager_enter_returns_self(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         path = _write_config(tmp_path, _base_config_data())
         agent = KoboiAgent.from_config(path)
         async with agent as a:
@@ -227,6 +222,7 @@ class TestContextManager:
 
     async def test_context_manager_closes_client(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         path = _write_config(tmp_path, _base_config_data())
         agent = KoboiAgent.from_config(path)
         closed = []
@@ -243,6 +239,7 @@ class TestContextManager:
 
     async def test_context_manager_closes_mcp_clients(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         path = _write_config(tmp_path, _base_config_data())
         agent = KoboiAgent.from_config(path)
 
@@ -258,6 +255,7 @@ class TestContextManager:
 
     async def test_context_manager_closes_sqlite_memory(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         config_data = _base_config_data()
         config_data["memory"] = {"backend": "sqlite", "db_path": str(tmp_path / "test.db")}
         path = _write_config(tmp_path, config_data)
@@ -277,6 +275,7 @@ class TestContextManager:
 
     async def test_context_manager_handles_close_errors(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         path = _write_config(tmp_path, _base_config_data())
         agent = KoboiAgent.from_config(path)
 
@@ -289,6 +288,7 @@ class TestContextManager:
 
     async def test_close_without_context_manager(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         path = _write_config(tmp_path, _base_config_data())
         agent = KoboiAgent.from_config(path)
         closed = []
@@ -304,6 +304,7 @@ class TestContextManager:
 
     async def test_mcp_clients_stored_on_agent(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         path = _write_config(tmp_path, _base_config_data())
         agent = KoboiAgent.from_config(path)
         assert hasattr(agent, "_mcp_clients")
@@ -316,6 +317,7 @@ class TestContextManager:
 class TestAgentOn:
     def _make_agent(self, tmp_path):
         from koboi.facade import KoboiAgent
+
         path = _write_config(tmp_path, _base_config_data())
         return KoboiAgent.from_config(path)
 
@@ -427,9 +429,11 @@ class TestDeveloperWorkflowIntegration:
         agent = KoboiAgent.from_config(path)
 
         # Replace client with mock
-        agent._core.client = MockClient(responses=[
-            make_mock_response(content="Hello from dev agent!"),
-        ])
+        agent._core.client = MockClient(
+            responses=[
+                make_mock_response(content="Hello from dev agent!"),
+            ]
+        )
 
         # Register event callback
         output_received = []

@@ -1,4 +1,5 @@
 """Tests for the PolicyHook in koboi.hooks.policy_hook."""
+
 from __future__ import annotations
 
 import pytest
@@ -31,28 +32,32 @@ class TestPolicyHookInit:
 
 class TestPolicyHookDeny:
     async def test_deny_sets_abort(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="deny_all",
-                action=PolicyAction.DENY,
-                tool_pattern="*",
-                description="Block everything",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="deny_all",
+                    action=PolicyAction.DENY,
+                    tool_pattern="*",
+                    description="Block everything",
+                ),
+            ]
+        )
         hook = PolicyHook(engine)
         ctx = HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="test_tool")
         result = await hook.execute(ctx)
         assert result.abort is True
 
     async def test_deny_injects_message(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="deny_shell",
-                action=PolicyAction.DENY,
-                tool_pattern="run_shell",
-                description="Shell is blocked",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="deny_shell",
+                    action=PolicyAction.DENY,
+                    tool_pattern="run_shell",
+                    description="Shell is blocked",
+                ),
+            ]
+        )
         hook = PolicyHook(engine)
         ctx = HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="run_shell")
         result = await hook.execute(ctx)
@@ -61,14 +66,16 @@ class TestPolicyHookDeny:
         assert "Shell is blocked" in result.inject_message
 
     async def test_deny_stores_decision_in_metadata(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="deny_calc",
-                action=PolicyAction.DENY,
-                tool_pattern="calculate",
-                description="Calculator blocked",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="deny_calc",
+                    action=PolicyAction.DENY,
+                    tool_pattern="calculate",
+                    description="Calculator blocked",
+                ),
+            ]
+        )
         hook = PolicyHook(engine)
         ctx = HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="calculate")
         result = await hook.execute(ctx)
@@ -119,14 +126,16 @@ class TestPolicyHookAllow:
         assert decision["action"] == "allow"
 
     async def test_explicit_allow_rule(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="allow_calc",
-                action=PolicyAction.ALLOW,
-                tool_pattern="calculate",
-                description="Calculator is fine",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="allow_calc",
+                    action=PolicyAction.ALLOW,
+                    tool_pattern="calculate",
+                    description="Calculator is fine",
+                ),
+            ]
+        )
         hook = PolicyHook(engine)
         ctx = HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="calculate")
         result = await hook.execute(ctx)
@@ -136,14 +145,16 @@ class TestPolicyHookAllow:
 
 class TestPolicyHookConfirm:
     async def test_confirm_flags_metadata(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="confirm_shell",
-                action=PolicyAction.CONFIRM,
-                tool_pattern="run_shell",
-                description="Needs user approval",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="confirm_shell",
+                    action=PolicyAction.CONFIRM,
+                    tool_pattern="run_shell",
+                    description="Needs user approval",
+                ),
+            ]
+        )
         hook = PolicyHook(engine, risk_lookup={"run_shell": RiskLevel.MODERATE})
         ctx = HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="run_shell")
         result = await hook.execute(ctx)
@@ -162,14 +173,16 @@ class TestPolicyHookConfirm:
 
 class TestPolicyHookMissingToolName:
     async def test_missing_tool_name_passes_through(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="deny_all",
-                action=PolicyAction.DENY,
-                tool_pattern="*",
-                description="Block everything",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="deny_all",
+                    action=PolicyAction.DENY,
+                    tool_pattern="*",
+                    description="Block everything",
+                ),
+            ]
+        )
         hook = PolicyHook(engine)
         ctx = HookContext(event=HookEvent.PRE_TOOL_USE, tool_name=None)
         result = await hook.execute(ctx)
@@ -177,14 +190,16 @@ class TestPolicyHookMissingToolName:
         assert "policy_decision" not in result.metadata
 
     async def test_empty_tool_name_passes_through(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="deny_all",
-                action=PolicyAction.DENY,
-                tool_pattern="*",
-                description="Block everything",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="deny_all",
+                    action=PolicyAction.DENY,
+                    tool_pattern="*",
+                    description="Block everything",
+                ),
+            ]
+        )
         hook = PolicyHook(engine)
         ctx = HookContext(event=HookEvent.PRE_TOOL_USE, tool_name=None)
         result = await hook.execute(ctx)
@@ -224,13 +239,15 @@ class TestPolicyHookWithContextArguments:
         assert result.abort is False
 
     async def test_none_arguments_handled(self):
-        engine = PolicyEngine([
-            PolicyRule(
-                name="allow_all",
-                action=PolicyAction.ALLOW,
-                tool_pattern="*",
-            ),
-        ])
+        engine = PolicyEngine(
+            [
+                PolicyRule(
+                    name="allow_all",
+                    action=PolicyAction.ALLOW,
+                    tool_pattern="*",
+                ),
+            ]
+        )
         hook = PolicyHook(engine)
         ctx = HookContext(
             event=HookEvent.PRE_TOOL_USE,

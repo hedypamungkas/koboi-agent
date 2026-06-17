@@ -1,4 +1,5 @@
 """Tests for koboi/tui/loop.py and koboi/tui/app.py."""
+
 from __future__ import annotations
 
 import asyncio
@@ -37,10 +38,13 @@ from koboi.events import (
 def _make_temp_config() -> str:
     """Create a temp YAML config file and return its path."""
     with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
-        yaml.dump({
-            "agent": {"name": "test-agent", "max_iterations": 5},
-            "llm": {"model": "gpt-4o-mini", "provider": "openai"},
-        }, f)
+        yaml.dump(
+            {
+                "agent": {"name": "test-agent", "max_iterations": 5},
+                "llm": {"model": "gpt-4o-mini", "provider": "openai"},
+            },
+            f,
+        )
         return f.name
 
 
@@ -124,6 +128,7 @@ class TestStreamResponse:
             # Verify a panel was updated with markdown
             last_call = mock_live.update.call_args
             from rich.panel import Panel
+
             assert isinstance(last_call[0][0], Panel)
 
     @pytest.mark.asyncio
@@ -132,11 +137,7 @@ class TestStreamResponse:
         mock_agent = MagicMock()
 
         async def mock_stream(prompt):
-            yield ToolCallEvent(
-                tool_name="calculator",
-                tool_call_id="tc_123",
-                arguments='{"expr": "2+2"}'
-            )
+            yield ToolCallEvent(tool_name="calculator", tool_call_id="tc_123", arguments='{"expr": "2+2"}')
             yield CompleteEvent(content="Result: 4")
 
         mock_agent.run_stream = mock_stream
@@ -323,16 +324,19 @@ class TestBuildSlashCommands:
 
         mock_console.print.assert_called_once()
         from rich.panel import Panel
+
         call_arg = mock_console.print.call_args[0][0]
         assert isinstance(call_arg, Panel)
 
     def test_cmd_history_with_messages(self):
         """Test /history command displays messages."""
         mock_agent = _make_mock_agent()
-        mock_agent.core.memory.get_messages = MagicMock(return_value=[
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-        ])
+        mock_agent.core.memory.get_messages = MagicMock(
+            return_value=[
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+            ]
+        )
         mock_console = MagicMock()
         commands = build_slash_commands(mock_agent)
 
@@ -364,6 +368,7 @@ class TestBuildSlashCommands:
 
         mock_console.print.assert_called_once()
         from rich.table import Table
+
         call_arg = mock_console.print.call_args[0][0]
         assert isinstance(call_arg, Table)
 
@@ -389,6 +394,7 @@ class TestBuildSlashCommands:
 
         mock_console.print.assert_called_once()
         from rich.panel import Panel
+
         call_arg = mock_console.print.call_args[0][0]
         assert isinstance(call_arg, Panel)
 
@@ -456,12 +462,7 @@ class TestInteractiveLoop:
         mock_console.input = MagicMock(side_effect=["/help", "quit"])
 
         commands = build_slash_commands(mock_agent)
-        await interactive_loop(
-            mock_agent,
-            mock_console,
-            extra_commands=commands,
-            stream=False
-        )
+        await interactive_loop(mock_agent, mock_console, extra_commands=commands, stream=False)
 
         # Help should have been displayed
         assert mock_console.print.called
@@ -652,6 +653,7 @@ class TestBuildWelcomePanel:
 
         panel = _build_welcome_panel(mock_agent)
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)
 
     def test_panel_with_many_tools_truncates_display(self):
@@ -675,6 +677,7 @@ class TestBuildWelcomePanel:
 
         panel = _build_welcome_panel(mock_agent)
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)
 
     def test_panel_with_guardrails(self):
@@ -695,4 +698,5 @@ class TestBuildWelcomePanel:
 
         panel = _build_welcome_panel(mock_agent)
         from rich.panel import Panel
+
         assert isinstance(panel, Panel)

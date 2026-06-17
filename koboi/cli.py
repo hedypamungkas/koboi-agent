@@ -1,4 +1,5 @@
 """koboi/cli -- Console-script entry point with graceful TUI-dep handling."""
+
 from __future__ import annotations
 
 import sys

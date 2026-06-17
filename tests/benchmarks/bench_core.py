@@ -1,4 +1,5 @@
 """Core performance benchmarks for koboi-agent."""
+
 import tempfile
 from pathlib import Path
 
@@ -175,18 +176,10 @@ def test_context_key_facts(benchmark, sample_messages):
         tool_call = {
             "id": f"tc_{i}",
             "type": "function",
-            "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'}
+            "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'},
         }
-        many_messages.append({
-            "role": "assistant",
-            "content": f"Let me check {i}.",
-            "tool_calls": [tool_call]
-        })
-        many_messages.append({
-            "role": "tool",
-            "tool_call_id": f"tc_{i}",
-            "content": f"Weather in Paris: Sunny {i}C"
-        })
+        many_messages.append({"role": "assistant", "content": f"Let me check {i}.", "tool_calls": [tool_call]})
+        many_messages.append({"role": "tool", "tool_call_id": f"tc_{i}", "content": f"Weather in Paris: Sunny {i}C"})
 
     import asyncio
 
@@ -205,14 +198,22 @@ def test_ensure_tool_integrity(benchmark):
     messages = [
         {"role": "system", "content": "You are helpful."},
         {"role": "user", "content": "Calculate 2+2"},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "tc_1", "type": "function", "function": {"name": "calculator", "arguments": '{"expr": "2+2"}'}}
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "tc_1", "type": "function", "function": {"name": "calculator", "arguments": '{"expr": "2+2"}'}}
+            ],
+        },
         {"role": "tool", "tool_call_id": "tc_1", "content": "Result: 4"},
         {"role": "user", "content": "Now calculate 3+3"},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "tc_2", "type": "function", "function": {"name": "calculator", "arguments": '{"expr": "3+3"}'}}
-        ]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "tc_2", "type": "function", "function": {"name": "calculator", "arguments": '{"expr": "3+3"}'}}
+            ],
+        },
     ]
 
     # Add some orphaned tool results

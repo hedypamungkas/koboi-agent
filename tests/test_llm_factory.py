@@ -1,4 +1,5 @@
 """Tests for koboi.llm.factory module."""
+
 from __future__ import annotations
 
 import pytest

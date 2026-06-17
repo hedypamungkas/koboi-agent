@@ -3,6 +3,7 @@
 Evaluates generated patches against expected SWE-bench patches using
 structural similarity and file overlap comparison.
 """
+
 from __future__ import annotations
 
 import logging
@@ -162,29 +163,29 @@ class DockerTestScorer(BaseScorer):
 
 
 def _extract_filenames(patch: str) -> set[str]:
-        """Extract filenames from a diff/patch string."""
-        files: set[str] = set()
+    """Extract filenames from a diff/patch string."""
+    files: set[str] = set()
 
-        # diff --git a/file b/file
-        for m in re.finditer(r"diff --git a/(.+?) b/(.+?)(?:\s|$)", patch):
-            files.add(m.group(2))
+    # diff --git a/file b/file
+    for m in re.finditer(r"diff --git a/(.+?) b/(.+?)(?:\s|$)", patch):
+        files.add(m.group(2))
 
-        # --- a/file / +++ b/file
-        for m in re.finditer(r"[-+]{3} [ab]/(.+?)(?:\s|$)", patch):
-            files.add(m.group(1))
+    # --- a/file / +++ b/file
+    for m in re.finditer(r"[-+]{3} [ab]/(.+?)(?:\s|$)", patch):
+        files.add(m.group(1))
 
-        return files
+    return files
 
 
 def _diff_stats(patch: str) -> dict[str, int]:
-        """Extract statistics from a diff/patch string."""
-        hunks = len(re.findall(r"^@@ ", patch, re.MULTILINE))
-        additions = len(re.findall(r"^\+[^+]", patch, re.MULTILINE))
-        deletions = len(re.findall(r"^-[^-]", patch, re.MULTILINE))
+    """Extract statistics from a diff/patch string."""
+    hunks = len(re.findall(r"^@@ ", patch, re.MULTILINE))
+    additions = len(re.findall(r"^\+[^+]", patch, re.MULTILINE))
+    deletions = len(re.findall(r"^-[^-]", patch, re.MULTILINE))
 
-        return {
-            "hunks": hunks,
-            "additions": additions,
-            "deletions": deletions,
-            "total": additions + deletions,
-        }
+    return {
+        "hunks": hunks,
+        "additions": additions,
+        "deletions": deletions,
+        "total": additions + deletions,
+    }

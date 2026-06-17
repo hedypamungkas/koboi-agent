@@ -2,6 +2,7 @@
 
 Collects metrics throughout the agent session lifecycle for health reporting.
 """
+
 from __future__ import annotations
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent

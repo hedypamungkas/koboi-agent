@@ -100,10 +100,12 @@ class PaymentGateway:
     def __init__(self, db_path: str = "transactions.db"):
         self.db_path = db_path
         self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {MERCHANT_API_KEY}",
-            "Content-Type": "application/json",
-        })
+        self._session.headers.update(
+            {
+                "Authorization": f"Bearer {MERCHANT_API_KEY}",
+                "Content-Type": "application/json",
+            }
+        )
         self._lock = threading.Lock()
         self._processing = {}
         self._init_db()
@@ -328,9 +330,7 @@ class PaymentGateway:
             if reverse:
                 rate = 1.0 / reverse
             else:
-                raise ValueError(
-                    f"No exchange rate for {from_currency.value} to {to_currency.value}"
-                )
+                raise ValueError(f"No exchange rate for {from_currency.value} to {to_currency.value}")
 
         converted = amount * rate
         return round(converted, 2)
@@ -360,20 +360,24 @@ class PaymentGateway:
             if txn.transaction_id in provider_map:
                 prov = provider_map[txn.transaction_id]
                 if abs(txn.amount - prov["amount"]) > 0.01 or txn.status != prov["status"]:
-                    mismatches.append({
-                        "transaction_id": txn.transaction_id,
-                        "local_amount": txn.amount,
-                        "provider_amount": prov["amount"],
-                        "local_status": txn.status,
-                        "provider_status": prov["status"],
-                    })
+                    mismatches.append(
+                        {
+                            "transaction_id": txn.transaction_id,
+                            "local_amount": txn.amount,
+                            "provider_amount": prov["amount"],
+                            "local_status": txn.status,
+                            "provider_status": prov["status"],
+                        }
+                    )
                 else:
                     matched.append(txn.transaction_id)
             else:
-                mismatches.append({
-                    "transaction_id": txn.transaction_id,
-                    "issue": "not_found_at_provider",
-                })
+                mismatches.append(
+                    {
+                        "transaction_id": txn.transaction_id,
+                        "issue": "not_found_at_provider",
+                    }
+                )
 
         for prov_txn in provider_txns:
             if prov_txn["transaction_id"] not in local_ids:

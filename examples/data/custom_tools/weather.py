@@ -1,4 +1,5 @@
 """Custom weather tool example -- mock data for demo purposes."""
+
 from __future__ import annotations
 
 from koboi.tools.registry import tool

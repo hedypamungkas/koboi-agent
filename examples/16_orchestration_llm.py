@@ -11,6 +11,7 @@ Run:
     python examples/15_orchestration_llm.py                  # automatic mode
     python examples/15_orchestration_llm.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import sys
@@ -63,7 +64,9 @@ def _run_router_automatic(router_name: str, router, client, logger):
     from koboi.orchestration.orchestrator import Orchestrator
 
     orchestrator = Orchestrator(
-        client=client, router=router, logger=logger,
+        client=client,
+        router=router,
+        logger=logger,
         enable_dynamic=(router_name in ("LLMRouter", "HybridRouter")),
     )
 
@@ -80,7 +83,9 @@ def _run_router_automatic(router_name: str, router, client, logger):
     for query, expected in TEST_QUERIES:
         try:
             decision = run_async(router.route(query))
-            route_table.add_row(query[:45], expected[:20], ", ".join(decision.agents), f"{decision.confidence:.2f}", decision.method)
+            route_table.add_row(
+                query[:45], expected[:20], ", ".join(decision.agents), f"{decision.confidence:.2f}", decision.method
+            )
             results_summary.append((query, expected, decision))
         except Exception as e:
             route_table.add_row(query[:45], expected[:20], f"[red]Error: {e}[/red]", "-", "-")
@@ -150,7 +155,11 @@ def run_automatic():
     logger = AgentLogger(session_id="ex15_router_comparison")
     all_results: dict[str, list] = {}
 
-    for router_name, router_cls in [("KeywordRouter", KeywordRouter), ("LLMRouter", LLMRouter), ("HybridRouter", HybridRouter)]:
+    for router_name, router_cls in [
+        ("KeywordRouter", KeywordRouter),
+        ("LLMRouter", LLMRouter),
+        ("HybridRouter", HybridRouter),
+    ]:
         router = _build_router(router_name)
         results = _run_router_automatic(router_name, router, client, logger)
         all_results[router_name] = results
@@ -188,7 +197,9 @@ def run_interactive():
     router = _build_router(selected)
     logger = AgentLogger(session_id=f"ex15_interactive_{selected}")
     orchestrator = Orchestrator(
-        client=client, router=router, logger=logger,
+        client=client,
+        router=router,
+        logger=logger,
         enable_dynamic=(selected in ("LLMRouter", "HybridRouter")),
     )
 
@@ -207,7 +218,9 @@ def run_interactive():
 
         # Show routing
         decision = run_async(router.route(user_input))
-        console.print(f"[dim]Routed: {decision.method} -> [cyan]{', '.join(decision.agents)}[/cyan] (confidence: {decision.confidence:.2f})[/dim]")
+        console.print(
+            f"[dim]Routed: {decision.method} -> [cyan]{', '.join(decision.agents)}[/cyan] (confidence: {decision.confidence:.2f})[/dim]"
+        )
 
         try:
             result = run_async(orchestrator.run(user_input, mode="sequential"))

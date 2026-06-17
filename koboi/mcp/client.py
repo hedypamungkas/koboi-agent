@@ -2,6 +2,7 @@
 
 Also re-exports MCPError and register_mcp_tools for backward compatibility.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,7 +48,8 @@ class MCPClient(BaseMCPClient):
 
         # Drain stderr in background thread (so buffer doesn't fill up)
         self._stderr_thread = threading.Thread(
-            target=self._drain_stderr, daemon=True,
+            target=self._drain_stderr,
+            daemon=True,
         )
         self._stderr_thread.start()
 
@@ -83,10 +85,13 @@ class MCPClient(BaseMCPClient):
 
     def _call_tool_sync(self, name: str, arguments: dict) -> str:
         """Sync implementation of call_tool, run in a thread."""
-        result = self._send_request("tools/call", {
-            "name": name,
-            "arguments": arguments,
-        })
+        result = self._send_request(
+            "tools/call",
+            {
+                "name": name,
+                "arguments": arguments,
+            },
+        )
         return self._extract_tool_result(result)
 
     def close(self) -> None:
@@ -172,10 +177,7 @@ class MCPClient(BaseMCPClient):
 
         if thread.is_alive():
             self.close()
-            raise TimeoutError(
-                f"MCP server did not respond within {timeout}s. "
-                "The server process has been terminated."
-            )
+            raise TimeoutError(f"MCP server did not respond within {timeout}s. The server process has been terminated.")
 
         if error:
             raise error[0]

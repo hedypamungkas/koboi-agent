@@ -3,6 +3,7 @@
 Tier 1 tests: screen interaction flows (CommandPalette, HistorySearch,
 PermissionDialog) and theme cycling via Ctrl+T.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

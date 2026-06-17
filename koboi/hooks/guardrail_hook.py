@@ -7,6 +7,7 @@ directly (see loop.py:_validate_input / _process_output). This class exists as
 an alternative integration path for users who prefer to run guardrails through
 the hook system. To use it, add it to your hook chain manually.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

@@ -2,6 +2,7 @@
 
 Each loader converts an external dataset format into a list[EvalCase].
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,17 +52,19 @@ class YAMLLoader(DatasetLoader):
         for item in data:
             if not isinstance(item, dict):
                 continue
-            cases.append(EvalCase(
-                name=item.get("name", "unnamed"),
-                user_message=item.get("user_message", ""),
-                expected_tools=item.get("expected_tools", []),
-                expected_keywords=item.get("expected_keywords", []),
-                max_iterations=item.get("max_iterations", 10),
-                tags=item.get("tags", []),
-                expected_answer=item.get("expected_answer"),
-                context_docs=item.get("context_docs", []),
-                metadata=item.get("metadata", {}),
-            ))
+            cases.append(
+                EvalCase(
+                    name=item.get("name", "unnamed"),
+                    user_message=item.get("user_message", ""),
+                    expected_tools=item.get("expected_tools", []),
+                    expected_keywords=item.get("expected_keywords", []),
+                    max_iterations=item.get("max_iterations", 10),
+                    tags=item.get("tags", []),
+                    expected_answer=item.get("expected_answer"),
+                    context_docs=item.get("context_docs", []),
+                    metadata=item.get("metadata", {}),
+                )
+            )
         return cases
 
     def framework_name(self) -> str:
@@ -80,9 +83,7 @@ class LoaderRegistry:
     @classmethod
     def get(cls, name: str) -> DatasetLoader:
         if name not in cls._loaders:
-            raise ValueError(
-                f"Unknown loader '{name}'. Available: {cls.list_available()}"
-            )
+            raise ValueError(f"Unknown loader '{name}'. Available: {cls.list_available()}")
         return cls._loaders[name]
 
     @classmethod
@@ -107,6 +108,7 @@ def register_default_loaders() -> None:
     # BFCL - no extra deps
     try:
         from koboi.eval.loaders.bfcl_loader import BFCLLoader
+
         LoaderRegistry.register("bfcl", BFCLLoader())
     except ImportError:
         pass
@@ -114,6 +116,7 @@ def register_default_loaders() -> None:
     # GAIA - needs `datasets` package
     try:
         from koboi.eval.loaders.gaia_loader import GAIALoader
+
         LoaderRegistry.register("gaia", GAIALoader())
     except ImportError:
         pass
@@ -121,6 +124,7 @@ def register_default_loaders() -> None:
     # SWE-bench - needs `datasets` package
     try:
         from koboi.eval.loaders.swe_bench_loader import SWEBenchLoader
+
         LoaderRegistry.register("swe-bench", SWEBenchLoader())
     except ImportError:
         pass

@@ -1,4 +1,5 @@
 """Tests for koboi/mcp/client.py and koboi/mcp/server.py — expanded coverage."""
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,12 @@ from koboi.types import MCPToolInfo
 class TestMCPServer:
     def test_tool_registration(self):
         server = MCPServer(name="test-server", version="1.0")
-        @server.tool(name="echo", description="Echo input", input_schema={"type": "object", "properties": {"text": {"type": "string"}}})
+
+        @server.tool(
+            name="echo",
+            description="Echo input",
+            input_schema={"type": "object", "properties": {"text": {"type": "string"}}},
+        )
         def echo(text: str) -> str:
             return text
 
@@ -33,6 +39,7 @@ class TestMCPServer:
 
     def test_handle_tools_list(self):
         server = MCPServer(name="test")
+
         @server.tool(name="greet", description="Say hi", input_schema={})
         def greet():
             return "hi"
@@ -43,6 +50,7 @@ class TestMCPServer:
 
     def test_handle_tools_call(self):
         server = MCPServer(name="test")
+
         @server.tool(name="add", description="Add", input_schema={})
         def add(a: int, b: int) -> int:
             return a + b
@@ -59,8 +67,10 @@ class TestMCPServer:
         server = MCPServer(name="test")
         responses = []
         original_write = server._write_response
+
         def capture_write(msg):
             responses.append(msg)
+
         server._write_response = capture_write
 
         server._dispatch({"jsonrpc": "2.0", "id": 1, "method": "unknown/method"})
@@ -75,6 +85,7 @@ class TestMCPServer:
 
     def test_dispatch_tool_exception(self):
         server = MCPServer(name="test")
+
         @server.tool(name="failing", description="fails", input_schema={})
         def failing():
             raise ValueError("boom")
@@ -82,8 +93,9 @@ class TestMCPServer:
         responses = []
         server._write_response = lambda msg: responses.append(msg)
 
-        server._dispatch({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                         "params": {"name": "failing", "arguments": {}}})
+        server._dispatch(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "failing", "arguments": {}}}
+        )
         assert len(responses) == 1
         assert responses[0]["result"]["isError"] is True
 
@@ -105,11 +117,10 @@ class TestMCPClient:
         client._process.stdin = MagicMock()
         client._process.stdout = MagicMock()
 
-        error_response = json.dumps({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {"code": -32600, "message": "Invalid request"}
-        }).encode() + b"\n"
+        error_response = (
+            json.dumps({"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": "Invalid request"}}).encode()
+            + b"\n"
+        )
         client._process.stdout.readline.return_value = error_response
 
         with pytest.raises(MCPError) as exc_info:

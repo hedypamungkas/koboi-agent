@@ -10,6 +10,7 @@ Run:
     python examples/17_harness_telemetry.py                  # automatic mode
     python examples/17_harness_telemetry.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import time
@@ -38,9 +39,7 @@ CONVERSATIONS = [
 
 def _find_telemetry_collector(agent):
     """Find the TelemetryCollector from the agent's hook chain."""
-    hook = agent.core.hooks.find_hook(
-        lambda h: hasattr(h, "telemetry") and hasattr(h.telemetry, "snapshot")
-    )
+    hook = agent.core.hooks.find_hook(lambda h: hasattr(h, "telemetry") and hasattr(h.telemetry, "snapshot"))
     return hook.telemetry if hook else None
     return None
 
@@ -87,6 +86,7 @@ def main(mode: str, verbose: bool):
         console.print("[dim]Make sure config has harness.telemetry: true[/dim]\n")
 
     if mode == "interactive":
+
         def _post_receive(result, a):
             t = _find_telemetry_collector(a)
             if t:
@@ -104,16 +104,18 @@ def main(mode: str, verbose: bool):
 
         # Final summary
         overall_duration = time.time() - overall_start
-        console.print(Panel(
-            f"[bold]Session Summary[/bold]\n\n"
-            f"Total Turns: {len(CONVERSATIONS)}\n"
-            f"Total Duration: {overall_duration:.1f}s\n"
-            + (f"Health Score: {telemetry.health_score()}/100\n" if telemetry else "")
-            + (f"Total Tool Calls: {telemetry.snapshot.total_tool_calls}\n" if telemetry else "")
-            + (f"Doom Loops: {telemetry.snapshot.doom_loops_detected}" if telemetry else ""),
-            title="Final Report",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"[bold]Session Summary[/bold]\n\n"
+                f"Total Turns: {len(CONVERSATIONS)}\n"
+                f"Total Duration: {overall_duration:.1f}s\n"
+                + (f"Health Score: {telemetry.health_score()}/100\n" if telemetry else "")
+                + (f"Total Tool Calls: {telemetry.snapshot.total_tool_calls}\n" if telemetry else "")
+                + (f"Doom Loops: {telemetry.snapshot.doom_loops_detected}" if telemetry else ""),
+                title="Final Report",
+                border_style="green",
+            )
+        )
 
 
 if __name__ == "__main__":

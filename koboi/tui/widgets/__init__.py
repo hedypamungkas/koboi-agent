@@ -1,4 +1,5 @@
 """koboi/tui/widgets -- Textual widgets for the Koboi TUI."""
+
 from koboi.tui.widgets.chat_log import ChatLog
 from koboi.tui.widgets.diff_view import DiffViewWidget
 from koboi.tui.widgets.header_bar import HeaderBar

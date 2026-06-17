@@ -9,6 +9,7 @@ Usage:
     python examples/27_benchmark_suite.py --framework bfcl
     python examples/27_benchmark_suite.py --framework all --parallel
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,10 +57,12 @@ async def run_bfcl_suite(agent_config: str, max_cases: int = 10) -> list:
     print(f"Loaded {len(cases)} BFCL cases")
 
     harness_factory = lambda: KoboiAgent.from_config(agent_config)
-    scorers = ScorerRegistry.from_config([
-        {"name": "tool_calling_accuracy"},
-        {"name": "cost"},
-    ])
+    scorers = ScorerRegistry.from_config(
+        [
+            {"name": "tool_calling_accuracy"},
+            {"name": "cost"},
+        ]
+    )
 
     runner = EvalRunner(harness_factory=harness_factory, scorers=scorers, threshold=0.7)
     results = await runner.run_suite(cases, parallel=False)
@@ -73,9 +76,11 @@ async def run_ragas_suite(agent_config: str, doc_paths: list[str]) -> list:
 
     harness_factory = lambda: KoboiAgent.from_config(agent_config)
     # Use faithfulness scorer (answer_relevancy needs embeddings endpoint not available on proxy)
-    scorers = ScorerRegistry.from_config([
-        {"name": "ragas_faithfulness"},
-    ])
+    scorers = ScorerRegistry.from_config(
+        [
+            {"name": "ragas_faithfulness"},
+        ]
+    )
 
     # Multi-case RAGAS benchmark covering different RAG quality dimensions
     cases = [
@@ -163,10 +168,12 @@ async def run_gaia_suite(agent_config: str, max_cases: int = 5) -> list:
     print("\n=== GAIA: General Task Completion ===")
 
     harness_factory = lambda: KoboiAgent.from_config(agent_config)
-    scorers = ScorerRegistry.from_config([
-        {"name": "gaia_verification", "numeric_tolerance": 0.01},
-        {"name": "cost"},
-    ])
+    scorers = ScorerRegistry.from_config(
+        [
+            {"name": "gaia_verification", "numeric_tolerance": 0.01},
+            {"name": "cost"},
+        ]
+    )
 
     # Sample GAIA-style cases
     cases = [
@@ -201,24 +208,26 @@ async def run_swe_bench_suite(agent_config: str, max_cases: int = 5) -> list:
     config_to_use = swe_config if Path(swe_config).exists() else agent_config
 
     harness_factory = lambda: KoboiAgent.from_config(config_to_use)
-    scorers = ScorerRegistry.from_config([
-        {"name": "patch_generation"},
-        {"name": "cost", "max_tokens": 100000},
-    ])
+    scorers = ScorerRegistry.from_config(
+        [
+            {"name": "patch_generation"},
+            {"name": "cost", "max_tokens": 100000},
+        ]
+    )
 
     # Sample SWE-bench-style cases
     cases = [
         EvalCase(
             name="swe_sample_0",
             user_message="Fix the bug in the calculate_total function that returns None when the list is empty.",
-            expected_answer='''diff --git a/utils.py b/utils.py
+            expected_answer="""diff --git a/utils.py b/utils.py
 --- a/utils.py
 +++ b/utils.py
 @@ -10,3 +10,5 @@
  def calculate_total(items):
 +    if not items:
 +        return 0
-     return sum(items)''',
+     return sum(items)""",
             max_iterations=30,
             tags=["swe-bench", "coding"],
             metadata={"framework": "swe-bench"},
@@ -244,9 +253,9 @@ async def run_all_suites(agent_config: str, parallel: bool = False, max_cases: i
     total = len(all_results)
     passed = sum(1 for r in all_results if r.passed)
     avg = sum(r.overall_score for r in all_results) / total if total else 0
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"TOTAL: {passed}/{total} passed — Average: {avg:.1%}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     return all_results
 

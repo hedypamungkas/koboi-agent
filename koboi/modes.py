@@ -3,6 +3,7 @@
 Centralizes mode types, per-mode configuration, and runtime mode switching.
 Used by the hook system, TUI, and agent loop to enforce mode-aware behavior.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,16 +12,18 @@ from enum import Enum
 
 class AgentMode(Enum):
     """Interaction mode for the agent."""
-    CHAT = "chat"       # Read-only exploration, no file modifications
-    PLAN = "plan"       # Analyze codebase, produce numbered step plan
-    ACT = "act"         # Execute with per-action permission prompts
-    AUTO = "auto"       # Execute with graduated trust (learns from approvals)
-    YOLO = "yolo"       # Bypass rate limit, approval, mode blocks; hardcoded safety only
+
+    CHAT = "chat"  # Read-only exploration, no file modifications
+    PLAN = "plan"  # Analyze codebase, produce numbered step plan
+    ACT = "act"  # Execute with per-action permission prompts
+    AUTO = "auto"  # Execute with graduated trust (learns from approvals)
+    YOLO = "yolo"  # Bypass rate limit, approval, mode blocks; hardcoded safety only
 
 
 @dataclass(frozen=True)
 class ModeConfig:
     """Per-mode behavior configuration."""
+
     allow_file_write: bool
     allow_shell: bool
     require_plan_approval: bool

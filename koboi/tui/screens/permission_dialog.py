@@ -1,4 +1,5 @@
 """permission_dialog.py -- Non-blocking modal screen for tool approval."""
+
 from __future__ import annotations
 
 from textual.app import ComposeResult

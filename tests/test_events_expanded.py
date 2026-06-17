@@ -1,10 +1,19 @@
 """Tests for events.py -- event_to_dict and orchestration events."""
+
 from __future__ import annotations
 
 from koboi.events import (
-    TextDeltaEvent, ToolCallEvent, ToolResultEvent, IterationEvent,
-    CompleteEvent, ErrorEvent, RoutingDecisionEvent, AgentDispatchEvent,
-    AgentResultEvent, OrchestrationCompleteEvent, event_to_dict,
+    TextDeltaEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+    IterationEvent,
+    CompleteEvent,
+    ErrorEvent,
+    RoutingDecisionEvent,
+    AgentDispatchEvent,
+    AgentResultEvent,
+    OrchestrationCompleteEvent,
+    event_to_dict,
 )
 from koboi.types import AgentResponse, TokenUsage
 
@@ -58,8 +67,11 @@ class TestEventToDict:
 
     def test_routing_decision(self):
         event = RoutingDecisionEvent(
-            agents=["a1", "a2"], confidence=0.9, method="llm",
-            reasoning="test", domain_label="finance",
+            agents=["a1", "a2"],
+            confidence=0.9,
+            method="llm",
+            reasoning="test",
+            domain_label="finance",
         )
         d = event_to_dict(event)
         assert d["type"] == "routing_decision"
@@ -68,7 +80,10 @@ class TestEventToDict:
 
     def test_agent_dispatch(self):
         event = AgentDispatchEvent(
-            agent_name="a1", agent_index=0, total_agents=2, mode="parallel",
+            agent_name="a1",
+            agent_index=0,
+            total_agents=2,
+            mode="parallel",
         )
         d = event_to_dict(event)
         assert d["type"] == "agent_dispatch"
@@ -76,8 +91,13 @@ class TestEventToDict:
 
     def test_agent_result(self):
         event = AgentResultEvent(
-            agent_name="a1", answer="ok", elapsed_seconds=1.0,
-            tokens_used=100, is_dynamic=True, domain_label="test", failed=False,
+            agent_name="a1",
+            answer="ok",
+            elapsed_seconds=1.0,
+            tokens_used=100,
+            is_dynamic=True,
+            domain_label="test",
+            failed=False,
         )
         d = event_to_dict(event)
         assert d["type"] == "agent_result"
@@ -85,8 +105,11 @@ class TestEventToDict:
 
     def test_orchestration_complete(self):
         event = OrchestrationCompleteEvent(
-            final_answer="done", elapsed_seconds=2.0, agent_results=[],
-            execution_mode="parallel", routing_agents=["a1"],
+            final_answer="done",
+            elapsed_seconds=2.0,
+            agent_results=[],
+            execution_mode="parallel",
+            routing_agents=["a1"],
             routing_confidence=0.9,
         )
         d = event_to_dict(event)

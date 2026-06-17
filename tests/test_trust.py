@@ -1,4 +1,5 @@
 """Tests for koboi/trust.py -- SQLite-backed trust database."""
+
 from __future__ import annotations
 
 import tempfile
@@ -67,16 +68,12 @@ class TestTrustDatabase:
         assert result.auto_approve is False
 
     def test_expired_rule_ignored(self, trust_db):
-        trust_db.record_decision(
-            "tool.*", RiskLevel.SAFE, "allow", always=True, ttl_seconds=-1
-        )
+        trust_db.record_decision("tool.*", RiskLevel.SAFE, "allow", always=True, ttl_seconds=-1)
         result = trust_db.should_auto_approve("tool.x", RiskLevel.SAFE)
         assert result.auto_approve is False
 
     def test_ttl_rule_not_expired(self, trust_db):
-        trust_db.record_decision(
-            "tool.*", RiskLevel.SAFE, "allow", always=True, ttl_seconds=3600
-        )
+        trust_db.record_decision("tool.*", RiskLevel.SAFE, "allow", always=True, ttl_seconds=3600)
         result = trust_db.should_auto_approve("tool.x", RiskLevel.SAFE)
         assert result.auto_approve is True
 
@@ -103,9 +100,7 @@ class TestTrustDatabase:
 
     def test_get_rules_excludes_expired(self, trust_db):
         trust_db.record_decision("tool.a", RiskLevel.SAFE, "allow", always=True)
-        trust_db.record_decision(
-            "tool.b", RiskLevel.SAFE, "allow", always=True, ttl_seconds=-1
-        )
+        trust_db.record_decision("tool.b", RiskLevel.SAFE, "allow", always=True, ttl_seconds=-1)
         rules = trust_db.get_rules()
         assert len(rules) == 1
 

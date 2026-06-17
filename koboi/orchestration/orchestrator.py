@@ -3,6 +3,7 @@
 Orchestrator: routes queries to specialized agents, collects and combines results.
 QualityEvaluator: LLM-based answer quality evaluation with revision support.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,15 +17,21 @@ from typing import TYPE_CHECKING
 from koboi.tokens import estimate_tokens
 from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, RoutingDecision
 from koboi.events import (
-    AgentDispatchEvent, AgentResultEvent, OrchestrationCompleteEvent,
-    RoutingDecisionEvent, TextDeltaEvent,
+    AgentDispatchEvent,
+    AgentResultEvent,
+    OrchestrationCompleteEvent,
+    RoutingDecisionEvent,
+    TextDeltaEvent,
 )
 
 
 @dataclass
 class _AgentCompletedEvent:
     """Internal event carrying full AgentResult for run() collection."""
+
     agent_result: AgentResult
+
+
 from koboi.orchestration.router import BaseRouter
 from koboi.orchestration.factory import AgentFactory, DynamicAgentBuilder
 
@@ -38,6 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # QualityEvaluator
 # ---------------------------------------------------------------------------
+
 
 class QualityEvaluator:
     EVAL_PROMPT = (
@@ -82,6 +90,7 @@ class QualityEvaluator:
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+
 class Orchestrator:
     def __init__(
         self,
@@ -118,14 +127,17 @@ class Orchestrator:
         if not self.logger:
             return None
         from koboi.logger import AgentLogger
+
         session_id = f"{self.logger.session_id}_{agent_name}"
         return AgentLogger(log_dir=self.logger.log_dir, session_id=session_id)
 
     async def _resolve_dynamic_agents(self, query: str, decision: RoutingDecision) -> list[str]:
         if not self._dynamic_builder:
             from koboi.orchestration.factory import DynamicAgentBuilder
+
             self._dynamic_builder = DynamicAgentBuilder(
-                client=self.client, logger=self.logger,
+                client=self.client,
+                logger=self.logger,
                 top_k=self._top_k,
                 chunk_size=self._chunk_size,
                 chunk_overlap=self._chunk_overlap,
@@ -133,7 +145,8 @@ class Orchestrator:
             )
 
         blueprint = await self._dynamic_builder.build_blueprint(
-            query, domain_label=decision.domain_label,
+            query,
+            domain_label=decision.domain_label,
         )
         self._dynamic_blueprints[blueprint.name] = blueprint
 
@@ -159,8 +172,11 @@ class Orchestrator:
         async for event in self._execute_pipeline(query, mode):
             if isinstance(event, RoutingDecisionEvent):
                 decision = RoutingDecision(
-                    query=query, agents=event.agents, confidence=event.confidence,
-                    method=event.method, reasoning=event.reasoning,
+                    query=query,
+                    agents=event.agents,
+                    confidence=event.confidence,
+                    method=event.method,
+                    reasoning=event.reasoning,
                     domain_label=event.domain_label,
                 )
             elif isinstance(event, _AgentCompletedEvent):
@@ -172,13 +188,20 @@ class Orchestrator:
 
         if decision is None:
             decision = RoutingDecision(
-                query=query, agents=[], confidence=0.0, method="keyword", reasoning="error",
+                query=query,
+                agents=[],
+                confidence=0.0,
+                method="keyword",
+                reasoning="error",
             )
 
         elapsed = time.time() - start
         orch_result = OrchestratorResult(
-            query=query, routing=decision, agent_results=results,
-            final_answer=combined_answer, total_elapsed_seconds=elapsed,
+            query=query,
+            routing=decision,
+            agent_results=results,
+            final_answer=combined_answer,
+            total_elapsed_seconds=elapsed,
             execution_mode=execution_mode,
         )
         if self.logger:
@@ -186,7 +209,10 @@ class Orchestrator:
         return orch_result
 
     async def _run_with_revision_legacy(
-        self, query: str, mode: str, start: float,
+        self,
+        query: str,
+        mode: str,
+        start: float,
     ) -> OrchestratorResult:
         """Legacy path for revision-enabled runs. Not streamable."""
         decision = await self.router.route(query)
@@ -202,8 +228,11 @@ class Orchestrator:
         elapsed = time.time() - start
 
         orch_result = OrchestratorResult(
-            query=query, routing=decision, agent_results=results,
-            final_answer=final, total_elapsed_seconds=elapsed,
+            query=query,
+            routing=decision,
+            agent_results=results,
+            final_answer=final,
+            total_elapsed_seconds=elapsed,
             execution_mode=f"{mode}+revision",
         )
         if self.logger:
@@ -233,10 +262,14 @@ class Orchestrator:
         results: list[AgentResult] = []
         for result in completed:
             if isinstance(result, Exception):
-                results.append(AgentResult(
-                    agent_name="unknown", answer=f"Error: {result}",
-                    elapsed_seconds=0, tokens_used=0,
-                ))
+                results.append(
+                    AgentResult(
+                        agent_name="unknown",
+                        answer=f"Error: {result}",
+                        elapsed_seconds=0,
+                        tokens_used=0,
+                    )
+                )
             else:
                 results.append(result)
                 if self.logger:
@@ -246,7 +279,10 @@ class Orchestrator:
         return results
 
     async def _execute_with_revision(
-        self, query: str, agent_names: list[str], mode: str = "sequential",
+        self,
+        query: str,
+        agent_names: list[str],
+        mode: str = "sequential",
     ) -> list[AgentResult]:
         results: list[AgentResult] = []
         for name in agent_names:
@@ -300,7 +336,7 @@ class Orchestrator:
 
         try:
             result = await agent.run(query)
-            answer = result.content if hasattr(result, 'content') else str(result)
+            answer = result.content if hasattr(result, "content") else str(result)
         except Exception as e:
             logger.error("Agent %s failed: %s", agent_name, e, exc_info=True)
             answer = f"Error: {e}"
@@ -312,10 +348,7 @@ class Orchestrator:
             tokens = 0
 
         is_dynamic = agent_name in self._dynamic_blueprints
-        domain_label = (
-            self._dynamic_blueprints[agent_name].domain_label
-            if is_dynamic else None
-        )
+        domain_label = self._dynamic_blueprints[agent_name].domain_label if is_dynamic else None
 
         return AgentResult(
             agent_name=agent_name,
@@ -399,14 +432,13 @@ class Orchestrator:
             yield TextDeltaEvent(content="\n\n".join(parts))
 
     async def _execute_pipeline(
-        self, query: str, mode: str = "sequential",
+        self,
+        query: str,
+        mode: str = "sequential",
     ) -> AsyncGenerator:
         """Core orchestration pipeline. Yields events for both run() and run_stream()."""
         if self.use_revision:
-            logger.warning(
-                "Revision logic is not supported in streaming mode; "
-                "falling back to direct execution."
-            )
+            logger.warning("Revision logic is not supported in streaming mode; falling back to direct execution.")
 
         start = time.time()
 
@@ -432,15 +464,14 @@ class Orchestrator:
         if mode == "parallel":
             for i, name in enumerate(agent_names):
                 yield AgentDispatchEvent(
-                    agent_name=name, agent_index=i,
-                    total_agents=total, mode=mode,
+                    agent_name=name,
+                    agent_index=i,
+                    total_agents=total,
+                    mode=mode,
                 )
 
             order = {name: i for i, name in enumerate(agent_names)}
-            tasks = {
-                name: asyncio.create_task(self._run_single(name, query))
-                for name in agent_names
-            }
+            tasks = {name: asyncio.create_task(self._run_single(name, query)) for name in agent_names}
             pending = set(tasks.values())
             while pending:
                 done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
@@ -449,8 +480,11 @@ class Orchestrator:
                         result = task.result()
                     except Exception as e:
                         result = AgentResult(
-                            agent_name="unknown", answer=f"Error: {e}",
-                            elapsed_seconds=0, tokens_used=0, failed=True,
+                            agent_name="unknown",
+                            answer=f"Error: {e}",
+                            elapsed_seconds=0,
+                            tokens_used=0,
+                            failed=True,
                         )
                     results.append(result)
                     yield AgentResultEvent(
@@ -468,8 +502,10 @@ class Orchestrator:
         else:
             for i, name in enumerate(agent_names):
                 yield AgentDispatchEvent(
-                    agent_name=name, agent_index=i,
-                    total_agents=total, mode=mode,
+                    agent_name=name,
+                    agent_index=i,
+                    total_agents=total,
+                    mode=mode,
                 )
 
                 result = await self._run_single(name, query)

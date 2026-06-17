@@ -1,4 +1,5 @@
 """HeaderBar -- top bar showing agent name, mode, model."""
+
 from __future__ import annotations
 
 from textual.reactive import reactive

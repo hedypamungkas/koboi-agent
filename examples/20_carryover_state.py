@@ -10,6 +10,7 @@ Run:
     python examples/19_carryover_state.py                  # automatic mode
     python examples/19_carryover_state.py -m interactive   # interactive mode
 """
+
 from __future__ import annotations
 
 import click
@@ -41,7 +42,12 @@ def run_automatic():
     state.add_goal("Calculate pricing for 10 users")
     console.print(f"  Goals added: {state.user_goals}")
 
-    state.record_tool_use(tool_name="web_search", arguments='{"query": "AcmeERP"}', result="Found: AcmeERP Enterprise - $15,000", iteration=1)
+    state.record_tool_use(
+        tool_name="web_search",
+        arguments='{"query": "AcmeERP"}',
+        result="Found: AcmeERP Enterprise - $15,000",
+        iteration=1,
+    )
     state.record_tool_use(tool_name="calculate", arguments='{"expression": "15000 * 10"}', result="150000", iteration=2)
     console.print(f"  Tool calls recorded: {dict(state.invoked_tools)}")
 
@@ -101,11 +107,14 @@ def run_automatic():
     else:
         console.print("\n[bold yellow]Some checks failed -- inspect serialization.[/bold yellow]")
 
-    console.print(Panel(
-        "[bold]Carryover State[/bold] enables agents to preserve important metadata\n"
-        "(goals, artifacts, verified work) that is not lost when context is truncated.",
-        title="Conclusion", border_style="blue",
-    ))
+    console.print(
+        Panel(
+            "[bold]Carryover State[/bold] enables agents to preserve important metadata\n"
+            "(goals, artifacts, verified work) that is not lost when context is truncated.",
+            title="Conclusion",
+            border_style="blue",
+        )
+    )
 
 
 def run_interactive():
@@ -176,7 +185,9 @@ def run_interactive():
             state = CarryoverState()
             console.print("[yellow]State cleared.[/yellow]")
         else:
-            console.print("[yellow]Unknown command. Type 'goal', 'done', 'tool', 'artifact', 'verify', 'show', 'serialize', 'reset', or 'quit'.[/yellow]")
+            console.print(
+                "[yellow]Unknown command. Type 'goal', 'done', 'tool', 'artifact', 'verify', 'show', 'serialize', 'reset', or 'quit'.[/yellow]"
+            )
         console.print()
 
 

@@ -1,4 +1,5 @@
 """Tests for koboi/plugins.py -- plugin discovery via entry_points."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch

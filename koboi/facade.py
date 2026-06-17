@@ -3,6 +3,7 @@
 Single class that hides all subsystem complexity. Creates everything from
 YAML config and delegates to AgentCore.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -141,6 +142,7 @@ class KoboiAgent:
             # Using a persistent thread+loop keeps httpx connections alive across calls.
             if not hasattr(self, "_bg_thread") or self._bg_thread is None or not self._bg_thread.is_alive():
                 import threading
+
                 self._bg_loop = asyncio.new_event_loop()
                 self._bg_thread = threading.Thread(target=self._bg_loop.run_forever, daemon=True)
                 self._bg_thread.start()
@@ -160,8 +162,8 @@ class KoboiAgent:
                 pass
         if self._orchestrator is not None:
             # Clean up orchestrator's sub-agent memories
-            for agent in getattr(self._orchestrator, '_agents_map', {}).values():
-                if hasattr(agent, 'memory') and hasattr(agent.memory, 'close'):
+            for agent in getattr(self._orchestrator, "_agents_map", {}).values():
+                if hasattr(agent, "memory") and hasattr(agent.memory, "close"):
                     agent.memory.close()
             await self._orchestrator.client.close()
         elif self._core is not None:
@@ -248,6 +250,7 @@ class KoboiAgent:
                     valid = [ev.value for ev in HookEvent]
                     raise ValueError(f"Unknown event '{e}'. Valid events: {valid}")
         from koboi.hooks.callback_hook import CallbackHook
+
         if self._core is not None:
             self._core.hooks.add(CallbackHook(callback=callback, events=events))
         return self
@@ -259,6 +262,7 @@ class KoboiAgent:
     ) -> None:
         """Register a callback as a hook without subclassing Hook."""
         from koboi.hooks.callback_hook import CallbackHook
+
         if self._core is not None:
             self._core.hooks.add(CallbackHook(callback=callback, events=events))
 
@@ -304,21 +308,22 @@ class KoboiAgent:
         """Return the TelemetryCollector from the hook chain, if present."""
         if self._core is None:
             return None
-        tel = getattr(self._core, 'telemetry', None)
+        tel = getattr(self._core, "telemetry", None)
         if tel:
             return tel
-        found = self._core.hooks.find_hook(lambda h: hasattr(h, 'telemetry'))
+        found = self._core.hooks.find_hook(lambda h: hasattr(h, "telemetry"))
         return found.telemetry if found else None
 
     def ensure_telemetry_hook(self) -> None:
         """Attach a TelemetryHook if not already present."""
         if self._core is None:
             return
-        if self._core.hooks.find_hook(lambda h: hasattr(h, 'telemetry')):
+        if self._core.hooks.find_hook(lambda h: hasattr(h, "telemetry")):
             return
         try:
             from koboi.hooks.telemetry_hook import TelemetryHook
             from koboi.harness.telemetry import TelemetryCollector
+
             self._core.hooks.add(TelemetryHook(telemetry=TelemetryCollector()))
         except ImportError:
             pass
@@ -327,10 +332,8 @@ class KoboiAgent:
         """Push evaluation scores to Langfuse via the tracing hook."""
         if self._core is None:
             return
-        hook = self._core.hooks.find_hook(
-            lambda h: type(h).__name__ == 'LangfuseTracingHook'
-        )
-        if hook is None or not hasattr(hook, 'available') or not hook.available:
+        hook = self._core.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+        if hook is None or not hasattr(hook, "available") or not hook.available:
             return
         client = hook.get_client()
         if not client:
@@ -346,6 +349,7 @@ class KoboiAgent:
             client.flush()
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).debug("Failed to push scores to Langfuse: %s", e)
 
     def replace_from(self, other: KoboiAgent) -> None:
@@ -403,9 +407,11 @@ def _build_tools(config: Config) -> ToolRegistry:
     builtin_list = config.get("tools", "builtin", default=[])
     if builtin_list:
         from koboi.tools.builtin import register_all
+
         register_all(registry)
         # Inject per-agent memory store so agents don't share state
         from koboi.tools.builtin.memory import _MemoryStore
+
         memory_file = config.get("tools", "memory_file", default=".agent_memory.json")
         registry.set_dep("memory_store_ref", _MemoryStore(filepath=memory_file))
         if builtin_list and isinstance(builtin_list, list):
@@ -421,6 +427,7 @@ def _build_tools(config: Config) -> ToolRegistry:
                     register_decorated(registry, mod)
                 except ImportError as e:
                     import logging
+
                     logging.getLogger(__name__).warning("Failed to import custom tool module '%s': %s", module_name, e)
 
     return registry
@@ -517,6 +524,7 @@ def _build_guardrails(config: Config, logger: AgentLogger | None = None):
     if rl_conf:
         from koboi.guardrails.rate_limiter import RateLimiter
         from koboi.types import RateLimitConfig
+
         rate_limiter = RateLimiter(
             config=RateLimitConfig(
                 max_tool_calls_per_session=rl_conf.get("max_calls_per_session", 100),
@@ -530,9 +538,11 @@ def _build_guardrails(config: Config, logger: AgentLogger | None = None):
         db_path = audit_conf.get("db_path") if isinstance(audit_conf, dict) else None
         if db_path:
             from koboi.guardrails.audit import SQLiteAuditTrail
+
             audit_trail = SQLiteAuditTrail(db_path=db_path, logger=logger)
         else:
             from koboi.guardrails.audit import AuditTrail
+
             audit_trail = AuditTrail(logger=logger)
 
     return input_grds, output_grds, rate_limiter, audit_trail
@@ -543,9 +553,11 @@ def _build_approval(config: Config):
     handler_type = handler_conf.get("handler", "auto")
     if handler_type == "cli":
         from koboi.guardrails.approval import CLIApprovalHandler
+
         return CLIApprovalHandler()
     elif handler_type == "callback":
         from koboi.guardrails.approval import CallbackApprovalHandler
+
         return CallbackApprovalHandler(handler_conf.get("callback", lambda *a: True))
     return None
 
@@ -555,6 +567,7 @@ def _build_skills(config: Config, logger: AgentLogger):
     if not search_paths:
         return None
     from koboi.skills.registry import SkillRegistry
+
     registry = SkillRegistry()
     for path in search_paths:
         resolved = str(Path(path).expanduser().resolve())
@@ -578,17 +591,29 @@ def _build_trust_db(config: Config):
         return None
     try:
         from koboi.trust import TrustDatabase
+
         return TrustDatabase(db_path=config.trust_db_path)
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).warning("TrustDatabase init failed, graduated permissions disabled: %s", exc)
         return None
 
 
-def _build_hooks(config: Config, logger: AgentLogger, audit_trail, mode_manager: ModeManager | None = None, verbose: bool = False, policy_engine=None, tool_registry=None):
+def _build_hooks(
+    config: Config,
+    logger: AgentLogger,
+    audit_trail,
+    mode_manager: ModeManager | None = None,
+    verbose: bool = False,
+    policy_engine=None,
+    tool_registry=None,
+):
     from koboi.hooks.registry import build_hook_chain
+
     return build_hook_chain(
-        config, logger,
+        config,
+        logger,
         audit_trail=audit_trail,
         mode_manager=mode_manager,
         verbose=verbose,
@@ -645,6 +670,7 @@ class AgentAssembler:
         memory_backend = memory_conf.get("backend", "sqlite")
         if memory_backend == "sqlite":
             from koboi.memory_sqlite import SQLiteMemory
+
             self.memory = SQLiteMemory(
                 db_path=memory_conf.get("db_path", "koboi_memory.db"),
                 session_id=memory_conf.get("session_id"),
@@ -675,8 +701,9 @@ class AgentAssembler:
         return self.augmentation
 
     def build_guardrails(self) -> tuple:
-        self.input_guardrails, self.output_guardrails, self.rate_limiter, self.audit_trail = \
-            _build_guardrails(self.config, logger=self.logger)
+        self.input_guardrails, self.output_guardrails, self.rate_limiter, self.audit_trail = _build_guardrails(
+            self.config, logger=self.logger
+        )
         return self.input_guardrails, self.output_guardrails, self.rate_limiter, self.audit_trail
 
     def build_approval(self) -> object:
@@ -701,9 +728,13 @@ class AgentAssembler:
 
     def build_hooks(self) -> object:
         self.hook_chain = _build_hooks(
-            self.config, self.logger, self.audit_trail,
-            mode_manager=self.mode_manager, verbose=self.verbose,
-            policy_engine=self.policy_engine, tool_registry=self.tools,
+            self.config,
+            self.logger,
+            self.audit_trail,
+            mode_manager=self.mode_manager,
+            verbose=self.verbose,
+            policy_engine=self.policy_engine,
+            tool_registry=self.tools,
         )
         return self.hook_chain
 
@@ -724,11 +755,11 @@ class AgentAssembler:
         self.build_trust_db()
         self.build_hooks()
 
-        _setup_subagent(self.tools, self.client, self.hook_chain, self.logger,
-                        memory=self.memory, config=self.config)
+        _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
 
         from koboi.loop import AgentCore
+
         core = AgentCore(
             client=self.client,
             memory=self.memory,
@@ -751,8 +782,12 @@ class AgentAssembler:
         )
 
         return KoboiAgent(
-            core=core, config=self.config, logger=self.logger, mcp_clients=self.mcp_clients,
-            mode_manager=self.mode_manager, trust_db=self.trust_db,
+            core=core,
+            config=self.config,
+            logger=self.logger,
+            mcp_clients=self.mcp_clients,
+            mode_manager=self.mode_manager,
+            trust_db=self.trust_db,
         )
 
 
@@ -774,9 +809,11 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
             clients.append(mcp_client)
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(
                 "MCP server connection failed for '%s': %s",
-                server_conf.get("url") or server_conf.get("command", "?"), e,
+                server_conf.get("url") or server_conf.get("command", "?"),
+                e,
             )
 
     return clients
@@ -786,6 +823,7 @@ def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger):
     """Factory: create the right MCPClient subclass based on transport config."""
     if transport == "streamable-http":
         from koboi.mcp.http_client import StreamableHTTPMCPClient
+
         url = server_conf.get("url", "")
         if not url:
             raise ValueError("streamable-http transport requires 'url'")
@@ -798,6 +836,7 @@ def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger):
         )
     else:
         from koboi.mcp.client import MCPClient
+
         command = server_conf.get("command", "")
         args = server_conf.get("args", [])
         if not command:
@@ -824,13 +863,15 @@ def _build_policy(config: Config):
         except ValueError:
             action = PolicyAction.ALLOW
 
-        engine.add_rule(PolicyRule(
-            name=f"config_{tool}_{action_str}",
-            action=action,
-            tool_pattern=tool,
-            argument_patterns={"command": pattern} if pattern else None,
-            description=f"From config: {tool} {pattern} -> {action_str}",
-        ))
+        engine.add_rule(
+            PolicyRule(
+                name=f"config_{tool}_{action_str}",
+                action=action,
+                tool_pattern=tool,
+                argument_patterns={"command": pattern} if pattern else None,
+                description=f"From config: {tool} {pattern} -> {action_str}",
+            )
+        )
 
     return engine
 
@@ -838,6 +879,7 @@ def _build_policy(config: Config):
 # ---------------------------------------------------------------------------
 # Orchestration support
 # ---------------------------------------------------------------------------
+
 
 def _parse_agent_defs(config: Config) -> list:
     """Parse AgentDef list from orchestration.agents config."""
@@ -852,15 +894,17 @@ def _parse_agent_defs(config: Config) -> list:
         name = ac.get("name", "")
         if not name:
             raise ValueError("Each orchestration agent must have a 'name'")
-        defs.append(AgentDef(
-            name=name,
-            system_prompt=ac.get("system_prompt", ""),
-            description=ac.get("description", ""),
-            keywords=ac.get("keywords", []),
-            tools_config=ac.get("tools"),
-            rag_config=ac.get("rag"),
-            llm_config=ac.get("llm"),
-        ))
+        defs.append(
+            AgentDef(
+                name=name,
+                system_prompt=ac.get("system_prompt", ""),
+                description=ac.get("description", ""),
+                keywords=ac.get("keywords", []),
+                tools_config=ac.get("tools"),
+                rag_config=ac.get("rag"),
+                llm_config=ac.get("llm"),
+            )
+        )
     return defs
 
 
@@ -877,8 +921,10 @@ def _build_router(config: Config, client: RetryClient, agent_defs: list):
         return LLMRouter(client=client, enable_dynamic=enable_dynamic, agent_defs=agent_defs)
     elif router_type == "hybrid":
         return HybridRouter(
-            client=client, confidence_threshold=confidence_threshold,
-            enable_dynamic=enable_dynamic, agent_defs=agent_defs,
+            client=client,
+            confidence_threshold=confidence_threshold,
+            enable_dynamic=enable_dynamic,
+            agent_defs=agent_defs,
         )
     else:
         return KeywordRouter(agent_defs=agent_defs)
@@ -910,7 +956,9 @@ def _build_orchestration(config: Config, verbose: bool = False):
 
     parent_rag = config.rag
     agents_map = AgentFactory.create_all_configured(
-        agent_defs, assembler.client, assembler.logger,
+        agent_defs,
+        assembler.client,
+        assembler.logger,
         parent_rag_config=parent_rag,
         hook_chain=assembler.hook_chain,
     )
@@ -941,9 +989,9 @@ def _build_orchestration(config: Config, verbose: bool = False):
 def _setup_subagent(
     tools: ToolRegistry,
     client: RetryClient,
-    hook_chain: 'HookChain',
+    hook_chain: "HookChain",
     logger: AgentLogger,
-    memory: 'ConversationMemory | None' = None,
+    memory: "ConversationMemory | None" = None,
     config: Config | None = None,
 ) -> None:
     """Initialize the subagent system if delegate_tasks tool is registered."""
@@ -972,12 +1020,13 @@ def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None 
     """Initialize task management if task tools are registered."""
     if "task_create" in tools:
         from koboi.task import TaskManager
+
         mgr = TaskManager()
         tools.set_dep("manager", mgr)
         # Inject manager into TaskHook if present in the chain
         if hook_chain is not None:
-            for hook in getattr(hook_chain, '_hooks', []):
-                if type(hook).__name__ == 'TaskHook':
+            for hook in getattr(hook_chain, "_hooks", []):
+                if type(hook).__name__ == "TaskHook":
                     hook.manager = mgr
                     break
 
@@ -985,6 +1034,7 @@ def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None 
 async def _run_orchestrator(orchestrator, message: str) -> RunResult:
     """Run orchestrator and adapt OrchestratorResult to RunResult."""
     import time
+
     start = time.time()
 
     result = await orchestrator.run(message)

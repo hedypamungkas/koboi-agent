@@ -1,9 +1,14 @@
 """Tests for koboi.eval module."""
+
 from __future__ import annotations
 
 from koboi.eval.scorers import (
-    ToolUsageScorer, KeywordPresenceScorer, OutputLengthScorer,
-    IterationEfficiencyScorer, HealthScoreScorer, LLMJudgeScorer,
+    ToolUsageScorer,
+    KeywordPresenceScorer,
+    OutputLengthScorer,
+    IterationEfficiencyScorer,
+    HealthScoreScorer,
+    LLMJudgeScorer,
 )
 from koboi.types import EvalScore
 from tests.conftest import MockClient, make_mock_response
@@ -19,14 +24,22 @@ def _mock_case(**kwargs):
 def _mock_telemetry(unique_tools=None, total_iterations=1, health=80):
     """Create a mock telemetry object."""
     tools = unique_tools or []
-    snap = type("S", (), {
-        "unique_tools_used": tools,
-        "total_iterations": total_iterations,
-    })()
-    tel = type("T", (), {
-        "snapshot": snap,
-        "health_score": lambda self=None: health,
-    })()
+    snap = type(
+        "S",
+        (),
+        {
+            "unique_tools_used": tools,
+            "total_iterations": total_iterations,
+        },
+    )()
+    tel = type(
+        "T",
+        (),
+        {
+            "snapshot": snap,
+            "health_score": lambda self=None: health,
+        },
+    )()
     return tel
 
 

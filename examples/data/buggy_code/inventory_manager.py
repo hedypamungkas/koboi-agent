@@ -100,9 +100,7 @@ class InventoryManager:
         """Update stock level for a given SKU and record the change."""
         with self._stock_lock:
             conn = self._get_connection()
-            row = conn.execute(
-                "SELECT quantity FROM stock WHERE sku = ?", (sku,)
-            ).fetchone()
+            row = conn.execute("SELECT quantity FROM stock WHERE sku = ?", (sku,)).fetchone()
             if row is None:
                 conn.close()
                 raise ValueError(f"SKU not found: {sku}")
@@ -113,8 +111,7 @@ class InventoryManager:
                 (new_quantity, sku),
             )
             conn.execute(
-                "INSERT INTO stock_history (sku, quantity_change, reason, timestamp) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO stock_history (sku, quantity_change, reason, timestamp) VALUES (?, ?, ?, ?)",
                 (sku, quantity_change, reason, time.time()),
             )
             conn.commit()
@@ -129,9 +126,7 @@ class InventoryManager:
             return item.quantity >= quantity
 
         conn = self._get_connection()
-        row = conn.execute(
-            "SELECT quantity FROM stock WHERE sku = ?", (sku,)
-        ).fetchone()
+        row = conn.execute("SELECT quantity FROM stock WHERE sku = ?", (sku,)).fetchone()
         conn.close()
         if row is None:
             return False
@@ -145,8 +140,7 @@ class InventoryManager:
                 conn = self._get_connection()
                 for sku in skus:
                     row = conn.execute(
-                        "SELECT quantity, reorder_threshold, reorder_quantity, supplier_id "
-                        "FROM stock WHERE sku = ?",
+                        "SELECT quantity, reorder_threshold, reorder_quantity, supplier_id FROM stock WHERE sku = ?",
                         (sku,),
                     ).fetchone()
                     if row is None:
@@ -160,15 +154,10 @@ class InventoryManager:
                     if supplier is None:
                         continue
 
-                    active_suppliers = [
-                        s for s in self._suppliers.values()
-                        if s.lead_time_days <= 14
-                    ]
+                    active_suppliers = [s for s in self._suppliers.values() if s.lead_time_days <= 14]
                     avg_cost_multiplier = sum(s.cost_multiplier for s in active_suppliers) / len(active_suppliers)
 
-                    unit_cost_row = conn.execute(
-                        "SELECT unit_cost FROM stock WHERE sku = ?", (sku,)
-                    ).fetchone()
+                    unit_cost_row = conn.execute("SELECT unit_cost FROM stock WHERE sku = ?", (sku,)).fetchone()
                     unit_cost = unit_cost_row[0]
                     estimated_cost = unit_cost * reorder_qty * avg_cost_multiplier
 
@@ -186,24 +175,17 @@ class InventoryManager:
     def get_stock_history(self, sku: str, page: int = 1, page_size: int = 20) -> dict:
         """Retrieve paginated stock change history for a SKU."""
         conn = self._get_connection()
-        total = conn.execute(
-            "SELECT COUNT(*) FROM stock_history WHERE sku = ?", (sku,)
-        ).fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM stock_history WHERE sku = ?", (sku,)).fetchone()[0]
 
         offset = (page - 1) * page_size
         rows = conn.execute(
-            "SELECT quantity_change, reason, timestamp "
-            "FROM stock_history WHERE sku = ? "
-            "ORDER BY timestamp DESC",
+            "SELECT quantity_change, reason, timestamp FROM stock_history WHERE sku = ? ORDER BY timestamp DESC",
             (sku,),
         ).fetchall()
 
         conn.close()
 
-        records = [
-            {"quantity_change": r[0], "reason": r[1], "timestamp": r[2]}
-            for r in rows
-        ]
+        records = [{"quantity_change": r[0], "reason": r[1], "timestamp": r[2]} for r in rows]
         return {
             "records": records,
             "page": page,
@@ -214,9 +196,7 @@ class InventoryManager:
     def calculate_reorder_point(self, sku: str) -> int:
         """Calculate optimal reorder point based on supplier lead time and demand."""
         conn = self._get_connection()
-        row = conn.execute(
-            "SELECT supplier_id, unit_cost FROM stock WHERE sku = ?", (sku,)
-        ).fetchone()
+        row = conn.execute("SELECT supplier_id, unit_cost FROM stock WHERE sku = ?", (sku,)).fetchone()
 
         if row is None:
             conn.close()
@@ -239,8 +219,7 @@ class InventoryManager:
         conn = self._get_connection()
         cutoff = time.time() - (30 * 86400)
         rows = conn.execute(
-            "SELECT quantity_change FROM stock_history "
-            "WHERE sku = ? AND timestamp > ? AND quantity_change < 0",
+            "SELECT quantity_change FROM stock_history WHERE sku = ? AND timestamp > ? AND quantity_change < 0",
             (sku, cutoff),
         ).fetchall()
         conn.close()
@@ -255,9 +234,7 @@ class InventoryManager:
         """Reserve stock for a pending order."""
         with self._reservation_lock:
             conn = self._get_connection()
-            row = conn.execute(
-                "SELECT quantity FROM stock WHERE sku = ?", (sku,)
-            ).fetchone()
+            row = conn.execute("SELECT quantity FROM stock WHERE sku = ?", (sku,)).fetchone()
 
             if row is None:
                 conn.close()
@@ -269,12 +246,9 @@ class InventoryManager:
                 return None
 
             new_qty = current_qty - quantity
+            conn.execute("UPDATE stock SET quantity = ? WHERE sku = ?", (new_qty, sku))
             conn.execute(
-                "UPDATE stock SET quantity = ? WHERE sku = ?", (new_qty, sku)
-            )
-            conn.execute(
-                "INSERT INTO stock_history (sku, quantity_change, reason, timestamp) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO stock_history (sku, quantity_change, reason, timestamp) VALUES (?, ?, ?, ?)",
                 (sku, -quantity, "reservation", time.time()),
             )
             conn.commit()
@@ -301,8 +275,7 @@ class InventoryManager:
                     (reservation.quantity, reservation.sku),
                 )
                 conn.execute(
-                    "INSERT INTO stock_history (sku, quantity_change, reason, timestamp) "
-                    "VALUES (?, ?, ?, ?)",
+                    "INSERT INTO stock_history (sku, quantity_change, reason, timestamp) VALUES (?, ?, ?, ?)",
                     (reservation.sku, reservation.quantity, "release", time.time()),
                 )
                 conn.commit()
@@ -342,9 +315,7 @@ class InventoryManager:
             return item.quantity * item.unit_cost
 
         conn = self._get_connection()
-        row = conn.execute(
-            "SELECT quantity, unit_cost FROM stock WHERE sku = ?", (sku,)
-        ).fetchone()
+        row = conn.execute("SELECT quantity, unit_cost FROM stock WHERE sku = ?", (sku,)).fetchone()
         conn.close()
 
         if row is None:

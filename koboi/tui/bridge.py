@@ -3,6 +3,7 @@
 The StreamBridge consumes the agent's async event generator and translates
 each StreamEvent into a Textual Message that widgets can react to.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, AsyncGenerator
@@ -199,33 +200,41 @@ class StreamBridge:
 
             elif isinstance(event, RoutingDecisionEvent):
                 self._is_orchestrated = True
-                self._app.post_message(StreamRoutingDecision(
-                    agents=event.agents,
-                    confidence=event.confidence,
-                    method=event.method,
-                    reasoning=event.reasoning,
-                ))
+                self._app.post_message(
+                    StreamRoutingDecision(
+                        agents=event.agents,
+                        confidence=event.confidence,
+                        method=event.method,
+                        reasoning=event.reasoning,
+                    )
+                )
 
             elif isinstance(event, AgentDispatchEvent):
-                self._app.post_message(StreamAgentDispatch(
-                    agent_name=event.agent_name,
-                    agent_index=event.agent_index,
-                    total_agents=event.total_agents,
-                    mode=event.mode,
-                ))
+                self._app.post_message(
+                    StreamAgentDispatch(
+                        agent_name=event.agent_name,
+                        agent_index=event.agent_index,
+                        total_agents=event.total_agents,
+                        mode=event.mode,
+                    )
+                )
 
             elif isinstance(event, AgentResultEvent):
-                self._app.post_message(StreamAgentResult(
-                    agent_name=event.agent_name,
-                    answer=event.answer,
-                    elapsed_seconds=event.elapsed_seconds,
-                    failed=event.failed,
-                ))
+                self._app.post_message(
+                    StreamAgentResult(
+                        agent_name=event.agent_name,
+                        answer=event.answer,
+                        elapsed_seconds=event.elapsed_seconds,
+                        failed=event.failed,
+                    )
+                )
 
             elif isinstance(event, OrchestrationCompleteEvent):
-                self._app.post_message(StreamOrchestrationComplete(
-                    final_answer=event.final_answer,
-                    elapsed_seconds=event.elapsed_seconds,
-                    execution_mode=event.execution_mode,
-                    agent_count=len(event.agent_results),
-                ))
+                self._app.post_message(
+                    StreamOrchestrationComplete(
+                        final_answer=event.final_answer,
+                        elapsed_seconds=event.elapsed_seconds,
+                        execution_mode=event.execution_mode,
+                        agent_count=len(event.agent_results),
+                    )
+                )
