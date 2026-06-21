@@ -1,0 +1,1105 @@
+{
+  "suite_name": "rag_retrieval",
+  "cases": [
+    {
+      "case_name": "pricing_acmeerp_enterprise",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "pricing_acmepos_professional",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "pricing_acmecrm_business",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "pricing_saas_starter",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "pricing_saas_professional",
+      "overall_score": 0.8,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.4,
+          "reason": "precision=0.4 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "pricing_saas_enterprise",
+      "overall_score": 0.644,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.3333,
+          "reason": "recall=0.3333 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.6,
+          "reason": "precision=0.6 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hardware_acmeserver_price",
+      "overall_score": 0.583,
+      "passed": false,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.5,
+          "reason": "recall=0.5 over 4 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.25,
+          "reason": "precision=0.25 over 4 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 4 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hardware_acmeswitch_ports",
+      "overall_score": 0.511,
+      "passed": false,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.3333,
+          "reason": "recall=0.3333 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "service_it_consulting",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "service_managed_sla",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "service_custom_dev_warranty",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "payment_terms_deposit",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "acmeerp_features",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_working_hours",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_annual_leave_permanent",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_annual_leave_contract",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_leave_carry_forward",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_remote_work_days",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_core_hours",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_meal_allowance",
+      "overall_score": 0.0,
+      "passed": false,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.0,
+          "reason": "recall=0.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.0,
+          "reason": "precision=0.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 0.0,
+          "reason": "hit=0.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_transport_allowance",
+      "overall_score": 0.0,
+      "passed": false,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.0,
+          "reason": "recall=0.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.0,
+          "reason": "precision=0.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 0.0,
+          "reason": "hit=0.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_internet_allowance",
+      "overall_score": 0.567,
+      "passed": false,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.5,
+          "reason": "recall=0.5 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_daily_report_deadline",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_monthly_report_deadline",
+      "overall_score": 0.778,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 3 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.3333,
+          "reason": "precision=0.3333 over 3 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 3 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_car_parking",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_code_of_conduct_gifts",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "policy_wifi_speed",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_ceo_name",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_cto_cfo",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_departments",
+      "overall_score": 0.111,
+      "passed": false,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.3333,
+          "reason": "recall=0.3333 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.0,
+          "reason": "precision=0.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 0.0,
+          "reason": "hit=0.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_pto",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_parental_leave",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_401k",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_career_level_senior",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_career_level_junior",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_resignation_notice",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_performance_360",
+      "overall_score": 0.833,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 2 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.5,
+          "reason": "precision=0.5 over 2 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 2 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_onboarding_month3",
+      "overall_score": 0.0,
+      "passed": false,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 0.0,
+          "reason": "recall=0.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.0,
+          "reason": "precision=0.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 0.0,
+          "reason": "hit=0.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_core_values",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "hr_mission",
+      "overall_score": 0.733,
+      "passed": true,
+      "framework": "retrieval",
+      "scores": [
+        {
+          "name": "retrieval_recall@5",
+          "value": 1.0,
+          "reason": "recall=1.0 over 5 chunks"
+        },
+        {
+          "name": "retrieval_precision@5",
+          "value": 0.2,
+          "reason": "precision=0.2 over 5 chunks"
+        },
+        {
+          "name": "retrieval_hit@5",
+          "value": 1.0,
+          "reason": "hit=1.0 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_math_addition",
+      "overall_score": 0.84,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.1601,
+          "reason": "gate_noise=0.1601 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_math_product",
+      "overall_score": 0.861,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.1395,
+          "reason": "gate_noise=0.1395 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_greeting",
+      "overall_score": 0.769,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.2309,
+          "reason": "gate_noise=0.2309 over 2 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_thanks",
+      "overall_score": 0.727,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.2734,
+          "reason": "gate_noise=0.2734 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_world_capital",
+      "overall_score": 0.854,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.1457,
+          "reason": "gate_noise=0.1457 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_joke",
+      "overall_score": 0.849,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.151,
+          "reason": "gate_noise=0.151 over 1 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_programming_def",
+      "overall_score": 0.956,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.0439,
+          "reason": "gate_noise=0.0439 over 1 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_translate",
+      "overall_score": 0.799,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.2013,
+          "reason": "gate_noise=0.2013 over 3 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_author",
+      "overall_score": 0.789,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.2111,
+          "reason": "gate_noise=0.2111 over 5 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    },
+    {
+      "case_name": "gate_weather",
+      "overall_score": 0.861,
+      "passed": true,
+      "framework": "retrieval-gate",
+      "scores": [
+        {
+          "name": "retrieval_gate_noise@5",
+          "value": 0.1395,
+          "reason": "gate_noise=0.1395 over 3 chunks"
+        }
+      ],
+      "duration_seconds": 0.0
+    }
+  ]
+}

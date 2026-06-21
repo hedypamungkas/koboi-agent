@@ -80,6 +80,15 @@ def register_default_scorers() -> None:
     ScorerRegistry.register("llm_judge", lambda **kw: LLMJudgeScorer(**kw))
     ScorerRegistry.register("cost", lambda **kw: CostScorer(**kw))
 
+    # Deterministic retrieval-quality scorers (no external deps, always available).
+    from koboi.eval.scorers.retrieval_scorer import RetrievalScorer
+
+    for _metric in RetrievalScorer.METRICS:
+        ScorerRegistry.register(
+            f"retrieval_{_metric}",
+            lambda metric=_metric, **kw: RetrievalScorer(metric, **kw),
+        )
+
 
 def register_framework_scorers() -> None:
     """Register framework-specific scorers (fail-open if deps missing)."""

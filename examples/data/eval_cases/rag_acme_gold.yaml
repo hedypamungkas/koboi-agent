@@ -1,0 +1,438 @@
+# RAG gold set over the Acme Corp corpus (data/sample/*.md).
+#
+# 40 factual retrieval cases + 10 gating negatives. Used by examples/28_rag_baseline.py:
+#   - OFFLINE (default): deterministic recall@k / precision@k / hit@k via
+#     metadata.{source_doc, key_facts} + gate_noise via needs_retrieval=false.
+#   - LIVE (--mode live): RAGAS faithfulness/precision/recall over expected_answer +
+#     context_docs (gold passage TEXT, per ragas_scorer.py convention).
+#
+# Notes:
+#   - Uses `user_message:` (the YAMLLoader reads user_message, NOT input).
+#   - source_doc matches Chunk.doc_id == file stem (product_catalog / company_policy / employee_handbook).
+#   - key_facts are substrings guaranteed to appear in the source doc, so recall is
+#     computable; they are the facts a correct answer depends on.
+
+cases:
+  # ===================== PRODUCT CATALOG (pricing / products / services) =====================
+  - name: pricing_acmeerp_enterprise
+    user_message: "How much does AcmeERP Enterprise cost and what is the minimum number of users?"
+    expected_answer: "AcmeERP Enterprise costs $15,000/year with a perpetual license and requires a minimum of 10 users."
+    expected_keywords: ["15000", "perpetual", "10"]
+    context_docs:
+      - "AcmeERP Enterprise: Enterprise Resource Planning system. Price: $15,000/year (perpetual license). Minimum users: 10 users."
+    tags: ["rag", "pricing", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$15,000", "perpetual license", "10 users"], difficulty: easy}
+
+  - name: pricing_acmepos_professional
+    user_message: "What is the monthly price of AcmePOS Professional and what is its minimum?"
+    expected_answer: "AcmePOS Professional is $500/month as a SaaS subscription with a minimum of 1 outlet."
+    expected_keywords: ["500", "saas", "1 outlet"]
+    context_docs:
+      - "AcmePOS Professional: Point of Sale system. Price: $500/month (SaaS subscription). Minimum: 1 outlet."
+    tags: ["rag", "pricing", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$500/month", "SaaS subscription", "1 outlet"], difficulty: easy}
+
+  - name: pricing_acmecrm_business
+    user_message: "How is AcmeCRM Business priced and what is the minimum user count?"
+    expected_answer: "AcmeCRM Business is priced at $25/user/month with a minimum of 5 users."
+    expected_keywords: ["25", "user/month", "5"]
+    context_docs:
+      - "AcmeCRM Business: Customer Relationship Management. Price: $25/user/month. Minimum users: 5 users."
+    tags: ["rag", "pricing", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$25/user/month", "5 users"], difficulty: easy}
+
+  - name: pricing_saas_starter
+    user_message: "What does the Starter SaaS package cost and how many users does it allow?"
+    expected_answer: "The Starter package is $99/month for up to 5 users with basic features."
+    expected_keywords: ["99", "5 users", "starter"]
+    context_docs:
+      - "SaaS Packages - Starter: $99/month - Up to 5 users, basic features."
+    tags: ["rag", "pricing", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$99/month", "5 users", "Starter"], difficulty: easy}
+
+  - name: pricing_saas_professional
+    user_message: "How much is the Professional SaaS package and what is its user limit?"
+    expected_answer: "The Professional package is $299/month for up to 20 users with advanced features."
+    expected_keywords: ["299", "20 users", "professional"]
+    context_docs:
+      - "SaaS Packages - Professional: $299/month - Up to 20 users, advanced features."
+    tags: ["rag", "pricing", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$299/month", "20 users", "Professional"], difficulty: easy}
+
+  - name: pricing_saas_enterprise
+    user_message: "What are the terms of the Enterprise SaaS package?"
+    expected_answer: "The Enterprise package has custom pricing with unlimited users, full features, and dedicated support."
+    expected_keywords: ["custom", "unlimited", "enterprise"]
+    context_docs:
+      - "SaaS Packages - Enterprise: Custom pricing - Unlimited users, full features + dedicated support."
+    tags: ["rag", "pricing", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["Custom pricing", "Unlimited users", "Enterprise"], difficulty: easy}
+
+  - name: hardware_acmeserver_price
+    user_message: "How much does the AcmeServer RackMount cost?"
+    expected_answer: "The AcmeServer RackMount costs $8,500."
+    expected_keywords: ["8500", "acmeserver"]
+    context_docs:
+      - "AcmeServer RackMount: 2U rack server for data center deployment. Price: $8,500."
+    tags: ["rag", "hardware", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$8,500", "AcmeServer"], difficulty: easy}
+
+  - name: hardware_acmeswitch_ports
+    user_message: "How many ports does the AcmeSwitch Enterprise have and what does it cost?"
+    expected_answer: "The AcmeSwitch Enterprise has 48x 1GbE + 4x 10GbE ports and costs $2,500."
+    expected_keywords: ["2500", "48", "acmeswitch"]
+    context_docs:
+      - "AcmeSwitch Enterprise: Managed network switch. Price: $2,500. Specifications: 48x 1GbE + 4x 10GbE, Layer 3."
+    tags: ["rag", "hardware", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$2,500", "48x 1GbE", "AcmeSwitch"], difficulty: medium}
+
+  - name: service_it_consulting
+    user_message: "What is the rate for IT Consulting and what is the minimum booking?"
+    expected_answer: "IT Consulting is $200/hour with a 4-hour minimum."
+    expected_keywords: ["200", "4 hours", "consulting"]
+    context_docs:
+      - "IT Consulting: Price: $200/hour. Minimum: 4 hours. Areas: Infrastructure, Cloud, Security, Software Development."
+    tags: ["rag", "services", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$200/hour", "4 hours"], difficulty: easy}
+
+  - name: service_managed_sla
+    user_message: "What uptime SLA does the Managed Services plan guarantee and what does it cost?"
+    expected_answer: "Managed Services costs $1,500/month with a 99.9% uptime guarantee and a 6-month minimum contract."
+    expected_keywords: ["1500", "99.9", "managed"]
+    context_docs:
+      - "Managed Services: Price: $1,500/month. Minimum contract: 6 months. SLA: 99.9% uptime guarantee."
+    tags: ["rag", "services", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["$1,500/month", "6 months", "99.9%"], difficulty: medium}
+
+  - name: service_custom_dev_warranty
+    user_message: "What warranty is included with Custom Development?"
+    expected_answer: "Custom Development includes a 90-day warranty."
+    expected_keywords: ["90-day", "warranty", "custom"]
+    context_docs:
+      - "Custom Development: Price: Project-based quotation. Support: 90-day warranty included."
+    tags: ["rag", "services", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["90-day warranty", "Custom Development"], difficulty: easy}
+
+  - name: payment_terms_deposit
+    user_message: "What deposit is required when ordering and what are the payment terms?"
+    expected_answer: "A 30% deposit is required upon order confirmation, with full payment before delivery."
+    expected_keywords: ["30%", "deposit", "delivery"]
+    context_docs:
+      - "Payment Terms: 30% deposit upon order confirmation. Full payment before delivery."
+    tags: ["rag", "payment", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["30% deposit", "Full payment before delivery"], difficulty: medium}
+
+  - name: acmeerp_features
+    user_message: "What modules or features are included in AcmeERP Enterprise?"
+    expected_answer: "AcmeERP Enterprise includes Accounting, HR, Inventory, Sales, Purchasing, and CRM."
+    expected_keywords: ["accounting", "inventory", "crm"]
+    context_docs:
+      - "AcmeERP Enterprise features: Accounting, HR, Inventory, Sales, Purchasing, CRM."
+    tags: ["rag", "products", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "product_catalog", key_facts: ["Accounting, HR, Inventory, Sales, Purchasing, CRM"], difficulty: medium}
+
+  # ===================== COMPANY POLICY (hours / leave / remote / allowances) =====================
+  - name: policy_working_hours
+    user_message: "What are the working hours at Acme Corp?"
+    expected_answer: "Working hours are Monday to Friday 08:00-17:00 with a lunch break from 12:00-13:00; weekends are off."
+    expected_keywords: ["08:00", "17:00", "monday"]
+    context_docs:
+      - "Working Hours: Monday - Friday: 08:00 - 17:00, Lunch break: 12:00 - 13:00, Saturday - Sunday: Off."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["08:00 - 17:00", "12:00 - 13:00", "Saturday - Sunday: Off"], difficulty: easy}
+
+  - name: policy_annual_leave_permanent
+    user_message: "How many annual leave days does a permanent employee get?"
+    expected_answer: "Permanent employees get 12 days of annual leave per year."
+    expected_keywords: ["12 days", "permanent"]
+    context_docs:
+      - "Annual Leave: Permanent employees: 12 days per year."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["12 days per year", "Permanent employees"], difficulty: easy}
+
+  - name: policy_annual_leave_contract
+    user_message: "How much annual leave do contract employees receive?"
+    expected_answer: "Contract employees receive 6 days of annual leave per year."
+    expected_keywords: ["6 days", "contract"]
+    context_docs:
+      - "Annual Leave: Contract employees: 6 days per year."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["6 days per year", "Contract employees"], difficulty: easy}
+
+  - name: policy_leave_carry_forward
+    user_message: "Can unused annual leave be carried forward, and if so how much?"
+    expected_answer: "Unused leave can be carried forward a maximum of 3 days to the following year."
+    expected_keywords: ["3 days", "carried forward"]
+    context_docs:
+      - "Unused leave can be carried forward maximum 3 days to the following year."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["carried forward maximum 3 days"], difficulty: medium}
+
+  - name: policy_remote_work_days
+    user_message: "How many days per week can an employee work remotely?"
+    expected_answer: "Employees may work remotely up to 2 days per week with prior supervisor approval."
+    expected_keywords: ["2 days", "remote", "supervisor"]
+    context_docs:
+      - "Remote Work Policy: Employees may work remotely up to 2 days per week. Prior approval from direct supervisor required."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["2 days per week", "Prior approval from direct supervisor"], difficulty: easy}
+
+  - name: policy_core_hours
+    user_message: "During which core hours must remote employees be available?"
+    expected_answer: "Remote employees must be available during core hours 10:00-15:00."
+    expected_keywords: ["10:00", "15:00", "core hours"]
+    context_docs:
+      - "Remote Work Policy: Must be available during core hours (10:00 - 15:00)."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["core hours (10:00 - 15:00)"], difficulty: medium}
+
+  - name: policy_meal_allowance
+    user_message: "What is the monthly meal allowance?"
+    expected_answer: "The meal allowance is $150/month."
+    expected_keywords: ["150", "meal"]
+    context_docs:
+      - "Allowances: Meal allowance $150/month."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["Meal allowance $150/month"], difficulty: easy}
+
+  - name: policy_transport_allowance
+    user_message: "How much is the transportation allowance?"
+    expected_answer: "The transportation allowance is $100/month."
+    expected_keywords: ["100", "transportation"]
+    context_docs:
+      - "Allowances: Transportation allowance $100/month."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["Transportation allowance $100/month"], difficulty: easy}
+
+  - name: policy_internet_allowance
+    user_message: "Is there an internet allowance for remote work, and how much?"
+    expected_answer: "Yes, there is a $50/month internet allowance for remote work days."
+    expected_keywords: ["50", "internet", "remote"]
+    context_docs:
+      - "Allowances: Internet allowance $50/month for remote work days."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["Internet allowance $50/month", "remote work days"], difficulty: medium}
+
+  - name: policy_daily_report_deadline
+    user_message: "By what time must daily reports be submitted?"
+    expected_answer: "Daily reports must be submitted to the supervisor before 17:00."
+    expected_keywords: ["17:00", "daily", "supervisor"]
+    context_docs:
+      - "Reporting System: Daily reports: Submit to supervisor before 17:00."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["Daily reports", "before 17:00"], difficulty: medium}
+
+  - name: policy_monthly_report_deadline
+    user_message: "When are monthly reports due?"
+    expected_answer: "Monthly reports must be submitted before the 5th of the following month."
+    expected_keywords: ["5th", "monthly"]
+    context_docs:
+      - "Reporting System: Monthly reports: Submit before the 5th of the following month."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["before the 5th of the following month"], difficulty: medium}
+
+  - name: policy_car_parking
+    user_message: "How much does car parking cost at the office?"
+    expected_answer: "Car parking costs $50/month (motorcycle parking is free)."
+    expected_keywords: ["50", "parking", "cars"]
+    context_docs:
+      - "Office Facilities: Parking: Free for motorcycles, $50/month for cars."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["$50/month for cars", "Free for motorcycles"], difficulty: medium}
+
+  - name: policy_code_of_conduct_gifts
+    user_message: "Are employees allowed to accept gifts from vendors or clients?"
+    expected_answer: "No, gifts from vendors or clients are not permitted under the code of conduct."
+    expected_keywords: ["no gifts", "vendors", "permitted"]
+    context_docs:
+      - "Code of Conduct: No gifts from vendors/clients permitted."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["No gifts from vendors/clients permitted"], difficulty: medium}
+
+  - name: policy_wifi_speed
+    user_message: "What is the office WiFi speed?"
+    expected_answer: "The office WiFi speed is 100 Mbps, for work purposes only."
+    expected_keywords: ["100 mbps", "wifi"]
+    context_docs:
+      - "Office Facilities: WiFi: 100 Mbps speed, for work purposes only."
+    tags: ["rag", "policy", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "company_policy", key_facts: ["100 Mbps"], difficulty: easy}
+
+  # ===================== EMPLOYEE HANDBOOK (HR / benefits / career / org) =====================
+  - name: hr_ceo_name
+    user_message: "Who is the CEO of Acme Corp?"
+    expected_answer: "The CEO of Acme Corp is John Smith."
+    expected_keywords: ["john smith", "ceo"]
+    context_docs:
+      - "Organizational Structure: CEO: John Smith."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["CEO: John Smith"], difficulty: easy}
+
+  - name: hr_cto_cfo
+    user_message: "Who hold the CTO and CFO roles at Acme Corp?"
+    expected_answer: "Michael Johnson is the CTO and Sarah Williams is the CFO."
+    expected_keywords: ["michael johnson", "sarah williams"]
+    context_docs:
+      - "Organizational Structure: CTO: Michael Johnson, CFO: Sarah Williams."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["CTO: Michael Johnson", "CFO: Sarah Williams"], difficulty: medium}
+
+  - name: hr_departments
+    user_message: "What departments exist at Acme Corp?"
+    expected_answer: "Acme Corp has Engineering, Sales, Marketing, HR, Finance, and Support departments."
+    expected_keywords: ["engineering", "marketing", "support"]
+    context_docs:
+      - "Departments: 1. Engineering, 2. Sales, 3. Marketing, 4. HR, 5. Finance, 6. Support."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Engineering", "Marketing", "Support"], difficulty: medium}
+
+  - name: hr_pto
+    user_message: "How many paid time off days do employees get annually?"
+    expected_answer: "Employees get 12 days of paid time off annually."
+    expected_keywords: ["12 days", "paid time off"]
+    context_docs:
+      - "Employee Benefits: Paid time off: 12 days annually."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Paid time off: 12 days annually"], difficulty: easy}
+
+  - name: hr_parental_leave
+    user_message: "How long is parental leave at Acme Corp?"
+    expected_answer: "Parental leave is 12 weeks."
+    expected_keywords: ["12 weeks", "parental"]
+    context_docs:
+      - "Employee Benefits: Parental leave: 12 weeks."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Parental leave: 12 weeks"], difficulty: easy}
+
+  - name: hr_401k
+    user_message: "Does Acme Corp offer a retirement plan?"
+    expected_answer: "Yes, Acme Corp offers a 401(k) retirement plan with company match."
+    expected_keywords: ["401", "retirement", "match"]
+    context_docs:
+      - "Employee Benefits: 401(k) retirement plan with company match."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["401(k) retirement plan with company match"], difficulty: medium}
+
+  - name: hr_career_level_senior
+    user_message: "What experience range defines a Senior (Level 3) employee?"
+    expected_answer: "Level 3 Senior requires 5-8 years of experience."
+    expected_keywords: ["5-8 years", "senior", "level 3"]
+    context_docs:
+      - "Career Levels: Level 3: Senior (5-8 years experience)."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Level 3: Senior", "5-8 years experience"], difficulty: medium}
+
+  - name: hr_career_level_junior
+    user_message: "What is the experience range for a Level 1 Junior employee?"
+    expected_answer: "Level 1 Junior is for 0-2 years of experience."
+    expected_keywords: ["0-2 years", "junior", "level 1"]
+    context_docs:
+      - "Career Levels: Level 1: Junior (0-2 years experience)."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Level 1: Junior", "0-2 years experience"], difficulty: medium}
+
+  - name: hr_resignation_notice
+    user_message: "What is the resignation notice period at Acme Corp?"
+    expected_answer: "The resignation notice period is 30 days."
+    expected_keywords: ["30 days", "notice", "resignation"]
+    context_docs:
+      - "Resignation Procedure: Notice period: 30 days."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Notice period: 30 days"], difficulty: easy}
+
+  - name: hr_performance_360
+    user_message: "Which roles receive 360-degree feedback in performance reviews?"
+    expected_answer: "360-degree feedback is used for senior roles."
+    expected_keywords: ["360-degree", "senior", "feedback"]
+    context_docs:
+      - "Performance Review: 360-degree feedback for senior roles."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["360-degree feedback for senior roles"], difficulty: medium}
+
+  - name: hr_onboarding_month3
+    user_message: "What happens during the third month of onboarding?"
+    expected_answer: "Month 3 includes a probation review, performance evaluation, confirmation of employment status, and career development planning."
+    expected_keywords: ["probation", "month 3", "confirmation"]
+    context_docs:
+      - "Onboarding Process Month 3: Probation review and performance evaluation, Confirmation of employment status, Career development planning."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Probation review", "Career development planning"], difficulty: hard}
+
+  - name: hr_core_values
+    user_message: "What are the core values of Acme Corp?"
+    expected_answer: "The core values are Innovation, Integrity, Excellence, Collaboration, and Customer Focus."
+    expected_keywords: ["innovation", "integrity", "customer focus"]
+    context_docs:
+      - "Core Values: Innovation, Integrity, Excellence, Collaboration, Customer Focus."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["Innovation", "Integrity", "Customer Focus"], difficulty: hard}
+
+  - name: hr_mission
+    user_message: "What is Acme Corp's mission?"
+    expected_answer: "The mission is to provide innovative, accessible, and affordable technology solutions that empower businesses worldwide."
+    expected_keywords: ["innovative", "accessible", "affordable"]
+    context_docs:
+      - "Mission: To provide innovative, accessible, and affordable technology solutions that empower businesses worldwide."
+    tags: ["rag", "hr", "factual"]
+    metadata: {needs_retrieval: true, source_doc: "employee_handbook", key_facts: ["innovative, accessible, and affordable technology solutions"], difficulty: medium}
+
+  # ===================== GATING NEGATIVES (should NOT require retrieval) =====================
+  - name: gate_math_addition
+    user_message: "What is 2 plus 2?"
+    expected_answer: "4"
+    tags: ["gating", "math"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_math_product
+    user_message: "What is 10 times 7?"
+    expected_answer: "70"
+    tags: ["gating", "math"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_greeting
+    user_message: "Hello, how are you doing today?"
+    expected_answer: "Hello! I'm doing well, thank you. How can I help you?"
+    tags: ["gating", "chitchat"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_thanks
+    user_message: "Thank you so much for your help!"
+    expected_answer: "You're welcome! Let me know if you need anything else."
+    tags: ["gating", "chitchat"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_world_capital
+    user_message: "What is the capital of France?"
+    expected_answer: "Paris"
+    tags: ["gating", "world_knowledge"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_joke
+    user_message: "Tell me a short joke."
+    expected_answer: "Why did the scarecrow win an award? Because he was outstanding in his field."
+    tags: ["gating", "chitchat"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_programming_def
+    user_message: "What programming language is Python?"
+    expected_answer: "Python is a general-purpose, high-level programming language."
+    tags: ["gating", "world_knowledge"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_translate
+    user_message: "How do you say hello in Spanish?"
+    expected_answer: "Hola"
+    tags: ["gating", "world_knowledge"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_author
+    user_message: "Who wrote Romeo and Juliet?"
+    expected_answer: "William Shakespeare"
+    tags: ["gating", "world_knowledge"]
+    metadata: {needs_retrieval: false}
+
+  - name: gate_weather
+    user_message: "What's the weather like outside right now?"
+    expected_answer: "I don't have access to live weather data, so I can't tell you the current weather."
+    tags: ["gating", "chitchat"]
+    metadata: {needs_retrieval: false}

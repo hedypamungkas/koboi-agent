@@ -1,0 +1,38 @@
+# RAG evaluation config -- Acme Corp corpus.
+#
+# Used by examples/28_rag_baseline.py:
+#   - OFFLINE mode: only the `rag:` block is consumed (builds the retriever for
+#     deterministic recall@k/precision@k/hit@k over examples/data/eval_cases/rag_acme_gold.yaml).
+#   - LIVE mode: the full agent (llm + rag) is built for end-to-end RAGAS scoring.
+#
+# Note: SentenceChunker takes `max_chunk_size` (NOT `chunk_size` -- there is no
+# config alias, so `chunk_size` would be silently ignored). See koboi/rag/chunker.py.
+
+agent:
+  name: "rag-eval"
+  description: "RAG evaluation agent over the Acme Corp sample documents"
+  system_prompt: |
+    Answer strictly from the provided document context. If the context does not
+    contain the answer, say you do not know. Quote figures exactly.
+  max_iterations: 5
+
+llm:
+  provider: "anthropic"
+  model: "${OPENAI_MODEL:mimo-v2.5-pro}"
+  auth_type: "api_key"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+  timeout: 60.0
+  max_tokens: 1024
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  max_chunk_size: 400
+  retriever: "keyword"
+  top_k: 5
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/employee_handbook.md"
