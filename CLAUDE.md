@@ -37,19 +37,19 @@ koboi/              Main package (~150 .py files)
   notifications.py  Notification system
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + 18 specialized hooks
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + 19 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid), augmentation, registry
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
   harness/          Telemetry, carryover state, doom loop detection, policy engine
   orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator, factory, dynamic agent builder
   mcp/              MCP client (stdio + HTTP) and server
-  skills/           Skill discovery and registry (agentskills.io standard)
+  skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/
   tui/              Terminal UI (Textual): app, screens/ (8), widgets/ (13)
-tests/              ~107 test files, asyncio_mode="auto", shared conftest.py with MockClient
+tests/              ~108 test files, asyncio_mode="auto", shared conftest.py with MockClient
 configs/            12 YAML agent configs
-examples/           28 numbered example scripts (01-28) with matching YAMLs
+examples/           29 numbered example scripts (01-29) with matching YAMLs
 skills/             2 skill definitions: code_review, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)
@@ -75,6 +75,11 @@ docs/               Architecture overview, TUI design docs
 - `Config.from_yaml()` raises `FileNotFoundError`, not a generic error
 - `AgentCore` is in `loop.py`, not `core.py`
 - `HookEvent` values are snake_case strings: `"pre_tool_use"`, `"post_llm_call"`, etc. (15 total)
+- `SkillDefinition` new fields: `disable_model_invocation`, `user_invocable`, `disallowed_tools`
+- `build_discovery_prompt()` accepts `budget_chars` param; `SkillRegistry` defaults to 8000
+- `activate_skill()` preprocesses `` !`command` `` blocks (shell injection); set `run_shell=False` to disable
+- `SkillPersistenceHook` (priority 45) re-injects activated skills after POST_COMPACT
+- Skill scorers: `skill_trigger_accuracy`, `skill_routing_accuracy`, `skill_token_overhead` in eval/
 - The `facade.py` `_build_*` functions are module-level, not class methods
 - TUI entry point: `koboi.tui.app:main` (setuptools script)
 - Tool functions can be sync or async -- sync runs in thread via `asyncio.to_thread`

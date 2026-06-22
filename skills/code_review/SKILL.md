@@ -2,6 +2,8 @@
 name: code-review
 description: Systematic code review focusing on security, quality, and performance
 license: MIT
+disable-model-invocation: true
+disallowed-tools: shell
 ---
 
 # Code Review Skill

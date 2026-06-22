@@ -2,6 +2,7 @@
 name: search-and-summarize
 description: Research a topic by searching multiple sources and summarizing findings
 license: MIT
+allowed-tools: web_search web_fetch
 ---
 
 # Search and Summarize

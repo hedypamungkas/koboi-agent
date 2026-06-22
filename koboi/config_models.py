@@ -175,6 +175,7 @@ class SkillsConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     search_paths: list[str] = Field(default_factory=list)
+    budget_chars: int = Field(default=8000, ge=0)
 
 
 class OrchestrationConfig(BaseModel):

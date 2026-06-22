@@ -568,7 +568,8 @@ def _build_skills(config: Config, logger: AgentLogger):
         return None
     from koboi.skills.registry import SkillRegistry
 
-    registry = SkillRegistry()
+    budget_chars = config.get("skills", "budget_chars", default=8000)
+    registry = SkillRegistry(budget_chars=budget_chars)
     for path in search_paths:
         resolved = str(Path(path).expanduser().resolve())
         registry.discover([resolved])
@@ -757,6 +758,12 @@ class AgentAssembler:
 
         _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
+
+        # Add skill persistence hook if skills are present
+        if self.skills and self.hook_chain:
+            from koboi.hooks.skill_persistence_hook import SkillPersistenceHook
+
+            self.hook_chain.add(SkillPersistenceHook(skills=self.skills))
 
         from koboi.loop import AgentCore
 

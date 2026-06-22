@@ -174,6 +174,9 @@ class SkillDefinition:
     compatibility: str | None = None
     metadata: dict | None = None
     allowed_tools: list[str] | None = None
+    disable_model_invocation: bool = False
+    user_invocable: bool = True
+    disallowed_tools: list[str] | None = None
 
 
 @dataclass

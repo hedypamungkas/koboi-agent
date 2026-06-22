@@ -8,6 +8,7 @@ trigger_patterns:
   - down
   - production error
   - security breach
+disable-model-invocation: true
 ---
 
 # Incident Response Skill

@@ -82,6 +82,16 @@ def parse_frontmatter(content: str) -> dict:
     if "allowed-tools" in result:
         result["allowed-tools"] = result["allowed-tools"].split()
 
+    if "disallowed-tools" in result:
+        result["disallowed-tools"] = result["disallowed-tools"].split()
+
+    # Boolean fields: parse string "true"/"false" to bool
+    for bool_key in ("disable-model-invocation", "user-invocable"):
+        if bool_key in result:
+            val = result[bool_key]
+            if isinstance(val, str):
+                result[bool_key] = val.lower() in ("true", "1", "yes")
+
     return result
 
 
@@ -152,17 +162,61 @@ def _try_register_skill(
             compatibility=frontmatter.get("compatibility"),
             metadata=frontmatter.get("metadata"),
             allowed_tools=frontmatter.get("allowed-tools"),
+            disable_model_invocation=frontmatter.get("disable-model-invocation", False),
+            user_invocable=frontmatter.get("user-invocable", True),
+            disallowed_tools=frontmatter.get("disallowed-tools"),
         )
     )
 
 
-def activate_skill(skill: SkillDefinition) -> str:
-    """Load SKILL.md body (strip frontmatter). Sets skill.body and returns it."""
+def activate_skill(skill: SkillDefinition, run_shell: bool = True) -> str:
+    """Load SKILL.md body (strip frontmatter). Sets skill.body and returns it.
+
+    Args:
+        skill: The skill definition to activate.
+        run_shell: If True, preprocess `` !`command` `` blocks by executing
+            them and injecting stdout. Commands time out after 10 seconds.
+    """
     skill_path = Path(skill.skill_dir) / "SKILL.md"
     content = skill_path.read_text(encoding="utf-8")
     body = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL).strip()
+
+    if run_shell:
+        body = _preprocess_shell_commands(body)
+
     skill.body = body
     return body
+
+
+def _preprocess_shell_commands(body: str) -> str:
+    """Replace `` !`command` `` blocks with their stdout output.
+
+    Commands are executed with a 10-second timeout. On failure, the block
+    is replaced with ``[command failed: <cmd>]``.
+    """
+    import subprocess
+
+    def _run(match: re.Match) -> str:
+        cmd = match.group(1).strip()
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            output = result.stdout.strip()
+            if result.returncode != 0 and not output:
+                return f"[command failed: {cmd}]"
+            return output if output else f"[command produced no output: {cmd}]"
+        except subprocess.TimeoutExpired:
+            return f"[command timed out: {cmd}]"
+        except Exception:
+            return f"[command failed: {cmd}]"
+
+    # Match `` !`command` `` (with optional multiline backtick fence)
+    return re.sub(r"!`([^`]+)`", _run, body)
 
 
 def load_resource(skill: SkillDefinition, relative_path: str) -> str | None:
@@ -175,23 +229,72 @@ def load_resource(skill: SkillDefinition, relative_path: str) -> str | None:
     return resource_path.read_text(encoding="utf-8")
 
 
-def build_discovery_prompt(skills: list[SkillDefinition]) -> str:
-    """Generate discovery metadata text for system prompt injection."""
+def build_discovery_prompt(skills: list[SkillDefinition], budget_chars: int | None = None) -> str:
+    """Generate discovery metadata text for system prompt injection.
+
+    Args:
+        skills: List of skills to include (should be pre-sorted by relevance).
+        budget_chars: Maximum characters for the prompt. If exceeded,
+            least-relevant skills (those at the end of the list) are dropped.
+            None means no limit.
+    """
     if not skills:
         return ""
 
-    lines = [
+    header_lines = [
         "",
         "<available-skills>",
         "You have skills that can be activated. "
         "When the user request matches, respond with format: [ACTIVATE_SKILL: skill-name]",
         "",
     ]
+    footer = "</available-skills>"
+
+    if budget_chars is None:
+        # No budget: include all skills
+        lines = list(header_lines)
+        for skill in skills:
+            desc = skill.description[:200]
+            suffix = ""
+            if skill.disable_model_invocation:
+                suffix = " [user-only]"
+            lines.append(f"- {skill.name}: {desc}{suffix}")
+        lines.append(footer)
+        return "\n".join(lines)
+
+    # Budget-aware: track chars and truncate when exceeded
+    # Reserve space for header + footer
+    header_text = "\n".join(header_lines) + "\n"
+    footer_text = "\n" + footer
+    reserved = len(header_text) + len(footer_text) + 80  # 80 chars for truncation message
+    remaining = budget_chars - reserved
+
+    if remaining <= 0:
+        return ""
+
+    lines = list(header_lines)
+    total_chars = 0
+    included = 0
+
     for skill in skills:
         desc = skill.description[:200]
-        lines.append(f"- {skill.name}: {desc}")
+        suffix = ""
+        if skill.disable_model_invocation:
+            suffix = " [user-only]"
+        entry = f"- {skill.name}: {desc}{suffix}"
+        entry_chars = len(entry) + 1  # +1 for newline
 
-    lines.append("</available-skills>")
+        if total_chars + entry_chars > remaining:
+            dropped = len(skills) - included
+            if dropped > 0:
+                lines.append(f"  ... and {dropped} more skills (budget limit)")
+            break
+
+        lines.append(entry)
+        total_chars += entry_chars
+        included += 1
+
+    lines.append(footer)
     return "\n".join(lines)
 
 
@@ -203,10 +306,11 @@ class SkillRegistry:
     USER_SKILLS = ["~/.claude/skills"]
     PLUGIN_SKILLS = ["~/.claude/plugins/cache"]
 
-    def __init__(self, logger: AgentLogger | None = None):
+    def __init__(self, logger: AgentLogger | None = None, budget_chars: int | None = 8000):
         self._skills: dict[str, SkillDefinition] = {}
         self._activated: set[str] = set()
         self.logger = logger
+        self.budget_chars = budget_chars
 
     def discover(self, search_paths: list[str | Path], recursive: bool = False) -> list[str]:
         """Scan paths for skills and register them. Returns list of names."""
@@ -263,7 +367,7 @@ class SkillRegistry:
         return load_resource(skill, relative_path)
 
     def get_discovery_prompt(self) -> str:
-        return build_discovery_prompt(self.list_skills())
+        return build_discovery_prompt(self.list_skills(), budget_chars=self.budget_chars)
 
     # Common words that appear in almost every skill description -- useless for matching
     _STOPWORDS = frozenset(
@@ -333,11 +437,18 @@ class SkillRegistry:
         }
     )
 
-    def route(self, query: str, top_k: int = 3) -> list[SkillDefinition]:
+    def route(self, query: str, top_k: int = 3, include_model_disabled: bool = False) -> list[SkillDefinition]:
         """Return top-k skills whose description matches query keywords.
 
         Scoring: TF-IDF inspired -- rare words in query score higher
         than common words that appear in many descriptions.
+
+        Args:
+            query: User query to match against.
+            top_k: Maximum number of skills to return.
+            include_model_disabled: If True, include skills with
+                disable_model_invocation=True (for user-triggered routing).
+                If False (default), exclude them from auto-routing.
         """
         q_words = set(re.findall(r"\w+", query.lower())) - self._STOPWORDS
         if not q_words:
@@ -346,6 +457,9 @@ class SkillRegistry:
         # IDF: count how many skills each query word appears in
         word_doc_count: dict[str, int] = {}
         for skill in self._skills.values():
+            # Skip model-disabled skills for IDF calculation unless explicitly included
+            if skill.disable_model_invocation and not include_model_disabled:
+                continue
             name_words = set(re.findall(r"\w+", skill.name.replace("-", " ").replace("_", " ").lower()))
             desc_words = set(re.findall(r"\w+", skill.description.lower())) - self._STOPWORDS
             s_words = name_words | desc_words
@@ -355,6 +469,9 @@ class SkillRegistry:
 
         scored = []
         for skill in self._skills.values():
+            # Skip model-disabled skills unless explicitly included
+            if skill.disable_model_invocation and not include_model_disabled:
+                continue
             name_words = set(re.findall(r"\w+", skill.name.replace("-", " ").replace("_", " ").lower()))
             desc_words = set(re.findall(r"\w+", skill.description.lower())) - self._STOPWORDS
             s_words = name_words | desc_words
@@ -375,4 +492,4 @@ class SkillRegistry:
     def get_routed_discovery_prompt(self, query: str) -> str:
         """Discovery prompt with only skills relevant to query."""
         matched = self.route(query)
-        return build_discovery_prompt(matched)
+        return build_discovery_prompt(matched, budget_chars=self.budget_chars)

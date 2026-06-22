@@ -7,6 +7,7 @@ trigger_patterns:
   - code review
   - analyze code
   - check code
+disable-model-invocation: true
 ---
 
 # Code Review Skill

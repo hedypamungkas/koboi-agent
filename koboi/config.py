@@ -483,9 +483,11 @@ class ConfigBuilder:
             self._data.setdefault("policy", {})["rules"] = rules
         return self
 
-    def skills(self, search_paths: list[str] | None = None) -> ConfigBuilder:
+    def skills(self, search_paths: list[str] | None = None, budget_chars: int | None = None) -> ConfigBuilder:
         if search_paths is not None:
             self._data.setdefault("skills", {})["search_paths"] = search_paths
+        if budget_chars is not None:
+            self._data.setdefault("skills", {})["budget_chars"] = budget_chars
         return self
 
     def mcp(self, servers: list[dict] | None = None) -> ConfigBuilder:

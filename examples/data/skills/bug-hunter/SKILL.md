@@ -4,6 +4,7 @@ description: >
   Systematic bug hunting and vulnerability detection workflow.
   Use when the user asks to find bugs, analyze code for issues,
   debug problems, or perform security audits.
+allowed-tools: search filesystem
 ---
 
 # Bug Hunter Skill

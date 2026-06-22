@@ -88,6 +88,20 @@ def register_default_scorers() -> None:
     ScorerRegistry.register("tool_selection", lambda: ToolSelectionScorer())
     ScorerRegistry.register("token_efficiency", lambda **kw: TokenEfficiencyScorer(**kw))
 
+    # Skill-specific scorers
+    try:
+        from koboi.eval.scorers.skill_scorer import (
+            SkillTriggerAccuracyScorer,
+            SkillRoutingAccuracyScorer,
+            SkillTokenOverheadScorer,
+        )
+
+        ScorerRegistry.register("skill_trigger_accuracy", lambda: SkillTriggerAccuracyScorer())
+        ScorerRegistry.register("skill_routing_accuracy", lambda: SkillRoutingAccuracyScorer())
+        ScorerRegistry.register("skill_token_overhead", lambda **kw: SkillTokenOverheadScorer(**kw))
+    except ImportError:
+        pass
+
 
 def register_framework_scorers() -> None:
     """Register framework-specific scorers (fail-open if deps missing)."""
