@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from koboi.types import EvalCase, EvalScore
 from koboi.eval.scorers.base import BaseScorer
+from koboi.rag.retriever import apply_min_score, normalize_scores
 
 if TYPE_CHECKING:
     from koboi.rag.retriever import BaseRetriever
@@ -120,12 +121,25 @@ class RetrievalScorer(BaseScorer):
 
     METRICS = ("recall", "precision", "hit", "gate_noise")
 
-    def __init__(self, metric_name: str = "recall", retriever: BaseRetriever | None = None, top_k: int = 5):
+    def __init__(
+        self,
+        metric_name: str = "recall",
+        retriever: BaseRetriever | None = None,
+        top_k: int = 5,
+        min_score: float = 0.0,
+        normalize: bool = True,
+        fetch_factor: int = 1,
+    ):
         if metric_name not in self.METRICS:
             raise ValueError(f"Unknown retrieval metric '{metric_name}'. Available: {self.METRICS}")
         self.metric_name = metric_name
         self._retriever = retriever
         self.top_k = top_k
+        # Rec 2 knobs. Defaults (min_score=0, fetch_factor=1) reproduce the baseline
+        # exactly: keyword normalize is identity, no chunks filtered, same top_k fetched.
+        self.min_score = min_score
+        self.normalize = normalize
+        self.fetch_factor = max(1, fetch_factor)
 
     async def score(self, case: EvalCase, output: str, context: dict) -> EvalScore:
         name = f"retrieval_{self.metric_name}@{self.top_k}"
@@ -134,7 +148,19 @@ class RetrievalScorer(BaseScorer):
         if retriever is None:
             return EvalScore(name, 0.0, "no retriever configured")
 
-        results = await retriever.retrieve(case.user_message, top_k=self.top_k)
+        if _is_factual(case):
+            # Measure the SAME filtered set production would inject: fetch a wider
+            # candidate pool, normalize per-method, drop below min_score, truncate.
+            fetch_k = max(self.top_k * self.fetch_factor, self.top_k)
+            results = await retriever.retrieve(case.user_message, top_k=fetch_k)
+            if self.normalize:
+                results = normalize_scores(results)
+            results = apply_min_score(results, self.min_score, self.top_k)
+        else:
+            # Gating negative: measure RAW retriever over-firing (a Rec 1 concern),
+            # unaffected by Rec 2 filtering.
+            results = await retriever.retrieve(case.user_message, top_k=self.top_k)
+
         metrics = compute_retrieval_metrics(results, case)
 
         if metrics.get("no_gold"):

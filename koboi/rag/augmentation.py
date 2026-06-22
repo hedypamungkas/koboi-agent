@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from typing import TYPE_CHECKING
 
+from koboi.rag.retriever import apply_min_score, normalize_scores
 from koboi.rag.types import RetrievalResult
 from koboi.tokens import estimate_single
 
@@ -17,26 +18,50 @@ class AugmentationStrategy(ABC):
         retriever: BaseRetriever,
         top_k: int = 3,
         logger: AgentLogger | None = None,
+        min_score: float = 0.0,
+        normalize: bool = True,
+        fetch_factor: int = 1,
     ):
         self.retriever = retriever
         self.top_k = top_k
         self.logger = logger
+        self.min_score = min_score
+        self.normalize = normalize
+        self.fetch_factor = max(1, fetch_factor)
 
     async def _retrieve_and_format(self, query: str) -> tuple[str, list[RetrievalResult]]:
-        results = await self.retriever.retrieve(query, top_k=self.top_k)
+        # Fetch a wider candidate pool (mirrors RerankerRetriever.fetch_multiplier)
+        # so min_score can filter junk without under-injecting.
+        fetch_k = max(self.top_k * self.fetch_factor, self.top_k)
+        results = await self.retriever.retrieve(query, top_k=fetch_k)
 
         if not results:
             return "", results
+
+        if self.normalize:
+            results = normalize_scores(results)
+        results = apply_min_score(results, self.min_score, self.top_k)
+
+        if not results:
+            return "", results
+
+        if self.logger:
+            method = results[0].retrieval_method
+            mean_score = sum(r.score for r in results) / len(results)
+            self.logger.log_rag_retrieval(query, results, method)
+            self.logger.log_rag_filter(
+                query,
+                injected=len(results),
+                mean_score=mean_score,
+                min_score=self.min_score,
+                method=method,
+            )
 
         context_parts = []
         for r in results:
             source = r.chunk.metadata.get("source", r.chunk.doc_id)
             context_parts.append(f"[Source: {source}]\n{r.chunk.content}")
         context = "\n---\n".join(context_parts)
-
-        if self.logger:
-            method = results[0].retrieval_method if results else "none"
-            self.logger.log_rag_retrieval(query, results, method)
 
         return context, results
 
@@ -79,8 +104,18 @@ class OnTheFlyAugmentation(AugmentationStrategy):
         retriever: BaseRetriever,
         top_k: int = 3,
         logger: AgentLogger | None = None,
+        min_score: float = 0.0,
+        normalize: bool = True,
+        fetch_factor: int = 1,
     ):
-        super().__init__(retriever=retriever, top_k=top_k, logger=logger)
+        super().__init__(
+            retriever=retriever,
+            top_k=top_k,
+            logger=logger,
+            min_score=min_score,
+            normalize=normalize,
+            fetch_factor=fetch_factor,
+        )
         self._cache: dict[str, str] = {}
 
     async def augment_for_llm(self, messages: list[dict]) -> list[dict]:

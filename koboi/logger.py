@@ -112,6 +112,13 @@ class AgentLogger:
         self._separator("RAG AUGMENTATION")
         self._append(f"Strategy: {strategy}\nToken delta: +{delta}\n")
 
+    def log_rag_filter(self, query: str, injected: int, mean_score: float, min_score: float, method: str) -> None:
+        self._separator("RAG FILTER")
+        self._append(
+            f"Query: {query}\nMethod: {method}\n"
+            f"min_score: {min_score} | injected: {injected} | mean_injected_score: {mean_score:.4f}\n"
+        )
+
     def log_rag_chunking(self, doc_title: str, total: int, avg_size: float, method: str) -> None:
         self._separator("RAG CHUNKING")
         self._append(f"Doc: {doc_title} | Method: {method} | Chunks: {total} | Avg: {avg_size:.0f}\n")

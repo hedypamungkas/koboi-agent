@@ -36,6 +36,54 @@ def resolve_retriever(config: dict, chunks: list[Chunk], client: LLMClient | Non
     return entry.cls(**kwargs)
 
 
+def normalize_scores(results: list[RetrievalResult]) -> list[RetrievalResult]:
+    """Normalize retrieval scores to a comparable [0,1] scale, per method.
+
+    Per-method so a single ``min_score`` threshold has consistent meaning across
+    retrievers (keyword/semantic cosine lives in [0,1]; hybrid RRF tops out near
+    ~0.03):
+
+      - keyword / semantic / reranked: clamp cosine to ``[0,1]`` (identity for
+        keyword/reranked which are already 0-1; clamps negative semantic).
+      - hybrid (RRF): min-max within the result set -> ``[0,1]`` (RRF magnitude is
+        rank-arbitrary).
+
+    Returns new ``RetrievalResult`` objects; input is not mutated.
+    """
+    if not results:
+        return []
+
+    method = results[0].retrieval_method or ""
+    if method.startswith("hybrid"):
+        scores = [r.score for r in results]
+        lo, hi = min(scores), max(scores)
+        span = hi - lo
+
+        def _norm(s: float) -> float:
+            return 1.0 if span == 0 else (s - lo) / span
+
+    else:
+
+        def _norm(s: float) -> float:
+            return max(0.0, min(1.0, s))
+
+    return [RetrievalResult(chunk=r.chunk, score=_norm(r.score), retrieval_method=r.retrieval_method) for r in results]
+
+
+def apply_min_score(
+    results: list[RetrievalResult],
+    min_score: float,
+    top_k: int,
+) -> list[RetrievalResult]:
+    """Drop results below ``min_score`` (assumed already normalized), sort desc, truncate to ``top_k``.
+
+    ``min_score <= 0`` is a no-op filter (keeps all, still sorts + truncates).
+    """
+    kept = [r for r in results if r.score >= min_score] if min_score > 0 else list(results)
+    kept.sort(key=lambda r: r.score, reverse=True)
+    return kept[:top_k]
+
+
 class BaseRetriever(ABC):
     @abstractmethod
     async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]: ...

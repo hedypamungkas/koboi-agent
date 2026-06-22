@@ -84,9 +84,18 @@ def build_retriever():
 # ---------------------------------------------------------------------------
 
 
-async def run_offline(top_k: int, save: bool, compare: bool) -> list[EvalResult]:
+async def run_offline(
+    top_k: int,
+    save: bool,
+    compare: bool,
+    min_score: float = 0.0,
+    fetch_factor: int = 1,
+    normalize: bool = True,
+) -> list[EvalResult]:
     """Score factual cases (recall/precision/hit) + gating cases (gate_noise)."""
     print("\n=== RAG Retrieval Baseline (offline, deterministic) ===")
+    if min_score > 0 or fetch_factor > 1:
+        print(f"Rec 2 filter active: min_score={min_score} fetch_factor={fetch_factor} normalize={normalize}")
     retriever, chunk_count = build_retriever()
     print(f"Indexed {chunk_count} chunks from {RAG_CONFIG.relative_to(PROJECT_ROOT)}")
 
@@ -98,9 +107,25 @@ async def run_offline(top_k: int, save: bool, compare: bool) -> list[EvalResult]
     results: list[EvalResult] = []
 
     fact_scorers = [
-        RetrievalScorer("recall", retriever=retriever, top_k=top_k),
-        RetrievalScorer("precision", retriever=retriever, top_k=top_k),
-        RetrievalScorer("hit", retriever=retriever, top_k=top_k),
+        RetrievalScorer(
+            "recall",
+            retriever=retriever,
+            top_k=top_k,
+            min_score=min_score,
+            normalize=normalize,
+            fetch_factor=fetch_factor,
+        ),
+        RetrievalScorer(
+            "precision",
+            retriever=retriever,
+            top_k=top_k,
+            min_score=min_score,
+            normalize=normalize,
+            fetch_factor=fetch_factor,
+        ),
+        RetrievalScorer(
+            "hit", retriever=retriever, top_k=top_k, min_score=min_score, normalize=normalize, fetch_factor=fetch_factor
+        ),
     ]
     for case in factual:
         start = time.time()
@@ -186,6 +211,46 @@ def _compare(current: list[EvalResult]) -> None:
     print(report.summary())
 
 
+async def run_sweep(top_k: int, fetch_factor: int) -> None:
+    """Sweep min_score and print avg precision/recall/hit per threshold to find the knee."""
+    print("\n=== min_score sweep (factual cases) ===")
+    print(f"(top_k={top_k}, fetch_factor={fetch_factor})")
+    retriever, _ = build_retriever()
+    cases = await LoaderRegistry.load("yaml", str(GOLD_PATH))
+    factual = [c for c in cases if c.metadata.get("needs_retrieval", True)]
+    thresholds = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
+
+    print(f"\n{'min_score':>9} | {'recall':>7} | {'precision':>9} | {'hit':>5}")
+    print("-" * 42)
+    n = len(factual) or 1
+    best: tuple | None = None
+    for ms in thresholds:
+        scorers = {
+            m: RetrievalScorer(m, retriever=retriever, top_k=top_k, min_score=ms, fetch_factor=fetch_factor)
+            for m in ("recall", "precision", "hit")
+        }
+        totals = {"recall": 0.0, "precision": 0.0, "hit": 0.0}
+        for case in factual:
+            for m, s in scorers.items():
+                totals[m] += (await s.score(case, "", {})).value
+        recall = totals["recall"] / n
+        precision = totals["precision"] / n
+        hit = totals["hit"] / n
+        print(f"{ms:>9.2f} | {recall:>7.3f} | {precision:>9.3f} | {hit:>5.3f}")
+        # Knee: max precision subject to recall >= 0.85 (the Rec 2 hypothesis guardrail).
+        # Compare the rounded value so a displayed 0.850 (raw 0.8499) qualifies.
+        if round(recall, 3) >= 0.85 and (best is None or precision > best[1]):
+            best = (ms, precision, recall, hit)
+    print("-" * 42)
+    if best:
+        print(
+            f"Recommended (max precision @ recall>=0.85): min_score={best[0]:.2f}"
+            f" -> precision={best[1]:.3f}, recall={best[2]:.3f}, hit={best[3]:.3f}"
+        )
+    else:
+        print("No threshold held recall >= 0.85; lower min_score or raise fetch_factor.")
+
+
 # ---------------------------------------------------------------------------
 # Live mode: end-to-end RAGAS over a RAG-enabled agent
 # ---------------------------------------------------------------------------
@@ -225,17 +290,35 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=5, help="Retrieval depth k (default 5)")
     parser.add_argument("--save-baseline", action="store_true", help="Save results as baseline")
     parser.add_argument("--compare", action="store_true", help="Compare offline run vs baseline")
+    parser.add_argument(
+        "--min-score", type=float, default=0.0, help="Rec 2: drop chunks below this normalized score (default 0.0)"
+    )
+    parser.add_argument(
+        "--fetch-factor",
+        type=int,
+        default=None,
+        help="Candidate pool multiplier (default: 3 if --min-score>0 else 1)",
+    )
+    parser.add_argument("--sweep", action="store_true", help="Sweep min_score and print precision/recall/hit table")
     args = parser.parse_args()
+
+    # fetch_factor defaults to 3 when a min_score is set (recall protection), else 1 (baseline).
+    fetch_factor = args.fetch_factor if args.fetch_factor is not None else (3 if args.min_score > 0 else 1)
 
     print("Koboi RAG Baseline Runner")
     print(f"  gold set : {GOLD_PATH.relative_to(PROJECT_ROOT)}")
     print(f"  mode     : {args.mode}")
     print(f"  top_k    : {args.top_k}")
+    if args.mode == "offline":
+        print(f"  min_score: {args.min_score} | fetch_factor: {fetch_factor} | sweep: {args.sweep}")
     print(f"  scorers  : {ScorerRegistry.list_available()}")
     print(f"  loaders  : {LoaderRegistry.list_available()}")
 
     if args.mode == "offline":
-        asyncio.run(run_offline(args.top_k, args.save_baseline, args.compare))
+        if args.sweep:
+            asyncio.run(run_sweep(args.top_k, fetch_factor))
+        else:
+            asyncio.run(run_offline(args.top_k, args.save_baseline, args.compare, args.min_score, fetch_factor))
     else:
         asyncio.run(run_live(args.top_k, args.save_baseline))
 

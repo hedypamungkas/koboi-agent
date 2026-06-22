@@ -90,6 +90,10 @@ class RagConfig(BaseModel):
     top_k: int = Field(default=3, ge=1)
     augmentation: str = "on_the_fly"
     documents: list[str | dict] = Field(default_factory=list)
+    # Rec 2: relevance filtering (see koboi/rag/retriever.py normalize_scores / apply_min_score).
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    normalize: bool = True
+    fetch_factor: int = Field(default=1, ge=1)
 
 
 class InputGuardrailConfig(BaseModel):

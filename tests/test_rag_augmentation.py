@@ -191,3 +191,82 @@ class TestOnTheFlyCaching:
         assert "JavaScript web" in aug._cache
 
         assert result_a[0]["content"] != result_b[0]["content"]
+
+
+def _rr(doc_id: str, content: str, score: float, method: str = "keyword") -> RetrievalResult:
+    return RetrievalResult(
+        chunk=Chunk(id=f"{doc_id}_{content}", doc_id=doc_id, content=content),
+        score=score,
+        retrieval_method=method,
+    )
+
+
+class _ScoredStubRetriever:
+    """Returns a preset result list, capped by top_k."""
+
+    def __init__(self, results: list[RetrievalResult]):
+        self._results = results
+
+    async def retrieve(self, query: str, top_k: int = 3):
+        return self._results[:top_k]
+
+
+class TestMinScoreFiltering:
+    async def test_min_score_drops_low_score_chunks(self):
+        results = [_rr("d", "highscore", 0.9), _rr("d", "lowscore", 0.1)]
+        aug = InMemoryAugmentation(retriever=_ScoredStubRetriever(results), top_k=5, min_score=0.5, normalize=False)
+        out = await aug.augment_for_memory("q")
+        assert "highscore" in out
+        assert "lowscore" not in out
+
+    async def test_default_min_score_keeps_all(self):
+        results = [_rr("d", "a", 0.9), _rr("d", "b", 0.1)]
+        aug = InMemoryAugmentation(retriever=_ScoredStubRetriever(results), top_k=5, normalize=False)
+        out = await aug.augment_for_memory("q")
+        assert "a" in out and "b" in out
+
+    async def test_all_filtered_returns_original_message(self):
+        results = [_rr("d", "low", 0.1)]
+        aug = InMemoryAugmentation(retriever=_ScoredStubRetriever(results), top_k=5, min_score=0.5, normalize=False)
+        out = await aug.augment_for_memory("question")
+        assert out == "question"  # nothing survived the filter
+
+    async def test_fetch_factor_widens_candidate_pool(self):
+        results = [_rr("d", str(i), 0.5) for i in range(12)]
+        retriever = _ScoredStubRetriever(results)
+        aug = InMemoryAugmentation(retriever=retriever, top_k=3, fetch_factor=4, normalize=False)
+        seen = {}
+
+        async def spy_retrieve(query, top_k=3):
+            seen["top_k"] = top_k
+            return retriever._results[:top_k]
+
+        retriever.retrieve = spy_retrieve
+        out = await aug.augment_for_memory("q")
+        assert seen["top_k"] == 12  # top_k(3) * fetch_factor(4)
+        # after truncation, only top_k injected
+        assert out.count("[Source:") <= 3
+
+    async def test_logs_mean_injected_score(self):
+        results = [_rr("d", "a", 0.8), _rr("d", "b", 0.6)]
+        logger = MagicMock()
+        aug = InMemoryAugmentation(retriever=_ScoredStubRetriever(results), top_k=5, logger=logger, normalize=False)
+        await aug.augment_for_memory("q")
+        logger.log_rag_filter.assert_called_once()
+        kw = logger.log_rag_filter.call_args.kwargs
+        assert kw["injected"] == 2
+        assert abs(kw["mean_score"] - 0.7) < 1e-9
+        assert kw["min_score"] == 0.0
+
+    async def test_normalize_handles_hybrid_rrf_scale(self):
+        # Hybrid RRF scores (~0.01-0.03) normalized to [0,1] before filtering.
+        results = [
+            _rr("d", "top", 0.03, method="hybrid"),
+            _rr("d", "mid", 0.02, method="hybrid"),
+            _rr("d", "low", 0.01, method="hybrid"),
+        ]
+        aug = InMemoryAugmentation(retriever=_ScoredStubRetriever(results), top_k=3, min_score=0.5, normalize=True)
+        out = await aug.augment_for_memory("q")
+        assert "top" in out  # normalized to 1.0, kept
+        assert "mid" in out  # normalized to 0.5, kept (>= 0.5)
+        assert "low" not in out  # normalized to 0.0, dropped

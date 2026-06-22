@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from koboi.rag.types import Chunk, Document, RetrievalResult
+from koboi.rag.retriever import apply_min_score, normalize_scores
 
 
 class TestChunkTypes:
@@ -288,3 +289,70 @@ class TestRetrieverIntegration:
             assert hasattr(result, "score")
             assert hasattr(result, "retrieval_method")
             assert result.retrieval_method == "keyword"
+
+
+def _rr(doc_id: str, content: str, score: float, method: str = "keyword") -> RetrievalResult:
+    return RetrievalResult(
+        chunk=Chunk(id=f"{doc_id}_c0", doc_id=doc_id, content=content),
+        score=score,
+        retrieval_method=method,
+    )
+
+
+class TestNormalizeScores:
+    def test_empty(self):
+        assert normalize_scores([]) == []
+
+    def test_keyword_clamps_to_unit_range(self):
+        # Cosine already in [0,1] -> identity; negative would clamp (semantic).
+        results = [_rr("d", "x", 0.4), _rr("d", "y", 0.9)]
+        normed = normalize_scores(results)
+        assert [r.score for r in normed] == [0.4, 0.9]
+
+    def test_semantic_negative_clamped(self):
+        results = [_rr("d", "x", -0.2, method="semantic"), _rr("d", "y", 0.8, method="semantic")]
+        normed = normalize_scores(results)
+        assert normed[0].score == 0.0  # clamped
+        assert normed[1].score == 0.8
+
+    def test_hybrid_minmax_to_unit(self):
+        # RRF magnitudes (~0.008-0.03) -> min-max stretched to [0,1].
+        results = [
+            _rr("d", "a", 0.03, method="hybrid"),
+            _rr("d", "b", 0.02, method="hybrid"),
+            _rr("d", "c", 0.01, method="hybrid"),
+        ]
+        normed = normalize_scores(results)
+        assert normed[0].score == 1.0
+        assert normed[2].score == 0.0
+        assert abs(normed[1].score - 0.5) < 1e-9
+
+    def test_hybrid_all_equal_avoids_div_zero(self):
+        results = [_rr("d", "a", 0.02, method="hybrid"), _rr("d", "b", 0.02, method="hybrid")]
+        normed = normalize_scores(results)
+        assert all(r.score == 1.0 for r in normed)
+
+    def test_does_not_mutate_input(self):
+        results = [_rr("d", "x", 0.4)]
+        normalize_scores(results)
+        assert results[0].score == 0.4  # unchanged
+
+
+class TestApplyMinScore:
+    def test_no_filter_when_threshold_zero(self):
+        results = [_rr("d", "a", 0.1), _rr("d", "b", 0.9)]
+        kept = apply_min_score(results, min_score=0.0, top_k=5)
+        assert len(kept) == 2
+
+    def test_filters_below_threshold(self):
+        results = [_rr("d", "a", 0.1), _rr("d", "b", 0.5), _rr("d", "c", 0.9)]
+        kept = apply_min_score(results, min_score=0.5, top_k=5)
+        assert [r.score for r in kept] == [0.9, 0.5]  # sorted desc, 0.1 dropped
+
+    def test_truncates_to_top_k(self):
+        results = [_rr("d", str(i), i / 10.0) for i in range(1, 9)]  # 0.1..0.8
+        kept = apply_min_score(results, min_score=0.0, top_k=3)
+        assert [r.score for r in kept] == [0.8, 0.7, 0.6]
+
+    def test_empty_results(self):
+        assert apply_min_score([], min_score=0.5, top_k=5) == []

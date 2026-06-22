@@ -32,6 +32,12 @@ rag:
   retriever: "keyword"
   top_k: 5
   augmentation: "on_the_fly"
+  # Rec 2: relevance filtering. Defaults keep this config as the baseline control
+  # (min_score 0 = no filter). Tune via examples/28_rag_baseline.py --sweep, then
+  # set min_score + fetch_factor here for live mode.
+  min_score: 0.0      # drop chunks below this normalized score (0.0 = off)
+  normalize: true     # per-method normalization (cosine clamp; hybrid min-max)
+  fetch_factor: 1     # candidate multiplier (set 3 w/ min_score>0 to protect recall)
   documents:
     - path: "./data/sample/product_catalog.md"
     - path: "./data/sample/company_policy.md"

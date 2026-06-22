@@ -221,3 +221,39 @@ class TestIntegrationWithKeywordRetriever:
         assert score.name == "retrieval_recall@2"
         # The query "python programming" should surface the python chunk -> recall 1.0.
         assert score.value == 1.0
+
+
+class TestMinScoreInScorer:
+    @pytest.mark.asyncio
+    async def test_defaults_keep_all_chunks(self):
+        retriever = _StubRetriever(
+            [
+                _result("product_catalog", "costs $15,000 perpetual license", score=0.9),
+                _result("employee_handbook", "other content", score=0.2),
+            ]
+        )
+        scorer = RetrievalScorer("precision", retriever=retriever, top_k=5)  # defaults
+        score = await scorer.score(_factual(["$15,000"]), "out", {})
+        assert score.value == 0.5  # both kept, 1 relevant
+
+    @pytest.mark.asyncio
+    async def test_min_score_filters_low_score_chunks(self):
+        retriever = _StubRetriever(
+            [
+                _result("product_catalog", "costs $15,000 perpetual license", score=0.9),
+                _result("employee_handbook", "low relevance junk", score=0.1),
+            ]
+        )
+        scorer = RetrievalScorer("precision", retriever=retriever, top_k=5, min_score=0.5)
+        score = await scorer.score(_factual(["$15,000"]), "out", {})
+        # only the 0.9 chunk survives and is relevant -> precision 1.0
+        assert score.value == 1.0
+
+    @pytest.mark.asyncio
+    async def test_gating_ignores_min_score_filter(self):
+        # gate_noise measures raw retriever over-firing; min_score must NOT apply.
+        retriever = _StubRetriever([_result("d", "c", score=0.7), _result("d", "c2", score=0.2)])
+        scorer = RetrievalScorer("gate_noise", retriever=retriever, top_k=5, min_score=0.5)
+        case = _case(metadata={"needs_retrieval": False})
+        score = await scorer.score(case, "out", {})
+        assert score.value == 0.7  # raw max score, filter ignored
