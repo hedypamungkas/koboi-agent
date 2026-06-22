@@ -1,0 +1,985 @@
+{
+  "suite_name": "baseline_routing",
+  "cases": [
+    {
+      "case_name": "rag_product_pricing",
+      "overall_score": 0.997,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "2/2 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 80 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.979,
+          "reason": "104 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 2.51
+    },
+    {
+      "case_name": "rag_annual_leave",
+      "overall_score": 0.978,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 201 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.82,
+          "reason": "899 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 3.49
+    },
+    {
+      "case_name": "rag_meal_allowance",
+      "overall_score": 0.981,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 54 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.846,
+          "reason": "771 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 3.95
+    },
+    {
+      "case_name": "rag_ceo_name",
+      "overall_score": 0.983,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 39 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.86,
+          "reason": "699 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 2.99
+    },
+    {
+      "case_name": "rag_server_specs",
+      "overall_score": 0.984,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "2/2 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 347 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.868,
+          "reason": "658 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 3.89
+    },
+    {
+      "case_name": "noise_weather",
+      "overall_score": 0.97,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "No expected keywords specified"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 532 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.759,
+          "reason": "1204 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 9.68
+    },
+    {
+      "case_name": "noise_cooking",
+      "overall_score": 0.982,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "No expected keywords specified"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 472 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.855,
+          "reason": "724 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 6.74
+    },
+    {
+      "case_name": "noise_math",
+      "overall_score": 0.735,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 0.0,
+          "reason": "None of the expected tools used. Expected: ['calculator'], got: []"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 344 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 0.0,
+          "reason": "No tools used, expected: ['calculator']"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.879,
+          "reason": "603 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 14.05
+    },
+    {
+      "case_name": "noise_joke",
+      "overall_score": 0.987,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "No expected keywords specified"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 319 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.897,
+          "reason": "514 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 8.56
+    },
+    {
+      "case_name": "noise_sports",
+      "overall_score": 0.978,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 401 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.822,
+          "reason": "889 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 5.36
+    },
+    {
+      "case_name": "tool_calculate_total",
+      "overall_score": 0.726,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 0.0,
+          "reason": "None of the expected tools used. Expected: ['calculator'], got: []"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "2/2 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 311 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 0.0,
+          "reason": "No tools used, expected: ['calculator']"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.81,
+          "reason": "950 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 7.68
+    },
+    {
+      "case_name": "tool_calculate_comparison",
+      "overall_score": 0.726,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 0.0,
+          "reason": "None of the expected tools used. Expected: ['calculator'], got: []"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 492 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 0.0,
+          "reason": "No tools used, expected: ['calculator']"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.806,
+          "reason": "968 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 6.25
+    },
+    {
+      "case_name": "tool_search_info",
+      "overall_score": 0.725,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 0.0,
+          "reason": "None of the expected tools used. Expected: ['web_search'], got: []"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 747 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 0.0,
+          "reason": "No tools used, expected: ['web_search']"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.798,
+          "reason": "1010 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 6.35
+    },
+    {
+      "case_name": "tool_memory_store",
+      "overall_score": 0.977,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "All 1 expected tools used: ['memory_store']"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 447 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "Exact match: ['memory_store']"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.818,
+          "reason": "910 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 8.42
+    },
+    {
+      "case_name": "tool_calculate_discount",
+      "overall_score": 0.739,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 0.0,
+          "reason": "None of the expected tools used. Expected: ['calculator'], got: []"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 327 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 0.0,
+          "reason": "No tools used, expected: ['calculator']"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.914,
+          "reason": "428 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 5.55
+    },
+    {
+      "case_name": "ambiguous_rag_and_tool",
+      "overall_score": 0.659,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 0.0,
+          "reason": "None of the expected tools used. Expected: ['calculator'], got: []"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 0.5,
+          "reason": "1/2 keywords found, missing: ['3000']"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 818 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 0.0,
+          "reason": "No tools used, expected: ['calculator']"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.771,
+          "reason": "1146 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 8.66
+    },
+    {
+      "case_name": "ambiguous_multi_domain",
+      "overall_score": 0.914,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 0.5,
+          "reason": "1/2 keywords found, missing: ['25']"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 1083 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.814,
+          "reason": "930 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 11.87
+    },
+    {
+      "case_name": "ambiguous_general_plus_company",
+      "overall_score": 0.974,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 1411 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.793,
+          "reason": "1033 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 17.21
+    },
+    {
+      "case_name": "ambiguous_follow_up",
+      "overall_score": 0.977,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "1/1 keywords found"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 333 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.817,
+          "reason": "913 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 5.53
+    },
+    {
+      "case_name": "ambiguous_no_system",
+      "overall_score": 0.979,
+      "passed": true,
+      "framework": null,
+      "scores": [
+        {
+          "name": "tool_usage",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "keyword_presence",
+          "value": 1.0,
+          "reason": "No expected keywords specified"
+        },
+        {
+          "name": "output_length",
+          "value": 1.0,
+          "reason": "Output length OK: 425 chars"
+        },
+        {
+          "name": "health_score",
+          "value": 1.0,
+          "reason": "Health: 100.0/100"
+        },
+        {
+          "name": "rag_noise",
+          "value": 1.0,
+          "reason": "RAG not used -- no noise risk"
+        },
+        {
+          "name": "context_efficiency",
+          "value": 1.0,
+          "reason": "Context efficiency: 100.0%"
+        },
+        {
+          "name": "tool_selection",
+          "value": 1.0,
+          "reason": "No expected tools specified"
+        },
+        {
+          "name": "token_efficiency",
+          "value": 0.834,
+          "reason": "829 tokens (limit: 5000)"
+        }
+      ],
+      "duration_seconds": 5.34
+    }
+  ]
+}

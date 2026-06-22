@@ -122,6 +122,7 @@ _store = _MemoryStore()
 
 @tool(
     name="memory_store",
+    group="memory",
     description="Store key-value pair to persistent memory. Data persists across sessions.",
     parameters={
         "type": "object",
@@ -154,6 +155,7 @@ def memory_store(key: str, value: str, _deps: dict | None = None) -> str:
 
 @tool(
     name="memory_recall",
+    group="memory",
     description="Retrieve value from memory by key or search query.",
     parameters={
         "type": "object",

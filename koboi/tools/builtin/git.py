@@ -85,6 +85,7 @@ def _parse_status(raw: str) -> str:
 
 @tool(
     name="git_status",
+    group="git",
     description="Get git repository status — modified, added, deleted, untracked files.",
     parameters={
         "type": "object",
@@ -106,6 +107,7 @@ def git_status(repo_path: str = ".", _tool_config: dict | None = None) -> str:
 
 @tool(
     name="git_log",
+    group="git",
     description="Get git commit log.",
     parameters={
         "type": "object",
@@ -131,6 +133,7 @@ def git_log(repo_path: str = ".", count: int = 10, _tool_config: dict | None = N
 
 @tool(
     name="git_diff",
+    group="git",
     description="Get git diff — uncommitted changes or diff against branch/commit.",
     parameters={
         "type": "object",

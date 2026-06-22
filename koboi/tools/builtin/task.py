@@ -15,6 +15,7 @@ def get_manager() -> Any:
 
 @tool(
     name="task_create",
+    group="task",
     description=(
         "Create a new task to track work progress. Optionally specify dependencies "
         "on other tasks -- a task with dependencies is 'blocked' until all dependencies "
@@ -58,6 +59,7 @@ def task_create(
 
 @tool(
     name="task_list",
+    group="task",
     description=(
         "List all tasks, optionally filtered by status. Shows dependency info "
         "for blocked tasks. Use this to check remaining work and track progress."
@@ -98,6 +100,7 @@ def task_list(status: str = "", _deps: dict | None = None) -> str:
 
 @tool(
     name="task_get",
+    group="task",
     description="Get details of a specific task by its ID, including dependencies.",
     parameters={
         "type": "object",
@@ -136,6 +139,7 @@ def task_get(task_id: str, _deps: dict | None = None) -> str:
 
 @tool(
     name="task_update",
+    group="task",
     description=(
         "Update a task's status, subject, or description. Use this to mark "
         "tasks as in_progress when starting work, or completed when done. "

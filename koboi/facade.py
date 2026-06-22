@@ -805,7 +805,8 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
         try:
             mcp_client = _create_mcp_client(server_conf, transport, logger)
             mcp_client.connect()
-            register_mcp_tools(mcp_client, tools)
+            group = server_conf.get("group")
+            register_mcp_tools(mcp_client, tools, group=group)
             clients.append(mcp_client)
         except Exception as e:
             import logging

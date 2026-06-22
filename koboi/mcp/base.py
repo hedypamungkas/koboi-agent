@@ -149,11 +149,14 @@ class BaseMCPClient(ABC):
         return "\n".join(parts) if parts else str(result)
 
 
-def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry) -> list[str]:
+def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry, group: str | None = None) -> list[str]:
     """Bridge: discover MCP tools and register them to ToolRegistry.
 
     Each MCP tool is wrapped into an async closure that calls
     client.call_tool(). Works with any BaseMCPClient subclass.
+
+    Args:
+        group: Optional group name to assign to all tools from this server.
     """
     tool_infos = client.discover_tools()
     registered: list[str] = []
@@ -173,6 +176,7 @@ def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry) -> list[st
             parameters=info.input_schema,
             fn=handler,
             risk_level=RiskLevel.SAFE,
+            group=group,
         )
         registered.append(info.name)
 

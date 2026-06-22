@@ -206,6 +206,7 @@ class MCPServerConfig(BaseModel):
     auth: MCPAuthConfig | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     timeout: float = 30.0
+    group: str | None = None  # Tool group namespace for filtering
 
 
 class MCPConfig(BaseModel):

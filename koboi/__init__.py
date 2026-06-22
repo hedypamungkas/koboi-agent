@@ -14,7 +14,7 @@ try:
 
     __version__ = _get_version("koboi-agent")
 except Exception:
-    __version__ = "0.1.1"
+    __version__ = "0.1.2"
 
 # --- Eager imports: lightweight, always needed ---
 from koboi.config import Config, ConfigBuilder

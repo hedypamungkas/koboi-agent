@@ -16,14 +16,20 @@ class AugmentationStrategy(ABC):
         self,
         retriever: BaseRetriever,
         top_k: int = 3,
+        relevance_threshold: float | None = None,
         logger: AgentLogger | None = None,
     ):
         self.retriever = retriever
         self.top_k = top_k
+        self.relevance_threshold = relevance_threshold
         self.logger = logger
 
     async def _retrieve_and_format(self, query: str) -> tuple[str, list[RetrievalResult]]:
         results = await self.retriever.retrieve(query, top_k=self.top_k)
+
+        # Relevance gate: filter out results below threshold
+        if self.relevance_threshold is not None and results:
+            results = [r for r in results if r.score >= self.relevance_threshold]
 
         if not results:
             return "", results
@@ -78,9 +84,10 @@ class OnTheFlyAugmentation(AugmentationStrategy):
         self,
         retriever: BaseRetriever,
         top_k: int = 3,
+        relevance_threshold: float | None = None,
         logger: AgentLogger | None = None,
     ):
-        super().__init__(retriever=retriever, top_k=top_k, logger=logger)
+        super().__init__(retriever=retriever, top_k=top_k, relevance_threshold=relevance_threshold, logger=logger)
         self._cache: dict[str, str] = {}
 
     async def augment_for_llm(self, messages: list[dict]) -> list[dict]:

@@ -25,6 +25,7 @@ def _validate_path(path: str) -> str:
 
 @tool(
     name="list_files",
+    group="file",
     description="List files and directories in a path. Optionally filter by glob pattern.",
     parameters={
         "type": "object",
@@ -63,6 +64,7 @@ def list_files(path: str, pattern: str | None = None) -> str:
 
 @tool(
     name="read_file",
+    group="file",
     description="Read text file content",
     parameters={
         "type": "object",
@@ -95,6 +97,7 @@ def read_file(path: str, _tool_config: dict | None = None) -> str:
 
 @tool(
     name="write_file",
+    group="file",
     description="Write/create text file",
     risk_level=RiskLevel.DESTRUCTIVE,
     parameters={
@@ -127,6 +130,7 @@ def write_file(path: str, content: str) -> str:
 
 @tool(
     name="delete_file",
+    group="file",
     description="Delete file",
     risk_level=RiskLevel.DESTRUCTIVE,
     parameters={

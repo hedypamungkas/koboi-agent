@@ -220,3 +220,118 @@ class CostScorer(BaseScorer):
         score = max(0.0, 1.0 - (total / self.max_tokens))
         cost = (usage.prompt_tokens * self.cost_per_1k_input + usage.completion_tokens * self.cost_per_1k_output) / 1000
         return EvalScore("cost", round(score, 3), f"{total} tokens, ~${cost:.4f}")
+
+
+# ---------------------------------------------------------------------------
+# System-level scorers (M11-M15 from baseline analysis)
+# ---------------------------------------------------------------------------
+
+
+class RAGNoiseScorer(BaseScorer):
+    """Detects RAG noise injection -- RAG context was added but isn't useful.
+
+    Measures M18 (Noise Injection Rate). Score 1.0 = no noise, 0.3 = noise detected.
+    Heuristic: if RAG augmentation happened and expected_keywords exist but none
+    are found in the output, the RAG context likely injected irrelevant noise.
+    """
+
+    async def score(self, case: EvalCase, output: str, context: dict) -> EvalScore:
+        telemetry = context.get("telemetry")
+        if not telemetry:
+            return EvalScore("rag_noise", 1.0, "No telemetry available")
+
+        rag_augmented = context.get("rag_augmented", False)
+
+        # If no RAG was used, no noise possible
+        if not rag_augmented:
+            return EvalScore("rag_noise", 1.0, "RAG not used -- no noise risk")
+
+        # If RAG was used and we have expected keywords, check if they appear
+        expected = case.expected_keywords
+        if not expected:
+            return EvalScore("rag_noise", 0.8, "RAG used, no expected keywords to verify")
+
+        output_lower = output.lower()
+        found = sum(1 for kw in expected if kw.lower() in output_lower)
+        ratio = found / len(expected)
+
+        if ratio >= 0.5:
+            return EvalScore("rag_noise", 1.0, f"RAG used, {found}/{len(expected)} keywords found -- context useful")
+        elif ratio > 0:
+            return EvalScore("rag_noise", 0.6, f"RAG used, {found}/{len(expected)} keywords found -- partial noise")
+        else:
+            return EvalScore("rag_noise", 0.3, f"RAG used, 0/{len(expected)} keywords found -- likely noise")
+
+
+class ContextEfficiencyScorer(BaseScorer):
+    """Measures context efficiency from telemetry (M12).
+
+    Wraps TelemetryCollector.context_efficiency() as a scorer.
+    Score: direct mapping of productive_tokens / total_tokens.
+    """
+
+    async def score(self, case: EvalCase, output: str, context: dict) -> EvalScore:
+        telemetry = context.get("telemetry")
+        if not telemetry:
+            return EvalScore("context_efficiency", 0.5, "No telemetry available")
+
+        eff = telemetry.context_efficiency()
+        return EvalScore("context_efficiency", round(eff, 3), f"Context efficiency: {eff:.1%}")
+
+
+class ToolSelectionScorer(BaseScorer):
+    """Measures whether the agent used appropriate tools (M19).
+
+    Compares actual tool calls vs expected tools.
+    Score: 1.0 exact match, 0.7 subset, 0.5 superset, 0.3 no overlap.
+    """
+
+    async def score(self, case: EvalCase, output: str, context: dict) -> EvalScore:
+        expected = case.expected_tools
+        if not expected:
+            return EvalScore("tool_selection", 1.0, "No expected tools specified")
+
+        tool_calls = context.get("tool_calls", [])
+        used = list({tc.name for tc in tool_calls}) if tool_calls else []
+
+        if not used:
+            return EvalScore("tool_selection", 0.0, f"No tools used, expected: {expected}")
+
+        expected_set = set(expected)
+        used_set = set(used)
+        overlap = expected_set & used_set
+
+        if expected_set == used_set:
+            return EvalScore("tool_selection", 1.0, f"Exact match: {used}")
+        elif overlap == expected_set:
+            # Used all expected + extras
+            extra = used_set - expected_set
+            return EvalScore("tool_selection", 0.5, f"Superset: used {len(extra)} extra tools: {list(extra)}")
+        elif overlap:
+            # Used some expected tools
+            missing = expected_set - used_set
+            return EvalScore(
+                "tool_selection", 0.7, f"Subset: {len(overlap)}/{len(expected)} expected used, missing: {list(missing)}"
+            )
+        else:
+            return EvalScore("tool_selection", 0.3, f"No overlap: used {used}, expected {expected}")
+
+
+class TokenEfficiencyScorer(BaseScorer):
+    """Measures token cost efficiency relative to task complexity (M3).
+
+    Similar to CostScorer but with configurable max_tokens threshold.
+    Score: max(0, 1 - total_tokens / max_tokens).
+    """
+
+    def __init__(self, max_tokens: int = 5000):
+        self.max_tokens = max_tokens
+
+    async def score(self, case: EvalCase, output: str, context: dict) -> EvalScore:
+        usage = context.get("token_usage")
+        if not usage:
+            return EvalScore("token_efficiency", 0.5, "No token usage data")
+
+        total = usage.total_tokens
+        score = max(0.0, 1.0 - (total / self.max_tokens))
+        return EvalScore("token_efficiency", round(score, 3), f"{total} tokens (limit: {self.max_tokens})")

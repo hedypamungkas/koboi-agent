@@ -1,0 +1,37 @@
+# Benchmark Eval Suite Config
+# Defines eval suites, scorers, and regression tracking for baseline measurements.
+
+eval:
+  threshold: 0.6
+  parallel: false
+  max_concurrency: 5
+
+  # Default scorers applied to all suites
+  scorers:
+    - name: tool_usage
+    - name: keyword_presence
+    - name: output_length
+    - name: health_score
+    - name: rag_noise
+    - name: context_efficiency
+    - name: tool_selection
+    - name: token_efficiency
+
+  suites:
+    - name: "baseline_routing"
+      framework: yaml
+      source: "./examples/data/eval_cases/baseline_routing_eval.yaml"
+      scorers:
+        - tool_usage
+        - keyword_presence
+        - output_length
+        - health_score
+        - rag_noise
+        - context_efficiency
+        - tool_selection
+        - token_efficiency
+
+  regression:
+    baseline_dir: "./eval_baselines"
+    alert_on_regression: true
+    regression_threshold: 0.05

@@ -1,0 +1,165 @@
+# Baseline Routing Eval Suite
+# ~20 cases across 4 categories for measuring routing, RAG, tools, and ambiguous scenarios.
+# Uses Acme Corp sample documents from data/sample/
+
+cases:
+  # ===========================================================================
+  # Category A: RAG-Relevant (5 cases)
+  # Queries where RAG documents contain the answer. RAG should be used.
+  # ===========================================================================
+
+  - name: "rag_product_pricing"
+    user_message: "What is the price of the AcmeERP Enterprise license?"
+    expected_keywords: ["15000", "perpetual"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["rag", "relevant", "baseline"]
+
+  - name: "rag_annual_leave"
+    user_message: "How many days of annual leave do permanent employees get at Acme Corp?"
+    expected_keywords: ["12 days"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["rag", "relevant", "baseline"]
+
+  - name: "rag_meal_allowance"
+    user_message: "What is the meal allowance per month at Acme Corp?"
+    expected_keywords: ["150"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["rag", "relevant", "baseline"]
+
+  - name: "rag_ceo_name"
+    user_message: "Who is the CEO of Acme Corp?"
+    expected_keywords: ["John Smith"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["rag", "relevant", "baseline"]
+
+  - name: "rag_server_specs"
+    user_message: "What are the hardware specifications of the AcmeServer RackMount?"
+    expected_keywords: ["Dual Xeon", "128GB"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["rag", "relevant", "baseline"]
+
+  # ===========================================================================
+  # Category B: RAG-Noise (5 cases)
+  # Queries where RAG context exists but is NOT relevant to the question.
+  # RAG should NOT inject noise into the response.
+  # ===========================================================================
+
+  - name: "noise_weather"
+    user_message: "What is the weather like today in Jakarta?"
+    expected_keywords: []
+    expected_tools: []
+    max_iterations: 3
+    tags: ["rag", "noise", "baseline"]
+
+  - name: "noise_cooking"
+    user_message: "How do I make fried rice?"
+    expected_keywords: []
+    expected_tools: []
+    max_iterations: 3
+    tags: ["rag", "noise", "baseline"]
+
+  - name: "noise_math"
+    user_message: "What is the square root of 144?"
+    expected_keywords: ["12"]
+    expected_tools: ["calculator"]
+    max_iterations: 3
+    tags: ["rag", "noise", "baseline"]
+
+  - name: "noise_joke"
+    user_message: "Tell me a programming joke."
+    expected_keywords: []
+    expected_tools: []
+    max_iterations: 3
+    tags: ["rag", "noise", "baseline"]
+
+  - name: "noise_sports"
+    user_message: "Who won the FIFA World Cup 2022?"
+    expected_keywords: ["Argentina"]
+    expected_tools: []
+    max_iterations: 3
+    tags: ["rag", "noise", "baseline"]
+
+  # ===========================================================================
+  # Category C: Tool-Heavy (5 cases)
+  # Queries that require tool usage (calculator, web_search, etc.)
+  # ===========================================================================
+
+  - name: "tool_calculate_total"
+    user_message: "What is the total cost for 10 users on AcmeCRM Business for one year?"
+    expected_keywords: ["3000", "25"]
+    expected_tools: ["calculator"]
+    max_iterations: 5
+    tags: ["tools", "baseline"]
+
+  - name: "tool_calculate_comparison"
+    user_message: "How much cheaper is the Starter SaaS package compared to Professional per year?"
+    expected_keywords: ["2400"]
+    expected_tools: ["calculator"]
+    max_iterations: 5
+    tags: ["tools", "baseline"]
+
+  - name: "tool_search_info"
+    user_message: "Search for information about Acme Corp's managed services pricing."
+    expected_keywords: ["1500"]
+    expected_tools: ["web_search"]
+    max_iterations: 5
+    tags: ["tools", "baseline"]
+
+  - name: "tool_memory_store"
+    user_message: "Remember that our company budget for Q3 is $50,000."
+    expected_keywords: ["50,000"]
+    expected_tools: ["memory_store"]
+    max_iterations: 3
+    tags: ["tools", "baseline"]
+
+  - name: "tool_calculate_discount"
+    user_message: "If I get a 15% discount on AcmeERP Enterprise, how much do I pay?"
+    expected_keywords: ["12750"]
+    expected_tools: ["calculator"]
+    max_iterations: 5
+    tags: ["tools", "baseline"]
+
+  # ===========================================================================
+  # Category D: Ambiguous (5 cases)
+  # Queries that could use RAG AND tools, or neither, or multiple domains.
+  # ===========================================================================
+
+  - name: "ambiguous_rag_and_tool"
+    user_message: "How much would it cost to equip 5 outlets with AcmePOS Professional for 6 months?"
+    expected_keywords: ["3000", "500"]
+    expected_tools: ["calculator"]
+    max_iterations: 5
+    tags: ["ambiguous", "baseline"]
+
+  - name: "ambiguous_multi_domain"
+    user_message: "What benefits does Acme Corp offer and how much does the AcmeCRM cost per user?"
+    expected_keywords: ["25", "insurance"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["ambiguous", "baseline"]
+
+  - name: "ambiguous_general_plus_company"
+    user_message: "What is a good project management methodology for a team of 20 people, and does Acme Corp have a product for that?"
+    expected_keywords: ["AcmeERP"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["ambiguous", "baseline"]
+
+  - name: "ambiguous_follow_up"
+    user_message: "What about the warranty on the AcmeSwitch?"
+    expected_keywords: ["5-year"]
+    expected_tools: []
+    max_iterations: 5
+    tags: ["ambiguous", "baseline"]
+
+  - name: "ambiguous_no_system"
+    user_message: "Hello, can you help me with something?"
+    expected_keywords: []
+    expected_tools: []
+    max_iterations: 2
+    tags: ["ambiguous", "baseline"]

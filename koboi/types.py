@@ -23,6 +23,7 @@ class ToolDefinition:
     parameters: dict
     risk_level: RiskLevel = RiskLevel.SAFE
     timeout: float | None = None
+    group: str | None = None
 
     def __post_init__(self):
         if not self.name or not self.name.strip():

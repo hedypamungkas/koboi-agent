@@ -1,0 +1,48 @@
+# Benchmark Baseline Agent Config
+# Single-agent mode with RAG + tools enabled.
+# Used for empirical baseline measurements.
+# No orchestration, no MCP (no external server dependency).
+
+agent:
+  name: "benchmark-agent"
+  description: "General-purpose agent for baseline benchmarking with RAG and tools"
+  system_prompt: |
+    You are a helpful assistant for Acme Corp. You answer questions about
+    Acme Corp's products, services, and company policies using the context
+    provided. Be concise and accurate. If you don't know the answer, say so.
+  max_iterations: 10
+
+llm:
+  provider: "anthropic"
+  model: "${ANTHROPIC_MODEL:claude-sonnet-4-20250514}"
+  api_key: "${ANTHROPIC_AUTH_TOKEN}"
+  base_url: "${ANTHROPIC_BASE_URL:}/v1"
+
+tools:
+  builtin:
+    - calculator
+    - web_search
+    - memory_store
+    - memory_recall
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 8000
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  chunk_size: 400
+  retriever: "keyword"
+  top_k: 3
+  augmentation: "on_the_fly"
+  relevance_threshold: 0.1
+  documents:
+    - path: "./data/sample/product_catalog.md"
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/employee_handbook.md"
+
+harness:
+  telemetry: true
+  doom_loop:
+    consecutive_identical_threshold: 3

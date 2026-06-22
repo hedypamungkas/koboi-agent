@@ -52,10 +52,12 @@ class YAMLLoader(DatasetLoader):
         for item in data:
             if not isinstance(item, dict):
                 continue
+            # Support both "user_message" (canonical) and "input" (legacy/short alias)
+            user_message = item.get("user_message") or item.get("input", "")
             cases.append(
                 EvalCase(
                     name=item.get("name", "unnamed"),
-                    user_message=item.get("user_message", ""),
+                    user_message=user_message,
                     expected_tools=item.get("expected_tools", []),
                     expected_keywords=item.get("expected_keywords", []),
                     max_iterations=item.get("max_iterations", 10),

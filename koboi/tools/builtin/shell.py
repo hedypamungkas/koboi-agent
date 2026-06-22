@@ -57,6 +57,7 @@ def _check_command_blocked(command: str) -> str | None:
 
 @tool(
     name="run_shell",
+    group="system",
     description="Run shell command and return output",
     risk_level=RiskLevel.MODERATE,
     parameters={

@@ -49,6 +49,7 @@ def _match_glob(rel_path: str, patterns: list[str]) -> bool:
 
 @tool(
     name="grep_search",
+    group="file",
     description="Search text in files using regex pattern. Like ripgrep/grep.",
     parameters={
         "type": "object",
@@ -163,6 +164,7 @@ MAX_RESULTS = 500
 
 @tool(
     name="glob_find",
+    group="file",
     description="Find files by name pattern. Like 'find' or 'glob'.",
     parameters={
         "type": "object",

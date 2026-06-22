@@ -70,6 +70,10 @@ def register_default_scorers() -> None:
         HealthScoreScorer,
         LLMJudgeScorer,
         CostScorer,
+        RAGNoiseScorer,
+        ContextEfficiencyScorer,
+        ToolSelectionScorer,
+        TokenEfficiencyScorer,
     )
 
     ScorerRegistry.register("tool_usage", lambda: ToolUsageScorer())
@@ -79,6 +83,10 @@ def register_default_scorers() -> None:
     ScorerRegistry.register("health_score", lambda: HealthScoreScorer())
     ScorerRegistry.register("llm_judge", lambda **kw: LLMJudgeScorer(**kw))
     ScorerRegistry.register("cost", lambda **kw: CostScorer(**kw))
+    ScorerRegistry.register("rag_noise", lambda: RAGNoiseScorer())
+    ScorerRegistry.register("context_efficiency", lambda: ContextEfficiencyScorer())
+    ScorerRegistry.register("tool_selection", lambda: ToolSelectionScorer())
+    ScorerRegistry.register("token_efficiency", lambda **kw: TokenEfficiencyScorer(**kw))
 
 
 def register_framework_scorers() -> None:

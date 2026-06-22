@@ -20,6 +20,7 @@ class ToolRegistry:
         self._tool_defaults: dict = {}
         self._tool_overrides: dict = {}
         self._deps: dict[str, Any] = {}
+        self._active_groups: list[str] | None = None
 
     def list_tools(self) -> dict[str, ToolDefinition]:
         """Return a copy of registered tools (name -> ToolDefinition)."""
@@ -50,6 +51,7 @@ class ToolRegistry:
         fn: Callable,
         risk_level: RiskLevel = RiskLevel.SAFE,
         timeout: float | None = None,
+        group: str | None = None,
     ) -> None:
         self._tools[name] = ToolDefinition(
             name=name,
@@ -57,8 +59,19 @@ class ToolRegistry:
             parameters=parameters,
             risk_level=risk_level,
             timeout=timeout,
+            group=group,
         )
         self._handlers[name] = fn
+
+    def set_active_groups(self, groups: list[str] | None) -> None:
+        """Set which tool groups are exposed to the LLM.
+
+        When set to None (default), all tools are shown.
+        When set to a list of group names, only tools belonging to those groups
+        are included in get_definitions(). Tools outside active groups remain
+        registered for execution but are not presented to the LLM.
+        """
+        self._active_groups = groups
 
     def keep_only(self, names: list[str]) -> None:
         """Remove all tools except those in the given names list."""
@@ -67,6 +80,10 @@ class ToolRegistry:
         self._handlers = {k: v for k, v in self._handlers.items() if k in name_set}
 
     def get_definitions(self) -> list[dict]:
+        tools = self._tools.values()
+        # Filter by active groups if set (non-destructive)
+        if self._active_groups is not None:
+            tools = [t for t in tools if t.group is None or t.group in self._active_groups]
         return [
             {
                 "type": "function",
@@ -76,7 +93,7 @@ class ToolRegistry:
                     "parameters": t.parameters,
                 },
             }
-            for t in self._tools.values()
+            for t in tools
         ]
 
     def get_risk_level(self, name: str) -> RiskLevel | None:
@@ -144,11 +161,13 @@ def tool(
     parameters: dict,
     risk_level: RiskLevel = RiskLevel.SAFE,
     timeout: float | None = None,
+    group: str | None = None,
     deps: list[str] | None = None,
 ):
     """Decorator to register a function as a tool.
 
     Args:
+        group: Tool group name for namespace filtering (e.g., "math", "file", "web").
         deps: List of dependency names this tool requires. At registration time,
               the tool is wrapped with a closure that injects these dependencies
               from the registry's dep store as a ``_deps`` dict parameter.
@@ -161,6 +180,7 @@ def tool(
             parameters=parameters,
             risk_level=risk_level,
             timeout=timeout,
+            group=group,
         )
         fn._tool_deps = deps or []
         return fn
@@ -216,4 +236,6 @@ def register_decorated(registry: ToolRegistry, module: Any) -> None:
             td = obj._tool_def
             dep_names = getattr(obj, "_tool_deps", [])
             fn = _wrap_with_deps(obj, dep_names, registry)
-            registry.register(td.name, td.description, td.parameters, fn, risk_level=td.risk_level, timeout=td.timeout)
+            registry.register(
+                td.name, td.description, td.parameters, fn, risk_level=td.risk_level, timeout=td.timeout, group=td.group
+            )

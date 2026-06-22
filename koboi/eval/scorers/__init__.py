@@ -12,6 +12,10 @@ from koboi.eval.scorers.base import (
     HealthScoreScorer,
     LLMJudgeScorer,
     CostScorer,
+    RAGNoiseScorer,
+    ContextEfficiencyScorer,
+    ToolSelectionScorer,
+    TokenEfficiencyScorer,
 )
 
 __all__ = [
@@ -23,4 +27,8 @@ __all__ = [
     "HealthScoreScorer",
     "LLMJudgeScorer",
     "CostScorer",
+    "RAGNoiseScorer",
+    "ContextEfficiencyScorer",
+    "ToolSelectionScorer",
+    "TokenEfficiencyScorer",
 ]

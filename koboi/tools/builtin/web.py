@@ -204,6 +204,7 @@ async def _search_duckduckgo(query: str) -> str:
 
 @tool(
     name="web_search",
+    group="web",
     description="Search the internet. REQUIRED parameter: 'query' (string, search topic). Does NOT accept other parameters — do not send repo_path, city, expression, key, value, or path.",
     parameters={
         "type": "object",
@@ -308,6 +309,7 @@ def _extract_html_content(text: str) -> str:
 
 @tool(
     name="web_fetch",
+    group="web",
     description="Fetch content from URL and return text. Like curl/wget.",
     risk_level=RiskLevel.MODERATE,
     parameters={

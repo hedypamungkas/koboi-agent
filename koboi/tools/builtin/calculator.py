@@ -38,6 +38,7 @@ def _safe_eval(expression: str, names: dict) -> float:
 
 @tool(
     name="calculate",
+    group="math",
     description="Calculate mathematical expressions. Supports basic operations (+, -, *, /, **), math functions (sqrt, sin, cos, log, etc), and constants (pi, e).",
     parameters={
         "type": "object",
