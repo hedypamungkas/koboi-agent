@@ -65,3 +65,6 @@ MagicMock/
 
 # === Claude Code local settings (keep rules/skills committed) ===
 .claude/settings.json
+
+# === Local analysis docs (not for commit) ===
+docs/eve-impact-effort-analysis.md

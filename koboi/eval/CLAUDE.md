@@ -43,3 +43,39 @@ See `examples/21_eval_suite.py` and `configs/eval_suite.yaml`.
 1. Create a class in `loaders/` that inherits from `DatasetLoader`
 2. Implement `load(source: str) -> list[EvalCase]` and `framework_name() -> str`
 3. Register in `registry.py`
+
+## `t` authoring surface (`t/`) -- eve-style, test-shaped, CI-native evals
+Write `evals/**/*.eval.py` files exporting `async def test_*(t)` functions. The
+`t` object drives the agent and records assertions that fold into real
+`EvalResult`s with **gate/soft** severity. `EvalRunner.format_results` and
+`RegressionTracker` work on the output unchanged.
+```
+t/__init__.py        Public API: run_tests, run_tests_sync, TestContext, Severity, matchers
+t/assertions.py      Severity(GATE/SOFT), Matcher ABC + built-ins, RecordedAssertion
+t/context.py         TestContext (the `t`) -- send/calledTool/check/judge (record-and-collect)
+t/mock.py            ScriptedClient + scripted_response/scripted_tool_call builders
+t/loader.py          PythonTestLoader -- discover **/*.eval.py, import, collect test_*(t)
+t/runner.py          TestRunner.run_tests -> list[EvalResult] (drives harness directly)
+t/cli.py             `koboi eval-test` click command (--strict exit code)
+```
+```
+# evals/weather.eval.py
+from koboi.eval.t import scripted_response, scripted_tool_call, Contains
+MOCK_RESPONSES = [scripted_response(None, [scripted_tool_call("get_weather", {"city": "Jakarta"})]),
+                  scripted_response("Sunny, 28C")]
+async def test_weather(t):
+    await t.send("weather in Jakarta?")
+    t.calledTool("get_weather")          # gate
+    t.check(t.reply, Contains("Sunny"))  # soft
+    t.completed()                        # gate
+```
+- Run: `koboi eval-test evals/ --mock --strict` (exit 1 on any gate failure).
+- Programmatic: `await run_tests("evals/", threshold=0.6)`.
+- Severity: a single **GATE** failure forces `EvalResult.passed = False`
+  regardless of `overall_score`; **SOFT** assertions only lower the score.
+  `t.check` defaults to SOFT; tool/turn assertions default to GATE.
+- `t.judge("llm_judge"|"keyword_presence"|...)` routes through `ScorerRegistry`
+  (fail-soft if the scorer/dep is unavailable).
+- Binding: module-level `CONFIG` (YAML path/dict) = live; `MOCK_RESPONSES`
+  (or `USE_MOCK`) = deterministic mock (no API key). `--mock`/`--config` override.
+

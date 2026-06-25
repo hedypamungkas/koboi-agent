@@ -45,11 +45,12 @@ koboi/              Main package (~150 .py files)
   orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator, factory, dynamic agent builder
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
-  eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/
+  eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (8), widgets/ (13)
 tests/              ~108 test files, asyncio_mode="auto", shared conftest.py with MockClient
 configs/            12 YAML agent configs
-examples/           29 numbered example scripts (01-29) with matching YAMLs
+examples/           30 numbered example scripts (01-30) with matching YAMLs
+evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             2 skill definitions: code_review, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)

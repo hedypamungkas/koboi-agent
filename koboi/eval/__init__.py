@@ -50,3 +50,32 @@ __all__ = [
 register_default_scorers()
 register_framework_scorers()
 register_default_loaders()
+
+# eve-style `t` authoring surface (additive; see koboi/eval/t/)
+from koboi.eval.t import (  # noqa: E402
+    Contains,
+    Equals,
+    Matcher,
+    RecordedAssertion,
+    Regex,
+    Severity,
+    TestContext,
+    run_tests,
+    run_tests_sync,
+    scripted_response,
+    scripted_tool_call,
+)
+
+__all__ += [
+    "Contains",
+    "Equals",
+    "Matcher",
+    "RecordedAssertion",
+    "Regex",
+    "Severity",
+    "TestContext",
+    "run_tests",
+    "run_tests_sync",
+    "scripted_response",
+    "scripted_tool_call",
+]

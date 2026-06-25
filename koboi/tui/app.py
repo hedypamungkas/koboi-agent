@@ -378,5 +378,12 @@ def diagnostics(config_path: str, output: str | None):
         asyncio.run(agent.close())
 
 
+# Register the eve-style `t` eval-test command as a sibling of `eval`.
+# Purely additive: a no-config import keeps the CLI usable if the module is absent.
+from koboi.eval.t.cli import eval_test  # noqa: E402
+
+main.add_command(eval_test)
+
+
 if __name__ == "__main__":
     main()
