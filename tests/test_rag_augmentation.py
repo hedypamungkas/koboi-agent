@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
 
-from koboi.rag.types import Chunk, RetrievalResult
+from koboi.rag.types import Chunk
 from koboi.rag.retriever import KeywordRetriever
 from koboi.rag.augmentation import InMemoryAugmentation, OnTheFlyAugmentation
 

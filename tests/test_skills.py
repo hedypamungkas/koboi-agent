@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 
 from koboi.skills.registry import SkillRegistry, discover_skills
 from koboi.types import SkillDefinition

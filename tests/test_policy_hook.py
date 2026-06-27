@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 
 from koboi.hooks.chain import HookContext, HookEvent
 from koboi.hooks.policy_hook import PolicyHook
-from koboi.harness.policy import PolicyEngine, PolicyRule, PolicyAction, PolicyDecision
+from koboi.harness.policy import PolicyEngine, PolicyRule, PolicyAction
 from koboi.types import RiskLevel
 
 

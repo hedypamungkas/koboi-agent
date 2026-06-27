@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import pytest
-from pathlib import Path
 
 from koboi.skills.registry import SkillRegistry
 

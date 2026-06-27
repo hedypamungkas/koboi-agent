@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -96,7 +96,7 @@ class TestEvalRunner:
         runner = EvalRunner(harness_factory=factory, scorers=[])
         case = _make_case()
         case.file_attachments = [str(f)]
-        result = await runner.run_case(case)
+        await runner.run_case(case)
         harness.run.assert_called_once()
         call_msg = harness.run.call_args[0][0]
         assert "file content here" in call_msg

@@ -164,7 +164,6 @@ class TestAuditHook:
 
     async def test_execute_with_long_arguments_truncated(self):
         """AuditHook should truncate long arguments and results."""
-        from koboi.types import AuditEntry
 
         mock_audit = MagicMock()
         hook = AuditHook(audit_trail=mock_audit)

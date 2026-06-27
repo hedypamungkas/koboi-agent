@@ -1,15 +1,12 @@
 """Shared fixtures for benchmarks."""
 
 import pytest
-from koboi.config import Config
-from koboi.memory import ConversationMemory
 from koboi.tools.registry import ToolRegistry
-from koboi.hooks.chain import HookChain, Hook, HookContext, HookEvent
+from koboi.hooks.chain import HookChain, Hook, HookEvent
 from koboi.harness.telemetry import TelemetryCollector
 from koboi.context.manager import TruncationManager
 from koboi.rag.chunker import FixedSizeChunker, SentenceChunker
 from koboi.rag.retriever import KeywordRetriever
-from koboi.rag.augmentation import InMemoryAugmentation
 from koboi.rag.types import Document, Chunk
 
 

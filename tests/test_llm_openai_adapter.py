@@ -10,7 +10,6 @@ import pytest
 from koboi.llm.base import LLMResponseParseError
 from koboi.llm.http_transport import HttpTransport
 from koboi.llm.openai_adapter import OpenAIAdapter
-from koboi.types import AgentResponse
 
 
 def _mock_transport(response_json, status_code=200):

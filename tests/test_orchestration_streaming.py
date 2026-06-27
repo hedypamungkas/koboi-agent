@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from koboi.events import (
     AgentDispatchEvent,
@@ -13,10 +11,9 @@ from koboi.events import (
     OrchestrationCompleteEvent,
     RoutingDecisionEvent,
     TextDeltaEvent,
-    CompleteEvent,
 )
 from koboi.orchestration.orchestrator import Orchestrator, QualityEvaluator
-from koboi.types import AgentResult, AgentResponse, RoutingDecision
+from koboi.types import AgentResponse, RoutingDecision
 
 
 def _make_decision(agents=None):

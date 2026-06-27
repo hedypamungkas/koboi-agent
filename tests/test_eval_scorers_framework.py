@@ -17,7 +17,7 @@ from koboi.eval.scorers.swe_bench_scorer import (
     _extract_filenames,
     _diff_stats,
 )
-from koboi.types import EvalCase, EvalScore
+from koboi.types import EvalCase
 
 
 def _case(**kwargs):

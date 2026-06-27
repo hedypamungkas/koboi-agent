@@ -4,13 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from koboi.context.manager import (
-    ContextManager,
     NoopContextManager,
-    TruncationManager,
-    SmartTruncationManager,
     KeyFactsManager,
     SlidingWindowManager,
     ensure_tool_integrity,

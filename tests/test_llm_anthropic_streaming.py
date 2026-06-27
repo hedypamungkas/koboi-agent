@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.llm.anthropic_adapter import AnthropicAdapter
-from koboi.types import AgentResponse, ToolCall, TokenUsage
 
 
 class MockTransport:
@@ -77,7 +75,7 @@ class TestAnthropicAdapterComplete:
             }
         )
         adapter = AnthropicAdapter(model="claude-sonnet-4-20250514", transport=transport)
-        result = await adapter.complete(
+        await adapter.complete(
             messages=[
                 {"role": "system", "content": "You are helpful."},
                 {"role": "user", "content": "Hi"},

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from koboi.task import Task, TaskManager
+from koboi.task import TaskManager
 from koboi.tools.registry import ToolRegistry, register_decorated
 from koboi.hooks.chain import HookContext, HookEvent
 

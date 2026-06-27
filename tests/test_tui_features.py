@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from koboi.config import Config
 from koboi.tui.keybindings import get_keybinding_display, load_keybindings
 from koboi.tui.textual_app import KoboiApp
-from koboi.tui.widgets.input_box import ChatSubmit, InputBox, VimModeChanged
+from koboi.tui.widgets.input_box import ChatSubmit, InputBox
 from koboi.tui.widgets.status_bar import StatusBar
 
 

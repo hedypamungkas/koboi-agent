@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.hooks.chain import HookContext, HookEvent
 from koboi.hooks.doom_loop_hook import DoomLoopHook

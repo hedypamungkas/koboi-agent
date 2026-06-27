@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,10 +9,9 @@ import pytest
 from koboi.config import Config
 from koboi.hooks.chain import HookChain, HookContext, HookEvent, Hook
 from koboi.memory import ConversationMemory
-from koboi.subagent import SubAgentManager, SubagentTask, SubagentResult, _build_conversation_summary
+from koboi.subagent import SubAgentManager, SubagentTask, _build_conversation_summary
 from koboi.tools.builtin.subagent import delegate_tasks
 from koboi.tools.registry import ToolRegistry
-from koboi.types import AgentResponse, RunResult, TokenUsage
 
 from tests.conftest import MockClient, make_mock_response
 
@@ -476,7 +474,7 @@ class TestSubagentLifecycle:
         import asyncio
 
         started = asyncio.Event()
-        tasks_registered = asyncio.Event()
+        asyncio.Event()
 
         async def blocking_respond(*args, **kwargs):
             started.set()

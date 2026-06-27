@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from koboi.harness.telemetry import TelemetryCollector, IterationRecord
+from koboi.harness.telemetry import TelemetryCollector
 
 
 class TestTelemetryCollectorLifecycle:

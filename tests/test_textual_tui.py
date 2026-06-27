@@ -34,6 +34,35 @@ from koboi.tui.widgets.thinking_block import ThinkingBlockWidget
 from koboi.tui.widgets.tool_call import ToolCallWidget
 
 
+@pytest.fixture(autouse=True)
+def _ensure_event_loop_for_textual_widgets(request):
+    """Ensure a current event loop exists for bare Textual widget construction.
+
+    Textual ``Widget`` binds an ``asyncio.Lock`` in ``__init__`` (via ``RLock``),
+    which calls ``asyncio.get_event_loop()`` -- so constructing a widget outside
+    a running loop raises ``RuntimeError: There is no current event loop``.
+
+    In isolation these sync tests pass (a default loop is lazily created), but
+    across the full suite pytest-asyncio closes its loop after earlier async
+    tests, leaving ``_set_called=True`` / no loop on MainThread -- so bare widget
+    construction in later sync tests then fails. This fixture ensures a loop
+    exists for sync tests only; async tests already receive one from
+    pytest-asyncio and are left untouched.
+    """
+    import asyncio
+    import inspect
+
+    fn = getattr(request.node, "function", None)
+    if fn is not None and inspect.iscoroutinefunction(fn):
+        yield
+        return
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    yield
+
+
 # ============================================================================
 # Helpers
 # ============================================================================

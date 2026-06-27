@@ -6,7 +6,6 @@ slash command autocomplete integration.
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -195,7 +194,7 @@ class TestSlashAutocompleteIntegration:
     @pytest.mark.asyncio
     async def test_suggester_wired_to_input(self):
         app = KoboiApp(_make_mock_agent())
-        async with app.run_test() as pilot:
+        async with app.run_test():
             input_box = app.query_one("#input-box", InputBox)
             assert input_box.suggester is not None
             assert isinstance(input_box.suggester, CompositeSuggester)
@@ -203,7 +202,7 @@ class TestSlashAutocompleteIntegration:
     @pytest.mark.asyncio
     async def test_slash_suggestion_partial(self):
         app = KoboiApp(_make_mock_agent())
-        async with app.run_test() as pilot:
+        async with app.run_test():
             input_box = app.query_one("#input-box", InputBox)
             suggestion = await input_box.suggester.get_suggestion("/h")
             assert suggestion == "/help"
@@ -211,7 +210,7 @@ class TestSlashAutocompleteIntegration:
     @pytest.mark.asyncio
     async def test_slash_no_suggestion_plain_text(self):
         app = KoboiApp(_make_mock_agent())
-        async with app.run_test() as pilot:
+        async with app.run_test():
             input_box = app.query_one("#input-box", InputBox)
             suggestion = await input_box.suggester.get_suggestion("hello world")
             assert suggestion is None
@@ -219,7 +218,7 @@ class TestSlashAutocompleteIntegration:
     @pytest.mark.asyncio
     async def test_slash_suggestion_reset(self):
         app = KoboiApp(_make_mock_agent())
-        async with app.run_test() as pilot:
+        async with app.run_test():
             input_box = app.query_one("#input-box", InputBox)
             suggestion = await input_box.suggester.get_suggestion("/re")
             assert suggestion == "/reset"
@@ -227,7 +226,7 @@ class TestSlashAutocompleteIntegration:
     @pytest.mark.asyncio
     async def test_slash_exact_match_none(self):
         app = KoboiApp(_make_mock_agent())
-        async with app.run_test() as pilot:
+        async with app.run_test():
             input_box = app.query_one("#input-box", InputBox)
             # Exact match returns None per SlashSuggester logic (cmd != lower)
             suggestion = await input_box.suggester.get_suggestion("/help")

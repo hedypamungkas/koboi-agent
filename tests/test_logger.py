@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 
-import pytest
 
 from koboi.logger import AgentLogger
 
@@ -13,7 +12,7 @@ from koboi.logger import AgentLogger
 class TestAgentLoggerConstructor:
     def test_creates_log_dir_and_file_with_correct_naming(self, tmp_path):
         """Test constructor creates log directory and file with correct naming."""
-        logger = AgentLogger(log_dir=str(tmp_path), session_id="test_session")
+        AgentLogger(log_dir=str(tmp_path), session_id="test_session")
 
         # Check directory exists
         assert tmp_path.exists()
@@ -24,7 +23,7 @@ class TestAgentLoggerConstructor:
 
     def test_session_based_file_naming(self, tmp_path):
         """Test log file naming includes session_id."""
-        logger = AgentLogger(log_dir=str(tmp_path), session_id="my_session")
+        AgentLogger(log_dir=str(tmp_path), session_id="my_session")
 
         log_file = tmp_path / "my_session.log"
         assert log_file.exists()

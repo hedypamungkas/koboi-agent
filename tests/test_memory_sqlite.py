@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-import tempfile
 import threading
-from pathlib import Path
 
-import pytest
 
 from koboi.memory_sqlite import SQLiteMemory
 

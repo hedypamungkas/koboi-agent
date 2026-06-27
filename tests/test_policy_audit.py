@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from koboi.harness.policy_audit import PolicyAuditLog, PolicyAuditEntry
+from koboi.harness.policy_audit import PolicyAuditLog
 
 
 class TestPolicyAuditLog:

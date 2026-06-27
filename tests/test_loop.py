@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
 from koboi.memory import ConversationMemory
 from koboi.tools.registry import ToolRegistry
-from koboi.types import AgentResponse, ToolCall, TokenUsage
+from koboi.types import ToolCall
 from koboi.exceptions import AgentMaxIterationsError
 from tests.conftest import MockClient, make_mock_response, make_mock_tool_call, make_tool_registry
 
@@ -225,7 +224,7 @@ class TestRunResultDirect:
         assert r.tools_used == []
 
     def test_tools_used_deduplication(self):
-        from koboi.types import RunResult, ToolCall
+        from koboi.types import RunResult
 
         tc1 = ToolCall(id="1", name="web_search", arguments="{}")
         tc2 = ToolCall(id="2", name="calculator", arguments="{}")

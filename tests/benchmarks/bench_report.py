@@ -1,7 +1,6 @@
 """Utility to generate baseline benchmark reports."""
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
