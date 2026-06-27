@@ -7,6 +7,7 @@ import re
 import subprocess
 
 from koboi.tools.registry import tool, truncate_text
+from koboi.harness.env import build_safe_env
 
 GIT_TIMEOUT = 15
 MAX_OUTPUT = 10000
@@ -28,6 +29,7 @@ def _run_git(args: list[str], repo_path: str, tool_config: dict | None = None) -
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=build_safe_env(cfg),
         )
     except FileNotFoundError:
         return "Error: git not found in system"

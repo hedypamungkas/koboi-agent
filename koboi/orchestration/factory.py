@@ -261,6 +261,11 @@ class AgentFactory:
             memory_file = tools_config.get("memory_file", ".agent_memory.json")
             registry.set_dep("memory_store_ref", _MemoryStore(filepath=memory_file))
             registry.keep_only(builtin_list)
+        # Apply defaults/overrides/disabled/groups via the shared helper so this
+        # path stays in lock-step with facade._build_tools.
+        from koboi.tools.registry import apply_tool_selection
+
+        apply_tool_selection(registry, tools_config)
         return registry
 
     @staticmethod

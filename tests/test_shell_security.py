@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from koboi.tools.builtin.shell import _build_env, _get_npm_root, run_shell, MAX_OUTPUT, TIMEOUT
 
@@ -85,6 +85,41 @@ class TestBuildEnv:
                     env = _build_env()
                     assert "/mock/npm/root" in env["NODE_PATH"]
                     assert "/existing/path" in env["NODE_PATH"]
+
+    def test_build_env_strips_secrets(self):
+        """P0a: _build_env must not leak secret-shaped env vars to the subprocess."""
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-x", "DATABASE_URL": "pg://x"}, clear=False):
+            env = _build_env()
+            assert "OPENAI_API_KEY" not in env
+            assert "DATABASE_URL" not in env
+
+    def test_build_env_passes_cfg_through(self):
+        """P0a: _build_env threads _tool_config so allow-list extensions apply."""
+        with patch.dict(os.environ, {"CARGO_HOME": "/x"}, clear=False):
+            # CARGO_HOME is NOT in the default allow-list...
+            assert "CARGO_HOME" not in _build_env()
+            # ...but an explicit config allow-list adds it.
+            env = _build_env({"env_allowlist": ["CARGO_HOME"]})
+            assert env["CARGO_HOME"] == "/x"
+
+
+class TestRunShellEnvViaRegistry:
+    """P0a end-to-end: the full registry -> _wrap_with_deps -> _tool_config -> build_safe_env -> subprocess path."""
+
+    async def test_registry_execute_strips_secret_env(self, monkeypatch):
+        import json
+
+        from koboi.tools.registry import ToolRegistry, register_decorated
+        from koboi.tools.builtin import shell
+
+        registry = ToolRegistry()
+        register_decorated(registry, shell)
+
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-leak")
+        # The shell expands $OPENAI_API_KEY from the subprocess env; sanitized env -> empty.
+        result = await registry.execute("run_shell", json.dumps({"command": "echo [${OPENAI_API_KEY}]"}))
+        assert "sk-secret-leak" not in result
+        assert "[]" in result  # var expanded to empty under the sanitized env
 
 
 class TestNpmRootCaching:

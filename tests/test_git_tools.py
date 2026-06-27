@@ -246,6 +246,22 @@ class TestToolConfig:
         result = _run_git(["status", "--porcelain"], temp_git_repo, tool_config={"timeout": 30, "max_output": 5000})
         assert result is not None
 
+    def test_run_git_passes_sanitized_env(self, temp_git_repo, monkeypatch):
+        """P0a: _run_git must pass a sanitized env (no secrets) to subprocess."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-leak-me")
+        captured = {}
+        real_run = subprocess.run
+
+        def fake_run(*args, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return real_run(*args, **kwargs)
+
+        monkeypatch.setattr("koboi.tools.builtin.git.subprocess.run", fake_run)
+        _run_git(["status", "--porcelain"], str(temp_git_repo))
+        env = captured.get("env")
+        assert env is not None
+        assert "OPENAI_API_KEY" not in env
+
 
 class TestEdgeCases:
     def test_git_status_default_to_current_directory(self, tmp_path):

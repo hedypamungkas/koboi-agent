@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock, patch
-from pathlib import Path
+from unittest.mock import MagicMock, AsyncMock
 
-import pytest
 
 from koboi.orchestration._utils import extract_json as _extract_json
 from koboi.orchestration.factory import (
@@ -16,8 +14,6 @@ from koboi.orchestration.factory import (
     _get_finance_chunks,
     AgentFactory,
     DynamicAgentBuilder,
-    KNOWN_DOMAINS,
-    CHUNKER,
 )
 from koboi.types import AgentBlueprint, AgentDef
 
@@ -121,6 +117,23 @@ class TestAgentFactory:
     def test_build_tools_from_config_with_builtins(self):
         registry = AgentFactory._build_tools_from_config({"builtin": ["calculator"]})
         assert registry is not None
+
+    def test_build_tools_from_config_applies_disable(self):
+        # P3g: disabled denylist removes a tool entirely from the LLM view.
+        registry = AgentFactory._build_tools_from_config(
+            {"builtin": ["calculate", "web_search"], "disabled": ["web_search"]}
+        )
+        assert registry is not None
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert "calculate" in names
+        assert "web_search" not in names
+
+    def test_build_tools_from_config_applies_groups(self):
+        # P3g: groups hides a tool from the LLM view (calculate=math, web_search=web).
+        registry = AgentFactory._build_tools_from_config({"builtin": ["calculate", "web_search"], "groups": ["math"]})
+        assert registry is not None
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert names == {"calculate"}
 
     def test_build_rag_from_config_none(self):
         assert AgentFactory.build_rag_from_config(None, None) is None

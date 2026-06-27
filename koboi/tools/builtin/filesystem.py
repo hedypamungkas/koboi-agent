@@ -11,6 +11,23 @@ from koboi.types import RiskLevel
 _SANDBOX_DIR: str | None = os.environ.get("KOBOI_SANDBOX_DIR")
 _MAX_READ_SIZE = 50000
 
+# P3b: read-before-write tracking (advisory, never blocks).
+# Module-global mirrors the _SANDBOX_DIR pattern. Populated by read_file and
+# consulted by write_file/delete_file to emit an advisory note when writing to
+# a path that was never read. Cleared by ReadBeforeWriteResetHook at
+# SESSION_START and after a real context compaction.
+_read_paths: set[str] = set()
+
+
+def reset_read_before_write() -> None:
+    """Clear the read-before-write tracker (hook: SESSION_START / real compaction)."""
+    _read_paths.clear()
+
+
+def get_read_paths() -> set[str]:
+    """Return a copy of the paths recorded by read_file (test/debug visibility)."""
+    return set(_read_paths)
+
 
 def _validate_path(path: str) -> str:
     """Resolve and validate path stays within sandbox (when configured)."""
@@ -82,6 +99,7 @@ def read_file(path: str, _tool_config: dict | None = None) -> str:
     max_read_size = cfg.get("max_read_size", _MAX_READ_SIZE)
     try:
         path = _validate_path(path)
+        _read_paths.add(path)
         with open(path) as f:
             content = f.read(max_read_size)
         if len(content) == max_read_size:
@@ -118,10 +136,13 @@ def read_file(path: str, _tool_config: dict | None = None) -> str:
 def write_file(path: str, content: str) -> str:
     try:
         path = _validate_path(path)
+        note = ""
+        if path not in _read_paths:
+            note = f"\nNote: writing to '{path}' without having read it first -- verify the path is correct."
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
-        return f"Successfully wrote {len(content)} characters to '{path}'"
+        return f"Successfully wrote {len(content)} characters to '{path}'{note}"
     except PermissionError:
         return f"Error: no access to write to '{path}'"
     except IsADirectoryError:
@@ -147,8 +168,11 @@ def write_file(path: str, content: str) -> str:
 def delete_file(path: str) -> str:
     try:
         path = _validate_path(path)
+        note = ""
+        if path not in _read_paths:
+            note = f"\nNote: deleting '{path}' without having read it first -- verify the path is correct."
         os.remove(path)
-        return f"Successfully deleted '{path}'"
+        return f"Successfully deleted '{path}'{note}"
     except FileNotFoundError:
         return f"Error: file '{path}' not found"
     except PermissionError:

@@ -195,6 +195,7 @@ def _preprocess_shell_commands(body: str) -> str:
     is replaced with ``[command failed: <cmd>]``.
     """
     import subprocess
+    from koboi.harness.env import build_safe_env
 
     def _run(match: re.Match) -> str:
         cmd = match.group(1).strip()
@@ -205,6 +206,7 @@ def _preprocess_shell_commands(body: str) -> str:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=build_safe_env(),
             )
             output = result.stdout.strip()
             if result.returncode != 0 and not output:

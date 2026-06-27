@@ -180,7 +180,12 @@ class AgentCore:
                 self._skills_discovery_appended = True
 
         if self.context_manager:
+            pre = len(messages)
             messages = await self.context_manager.manage(messages, self.max_context_tokens)
+            # Authoritative compaction signal: did manage() actually trim?
+            # Stamped onto POST_COMPACT metadata so persistence hooks (e.g.
+            # ReadBeforeWriteResetHook) only act on a real trim, not every iter.
+            self._last_compacted = len(messages) < pre
 
         return messages
 
@@ -273,7 +278,12 @@ class AgentCore:
         """Run compaction, get managed messages, augment for LLM."""
         await self._emit(HookEvent.PRE_COMPACT, iteration=iteration)
         messages = await self._get_managed_messages()
-        await self._emit(HookEvent.POST_COMPACT, iteration=iteration, messages=messages)
+        await self._emit(
+            HookEvent.POST_COMPACT,
+            iteration=iteration,
+            messages=messages,
+            metadata={"compacted": getattr(self, "_last_compacted", False)},
+        )
         messages = await self._augment_llm(messages)
         return messages
 

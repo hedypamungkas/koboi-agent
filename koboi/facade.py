@@ -400,10 +400,6 @@ def _build_client(config: Config, logger: AgentLogger) -> RetryClient:
 
 def _build_tools(config: Config) -> ToolRegistry:
     registry = ToolRegistry()
-    tool_defaults = config.get("tools", "defaults", default={})
-    tool_overrides = config.get("tools", "overrides", default={})
-    if tool_defaults or tool_overrides:
-        registry.set_tool_config(tool_defaults, tool_overrides)
     builtin_list = config.get("tools", "builtin", default=[])
     if builtin_list:
         from koboi.tools.builtin import register_all
@@ -430,6 +426,13 @@ def _build_tools(config: Config) -> ToolRegistry:
 
                     logging.getLogger(__name__).warning("Failed to import custom tool module '%s': %s", module_name, e)
 
+    # Apply defaults/overrides (with alias normalization), disabled denylist,
+    # and groups -- via the shared helper so this stays in sync with the
+    # orchestration factory's _build_tools_from_config. The helper also mirrors
+    # defaults onto the env-hygiene module config (see apply_tool_selection).
+    from koboi.tools.registry import apply_tool_selection
+
+    apply_tool_selection(registry, config.get("tools", default={}))
     return registry
 
 
@@ -764,6 +767,21 @@ class AgentAssembler:
             from koboi.hooks.skill_persistence_hook import SkillPersistenceHook
 
             self.hook_chain.add(SkillPersistenceHook(skills=self.skills))
+
+        # P3b: compaction-aware tool-state preservation hooks.
+        # TaskPersistenceHook re-injects the active todo list after a compact;
+        # ReadBeforeWriteResetHook clears stale read-tracking on session start
+        # and real compaction. Each is added only when its collaborator exists.
+        if self.hook_chain:
+            task_mgr = self.tools.get_dep("manager")
+            if task_mgr is not None:
+                from koboi.hooks.task_persistence_hook import TaskPersistenceHook
+
+                self.hook_chain.add(TaskPersistenceHook(manager=task_mgr))
+            if "read_file" in self.tools:
+                from koboi.hooks.read_before_write_reset_hook import ReadBeforeWriteResetHook
+
+                self.hook_chain.add(ReadBeforeWriteResetHook())
 
         from koboi.loop import AgentCore
 

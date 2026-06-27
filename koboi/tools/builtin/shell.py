@@ -11,6 +11,7 @@ import subprocess
 from koboi.tools.registry import tool, truncate_text
 from koboi.types import RiskLevel
 from koboi.harness.policy import COMMAND_DENY_PATTERNS, SENSITIVE_PATHS
+from koboi.harness.env import build_safe_env
 
 MAX_OUTPUT = 10000
 TIMEOUT = 30
@@ -31,9 +32,14 @@ def _get_npm_root() -> str:
         return ""
 
 
-def _build_env() -> dict:
-    """Ensure global npm modules are in NODE_PATH."""
-    env = os.environ.copy()
+def _build_env(cfg: dict | None = None) -> dict:
+    """Sanitized env for subprocess.run, with npm NODE_PATH preserved.
+
+    Secrets are filtered out by build_safe_env (allow-list + secret block-list,
+    see koboi/harness/env.py). NODE_PATH is in the default allow-list, so the
+    npm-root prepend below still works on top of the sanitized base.
+    """
+    env = build_safe_env(cfg)
     npm_root = _get_npm_root()
     if npm_root and os.path.isdir(npm_root):
         existing = env.get("NODE_PATH", "")
@@ -97,7 +103,7 @@ def run_shell(command: str, cwd: str = "", _tool_config: dict | None = None) -> 
             text=True,
             timeout=timeout,
             cwd=cwd or None,
-            env=_build_env(),
+            env=_build_env(cfg),
         )
         output = ""
         if result.stdout:

@@ -68,6 +68,10 @@ class ToolsConfig(BaseModel):
     custom: list[dict] = Field(default_factory=list)
     defaults: dict = Field(default_factory=dict)
     overrides: dict = Field(default_factory=dict)
+    # DENYLIST: remove these tools entirely (LLM view + execution).
+    disabled: list[str] = Field(default_factory=list)
+    # HIDE FROM LLM: only advertise these tool groups; tools stay executable.
+    groups: list[str] | None = None
 
 
 class ContextConfig(BaseModel):

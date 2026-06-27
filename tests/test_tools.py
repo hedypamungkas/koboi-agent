@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from koboi.tools.registry import ToolRegistry, tool, register_decorated
+from koboi.tools.registry import ToolRegistry, tool, register_decorated, apply_tool_selection
 from koboi.types import RiskLevel
 
 
@@ -92,3 +92,99 @@ class TestToolDecorator:
         register_decorated(registry, mod)
         result = await registry.execute("mod_tool", "{}")
         assert result == "from module"
+
+
+class TestToolSelection:
+    """Tests for disable / groups / override-alias selection (P3g)."""
+
+    def _registry_with(self, *specs):
+        """Build a registry from (name, group) tuples; each tool returns '<name>-ran'."""
+        registry = ToolRegistry()
+        for name, group in specs:
+            registry.register(
+                name,
+                f"{name} tool",
+                {"type": "object", "properties": {}},
+                (lambda captured=name: f"{captured}-ran"),
+                group=group,
+            )
+        return registry
+
+    def test_disable_removes_from_definitions(self):
+        registry = self._registry_with(("a", None), ("b", None))
+        registry.disable(["a"])
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert names == {"b"}
+
+    async def test_disable_removes_from_execute(self):
+        registry = self._registry_with(("a", None))
+        registry.disable(["a"])
+        result = await registry.execute("a", "{}")
+        assert "not found" in result
+
+    def test_disable_clears_overrides(self):
+        registry = self._registry_with(("a", None))
+        registry.set_tool_config({}, {"a": {"timeout": 9}})
+        registry.disable(["a"])
+        # re-register a with the same name -- stale override must not leak back
+        registry.register("a", "a tool", {"type": "object", "properties": {}}, lambda: "ok")
+        assert "timeout" not in registry.get_tool_config("a")
+
+    def test_disable_unknown_name_non_fatal(self):
+        registry = self._registry_with(("a", None))
+        registry.disable(["ghost"])  # must not raise
+        assert "a" in registry
+
+    def test_apply_tool_selection_disable(self):
+        registry = self._registry_with(("a", None), ("b", None), ("c", None))
+        apply_tool_selection(registry, {"disabled": ["b"]})
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert names == {"a", "c"}
+
+    def test_apply_tool_selection_disable_alias(self):
+        """Alias keys in 'disabled' must resolve (shell -> run_shell), like overrides."""
+        registry = self._registry_with(("run_shell", None), ("calc", None))
+        apply_tool_selection(registry, {"disabled": ["shell"]})
+        assert "run_shell" not in registry
+        assert "calc" in registry
+
+    async def test_apply_tool_selection_groups_hides_but_keeps_executable(self):
+        registry = self._registry_with(("calc", "math"), ("search", "web"))
+        apply_tool_selection(registry, {"groups": ["math"]})
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert names == {"calc"}
+        # hidden from the LLM, but still callable programmatically
+        result = await registry.execute("search", "{}")
+        assert result == "search-ran"
+
+    def test_apply_tool_selection_order_disable_then_groups(self):
+        registry = self._registry_with(("a", "g1"), ("b", "g1"), ("c", "g2"))
+        apply_tool_selection(registry, {"disabled": ["b"], "groups": ["g1"]})
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert names == {"a"}  # b disabled, c hidden by groups
+        assert "b" not in registry
+
+    def test_apply_tool_selection_overrides_alias(self):
+        registry = self._registry_with(("run_shell", None))
+        apply_tool_selection(registry, {"overrides": {"shell": {"timeout": 99}}})
+        assert registry.get_tool_config("run_shell").get("timeout") == 99
+
+    def test_apply_tool_selection_git_ambiguous_warns(self, caplog):
+        import logging
+
+        registry = self._registry_with(("git_status", None), ("git_log", None))
+        with caplog.at_level(logging.WARNING):
+            apply_tool_selection(registry, {"overrides": {"git": {"timeout": 5}}})
+        assert any("ambiguous" in r.message for r in caplog.records)
+        # not applied to any git_* tool
+        assert "timeout" not in registry.get_tool_config("git_status")
+
+    def test_apply_tool_selection_none_noop(self):
+        registry = self._registry_with(("a", None))
+        apply_tool_selection(registry, None)
+        assert "a" in registry
+
+    def test_apply_tool_selection_empty_noop(self):
+        registry = self._registry_with(("a", None))
+        apply_tool_selection(registry, {})
+        assert "a" in registry
