@@ -63,9 +63,9 @@ class ThinkingBlockWidget(Widget):
         except Exception:
             return
         if collapsed:
-            header.update("v Thinking...")
+            header.update("v Thinking...")  # type: ignore[attr-defined]  # Textual Static.update; header typed Widget by query_one
         else:
-            header.update("^ Thinking")
+            header.update("^ Thinking")  # type: ignore[attr-defined]
 
     def toggle(self) -> None:
         self.collapsed = not self.collapsed

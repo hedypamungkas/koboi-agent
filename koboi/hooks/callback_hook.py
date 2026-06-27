@@ -32,5 +32,5 @@ class CallbackHook(Hook):
     async def execute(self, ctx: HookContext) -> HookContext:
         result = self._callback(ctx)
         if asyncio.iscoroutine(result):
-            result = await result
-        return result
+            return await result
+        return result  # type: ignore[return-value]  # callback typed sync|async; non-coroutine branch is a sync HookContext

@@ -188,7 +188,7 @@ class ToolCallWidget(Widget):
             header = self.query_one(".tool-header")
         except Exception:
             return
-        header.update(self._render_header())
+        header.update(self._render_header())  # type: ignore[attr-defined]  # Textual Static.update; header typed Widget by query_one
         header.remove_class("running")
         header.add_class(self._state)
 
@@ -223,6 +223,6 @@ class ToolCallWidget(Widget):
         self.set_class(not collapsed, "expanded")
         try:
             header = self.query_one(".tool-header")
-            header.update(self._render_header())
-        except Exception:
+            header.update(self._render_header())  # type: ignore[attr-defined]  # Textual Static.update; header typed Widget by query_one
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass

@@ -125,7 +125,7 @@ class EvalRunner:
             output=output,
             scores=scores,
             overall_score=round(overall, 3),
-            telemetry_report=telemetry.report() if telemetry else {},
+            telemetry_report=getattr(telemetry, "report", lambda: {})() if telemetry else {},
             trace_id=trace_id,
             duration_seconds=round(duration, 2),
             token_usage=token_usage,

@@ -138,7 +138,7 @@ class ToolRegistry:
                 _log.debug("disable: tool '%s' not registered, skipping", n)
 
     def get_definitions(self) -> list[dict]:
-        tools = self._tools.values()
+        tools = list(self._tools.values())
         # Filter by active groups if set (non-destructive)
         if self._active_groups is not None:
             tools = [t for t in tools if t.group is None or t.group in self._active_groups]
@@ -232,7 +232,7 @@ def tool(
     """
 
     def decorator(fn: Callable) -> Callable:
-        fn._tool_def = ToolDefinition(
+        td = ToolDefinition(
             name=name,
             description=description,
             parameters=parameters,
@@ -240,7 +240,8 @@ def tool(
             timeout=timeout,
             group=group,
         )
-        fn._tool_deps = deps or []
+        fn._tool_def = td  # type: ignore[attr-defined]  # attrs attached by the @tool decorator
+        fn._tool_deps = deps or []  # type: ignore[attr-defined]
         return fn
 
     return decorator
@@ -255,7 +256,7 @@ def _wrap_with_deps(
     import functools
     import inspect
 
-    tool_name = fn._tool_def.name
+    tool_name = fn._tool_def.name  # type: ignore[attr-defined]  # set by the @tool decorator
     sig = inspect.signature(fn)
     accepts_config = "_tool_config" in sig.parameters
 

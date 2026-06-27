@@ -90,4 +90,3 @@ jobs:
       - name: Static security analysis
         run: |
           bandit -r koboi/ -c pyproject.toml
-        continue-on-error: true

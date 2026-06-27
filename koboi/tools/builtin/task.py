@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from koboi.tools.registry import tool
 from koboi.types import RiskLevel
+
+if TYPE_CHECKING:
+    from koboi.task import Task
 
 
 def get_manager() -> Any:
@@ -185,12 +188,12 @@ def task_update(
             task, unblocked = mgr.mark_completed(task_id)
             if task is None:
                 return f"Task not found: {task_id}"
-            result = f"Updated task {task.id}: [{task.status}] {task.subject}"
+            msg = f"Updated task {task.id}: [{task.status}] {task.subject}"
             if unblocked:
-                result += f"\nUnblocked: {', '.join(unblocked)}"
-            return result
+                msg += f"\nUnblocked: {', '.join(unblocked)}"
+            return msg
 
-        result = mgr.update(
+        result: Task | tuple[Task, str] | None = mgr.update(
             task_id,
             status=status or None,
             subject=subject or None,

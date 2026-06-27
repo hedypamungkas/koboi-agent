@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Footer
+from textual.worker import Worker
 
 from koboi.modes import ModeManager
 from koboi.tui.commands import CommandContext, build_registry
@@ -53,7 +54,7 @@ class KoboiApp(App):
         self._bridge = StreamBridge(self)
         self._turn_count = 0
         self._streaming = False
-        self._current_task = None
+        self._current_task: Worker | None = None
         self._start_time: float = 0.0
         self._history: list[str] = []
         self._history_max = 500
@@ -138,7 +139,7 @@ class KoboiApp(App):
             try:
                 count = len(skills_reg.list_skills())
                 self.query_one("#status-bar", StatusBar).skill_count = count
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
 
         # Phase 5: First-run welcome screen
@@ -162,7 +163,7 @@ class KoboiApp(App):
                     agent_name=self._agent.config.agent_name,
                     model=f"{self._agent.config.provider}/{self._agent.config.model}",
                 )
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
 
     def _setup_tui_approval(self) -> None:
@@ -205,7 +206,7 @@ class KoboiApp(App):
         try:
             mem_len = len(self._agent.core.memory)
             parts.append(f"{mem_len} in memory")
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
         print(f"\nGoodbye! {' | '.join(parts)}", file=sys.stderr)
 
@@ -486,6 +487,8 @@ class KoboiApp(App):
         from koboi.memory_sqlite import SQLiteMemory
 
         mem = self._agent.core.memory
+        if not isinstance(mem, SQLiteMemory):
+            return
         messages = SQLiteMemory.get_session_messages(mem.db_path, session_id)
         chat = self.query_one("#chat-area", ChatLog)
         chat.clear_messages()
@@ -533,7 +536,7 @@ class KoboiApp(App):
 
                 sessions = SQLiteMemory.list_sessions(mem.db_path, limit=1)
                 return len(sessions) == 0
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
         return False
 

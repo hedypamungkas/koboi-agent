@@ -47,7 +47,7 @@ def discover_plugins() -> dict[str, list[str]]:
             eps = entry_points(group=group)
         except TypeError:
             # Python 3.9 compat: entry_points() returns dict
-            eps = entry_points().get(group, [])  # type: ignore[assignment]
+            eps = entry_points().get(group, [])  # type: ignore[assignment,arg-type]
 
         for ep in eps:
             try:

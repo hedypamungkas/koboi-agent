@@ -112,7 +112,7 @@ async def _cmd_info(ctx: CommandContext) -> CommandResult:
             lines.append(f"Guardrails: {', '.join(guards)}")
     if config.rag_enabled:
         lines.append("RAG: enabled")
-    hooks_cfg = config.get("hooks", {})
+    hooks_cfg = config.get("hooks", default={})
     if hooks_cfg:
         lines.append(f"Hooks: {', '.join(hooks_cfg.keys())}")
     ctx.output("\n".join(lines))
@@ -185,7 +185,7 @@ async def _cmd_fork(ctx: CommandContext) -> CommandResult:
     if not hasattr(mem, "fork_session") or not hasattr(mem, "db_path"):
         ctx.output("Fork requires SQLite memory backend.")
         return CommandResult()
-    new_id = mem.fork_and_switch()
+    new_id = mem.fork_and_switch()  # type: ignore[attr-defined]  # guarded by the hasattr checks above (SQLiteMemory-only method)
     ctx.output(f"Conversation forked. New session: {new_id[:8]}...")
     return CommandResult(clear_chat=True, repopulate_messages=True)
 
@@ -418,7 +418,7 @@ async def _cmd_undo(ctx: CommandContext) -> CommandResult:
         ctx.output("Can only revert 1-10 commits at a time.")
         return CommandResult()
     try:
-        log_result = _subprocess.run(["git", "log", f"-{n}", "--oneline"], capture_output=True, text=True, timeout=10)
+        log_result = _subprocess.run(["git", "log", f"-{n}", "--oneline"], capture_output=True, text=True, timeout=10)  # nosec B607 - intentional PATH-based launch of a user tool/editor
         if log_result.returncode != 0:
             ctx.output(f"Git error: {log_result.stderr.strip()}")
             return CommandResult()
@@ -429,7 +429,7 @@ async def _cmd_undo(ctx: CommandContext) -> CommandResult:
     reverted = 0
     for i in range(n):
         try:
-            result = _subprocess.run(["git", "revert", "HEAD", "--no-edit"], capture_output=True, text=True, timeout=30)
+            result = _subprocess.run(["git", "revert", "HEAD", "--no-edit"], capture_output=True, text=True, timeout=30)  # nosec B607 - intentional PATH-based launch of a user tool/editor
             if result.returncode == 0:
                 reverted += 1
             else:
@@ -483,10 +483,10 @@ async def _cmd_copy(ctx: CommandContext) -> CommandResult:
         import subprocess as _sp
 
         if shutil.which("pbcopy"):
-            _sp.run(["pbcopy"], input=last_assistant.encode(), check=True)
+            _sp.run(["pbcopy"], input=last_assistant.encode(), check=True)  # nosec B607 - intentional PATH-based launch of a user tool/editor
             copied = True
         elif shutil.which("xclip"):
-            _sp.run(["xclip", "-selection", "clipboard"], input=last_assistant.encode(), check=True)
+            _sp.run(["xclip", "-selection", "clipboard"], input=last_assistant.encode(), check=True)  # nosec B607 - intentional PATH-based launch of a user tool/editor
             copied = True
     if copied:
         preview = last_assistant[:80] + "..." if len(last_assistant) > 80 else last_assistant

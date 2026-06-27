@@ -38,12 +38,12 @@ eval-gaia = ["datasets>=2.14", "pandas>=2.0"]
 eval-swe-bench = ["datasets>=2.14", "pandas>=2.0"]
 eval-deepeval = ["deepeval>=0.20"]
 eval-all = ["ragas>=0.2", "datasets>=2.14", "pandas>=2.0", "deepeval>=0.20"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.0", "types-PyYAML"]
 all = [
     "langfuse>=2.0,<3.0",
     "rich>=13.0", "textual>=0.40", "click>=8.0", "prompt_toolkit>=3.0", "rapidfuzz>=3.0",
     "ragas>=0.2", "datasets>=2.14", "pandas>=2.0", "deepeval>=0.20",
-    "pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.0",
+    "pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.0", "types-PyYAML",
 ]
 
 [project.scripts]
@@ -71,6 +71,9 @@ asyncio_mode = "auto"
 [tool.ruff]
 target-version = "py310"
 line-length = 120
+# examples/data/buggy_code/ holds deliberately-buggy fixtures for the
+# SWE-bug-hunter demo -- lint errors there are intentional, not regressions.
+extend-exclude = ["examples/data/buggy_code"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
@@ -92,5 +95,10 @@ include = ["koboi*"]
 # B602: subprocess with shell=True — intentional in shell tool
 # B603/B604: subprocess without shell=False — intentional in shell tool
 # B404: import subprocess — intentional
+# B107: hardcoded_password_default — false positive on optional credential
+#        params (api_key/secret_key defaulting to "" / None), not real secrets.
+#        Real hardcoded secrets are still caught by B105 (kept active).
+# B608: hardcoded_sql_expressions — false positive on parameterized IN (?,…)
+#        clauses (placeholders interpolated, values bound). See koboi/journal.py.
 exclude_dirs = ["tests", ".venv"]
-skips = ["B602", "B603", "B604", "B404"]
+skips = ["B602", "B603", "B604", "B404", "B107", "B608"]

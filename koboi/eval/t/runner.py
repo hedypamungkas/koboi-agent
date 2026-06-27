@@ -180,12 +180,12 @@ class TestRunner:
             agent = self._build_live_agent(cfg)
             if agent.core is not None:
                 original = agent.core.client
-                agent.core.client = scripted
+                agent.core.client = scripted  # type: ignore[assignment]  # ScriptedClient is an LLMClient test-double injected for deterministic evals
                 # Release the now-unused real transport (httpx) so it does not leak.
                 if original is not None and original is not scripted:
                     try:
                         await original.close()
-                    except Exception:
+                    except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                         pass
             return agent
 
@@ -197,7 +197,7 @@ class TestRunner:
 
         iterations = max(1, len(responses or []) + 2)
         core = AgentCore(
-            client=scripted,
+            client=scripted,  # type: ignore[arg-type]  # ScriptedClient is an LLMClient test-double; AgentCore.client is RetryClient for prod
             memory=ConversationMemory(),
             tools=ToolRegistry(),
             max_iterations=iterations,
@@ -207,7 +207,7 @@ class TestRunner:
     async def _close(self, agent: "KoboiAgent") -> None:
         try:
             await agent.close()
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
     def _fold(self, test: LoadedTest, ctx: TestContext, *, elapsed: float, error: str | None) -> EvalResult:

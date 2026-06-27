@@ -16,7 +16,11 @@ from koboi.hooks.chain import Hook, HookChain
 
 if TYPE_CHECKING:
     from koboi.config import Config
+    from koboi.guardrails.audit import AuditTrail
+    from koboi.harness.policy import PolicyEngine
     from koboi.logger import AgentLogger
+    from koboi.modes import ModeManager
+    from koboi.tools.registry import ToolRegistry
 
 _logger = logging.getLogger(__name__)
 
@@ -119,14 +123,16 @@ _REGISTRY: list[HookEntry] = [
 # ---------------------------------------------------------------------------
 
 
-def _create_audit_hook(audit_trail: object) -> Hook:
+def _create_audit_hook(audit_trail: AuditTrail | None) -> Hook:
     from koboi.hooks.builtin import AuditHook
 
     return AuditHook(audit_trail=audit_trail)
 
 
 def _create_policy_hook(
-    policy_engine: object, tool_registry: object | None = None, config: object | None = None
+    policy_engine: PolicyEngine | None,
+    tool_registry: ToolRegistry | None = None,
+    config: Config | None = None,
 ) -> Hook:
     from koboi.hooks.policy_hook import PolicyHook
 
@@ -143,7 +149,7 @@ def _create_policy_hook(
     return PolicyHook(policy_engine=policy_engine, risk_lookup=risk_lookup, audit_log=audit_log)
 
 
-def _create_mode_hook(mode_manager: object) -> Hook:
+def _create_mode_hook(mode_manager: ModeManager | None) -> Hook:
     from koboi.hooks.mode_hook import ModeHook
 
     return ModeHook(mode_manager=mode_manager)
@@ -233,11 +239,11 @@ def _create_langfuse_hook(config: Config) -> Hook:
 def build_hook_chain(
     config: Config,
     logger: AgentLogger,
-    audit_trail: object | None = None,
-    mode_manager: object | None = None,
+    audit_trail: AuditTrail | None = None,
+    mode_manager: ModeManager | None = None,
     verbose: bool = False,
-    policy_engine: object | None = None,
-    tool_registry: object | None = None,
+    policy_engine: PolicyEngine | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> HookChain:
     """Build a HookChain from config using the registry.
 

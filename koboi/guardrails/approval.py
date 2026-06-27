@@ -7,6 +7,7 @@ can be skipped with auto_approve=True or overridden with custom callback.
 from __future__ import annotations
 
 import time
+from collections.abc import Awaitable
 from typing import Callable
 from typing import TYPE_CHECKING
 
@@ -35,7 +36,9 @@ def _risk_color(level: RiskLevel) -> str:
 class ApprovalHandler:
     """Base class — deny destructive ops by default, allow others."""
 
-    def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
+    def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool | Awaitable[bool]:
+        # May be sync (bool) or async (Awaitable[bool]); the execution pipeline
+        # awaits when iscoroutinefunction(should_approve) is True.
         return risk_level != RiskLevel.DESTRUCTIVE
 
 
