@@ -6,6 +6,7 @@ simple_chat.yaml        Minimal chat agent (no tools)
 sales_agent.yaml        Sales assistant with tools, RAG, guardrails, tracing
 customer_service.yaml   Customer service agent
 coding_agent.yaml       Code-focused agent with filesystem/shell/git tools
+sandbox_restricted.yaml Restricted sandbox + SQLite journal/resume demo (P0b + P2-A)
 rag_agent.yaml          RAG with document Q&A
 orchestrated.yaml       Multi-agent orchestrator
 anthropic_chat.yaml     Anthropic provider example
@@ -27,4 +28,4 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `llm`, `tools`, `context`, `rag`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `orchestration`
+`agent`, `llm`, `tools`, `context`, `rag`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `orchestration`, `sandbox`, `journal`

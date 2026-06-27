@@ -127,12 +127,18 @@ def main():
 @click.option("--message", "-m", help="Message to send (required for non-interactive)")
 @click.option("--verbose", "-v", is_flag=True, help="Show debug output")
 @click.option("--print", "print_mode", is_flag=True, help="Output streaming JSON lines (pipe-friendly)")
-def run(config_path: str, message: str | None, verbose: bool, print_mode: bool):
+@click.option(
+    "--resume",
+    "resume_session",
+    default=None,
+    help="Resume an interrupted session by ID (rehydrate + continue). --message is ignored.",
+)
+def run(config_path: str, message: str | None, verbose: bool, print_mode: bool, resume_session: str | None):
     """Run a single agent query (non-interactive or one-shot)."""
     from koboi.facade import KoboiAgent
 
     try:
-        agent = KoboiAgent.from_config(config_path, verbose=verbose)
+        agent = KoboiAgent.from_config(config_path, verbose=verbose, resume_session=resume_session)
     except Exception as e:
         if print_mode:
             print(json.dumps({"type": "error", "error": str(e)}), flush=True)
@@ -140,6 +146,18 @@ def run(config_path: str, message: str | None, verbose: bool, print_mode: bool):
             console.print(f"[red bold]Error loading agent:[/red bold] {e}")
             console.print("[dim]Check your config file and API key settings.[/dim]")
         raise SystemExit(1)
+
+    # --resume: rehydrate-and-continue an interrupted session. The original user
+    # turn is already in the conversation, so no new message is required.
+    if resume_session:
+        try:
+            with console.status("[bold cyan]Resuming...[/bold cyan]", spinner="dots"):
+                result = asyncio.run(agent.resume())
+        except Exception as e:
+            console.print(f"[red bold]Resume error:[/red bold] {e}")
+            raise SystemExit(1)
+        console.print(Panel(Markdown(str(result)), title=f"Resumed ({resume_session[:8]})"))
+        return
 
     if not message:
         if print_mode:
@@ -162,6 +180,51 @@ def run(config_path: str, message: str | None, verbose: bool, print_mode: bool):
             console.print(f"[red bold]Agent error:[/red bold] {e}")
             raise SystemExit(1)
         console.print(Panel(Markdown(str(result)), title="Output"))
+
+
+@main.command()
+@click.argument("config_path", type=click.Path(exists=True))
+@click.option("--limit", default=50, help="Max sessions to list")
+def sessions(config_path: str, limit: int):
+    """List persisted sessions for an agent's database (P2-A)."""
+    from koboi.config import Config
+    from koboi.memory_sqlite import SQLiteMemory
+    from rich.table import Table
+
+    try:
+        config = Config.from_yaml(config_path)
+    except Exception as e:
+        console.print(f"[red bold]Config error:[/red bold] {e}")
+        raise SystemExit(1)
+
+    db_path = config.get("memory", "db_path", default="koboi_memory.db")
+    if config.get("memory", "backend", default="sqlite") != "sqlite":
+        console.print("[yellow]Memory backend is not sqlite -- no persisted sessions.[/yellow]")
+        return
+
+    rows = SQLiteMemory.list_sessions(db_path, limit=limit)
+    if not rows:
+        console.print(f"[dim]No sessions found in {db_path}.[/dim]")
+        return
+
+    table = Table(title=f"Sessions in {db_path}", show_lines=False)
+    table.add_column("Session ID", style="cyan", no_wrap=True)
+    table.add_column("Title")
+    table.add_column("Messages", justify="right")
+    table.add_column("Updated", style="dim")
+    table.add_column("First message", overflow="fold")
+    for row in rows:
+        sid = row.get("session_id", "") or ""
+        first = (row.get("first_message") or "").strip().replace("\n", " ")[:60]
+        table.add_row(
+            sid[:12],
+            (row.get("title") or "")[:40],
+            str(row.get("message_count", 0)),
+            str(row.get("updated_at"))[:18],
+            first,
+        )
+    console.print(table)
+    console.print("[dim]Resume with: koboi run " + str(config_path) + " --resume <session-id>[/dim]")
 
 
 @main.command()

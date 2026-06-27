@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 @functools.lru_cache(maxsize=1)
 def _get_npm_root() -> str:
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B607 - intentional PATH-based launch of a user tool/editor
             ["npm", "root", "-g"],
             capture_output=True,
             text=True,
@@ -32,20 +32,42 @@ def _get_npm_root() -> str:
         return ""
 
 
-def _build_env(cfg: dict | None = None) -> dict:
+def _build_env(cfg: dict | None = None, sandbox=None) -> dict:
     """Sanitized env for subprocess.run, with npm NODE_PATH preserved.
 
-    Secrets are filtered out by build_safe_env (allow-list + secret block-list,
-    see koboi/harness/env.py). NODE_PATH is in the default allow-list, so the
-    npm-root prepend below still works on top of the sanitized base.
+    When a sandbox is wired, env hygiene flows through ``sandbox.build_env``
+    (the restricted backend layers PATH/network stripping on top); otherwise we
+    use ``build_safe_env`` directly. Either way NODE_PATH is prepended.
     """
-    env = build_safe_env(cfg)
+    if sandbox is not None:
+        env = sandbox.build_env(cfg)
+    else:
+        env = build_safe_env(cfg)
     npm_root = _get_npm_root()
     if npm_root and os.path.isdir(npm_root):
         existing = env.get("NODE_PATH", "")
         if npm_root not in existing:
             env["NODE_PATH"] = f"{npm_root}:{existing}" if existing else npm_root
     return env
+
+
+def _format_result(result, timeout: int) -> str:
+    """Render a subprocess result (SandboxResult or CompletedProcess)."""
+    if getattr(result, "timed_out", False):
+        return f"Error: command timed out after {timeout}s"
+    stdout = getattr(result, "stdout", "") or ""
+    stderr = getattr(result, "stderr", "") or ""
+    returncode = getattr(result, "returncode", 0)
+    output = ""
+    if stdout:
+        output += stdout
+    if stderr:
+        output = ("\n" + stderr) if output else stderr
+    if not output:
+        output = "(no output)"
+    if returncode != 0:
+        output = f"[exit code: {returncode}]\n{output}"
+    return output
 
 
 def _check_command_blocked(command: str) -> str | None:
@@ -66,6 +88,7 @@ def _check_command_blocked(command: str) -> str | None:
     group="system",
     description="Run shell command and return output",
     risk_level=RiskLevel.MODERATE,
+    deps=["sandbox"],
     parameters={
         "type": "object",
         "properties": {
@@ -81,8 +104,9 @@ def _check_command_blocked(command: str) -> str | None:
         "required": ["command"],
     },
 )
-def run_shell(command: str, cwd: str = "", _tool_config: dict | None = None) -> str:
+def run_shell(command: str, cwd: str = "", _tool_config: dict | None = None, _deps: dict | None = None) -> str:
     cfg = _tool_config or {}
+    sandbox = (_deps or {}).get("sandbox")
     max_output = cfg.get("max_output", MAX_OUTPUT)
     timeout = cfg.get("timeout", TIMEOUT)
     # shim: macOS doesn't have `python` binary, only `python3`
@@ -94,8 +118,19 @@ def run_shell(command: str, cwd: str = "", _tool_config: dict | None = None) -> 
     if blocked_reason:
         return f"Error: {blocked_reason}"
     try:
-        # shell=True is required for pipe/redirect/&& chaining in agent commands.
-        # The policy engine provides deny-list filtering for dangerous patterns.
+        if sandbox is not None:
+            # shell=True is required for pipe/redirect/&& chaining. The sandbox
+            # applies cwd containment, env hygiene, network/rlimit policy, and
+            # process-group kill on timeout.
+            result = sandbox.run(
+                command,
+                cwd=cwd or None,
+                env=_build_env(cfg, sandbox=sandbox),
+                timeout=timeout,
+                shell=True,
+            )
+            return truncate_text(_format_result(result, timeout), max_output)
+        # Legacy path (no sandbox wired) -- preserves exact pre-P0b behavior.
         result = subprocess.run(
             command,
             shell=True,
@@ -105,20 +140,12 @@ def run_shell(command: str, cwd: str = "", _tool_config: dict | None = None) -> 
             cwd=cwd or None,
             env=_build_env(cfg),
         )
-        output = ""
-        if result.stdout:
-            output += result.stdout
-        if result.stderr:
-            if output:
-                output += "\n"
-            output += result.stderr
-        if not output:
-            output = "(no output)"
-        if result.returncode != 0:
-            output = f"[exit code: {result.returncode}]\n{output}"
-        return truncate_text(output, max_output)
+        return truncate_text(_format_result(result, timeout), max_output)
     except subprocess.TimeoutExpired:
         return f"Error: command timed out after {timeout}s"
+    except PermissionError as e:
+        # Restricted sandbox rejects cwd/paths outside the workdir.
+        return f"Error: {e}"
     except FileNotFoundError as e:
         if cwd and not os.path.isdir(cwd):
             return f"Error: working directory '{cwd}' not found"

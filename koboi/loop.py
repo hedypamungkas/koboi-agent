@@ -27,7 +27,7 @@ from koboi.tools.registry import ToolRegistry
 from koboi.client import RetryClient
 from koboi.tokens import estimate_tokens
 from koboi.hooks.chain import HookEvent, HookChain, HookContext, AgentInfo
-from koboi.types import ToolCall, AuditEntry, RunResult
+from koboi.types import AgentResponse, AuditEntry, RunResult, TokenUsage, ToolCall
 
 if TYPE_CHECKING:
     from koboi.logger import AgentLogger
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from koboi.guardrails.approval import ApprovalHandler
     from koboi.skills.registry import SkillRegistry
     from koboi.modes import ModeManager
+    from koboi.journal import StepJournal
 
 _log = _logging.getLogger("koboi.loop")
 
@@ -89,6 +90,7 @@ class AgentCore:
         skills: SkillRegistry | None = None,
         hook_chain: HookChain | None = None,
         mode_manager: ModeManager | None = None,
+        journal: StepJournal | None = None,
         # Backward-compatible singular kwargs
         input_guardrail: BaseGuardrail | None = None,
         output_guardrail: BaseGuardrail | None = None,
@@ -115,6 +117,10 @@ class AgentCore:
         self.skills = skills
         self.hooks = hook_chain or HookChain()
         self.mode_manager = mode_manager
+        self.journal = journal
+        # P2-A: turn counter. On a fresh agent this is 0; on resume it inherits
+        # the journal's highest recorded turn so numbering stays continuous.
+        self._turn_index: int = journal.turn_index if journal else 0
         self._last_user_message = ""
         self._skills_discovery_appended = False
         self._last_prompt_tokens: int = 0
@@ -287,7 +293,7 @@ class AgentCore:
         messages = await self._augment_llm(messages)
         return messages
 
-    def _update_usage(self, response: object, total_usage: object | None) -> object:
+    def _update_usage(self, response: AgentResponse, total_usage: TokenUsage | None) -> TokenUsage | None:
         """Update token usage from response. Returns updated total_usage."""
         if not response.usage:
             return total_usage
@@ -295,8 +301,6 @@ class AgentCore:
         if self.context_manager:
             self.context_manager.last_actual_tokens = response.usage.prompt_tokens
         if total_usage is None:
-            from koboi.types import TokenUsage
-
             total_usage = TokenUsage()
         total_usage.prompt_tokens += response.usage.prompt_tokens
         total_usage.completion_tokens += response.usage.completion_tokens
@@ -310,6 +314,12 @@ class AgentCore:
         text_part = user_message if isinstance(user_message, str) else _extract_text(user_message)
         self._last_user_message = text_part
         await self._emit(HookEvent.SESSION_START)
+        # P2-A: a new run() call is a new user turn. Advances the journal's turn
+        # counter so step rows for this invocation are numbered under a fresh
+        # turn. (resume() does NOT advance -- it inherits the interrupted turn.)
+        if self.journal:
+            self.journal.advance_turn()
+            self._turn_index = self.journal.turn_index
         await self._validate_input(text_part)
         if isinstance(user_message, str):
             user_message = await self._augment_memory(user_message)
@@ -317,20 +327,96 @@ class AgentCore:
         tool_defs = self.tools.get_definitions() or None
         return user_message, tool_defs, _time.monotonic()
 
-    def _store_tool_response_in_memory(self, response: object) -> None:
+    def _store_tool_response_in_memory(self, response: AgentResponse) -> None:
         """Store assistant message with tool call details in conversation memory."""
         self.memory.add_assistant_message(
             response.content,
             self._format_tool_calls_for_memory(response.tool_calls),
         )
 
-    async def run(self, user_message: str | list) -> RunResult:
-        user_message, tool_defs, _start = await self._prepare_run(user_message)
+    # -- P2-A: step journal ------------------------------------------------
+
+    def _journal_step(
+        self,
+        step_index: int,
+        status: str,
+        response: object | None = None,
+        tool_calls: list[ToolCall] | None = None,
+        is_terminal: bool = False,
+        error: str | None = None,
+    ) -> None:
+        """Record one step in the journal (no-op when no journal is attached)."""
+        if not self.journal:
+            return
+        usage = getattr(response, "usage", None) if response else None
+        self.journal.record_step(
+            turn_index=self._turn_index,
+            step_index=step_index,
+            status=status,
+            prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
+            completion_tokens=getattr(usage, "completion_tokens", None) if usage else None,
+            tool_calls=tool_calls,
+            is_terminal=is_terminal,
+            error=error,
+        )
+
+    def _journal_max_iter(self) -> None:
+        """Record the terminal 'max_iter' step (shared by run() and run_stream())."""
+        self._journal_step(
+            self.max_iterations - 1,
+            status="max_iter",
+            is_terminal=True,
+            error=f"max_iterations={self.max_iterations}",
+        )
+
+    def _run_metadata(self, *, resumed: bool, last_step: int) -> dict:
+        return {
+            "model": self.client.model if hasattr(self.client, "model") else "",
+            "session_id": getattr(self.memory, "session_id", None),
+            "resumed": resumed,
+            "turn_index": self._turn_index,
+            "last_step": last_step,
+        }
+
+    async def _repair_interrupted_turn(self) -> None:
+        """Re-execute tool calls from the trailing assistant message whose
+        results never landed in memory (the crash window before a tool result
+        was persisted). Idempotency caveat: non-idempotent tools may re-run;
+        DESTRUCTIVE tools will re-prompt for approval on the way through the
+        pipeline, which is the safe default.
+        """
+        msgs = self.memory.get_messages()
+        if not msgs or msgs[-1].get("role") != "assistant" or "tool_calls" not in msgs[-1]:
+            return
+        requested = msgs[-1].get("tool_calls") or []
+        answered = {m.get("tool_call_id") for m in msgs if m.get("role") == "tool"}
+        missing = [tc for tc in requested if tc.get("id") not in answered]
+        if not missing:
+            return
+        self._log(f"Resume: re-executing {len(missing)} missing tool call(s)")
+        for tc_dict in missing:
+            fn = tc_dict.get("function", {}) if isinstance(tc_dict, dict) else {}
+            tc = ToolCall(
+                id=tc_dict.get("id", "") if isinstance(tc_dict, dict) else "",
+                name=fn.get("name", ""),
+                arguments=fn.get("arguments", "{}"),
+            )
+            await self._pipeline.execute_tool_call(tc, iteration=0)
+
+    async def _run_loop(self, tool_defs: list[dict] | None, _start: float, *, resumed: bool) -> RunResult:
+        """Shared iteration loop for run() and resume().
+
+        Journal writes are native (not hooks) so durability can't be bypassed.
+        Each iteration: a 'running' marker at start, then 'skill'/'complete'/
+        'tool_calls' as the outcome, and a terminal 'max_iter' row if the loop
+        is exhausted.
+        """
         tool_calls_made: list[ToolCall] = []
-        total_usage = None
+        total_usage: TokenUsage | None = None
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
+            self._journal_step(i, status="running")
             tokens = estimate_tokens(messages)
             self._log(f"iteration {i + 1}: {len(messages)} messages, ~{tokens} tokens")
 
@@ -341,10 +427,12 @@ class AgentCore:
             total_usage = self._update_usage(response, total_usage)
 
             if response.content and self.skills and self._activate_skill(response.content):
+                self._journal_step(i, status="skill", response=response)
                 continue
 
             if response.is_complete:
                 output = await self._process_output(response.content, response, i)
+                self._journal_step(i, status="complete", response=response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 return RunResult(
                     content=output,
@@ -353,7 +441,7 @@ class AgentCore:
                     token_usage=total_usage,
                     success=True,
                     elapsed_seconds=_time.monotonic() - _start,
-                    metadata={"model": self.client.model if hasattr(self.client, "model") else ""},
+                    metadata=self._run_metadata(resumed=resumed, last_step=i),
                 )
 
             if response.tool_calls:
@@ -362,9 +450,36 @@ class AgentCore:
                 for tc in response.tool_calls:
                     tool_calls_made.append(tc)
                     await self._pipeline.execute_tool_call(tc, iteration=i)
+                self._journal_step(i, status="tool_calls", response=response, tool_calls=response.tool_calls)
 
+        self._journal_max_iter()
         await self._emit(HookEvent.SESSION_END, iteration=self.max_iterations)
         raise AgentMaxIterationsError(self.max_iterations)
+
+    async def run(self, user_message: str | list) -> RunResult:
+        user_message, tool_defs, _start = await self._prepare_run(user_message)
+        return await self._run_loop(tool_defs, _start, resumed=False)
+
+    async def resume(self) -> RunResult:
+        """Rehydrate-and-continue an interrupted session.
+
+        Assumes memory was already rehydrated with the target session_id (the
+        SQLiteMemory constructor reloads messages). Does NOT add a user message:
+        it goes straight into the iteration loop on the existing messages.
+        Prior 'running' step markers are marked 'interrupted', and any tool
+        calls from the trailing assistant message that lack persisted results
+        are re-executed before the loop resumes. The interrupted turn is
+        inherited (no advance).
+        """
+        await self._emit(HookEvent.SESSION_START)
+        if self.journal:
+            open_rows = self.journal.list_open_running()
+            if open_rows:
+                self.journal.mark_interrupted(open_rows)
+            self._turn_index = self.journal.turn_index
+        await self._repair_interrupted_turn()
+        tool_defs = self.tools.get_definitions() or None
+        return await self._run_loop(tool_defs, _time.monotonic(), resumed=True)
 
     async def run_stream(self, user_message: str | list) -> AsyncGenerator:
         """Stream agent execution as a sequence of StreamEvents."""
@@ -378,6 +493,7 @@ class AgentCore:
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
+            self._journal_step(i, status="running")
             tokens = estimate_tokens(messages)
             yield IterationEvent(iteration=i, messages_count=len(messages), tokens_estimated=tokens)
 
@@ -404,10 +520,12 @@ class AgentCore:
                 return
 
             if final_response.content and self.skills and self._activate_skill(final_response.content):
+                self._journal_step(i, status="skill", response=final_response)
                 continue
 
             if final_response.is_complete:
                 output = await self._process_output(final_response.content or "", final_response, i)
+                self._journal_step(i, status="complete", response=final_response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 seen: set[str] = set()
                 unique_tools = [t for t in _stream_tools_used if t not in seen and not seen.add(t)]  # type: ignore[func-returns-value]
@@ -432,7 +550,11 @@ class AgentCore:
                         tool_call_id=tc.id,
                         result=pipeline_result.result,
                     )
+                self._journal_step(
+                    i, status="tool_calls", response=final_response, tool_calls=final_response.tool_calls
+                )
 
+        self._journal_max_iter()
         await self._emit(HookEvent.SESSION_END, iteration=self.max_iterations)
         yield ErrorEvent(error=AgentMaxIterationsError(self.max_iterations))
 

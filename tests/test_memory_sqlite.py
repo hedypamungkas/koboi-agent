@@ -40,6 +40,19 @@ class TestSQLiteMemory:
         result = cursor.fetchone()
         assert result is not None
 
+        # P2-A: steps table (journal) is created alongside messages/sessions.
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='steps'")
+        assert cursor.fetchone() is not None
+        cursor.execute("PRAGMA table_info(steps)")
+        step_cols = {row[1]: row[2] for row in cursor.fetchall()}
+        assert step_cols["session_id"] == "TEXT"
+        assert step_cols["turn_index"] == "INTEGER"
+        assert step_cols["step_index"] == "INTEGER"
+        assert step_cols["status"] == "TEXT"
+        assert step_cols["is_terminal"] == "INTEGER"
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_steps_session'")
+        assert cursor.fetchone() is not None
+
         conn.close()
         mem.close()
 
