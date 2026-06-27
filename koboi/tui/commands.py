@@ -281,11 +281,9 @@ async def _cmd_mode(ctx: CommandContext) -> CommandResult:
 
 
 async def _cmd_tasks(ctx: CommandContext) -> CommandResult:
-    from koboi.tools.builtin.task import get_manager
-
-    try:
-        mgr = get_manager()
-    except RuntimeError:
+    core = ctx.agent.core
+    mgr = core.tools.get_dep("task_manager") if core else None
+    if not mgr:
         ctx.output("Task management not initialized. Add task tools to your config.")
         return CommandResult()
     status_filter = ctx.args.strip() if ctx.args.strip() in ("pending", "in_progress", "completed", "blocked") else None
@@ -535,9 +533,8 @@ async def _cmd_run(ctx: CommandContext) -> CommandResult:
 
 
 async def _cmd_kill(ctx: CommandContext) -> CommandResult:
-    from koboi.tools.builtin.subagent import get_manager
-
-    manager = get_manager()
+    core = ctx.agent.core
+    manager = core.tools.get_dep("subagent_manager") if core else None
     if not manager:
         ctx.output("Subagent system not initialized.")
         return CommandResult()
@@ -566,9 +563,8 @@ async def _cmd_subagents(ctx: CommandContext) -> CommandResult:
     if ctx.app is not None and ctx.app._agent_states:
         ctx.app.action_subagent_monitor()
         return CommandResult()
-    from koboi.tools.builtin.subagent import get_manager
-
-    manager = get_manager()
+    core = ctx.agent.core
+    manager = core.tools.get_dep("subagent_manager") if core else None
     if not manager:
         ctx.output("Subagent system not initialized.")
         return CommandResult()

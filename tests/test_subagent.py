@@ -183,7 +183,7 @@ class TestDelegateTasksTool:
             {"task": "Research X", "label": "research"},
             {"task": "Analyze Y", "label": "analyze"},
         ]
-        result = await delegate_tasks(tasks, _deps={"manager": manager})
+        result = await delegate_tasks(tasks, _deps={"subagent_manager": manager})
 
         assert "research" in result
         assert "analyze" in result
@@ -206,7 +206,7 @@ class TestDelegateTasksTool:
         memory.add_assistant_message("Let me check.")
         manager._parent_memory = memory
 
-        result = await delegate_tasks([{"task": "Summarize", "label": "sum"}], _deps={"manager": manager})
+        result = await delegate_tasks([{"task": "Summarize", "label": "sum"}], _deps={"subagent_manager": manager})
 
         assert "Contextual answer" in result
 
@@ -228,7 +228,9 @@ class TestDelegateTasksTool:
         manager = SubAgentManager(client=client, tools=tools, hook_chain=hooks, max_iterations=2)
 
         # The child agent should have access to get_weather
-        result = await delegate_tasks([{"task": "Check weather", "label": "weather"}], _deps={"manager": manager})
+        result = await delegate_tasks(
+            [{"task": "Check weather", "label": "weather"}], _deps={"subagent_manager": manager}
+        )
         assert "Tool result" in result
 
     async def test_child_tools_exclude_delegate_tasks(self):
@@ -378,7 +380,7 @@ class TestSubagentIntegration:
                 {"task": "Do A", "label": "a"},
                 {"task": "Do B", "label": "b"},
             ],
-            _deps={"manager": manager},
+            _deps={"subagent_manager": manager},
         )
 
         assert len(dispatch_events) == 2
@@ -683,7 +685,7 @@ class TestSubagentConfig:
 
         _setup_subagent(tools, client, hooks, None, config=config)
 
-        manager = tools.get_dep("manager")
+        manager = tools.get_dep("subagent_manager")
         assert manager is not None
         assert manager.timeout == 42
         assert manager.max_iterations == 7
@@ -710,7 +712,7 @@ class TestSubagentConfig:
 
         _setup_subagent(tools, client, hooks, None, config=config)
 
-        manager = tools.get_dep("manager")
+        manager = tools.get_dep("subagent_manager")
         assert manager is not None
         assert manager.timeout == 60.0
         assert manager.max_iterations == 5

@@ -401,9 +401,8 @@ class KoboiApp(App):
 
     def action_kill_subagents(self) -> None:
         """Cancel all running subagents (ctrl+k)."""
-        from koboi.tools.builtin.subagent import get_manager
-
-        manager = get_manager()
+        core = self._agent.core
+        manager = core.tools.get_dep("subagent_manager") if core else None
         chat = self.query_one("#chat-area", ChatLog)
         if manager:
             running = manager.list_running()
@@ -612,26 +611,20 @@ class KoboiApp(App):
         chat = self.query_one("#chat-area", ChatLog)
         chat.add_iteration_marker(event.iteration, event.messages_count)
 
-        try:
-            from koboi.tools.builtin.task import get_manager
-
-            mgr = get_manager()
+        core = self._agent.core
+        mgr = core.tools.get_dep("task_manager") if core else None
+        if mgr:
             status.task_summary = mgr.summary_short()
-        except (RuntimeError, ImportError):
-            pass
 
     def on_stream_complete(self, event: StreamComplete) -> None:
         chat = self.query_one("#chat-area", ChatLog)
         chat.finalize_stream(event.content)
         status = self.query_one("#status-bar", StatusBar)
         status.state = "idle"
-        try:
-            from koboi.tools.builtin.task import get_manager
-
-            mgr = get_manager()
+        core = self._agent.core
+        mgr = core.tools.get_dep("task_manager") if core else None
+        if mgr:
             status.task_summary = mgr.summary_short()
-        except (RuntimeError, ImportError):
-            pass
         if not self._app_focused and self._notify_enabled:
             from koboi.notifications import notify
 

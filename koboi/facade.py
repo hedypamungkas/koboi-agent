@@ -879,7 +879,7 @@ class AgentAssembler:
         # ReadBeforeWriteResetHook clears stale read-tracking on session start
         # and real compaction. Each is added only when its collaborator exists.
         if self.hook_chain:
-            task_mgr = self.tools.get_dep("manager")
+            task_mgr = self.tools.get_dep("task_manager")
             if task_mgr is not None:
                 from koboi.hooks.task_persistence_hook import TaskPersistenceHook
 
@@ -1160,7 +1160,7 @@ def _setup_subagent(
         )
         if memory is not None:
             manager._parent_memory = memory  # type: ignore[attr-defined]  # injected attr consumed by SubAgentManager._run_single
-        tools.set_dep("manager", manager)
+        tools.set_dep("subagent_manager", manager)
 
 
 def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None = None) -> None:
@@ -1169,7 +1169,7 @@ def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None 
         from koboi.task import TaskManager
 
         mgr = TaskManager()
-        tools.set_dep("manager", mgr)
+        tools.set_dep("task_manager", mgr)
         # Inject manager into TaskHook if present in the chain
         if hook_chain is not None:
             for hook in getattr(hook_chain, "_hooks", []):

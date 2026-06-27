@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from koboi.tools.registry import tool
 from koboi.types import RiskLevel
 
 if TYPE_CHECKING:
     from koboi.task import Task
-
-
-def get_manager() -> Any:
-    """Backward-compat accessor. Prefer _deps['manager'] in tool functions."""
-    raise RuntimeError("TaskManager not initialized — use _deps['manager'] instead")
 
 
 @tool(
@@ -44,13 +39,13 @@ def get_manager() -> Any:
         "required": ["subject"],
     },
     risk_level=RiskLevel.SAFE,
-    deps=["manager"],
+    deps=["task_manager"],
 )
 def task_create(
     subject: str, description: str = "", blocked_by: list[str] | None = None, _deps: dict | None = None
 ) -> str:
     try:
-        mgr = _deps.get("manager") if _deps else None
+        mgr = _deps.get("task_manager") if _deps else None
         if mgr is None:
             return "Error: TaskManager not initialized"
         task = mgr.create(subject, description, blocked_by=blocked_by)
@@ -79,11 +74,11 @@ def task_create(
         "required": [],
     },
     risk_level=RiskLevel.SAFE,
-    deps=["manager"],
+    deps=["task_manager"],
 )
 def task_list(status: str = "", _deps: dict | None = None) -> str:
     try:
-        mgr = _deps.get("manager") if _deps else None
+        mgr = _deps.get("task_manager") if _deps else None
         if mgr is None:
             return "Error: TaskManager not initialized"
         tasks = mgr.list_tasks(status_filter=status or None)
@@ -116,11 +111,11 @@ def task_list(status: str = "", _deps: dict | None = None) -> str:
         "required": ["task_id"],
     },
     risk_level=RiskLevel.SAFE,
-    deps=["manager"],
+    deps=["task_manager"],
 )
 def task_get(task_id: str, _deps: dict | None = None) -> str:
     try:
-        mgr = _deps.get("manager") if _deps else None
+        mgr = _deps.get("task_manager") if _deps else None
         if mgr is None:
             return "Error: TaskManager not initialized"
         task = mgr.get(task_id)
@@ -173,13 +168,13 @@ def task_get(task_id: str, _deps: dict | None = None) -> str:
         "required": ["task_id"],
     },
     risk_level=RiskLevel.SAFE,
-    deps=["manager"],
+    deps=["task_manager"],
 )
 def task_update(
     task_id: str, status: str = "", subject: str = "", description: str = "", _deps: dict | None = None
 ) -> str:
     try:
-        mgr = _deps.get("manager") if _deps else None
+        mgr = _deps.get("task_manager") if _deps else None
         if mgr is None:
             return "Error: TaskManager not initialized"
 
@@ -230,11 +225,11 @@ def task_update(
         "required": ["task_id", "depends_on"],
     },
     risk_level=RiskLevel.SAFE,
-    deps=["manager"],
+    deps=["task_manager"],
 )
 def task_add_dependency(task_id: str, depends_on: str, _deps: dict | None = None) -> str:
     try:
-        mgr = _deps.get("manager") if _deps else None
+        mgr = _deps.get("task_manager") if _deps else None
         if mgr is None:
             return "Error: TaskManager not initialized"
         success, message = mgr.add_dependency(task_id, depends_on)

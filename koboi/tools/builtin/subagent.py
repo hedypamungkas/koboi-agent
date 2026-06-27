@@ -41,10 +41,10 @@ from koboi.types import RiskLevel
         "required": ["tasks"],
     },
     risk_level=RiskLevel.SAFE,
-    deps=["manager"],
+    deps=["subagent_manager"],
 )
 async def delegate_tasks(tasks: list[dict], _deps: dict | None = None) -> str:
-    _mgr = _deps.get("manager") if _deps else None
+    _mgr = _deps.get("subagent_manager") if _deps else None
     if _mgr is None:
         return "Error: subagent system not initialized. Cannot delegate tasks."
 

@@ -82,14 +82,12 @@ def _show_lifecycle_info() -> None:
 
 def _run_with_monitoring_demo() -> None:
     """Show how to monitor subagents programmatically."""
-    from koboi.tools.builtin.subagent import get_manager
-
     console.print("\n[bold cyan]Programmatic Subagent Control[/bold cyan]\n")
 
     agent = create_agent("25_subagent_delegation")
 
-    # Show that manager is wired up
-    manager = get_manager()
+    # Show that manager is wired up (SubAgentManager lives on the agent's tool registry)
+    manager = agent.core.tools.get_dep("subagent_manager") if agent.core else None
     if manager:
         console.print("  SubAgentManager: [green]active[/green]")
         console.print(f"  Timeout: [cyan]{manager.timeout}s[/cyan]")

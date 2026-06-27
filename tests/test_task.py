@@ -292,7 +292,7 @@ class TestTaskTools:
         from koboi.tools.builtin import task as task_mod
 
         registry = ToolRegistry()
-        registry.set_dep("manager", self._mgr)
+        registry.set_dep("task_manager", self._mgr)
         register_decorated(registry, task_mod)
         return registry
 
@@ -393,7 +393,7 @@ class TestTaskTools:
         from koboi.tools.builtin import task as task_mod
 
         registry = ToolRegistry()
-        # Don't set dep "manager" -- simulates uninitialized state
+        # Don't set dep "task_manager" -- simulates uninitialized state
         register_decorated(registry, task_mod)
         result = await registry.execute("task_create", json.dumps({"subject": "Test"}))
         assert "Error" in result
