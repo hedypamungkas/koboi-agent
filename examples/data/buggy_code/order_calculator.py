@@ -1,6 +1,5 @@
 """Order pricing calculator with discount and tax handling."""
 
-from typing import Optional
 from dataclasses import dataclass, field
 
 

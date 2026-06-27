@@ -28,7 +28,6 @@ from koboi import KoboiAgent
 from koboi.eval import (
     EvalCase,
     EvalRunner,
-    EvalConfig,
     RegressionTracker,
     ScorerRegistry,
     LoaderRegistry,
@@ -56,7 +55,9 @@ async def run_bfcl_suite(agent_config: str, max_cases: int = 10) -> list:
     )
     print(f"Loaded {len(cases)} BFCL cases")
 
-    harness_factory = lambda: KoboiAgent.from_config(agent_config)
+    def harness_factory():
+        return KoboiAgent.from_config(agent_config)
+
     scorers = ScorerRegistry.from_config(
         [
             {"name": "tool_calling_accuracy"},
@@ -74,7 +75,9 @@ async def run_ragas_suite(agent_config: str, doc_paths: list[str]) -> list:
     """Run RAGAS RAG quality benchmark."""
     print("\n=== RAGAS: RAG Quality ===")
 
-    harness_factory = lambda: KoboiAgent.from_config(agent_config)
+    def harness_factory():
+        return KoboiAgent.from_config(agent_config)
+
     # Use faithfulness scorer (answer_relevancy needs embeddings endpoint not available on proxy)
     scorers = ScorerRegistry.from_config(
         [
@@ -167,7 +170,9 @@ async def run_gaia_suite(agent_config: str, max_cases: int = 5) -> list:
     """Run GAIA general task benchmark."""
     print("\n=== GAIA: General Task Completion ===")
 
-    harness_factory = lambda: KoboiAgent.from_config(agent_config)
+    def harness_factory():
+        return KoboiAgent.from_config(agent_config)
+
     scorers = ScorerRegistry.from_config(
         [
             {"name": "gaia_verification", "numeric_tolerance": 0.01},
@@ -207,7 +212,9 @@ async def run_swe_bench_suite(agent_config: str, max_cases: int = 5) -> list:
     swe_config = str(Path(__file__).parent.parent / "configs" / "swe_bench.yaml")
     config_to_use = swe_config if Path(swe_config).exists() else agent_config
 
-    harness_factory = lambda: KoboiAgent.from_config(config_to_use)
+    def harness_factory():
+        return KoboiAgent.from_config(config_to_use)
+
     scorers = ScorerRegistry.from_config(
         [
             {"name": "patch_generation"},
@@ -269,7 +276,7 @@ def main():
     parser.add_argument("--save-baseline", action="store_true", help="Save results as baseline")
     args = parser.parse_args()
 
-    print(f"Koboi Agent Benchmark Suite")
+    print("Koboi Agent Benchmark Suite")
     print(f"Config: {args.config}")
     print(f"Framework: {args.framework}")
     print(f"Available scorers: {ScorerRegistry.list_available()}")

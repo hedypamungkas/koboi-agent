@@ -15,7 +15,6 @@ Run:
 
 from __future__ import annotations
 
-import sys
 
 import click
 from rich.markdown import Markdown
@@ -31,7 +30,6 @@ from conftest import (
     create_agent,
     automatic_batch,
     interactive_loop,
-    run_async,
 )
 
 ensure_path()
@@ -93,7 +91,7 @@ def _run_with_monitoring_demo() -> None:
     # Show that manager is wired up
     manager = get_manager()
     if manager:
-        console.print(f"  SubAgentManager: [green]active[/green]")
+        console.print("  SubAgentManager: [green]active[/green]")
         console.print(f"  Timeout: [cyan]{manager.timeout}s[/cyan]")
         console.print(f"  Max iterations: [cyan]{manager.max_iterations}[/cyan]")
     else:

@@ -14,7 +14,6 @@ Run:
 from __future__ import annotations
 
 import sys
-import time
 
 import click
 from rich.markdown import Markdown
@@ -122,7 +121,6 @@ class BM25Retriever(BaseRetriever):
         return re.findall(r"\w+", text.lower())
 
     def _build_index(self) -> None:
-        import math
 
         total_len = 0
         for chunk in self._chunks:
@@ -355,7 +353,6 @@ def run_automatic(verbose: bool):
 
 def run_interactive(verbose: bool):
     """Interactive mode: pick a config and chat with RAG augmentation."""
-    from koboi.rag.augmentation import InMemoryAugmentation
     from koboi.loop import AgentCore
     from koboi.memory import ConversationMemory
     from koboi.client import Client

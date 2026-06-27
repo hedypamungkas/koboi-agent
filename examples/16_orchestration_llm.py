@@ -34,7 +34,6 @@ from conftest import (
 ensure_path()
 load_env()
 
-from pathlib import Path
 
 TEST_QUERIES = [
     ("How much leave do I have left?", "hr"),

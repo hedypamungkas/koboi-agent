@@ -42,7 +42,7 @@ class AgentLogger:
             try:
                 self._handler.close()
                 self._logger.removeHandler(self._handler)
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
             self._handler = None
 

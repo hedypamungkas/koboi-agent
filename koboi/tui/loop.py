@@ -160,7 +160,7 @@ def _print_summary(console: Console, turns: int, start_time: float, agent=None) 
         try:
             mem_len = len(agent.core.memory)
             parts.append(f"{mem_len} in memory")
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
     console.print(f"\n[dim]Goodbye! {' | '.join(parts)}[/dim]")
@@ -338,7 +338,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
             console.print("[yellow]Can only revert 1-10 commits.[/yellow]")
             return
         try:
-            log_result = _sp.run(["git", "log", f"-{n}", "--oneline"], capture_output=True, text=True, timeout=10)
+            log_result = _sp.run(["git", "log", f"-{n}", "--oneline"], capture_output=True, text=True, timeout=10)  # nosec B607 - intentional PATH-based launch of a user tool/editor
             if log_result.returncode != 0:
                 console.print(f"[red]Git error: {log_result.stderr.strip()}[/red]")
                 return
@@ -349,7 +349,7 @@ def build_slash_commands(agent) -> dict[str, Callable]:
         reverted = 0
         for i in range(n):
             try:
-                result = _sp.run(["git", "revert", "HEAD", "--no-edit"], capture_output=True, text=True, timeout=30)
+                result = _sp.run(["git", "revert", "HEAD", "--no-edit"], capture_output=True, text=True, timeout=30)  # nosec B607 - intentional PATH-based launch of a user tool/editor
                 if result.returncode == 0:
                     reverted += 1
                 else:
@@ -383,10 +383,10 @@ def build_slash_commands(agent) -> dict[str, Callable]:
             import subprocess as _sp
 
             if shutil.which("pbcopy"):
-                _sp.run(["pbcopy"], input=last_assistant.encode(), check=True)
+                _sp.run(["pbcopy"], input=last_assistant.encode(), check=True)  # nosec B607 - intentional PATH-based launch of a user tool/editor
                 copied = True
             elif shutil.which("xclip"):
-                _sp.run(["xclip", "-selection", "clipboard"], input=last_assistant.encode(), check=True)
+                _sp.run(["xclip", "-selection", "clipboard"], input=last_assistant.encode(), check=True)  # nosec B607 - intentional PATH-based launch of a user tool/editor
                 copied = True
         if copied:
             preview = last_assistant[:80] + "..." if len(last_assistant) > 80 else last_assistant

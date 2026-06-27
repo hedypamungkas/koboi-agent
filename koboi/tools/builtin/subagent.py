@@ -64,7 +64,7 @@ async def delegate_tasks(tasks: list[dict], _deps: dict | None = None) -> str:
     if parent_memory is not None:
         try:
             parent_messages = parent_memory.get_messages()
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
     results = await _mgr.run_tasks(subagent_tasks, parent_messages=parent_messages)

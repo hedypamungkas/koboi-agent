@@ -14,9 +14,7 @@ Run:
 from __future__ import annotations
 
 import click
-from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.prompt import Prompt
 from rich.table import Table
 
 from conftest import (
@@ -96,7 +94,6 @@ def _print_results(results):
     console.print()
     for r in results:
         status = "PASS" if r.overall_score >= 0.6 else "FAIL"
-        border = "green" if r.overall_score >= 0.6 else "red"
 
         detail_table = Table(show_header=True, header_style="bold", title=f"[{status}] {r.case_name}")
         detail_table.add_column("Scorer", style="cyan", width=25)

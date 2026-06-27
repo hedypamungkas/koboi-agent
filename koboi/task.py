@@ -62,8 +62,8 @@ class TaskManager:
         status: str | None = None,
         subject: str | None = None,
         description: str | None = None,
-    ) -> Task | tuple[Task, str]:
-        """Update a task. Returns Task on success, or (Task, reason) if blocked."""
+    ) -> Task | tuple[Task, str] | None:
+        """Update a task. Returns Task on success, (Task, reason) if blocked, or None if not found."""
         task = self._tasks.get(task_id)
         if task is None:
             return None

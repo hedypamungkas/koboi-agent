@@ -15,10 +15,8 @@ Run:
 
 from __future__ import annotations
 
-import sys
 
 import click
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
@@ -31,7 +29,6 @@ from conftest import (
     create_agent,
     automatic_batch,
     interactive_loop,
-    run_async,
 )
 
 ensure_path()
