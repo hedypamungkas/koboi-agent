@@ -608,7 +608,7 @@ def _build_guardrails(config: Config, logger: AgentLogger | None = None):
     return input_grds, output_grds, rate_limiter, audit_trail
 
 
-def _build_approval(config: Config):
+def _build_approval(config: Config, trust_db=None):
     handler_conf = config.get("guardrails", "approval", default={})
     handler_type = handler_conf.get("handler", "auto")
     if handler_type == "cli":
@@ -619,6 +619,20 @@ def _build_approval(config: Config):
         from koboi.guardrails.approval import CallbackApprovalHandler
 
         return CallbackApprovalHandler(handler_conf.get("callback", lambda *a: True))
+    elif handler_type == "async_callback":
+        # REST/SSE-friendly non-blocking handler. ``callback``/``audit_trail`` are
+        # caller-injected (non-serializable) -- the M2 server bootstrap populates
+        # them programmatically; absent a callback we return None (no handler).
+        from koboi.guardrails.approval import AsyncCallbackApprovalHandler
+
+        callback = handler_conf.get("callback")
+        if callback is None:
+            return None
+        timeout = handler_conf.get("timeout", 120)
+        audit_trail = handler_conf.get("audit_trail")
+        return AsyncCallbackApprovalHandler(
+            callback=callback, trust_db=trust_db, audit_trail=audit_trail, timeout=timeout
+        )
     return None
 
 
@@ -815,7 +829,7 @@ class AgentAssembler:
         return self.input_guardrails, self.output_guardrails, self.rate_limiter, self.audit_trail
 
     def build_approval(self) -> object:
-        self.approval_handler = _build_approval(self.config)
+        self.approval_handler = _build_approval(self.config, trust_db=self.trust_db)
         return self.approval_handler
 
     def build_policy(self) -> object:
@@ -858,11 +872,11 @@ class AgentAssembler:
         self.build_context()
         self.build_rag()
         self.build_guardrails()
+        self.build_trust_db()
         self.build_approval()
         self.build_policy()
         self.build_skills()
         self.build_mode_manager()
-        self.build_trust_db()
         self.build_hooks()
 
         _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
@@ -911,6 +925,7 @@ class AgentAssembler:
             hook_chain=self.hook_chain,
             mode_manager=self.mode_manager,
             journal=self.journal,
+            trust_db=self.trust_db,
         )
 
         return KoboiAgent(
@@ -1089,11 +1104,11 @@ def _build_orchestration(config: Config, verbose: bool = False):
     assembler.build_logger()
     assembler.build_client()
     assembler.build_guardrails()
+    assembler.build_trust_db()
     assembler.build_approval()
     assembler.build_policy()
     assembler.build_skills()
     assembler.build_mode_manager()
-    assembler.build_trust_db()
     assembler.build_hooks()
     assembler.build_sandbox()
 

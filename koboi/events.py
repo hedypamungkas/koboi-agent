@@ -49,6 +49,24 @@ class ErrorEvent:
 
 
 @dataclass
+class PendingApprovalEvent:
+    """Emitted when a tool call is awaiting human approval (HITL).
+
+    M0 ships the type + serialization only; emission on the SSE stream is wired
+    in M2 (the interactive approval flow). All fields are JSON primitives so the
+    generic ``asdict`` path in ``event_to_dict`` handles it (no special case).
+    """
+
+    approval_id: str
+    tool_name: str
+    tool_call_id: str
+    arguments: str
+    risk_level: str
+    reason: str = ""
+    timeout_seconds: float = 120.0
+
+
+@dataclass
 class RoutingDecisionEvent:
     """Emitted when the router selects agents for a query."""
 
@@ -101,6 +119,7 @@ StreamEvent = Union[
     IterationEvent,
     CompleteEvent,
     ErrorEvent,
+    PendingApprovalEvent,
     RoutingDecisionEvent,
     AgentDispatchEvent,
     AgentResultEvent,
@@ -115,6 +134,7 @@ _EVENT_TYPE_MAP: dict[type, str] = {
     IterationEvent: "iteration",
     CompleteEvent: "complete",
     ErrorEvent: "error",
+    PendingApprovalEvent: "pending_approval",
     RoutingDecisionEvent: "routing_decision",
     AgentDispatchEvent: "agent_dispatch",
     AgentResultEvent: "agent_result",

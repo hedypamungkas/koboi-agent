@@ -192,6 +192,14 @@ class Config:
         return self.get("journal", default={})
 
     @property
+    def server(self) -> dict:
+        return self.get("server", default={})
+
+    @property
+    def jobs(self) -> dict:
+        return self.get("jobs", default={})
+
+    @property
     def agent_name(self) -> str:
         return self.agent.get("name", "koboi-agent")
 
@@ -563,6 +571,70 @@ class ConfigBuilder:
             section["enabled"] = enabled
         if record_tool_calls is not None:
             section["record_tool_calls"] = record_tool_calls
+        return self
+
+    def server(
+        self,
+        *,
+        enabled: bool | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        api_keys_file: str | None = None,
+        api_keys: list[str] | None = None,
+        auth_required: bool | None = None,
+        cors: dict | None = None,
+        pool: dict | None = None,
+        timeouts: dict | None = None,
+        limits: dict | None = None,
+        idempotency: dict | None = None,
+        workdir_ttl_seconds: float | None = None,
+    ) -> ConfigBuilder:
+        section = self._data.setdefault("server", {})
+        for key, val in {
+            "enabled": enabled,
+            "host": host,
+            "port": port,
+            "api_keys_file": api_keys_file,
+            "api_keys": api_keys,
+            "auth_required": auth_required,
+            "cors": cors,
+            "pool": pool,
+            "timeouts": timeouts,
+            "limits": limits,
+            "idempotency": idempotency,
+            "workdir_ttl_seconds": workdir_ttl_seconds,
+        }.items():
+            if val is not None:
+                section[key] = val
+        return self
+
+    def jobs(
+        self,
+        *,
+        enabled: bool | None = None,
+        max_concurrent: int | None = None,
+        per_tenant_max: int | None = None,
+        queue_depth: int | None = None,
+        default_dedicated_session: bool | None = None,
+        event_buffer: dict | None = None,
+        resume_on_startup: bool | None = None,
+        timeout_seconds: float | None = None,
+        ttl_seconds: float | None = None,
+    ) -> ConfigBuilder:
+        section = self._data.setdefault("jobs", {})
+        for key, val in {
+            "enabled": enabled,
+            "max_concurrent": max_concurrent,
+            "per_tenant_max": per_tenant_max,
+            "queue_depth": queue_depth,
+            "default_dedicated_session": default_dedicated_session,
+            "event_buffer": event_buffer,
+            "resume_on_startup": resume_on_startup,
+            "timeout_seconds": timeout_seconds,
+            "ttl_seconds": ttl_seconds,
+        }.items():
+            if val is not None:
+                section[key] = val
         return self
 
     def build(self) -> Config:

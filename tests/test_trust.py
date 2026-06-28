@@ -106,3 +106,28 @@ class TestTrustDatabase:
         assert TrustDatabase._risk_leq("safe", "destructive") is True
         assert TrustDatabase._risk_leq("moderate", "safe") is False
         assert TrustDatabase._risk_leq("destructive", "destructive") is True
+
+
+class TestTrustStoreProtocol:
+    """TrustStore Protocol (M0) -- structural surface the pipeline consumes."""
+
+    def test_trust_database_satisfies_protocol(self, trust_db):
+        # TrustDatabase exposes the two methods TrustStore declares.
+        assert callable(getattr(trust_db, "should_auto_approve", None))
+        assert callable(getattr(trust_db, "record_decision", None))
+
+    def test_fake_store_is_usable(self):
+        # A duck-typed store (no SQLite) satisfies TrustStore structurally;
+        # this is the seam a future multi-tenant/Redis store will plug into.
+        from koboi.trust import TrustDecision
+        from koboi.types import RiskLevel
+
+        class _FakeStore:
+            def should_auto_approve(self, tool_name, risk_level):
+                return TrustDecision(auto_approve=False)
+
+            def record_decision(self, tool_name, risk_level, decision, always=False, ttl_seconds=None):
+                pass
+
+        fake = _FakeStore()
+        assert fake.should_auto_approve("x", RiskLevel.SAFE).auto_approve is False

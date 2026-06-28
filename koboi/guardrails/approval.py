@@ -6,15 +6,22 @@ can be skipped with auto_approve=True or overridden with custom callback.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 from collections.abc import Awaitable
 from typing import Callable
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
+from koboi.guardrails.approval_types import ApprovalCallback, ApprovalRequest, ApprovalResponse
 from koboi.types import AuditEntry, RiskLevel
 
 if TYPE_CHECKING:
     from koboi.guardrails.audit import AuditTrail
+    from koboi.trust import TrustDatabase
+
+_logger = logging.getLogger(__name__)
 
 _rich_available = False
 try:
@@ -126,3 +133,97 @@ class CallbackApprovalHandler(ApprovalHandler):
             )
 
         return approved
+
+
+class AsyncCallbackApprovalHandler(ApprovalHandler):
+    """Non-blocking approval backed by an async ``callback`` (REST/SSE friendly).
+
+    Modeled on ``TUIApprovalHandler`` (``koboi/tui/approval.py``) but replaces
+    Textual's message bus with a caller-supplied async ``callback`` that receives
+    an :class:`ApprovalRequest` and resolves an :class:`ApprovalResponse`.
+
+    The tool-execution pipeline already ``await``s async ``should_approve``
+    implementations (``loop_pipeline.py``), so this handler slots in unchanged.
+
+    Use cases: M0 unit tests; M2 REST/SSE server (the callback enqueues a
+    pending approval, emits a ``PendingApprovalEvent`` on the SSE stream, and
+    awaits an ``asyncio.Future`` resolved by ``POST /approve``).
+    """
+
+    def __init__(
+        self,
+        callback: ApprovalCallback,
+        trust_db: TrustDatabase | None = None,
+        audit_trail: AuditTrail | None = None,
+        timeout: float = 120.0,
+    ) -> None:
+        self._callback = callback
+        self._trust_db = trust_db
+        self.audit_trail = audit_trail
+        self._timeout = timeout
+
+    async def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
+        # 1. Trust DB fast-path (auto-allow). Auto-deny is left to the pipeline's
+        #    own trust consultation; here we only short-circuit on an allow rule.
+        if self._trust_db:
+            trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level)
+            if trust_decision.auto_approve:
+                self._audit(tool_name, arguments, risk_level, True, trust_decision.reason)
+                return True
+
+        # 2. Delegate the actual prompt to the caller-supplied async callback;
+        #    enforce a timeout (deny on timeout) and fail-closed on error.
+        request = ApprovalRequest(
+            tool_name=tool_name,
+            arguments=arguments,
+            risk_level=risk_level,
+            reason="risk-based approval",
+            approval_id=f"ap_{uuid4().hex[:24]}",
+        )
+        try:
+            response: ApprovalResponse = await asyncio.wait_for(self._callback(request), timeout=self._timeout)
+        except asyncio.TimeoutError:
+            response = ApprovalResponse(approved=False)
+        except Exception as exc:  # fail-closed: never silently proceed
+            _logger.warning("Async approval callback error for %s: %s", tool_name, exc)
+            response = ApprovalResponse(approved=False)
+
+        # 3. Persist "always" decisions so future calls auto-approve.
+        if response.always_allow and self._trust_db:
+            self._trust_db.record_decision(
+                tool_name=tool_name,
+                risk_level=risk_level,
+                decision="allow" if response.approved else "deny",
+                always=True,
+            )
+
+        # 4. Audit.
+        self._audit(
+            tool_name,
+            arguments,
+            risk_level,
+            response.approved,
+            "always_allow" if response.always_allow else "one_shot",
+        )
+        return response.approved
+
+    def _audit(
+        self,
+        tool_name: str,
+        arguments: str,
+        risk_level: RiskLevel,
+        approved: bool,
+        details: str,
+    ) -> None:
+        if self.audit_trail:
+            self.audit_trail.record(
+                AuditEntry(
+                    timestamp=time.time(),
+                    event_type="tool_approved" if approved else "tool_denied",
+                    tool_name=tool_name,
+                    arguments=arguments[:500],
+                    result="approved" if approved else "denied",
+                    risk_level=risk_level.value,
+                    details=f"Async callback approval: {details}",
+                )
+            )

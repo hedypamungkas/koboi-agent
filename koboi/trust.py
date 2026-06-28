@@ -11,6 +11,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from fnmatch import fnmatch
+from typing import Protocol, runtime_checkable
 
 from koboi.types import RiskLevel
 
@@ -35,6 +36,28 @@ class TrustRule:
     created_at: float
     expires_at: float | None
     context: str
+
+
+@runtime_checkable
+class TrustStore(Protocol):
+    """Minimal read/write surface the tool-execution pipeline consumes.
+
+    ``TrustDatabase`` is the default implementation. Defining this Protocol now
+    (M0) means a future multi-tenant store (per-tenant scoping, Redis/Postgres
+    backing) can be swapped in at the facade wiring point without editing
+    ``loop_pipeline.py`` or its tests.
+    """
+
+    def should_auto_approve(self, tool_name: str, risk_level: RiskLevel) -> TrustDecision: ...
+
+    def record_decision(
+        self,
+        tool_name: str,
+        risk_level: RiskLevel,
+        decision: str,
+        always: bool = False,
+        ttl_seconds: float | None = None,
+    ) -> None: ...
 
 
 class TrustDatabase:

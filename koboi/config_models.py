@@ -246,6 +246,7 @@ class SandboxConfig(BaseModel):
 
     backend: str = "passthrough"
     workdir: str = "."
+    workdir_strategy: str = "shared"  # "shared" (legacy global) | "per_session" (M1 serving)
     network: str = "deny"
     network_binaries: list[str] = Field(default_factory=list)
     safe_path: list[str] = Field(default_factory=list)
@@ -269,6 +270,50 @@ class JournalConfig(BaseModel):
     record_tool_calls: bool = True
 
 
+class ServerConfig(BaseModel):
+    """Top-level ``server:`` section -- REST/SSE serving (M0 skeleton; M1+ wiring).
+
+    M0 ships the schema only; no runtime code reads it yet. Nested groups
+    (``pool``/``timeouts``/``limits``/``cors``/``idempotency``) are dicts now and
+    are promoted to typed sub-models as each is consumed in M1+.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = Field(default=8080, ge=1, le=65535)
+    api_keys_file: str | None = None
+    api_keys: list[str] = Field(default_factory=list)
+    auth_required: bool = True
+    cors: dict = Field(default_factory=dict)
+    pool: dict = Field(default_factory=dict)
+    timeouts: dict = Field(default_factory=dict)
+    limits: dict = Field(default_factory=dict)
+    idempotency: dict = Field(default_factory=dict)
+    workdir_ttl_seconds: float = Field(default=86400.0, gt=0)
+
+
+class JobsConfig(BaseModel):
+    """Top-level ``jobs:`` section -- background/autonomous job runner (M0 skeleton; M4 wiring).
+
+    Drives long-running agent runs outside the request lifecycle with
+    resume-on-startup durability. M0 ships the schema only.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    max_concurrent: int = Field(default=64, ge=1)
+    per_tenant_max: int = Field(default=5, ge=1)
+    queue_depth: int = Field(default=32, ge=1)
+    default_dedicated_session: bool = True
+    event_buffer: dict = Field(default_factory=dict)
+    resume_on_startup: bool = True
+    timeout_seconds: float = Field(default=1800.0, gt=0)
+    ttl_seconds: float = Field(default=86400.0, gt=0)
+
+
 class KoboiConfig(BaseModel):
     """Top-level config schema for koboi-agent."""
 
@@ -289,6 +334,8 @@ class KoboiConfig(BaseModel):
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     journal: JournalConfig = Field(default_factory=JournalConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    jobs: JobsConfig = Field(default_factory=JobsConfig)
 
     @model_validator(mode="before")
     @classmethod

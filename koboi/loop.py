@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from koboi.skills.registry import SkillRegistry
     from koboi.modes import ModeManager
     from koboi.journal import StepJournal
+    from koboi.trust import TrustStore
 
 _log = _logging.getLogger("koboi.loop")
 
@@ -91,6 +92,7 @@ class AgentCore:
         hook_chain: HookChain | None = None,
         mode_manager: ModeManager | None = None,
         journal: StepJournal | None = None,
+        trust_db: TrustStore | None = None,
         # Backward-compatible singular kwargs
         input_guardrail: BaseGuardrail | None = None,
         output_guardrail: BaseGuardrail | None = None,
@@ -118,6 +120,7 @@ class AgentCore:
         self.hooks = hook_chain or HookChain()
         self.mode_manager = mode_manager
         self.journal = journal
+        self.trust_db = trust_db
         # P2-A: turn counter. On a fresh agent this is 0; on resume it inherits
         # the journal's highest recorded turn so numbering stays continuous.
         self._turn_index: int = journal.turn_index if journal else 0
@@ -233,6 +236,7 @@ class AgentCore:
                 verbose=self.verbose,
                 audit_fn=self._audit,
                 mode_manager=self.mode_manager,
+                trust_db=self.trust_db,
             )
         return self._tool_pipeline
 
