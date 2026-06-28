@@ -43,10 +43,42 @@ def _risk_color(level: RiskLevel) -> str:
 class ApprovalHandler:
     """Base class — deny destructive ops by default, allow others."""
 
+    #: Set by subclasses that support auditing (CLI/Callback/Async/TUI). Stays
+    #: ``None`` on the bare base / in handlers with no trail attached.
+    audit_trail: AuditTrail | None = None
+
     def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool | Awaitable[bool]:
         # May be sync (bool) or async (Awaitable[bool]); the execution pipeline
         # awaits when iscoroutinefunction(should_approve) is True.
         return risk_level != RiskLevel.DESTRUCTIVE
+
+    def _audit(
+        self,
+        tool_name: str,
+        arguments: str,
+        risk_level: RiskLevel,
+        approved: bool,
+        detail: str,
+        source: str,
+    ) -> None:
+        """Record an approval decision to the attached audit trail (no-op if none).
+
+        ``source`` is the handler-specific prefix (e.g. "Human approval via CLI")
+        so the resulting ``details`` reads ``"{source}: {detail}"`` and each
+        subclass preserves its historical audit wording.
+        """
+        if self.audit_trail is not None:
+            self.audit_trail.record(
+                AuditEntry(
+                    timestamp=time.time(),
+                    event_type="tool_approved" if approved else "tool_denied",
+                    tool_name=tool_name,
+                    arguments=arguments[:500],
+                    result="approved" if approved else "denied",
+                    risk_level=risk_level.value,
+                    details=f"{source}: {detail}",
+                )
+            )
 
 
 class CLIApprovalHandler(ApprovalHandler):
@@ -87,19 +119,14 @@ class CLIApprovalHandler(ApprovalHandler):
             except (EOFError, KeyboardInterrupt):
                 approved = False
 
-        if self.audit_trail:
-            event = "tool_approved" if approved else "tool_denied"
-            self.audit_trail.record(
-                AuditEntry(
-                    timestamp=time.time(),
-                    event_type=event,
-                    tool_name=tool_name,
-                    arguments=arguments[:500],
-                    result="approved" if approved else "denied",
-                    risk_level=risk_level.value,
-                    details=f"Human approval via CLI: {'yes' if approved else 'no'}",
-                )
-            )
+        self._audit(
+            tool_name,
+            arguments,
+            risk_level,
+            approved,
+            "yes" if approved else "no",
+            source="Human approval via CLI",
+        )
 
         return approved
 
@@ -118,19 +145,14 @@ class CallbackApprovalHandler(ApprovalHandler):
     def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
         approved = self.callback(tool_name, arguments, risk_level.value)
 
-        if self.audit_trail:
-            event = "tool_approved" if approved else "tool_denied"
-            self.audit_trail.record(
-                AuditEntry(
-                    timestamp=time.time(),
-                    event_type=event,
-                    tool_name=tool_name,
-                    arguments=arguments[:500],
-                    result="approved" if approved else "denied",
-                    risk_level=risk_level.value,
-                    details=f"Callback approval: {'yes' if approved else 'no'}",
-                )
-            )
+        self._audit(
+            tool_name,
+            arguments,
+            risk_level,
+            approved,
+            "yes" if approved else "no",
+            source="Callback approval",
+        )
 
         return approved
 
@@ -168,7 +190,9 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
         if self._trust_db:
             trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level)
             if trust_decision.auto_approve:
-                self._audit(tool_name, arguments, risk_level, True, trust_decision.reason)
+                self._audit(
+                    tool_name, arguments, risk_level, True, trust_decision.reason, source="Async callback approval"
+                )
                 return True
 
         # 2. Delegate the actual prompt to the caller-supplied async callback;
@@ -204,26 +228,6 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
             risk_level,
             response.approved,
             "always_allow" if response.always_allow else "one_shot",
+            source="Async callback approval",
         )
         return response.approved
-
-    def _audit(
-        self,
-        tool_name: str,
-        arguments: str,
-        risk_level: RiskLevel,
-        approved: bool,
-        details: str,
-    ) -> None:
-        if self.audit_trail:
-            self.audit_trail.record(
-                AuditEntry(
-                    timestamp=time.time(),
-                    event_type="tool_approved" if approved else "tool_denied",
-                    tool_name=tool_name,
-                    arguments=arguments[:500],
-                    result="approved" if approved else "denied",
-                    risk_level=risk_level.value,
-                    details=f"Async callback approval: {details}",
-                )
-            )

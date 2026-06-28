@@ -88,29 +88,48 @@ class ToolExecutionPipeline:
         message: str,
         skip_reason: str,
         on_event: EventCallback | None = None,
-        *,
-        result_message: str | None = None,
     ) -> ToolPipelineResult:
         """Common deny/skip tail: persist the tool result + emit event + build result.
 
-        ``message`` is what gets stored in conversation memory; ``result_message``
-        (when given) is what the caller/stream sees -- kept separate to preserve
-        the exact strings historically emitted by each deny path.
+        ``message`` is used for both conversation memory and the streamed result,
+        so there is one canonical string per deny path.
         """
         self.memory.add_tool_result(tc.id, message)
-        out = result_message if result_message is not None else message
         if on_event:
             on_event(
                 "tool_result",
-                {"tool_name": tc.name, "tool_call_id": tc.id, "result": out},
+                {"tool_name": tc.name, "tool_call_id": tc.id, "result": message},
             )
         return ToolPipelineResult(
             tool_call_id=tc.id,
             tool_name=tc.name,
-            result=out,
+            result=message,
             skipped=True,
             skip_reason=skip_reason,
         )
+
+    def _deny_tool(
+        self,
+        tc: ToolCall,
+        risk: RiskLevel,
+        skip_reason: str,
+        details: str,
+        on_event: EventCallback | None = None,
+    ) -> ToolPipelineResult:
+        """Unified tool-denial: log + audit(``tool_denied``) + deny/skip tail.
+
+        Shared by the risk-based denial (step 3) and the policy-confirm denial
+        (step 4c) so memory/result wording stays identical across both.
+        """
+        self._log(f"Tool denied ({skip_reason}): {tc.name}")
+        self._audit(
+            "tool_denied",
+            tool_name=tc.name,
+            arguments=tc.arguments[:200],
+            risk_level=risk.value,
+            details=details,
+        )
+        return self._deny_or_skip(tc, "Error: Tool execution denied by user", skip_reason, on_event)
 
     async def _resolve_approval(
         self,
@@ -225,21 +244,7 @@ class ToolExecutionPipeline:
         if not is_yolo:
             outcome = await self._resolve_approval(tc, risk)
             if not outcome.proceed:
-                self._log(f"Tool denied: {tc.name}")
-                self._audit(
-                    "tool_denied",
-                    tool_name=tc.name,
-                    arguments=tc.arguments[:200],
-                    risk_level=risk.value,
-                    details=outcome.audit_details or "Denied by human",
-                )
-                return self._deny_or_skip(
-                    tc,
-                    "Error: Tool execution denied by user",
-                    "denied",
-                    on_event,
-                    result_message="Error: Denied by user",
-                )
+                return self._deny_tool(tc, risk, "denied", outcome.audit_details or "Denied by human", on_event)
             approval_prompted = outcome.prompted or outcome.reason == "skipped_via_trust"
 
         # 4. PRE_TOOL_USE hook
@@ -278,20 +283,8 @@ class ToolExecutionPipeline:
                     tc, risk, policy_reason=policy_reason, already_prompted=approval_prompted
                 )
                 if not confirm_outcome.proceed:
-                    self._log(f"Tool denied by policy confirm: {tc.name}")
-                    self._audit(
-                        "tool_denied",
-                        tool_name=tc.name,
-                        arguments=tc.arguments[:200],
-                        risk_level=risk.value,
-                        details=f"Policy confirm denied: {policy_reason}",
-                    )
-                    return self._deny_or_skip(
-                        tc,
-                        "Error: Tool execution denied by user",
-                        "policy_denied",
-                        on_event,
-                        result_message="Error: Denied by user",
+                    return self._deny_tool(
+                        tc, risk, "policy_denied", f"Policy confirm denied: {policy_reason}", on_event
                     )
 
             # 5. Mode block check (skipped in YOLO mode)
