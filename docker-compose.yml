@@ -1,0 +1,67 @@
+# docker-compose.yml — production self-host deployment for koboi-agent.
+#
+# Usage:
+#   1. Generate an API key:
+#        docker compose run --rm koboi koboi keys create --file /data/keys.json --label production
+#   2. Set your LLM key:
+#        export OPENAI_API_KEY=sk-...
+#   3. Start:
+#        docker compose up -d
+#   4. Test:
+#        curl -N -H "Authorization: Bearer koboi_..." \
+#          -H "Content-Type: application/json" \
+#          -d '{"message":"hello"}' \
+#          https://localhost/v1/chat/stream
+#
+# The koboi-data volume persists SQLite (memory, journal, jobs, ownership) +
+# workspace dirs across container restarts. Resume works after restart.
+
+services:
+  koboi:
+    build: .
+    container_name: koboi-agent
+    restart: unless-stopped
+    volumes:
+      - koboi-data:/data
+      - ./configs:/app/configs:ro          # override agent config
+    environment:
+      # --- Auth ---
+      - KOBOI_API_KEYS_FILE=/data/keys.json
+      # Or use env (comma-separated): KOBOI_API_KEYS=koboi_aaa,koboi_bbb
+      # --- LLM ---
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # --- Langfuse (optional) ---
+      - LANGFUSE_PUBLIC_KEY=${LF_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LF_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LF_BASE_URL:-http://langfuse:3000}
+      # --- Data paths ---
+      - KOBOI_DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    depends_on:
+      nginx:
+        condition: service_started
+
+  nginx:
+    image: nginx:alpine
+    container_name: koboi-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # For TLS (uncomment + provide certs):
+      # - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      koboi:
+        condition: service_healthy
+
+volumes:
+  koboi-data:
+    driver: local
