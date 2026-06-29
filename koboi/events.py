@@ -59,9 +59,10 @@ class PendingApprovalEvent:
 
     approval_id: str
     tool_name: str
-    tool_call_id: str
     arguments: str
     risk_level: str
+    tool_call_id: str = ""
+    reason: str = ""
     reason: str = ""
     timeout_seconds: float = 120.0
 

@@ -22,6 +22,7 @@ import copy
 import re
 import time
 from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from koboi.events import StreamEvent
@@ -179,6 +180,20 @@ class AgentPool:
                     yield event
             finally:
                 self._last_used[session_id] = time.monotonic()
+
+    @asynccontextmanager
+    async def session_lock(self, session_id: str):
+        """Acquire the per-session lock, yielding control to the caller.
+
+        Used by ``/chat/stream`` (M2) so the route can install a per-run approval
+        handler UNDER the lock (preventing a concurrent same-session request from
+        overwriting it before the run starts).
+        """
+        await self.get_or_create(session_id)
+        async with self._locks[session_id]:
+            self._last_used[session_id] = time.monotonic()
+            yield
+            self._last_used[session_id] = time.monotonic()
 
     async def get_messages(self, session_id: str) -> list[dict]:
         agent = self._agents.get(session_id)

@@ -269,5 +269,26 @@ class TestSecurity:
     async def test_safe_session_id_accepted(self):
         async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
             r = await c.post("/v1/chat/stream", json={"message": "hi"}, headers={"X-Session-Id": "valid-id_123"})
-            # streamed response (200) -- not a 400
             assert r.status_code == 200
+
+
+class TestApprovals:
+    """HTTP route tests for /approve.
+
+    The full mid-stream flow (stream + concurrent POST /approve) can't be tested
+    via httpx ASGITransport (asyncio.create_task inside anyio doesn't interleave).
+    The queue-bridge + coordinator + handler integration is tested directly in
+    ``test_server_approvals.py::TestQueueBridgeIntegration``. In production
+    (uvicorn), concurrent connections work correctly.
+    """
+
+    async def test_approve_no_active_session_404(self):
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
+            sid = (await c.post("/v1/sessions")).json()["session_id"]
+            r = await c.post(f"/v1/sessions/{sid}/approve", json={"approval_id": "x"})
+            assert r.status_code == 404
+
+    async def test_approve_unknown_session_404(self):
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
+            r = await c.post("/v1/sessions/nope/approve", json={"approval_id": "x"})
+            assert r.status_code == 404

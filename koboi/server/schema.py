@@ -68,3 +68,18 @@ class ReadyzCheck(BaseModel):
 class ReadyzResponse(BaseModel):
     status: Literal["ok", "down"]
     checks: list[ReadyzCheck]
+
+
+class ApproveRequest(BaseModel):
+    """POST /v1/sessions/:id/approve body."""
+
+    model_config = {"extra": "ignore"}
+
+    approval_id: str
+    decision: Literal["approve", "deny"] = "approve"
+    scope: Literal["once", "always"] = "once"
+
+
+class ApproveResponse(BaseModel):
+    approval_id: str
+    resolved: bool
