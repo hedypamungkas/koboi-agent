@@ -231,3 +231,36 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
             source="Async callback approval",
         )
         return response.approved
+
+
+class AutonomousApprovalHandler(ApprovalHandler):
+    """Autonomous-mode handler (M4): safe/moderate auto-approve; destructive → Trust DB or deny.
+
+    No human interaction (no pause, no Future). Destructive tools without a
+    Trust DB allow-rule are denied by default — anti prompt-injection safeguard
+    for jobs that run without human review.
+    """
+
+    def __init__(self, trust_db: TrustDatabase | None = None, audit_trail: AuditTrail | None = None) -> None:
+        self._trust_db = trust_db
+        self.audit_trail = audit_trail
+
+    def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
+        # Safe / moderate: allow (base behavior).
+        if risk_level != RiskLevel.DESTRUCTIVE:
+            return True
+        # Destructive: check Trust DB; deny if no rule.
+        if self._trust_db:
+            decision = self._trust_db.should_auto_approve(tool_name, risk_level)
+            if decision.auto_approve:
+                self._audit(tool_name, arguments, risk_level, True, decision.reason, source="Autonomous")
+                return True
+        self._audit(
+            tool_name,
+            arguments,
+            risk_level,
+            False,
+            "denied (autonomous: no trust rule for destructive tool)",
+            source="Autonomous",
+        )
+        return False

@@ -1,0 +1,292 @@
+"""koboi/server/jobs -- autonomous background job runner (M4).
+
+JobStore: SQLite ``jobs`` table (durable records). JobRegistry: in-memory
+(task + event buffer + status). run_job: executes an agent with
+AutonomousApprovalHandler, drains events to the buffer, updates status on
+completion/failure/timeout/cancel. Resume-on-startup: requeue pending, mark
+running-as-failed (simplified; full journal resume deferred to M5).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import sqlite3
+import time
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
+
+if TYPE_CHECKING:
+    from koboi.server.pool import AgentPool
+
+_logger = logging.getLogger(__name__)
+
+#: Terminal statuses (no further state transitions).
+TERMINAL = frozenset({"completed", "failed", "timed_out", "cancelled"})
+
+
+# ---------------------------------------------------------------------------
+# JobStore — SQLite durable records
+# ---------------------------------------------------------------------------
+
+
+class JobStore:
+    """SQLite-backed job records (``jobs`` table)."""
+
+    def __init__(self, db_path: str = "koboi_memory.db") -> None:
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._ensure_schema()
+
+    def _ensure_schema(self) -> None:
+        try:
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS jobs ("
+                "  job_id TEXT PRIMARY KEY,"
+                "  session_id TEXT NOT NULL,"
+                "  owner TEXT NOT NULL,"
+                "  status TEXT NOT NULL,"
+                "  message TEXT,"
+                "  result_json TEXT,"
+                "  error TEXT,"
+                "  idempotency_key TEXT,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL"
+                ")"
+            )
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_idem ON jobs(idempotency_key)")
+            self._conn.commit()
+        except Exception:
+            self._conn.close()
+            raise
+
+    def insert(
+        self,
+        job_id: str,
+        session_id: str,
+        owner: str,
+        message: str,
+        idempotency_key: str | None = None,
+    ) -> None:
+        now = time.time()
+        self._conn.execute(
+            "INSERT INTO jobs (job_id, session_id, owner, status, message, "
+            "idempotency_key, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
+            (job_id, session_id, owner, message, idempotency_key, now, now),
+        )
+        self._conn.commit()
+
+    def get(self, job_id: str) -> dict | None:
+        row = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_status(self, job_id: str, status: str, result_json: str | None = None, error: str | None = None) -> None:
+        self._conn.execute(
+            "UPDATE jobs SET status = ?, result_json = ?, error = ?, updated_at = ? WHERE job_id = ?",
+            (status, result_json, error, time.time(), job_id),
+        )
+        self._conn.commit()
+
+    def list_by_owner(self, owner: str, status: str | None = None) -> list[dict]:
+        if status:
+            rows = self._conn.execute(
+                "SELECT * FROM jobs WHERE owner = ? AND status = ? ORDER BY created_at DESC",
+                (owner, status),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM jobs WHERE owner = ? ORDER BY created_at DESC", (owner,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def find_by_idempotency_key(self, key: str, window_seconds: float = 86400) -> dict | None:
+        cutoff = time.time() - window_seconds
+        row = self._conn.execute(
+            "SELECT * FROM jobs WHERE idempotency_key = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 1",
+            (key, cutoff),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_by_status(self, status: str) -> list[dict]:
+        rows = self._conn.execute("SELECT * FROM jobs WHERE status = ? ORDER BY created_at", (status,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+# ---------------------------------------------------------------------------
+# JobRegistry — in-memory task + event buffer + status
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JobRecord:
+    """In-memory tracking for a single job."""
+
+    job_id: str
+    session_id: str
+    owner: str
+    status: str = "pending"
+    events: list = field(default_factory=list)
+    task: asyncio.Task | None = None
+    terminal: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+class JobRegistry:
+    """In-memory job registry with capped event buffer."""
+
+    def __init__(self, max_events: int = 500) -> None:
+        self._jobs: dict[str, JobRecord] = {}
+        self._max_events = max_events
+
+    def register(self, job_id: str, session_id: str, owner: str) -> JobRecord:
+        record = JobRecord(job_id=job_id, session_id=session_id, owner=owner)
+        self._jobs[job_id] = record
+        return record
+
+    def get(self, job_id: str) -> JobRecord | None:
+        return self._jobs.get(job_id)
+
+    def list_by_owner(self, owner: str) -> list[JobRecord]:
+        return [r for r in self._jobs.values() if r.owner == owner]
+
+    def append_event(self, job_id: str, event: Any) -> None:
+        record = self._jobs.get(job_id)
+        if record:
+            record.events.append(event)
+            if len(record.events) > self._max_events:
+                record.events = record.events[-self._max_events :]
+
+    def set_running(self, job_id: str, task: asyncio.Task) -> None:
+        record = self._jobs.get(job_id)
+        if record:
+            record.status = "running"
+            record.task = task
+
+    def set_terminal(self, job_id: str, status: str) -> None:
+        record = self._jobs.get(job_id)
+        if record:
+            record.status = status
+            record.terminal.set()
+
+    async def cancel(self, job_id: str) -> bool:
+        record = self._jobs.get(job_id)
+        if record and record.task and not record.task.done():
+            record.task.cancel()
+            return True
+        return False
+
+    @property
+    def active_count(self) -> int:
+        return sum(1 for r in self._jobs.values() if r.status == "running")
+
+
+# ---------------------------------------------------------------------------
+# run_job + resume_on_startup
+# ---------------------------------------------------------------------------
+
+
+def new_job_id() -> str:
+    return f"job_{uuid4().hex[:24]}"
+
+
+async def run_job(
+    job_id: str,
+    pool: AgentPool,
+    registry: JobRegistry,
+    store: JobStore,
+    message: str,
+    timeout: float = 1800,
+) -> None:
+    """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events."""
+
+    record = registry.get(job_id)
+    if record is None:
+        return
+
+    try:
+        await asyncio.wait_for(
+            _execute_job(job_id, pool, registry, store, message),
+            timeout=timeout,
+        )
+        store.update_status(job_id, "completed")
+        registry.set_terminal(job_id, "completed")
+    except asyncio.CancelledError:
+        store.update_status(job_id, "cancelled")
+        registry.set_terminal(job_id, "cancelled")
+        raise
+    except asyncio.TimeoutError:
+        store.update_status(job_id, "timed_out")
+        registry.set_terminal(job_id, "timed_out")
+    except Exception as exc:
+        _logger.exception("Job %s failed", job_id)
+        store.update_status(job_id, "failed", error=str(exc))
+        registry.set_terminal(job_id, "failed")
+
+
+async def _execute_job(
+    job_id: str,
+    pool: AgentPool,
+    registry: JobRegistry,
+    store: JobStore,
+    message: str,
+) -> None:
+    """Inner execution: agent setup + run_stream → event buffer."""
+    record = registry.get(job_id)
+    agent = await pool.get_or_create(record.session_id)
+
+    store.update_status(job_id, "running")
+    async with pool.session_lock(record.session_id):
+        # Install AutonomousApprovalHandler UNDER the lock (prevents race with
+        # concurrent /chat/stream). Restore prior handler in finally so
+        # interactive HITL is not permanently replaced on the shared agent.
+        prior_handler = agent._core.approval_handler
+        had_pipeline = hasattr(agent._core, "_tool_pipeline")
+        prior_pipeline = getattr(agent._core, "_tool_pipeline", None)
+        try:
+            if had_pipeline:
+                del agent._core._tool_pipeline
+            from koboi.guardrails.approval import AutonomousApprovalHandler
+
+            agent._core.approval_handler = AutonomousApprovalHandler(
+                trust_db=agent.trust_db,
+                audit_trail=agent._core.audit_trail,
+            )
+            async for event in agent.run_stream(message):
+                registry.append_event(job_id, event)
+        finally:
+            agent._core.approval_handler = prior_handler
+            if had_pipeline:
+                agent._core._tool_pipeline = prior_pipeline
+
+
+async def resume_on_startup(
+    store: JobStore,
+    pool: AgentPool,
+    registry: JobRegistry,
+    timeout: float,
+) -> int:
+    """Simplified resume: requeue pending; mark running-as-failed (interrupted).
+
+    Returns count of requeued jobs.
+    """
+    # Mark running jobs as failed (interrupted by restart).
+    for job in store.list_by_status("running"):
+        store.update_status(job["job_id"], "failed", error="interrupted by restart")
+        _logger.info("Job %s marked failed (interrupted by restart)", job["job_id"])
+
+    # Requeue pending jobs.
+    count = 0
+    for job in store.list_by_status("pending"):
+        registry.register(job["job_id"], job["session_id"], job["owner"])
+        task = asyncio.create_task(run_job(job["job_id"], pool, registry, store, job["message"], timeout))
+        registry.set_running(job["job_id"], task)
+        count += 1
+        _logger.info("Requeued job %s on startup", job["job_id"])
+
+    return count

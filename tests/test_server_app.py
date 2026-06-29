@@ -352,3 +352,125 @@ class TestAuth:
             assert r.status_code == 403
             r2 = await c.get(f"/v1/sessions/{sid}", headers={"Authorization": "Bearer key-alice"})
             assert r2.status_code == 200
+
+
+async def _poll_job(client, job_id, timeout=10.0):
+    """Poll GET /v1/jobs/:id until terminal. Returns the final JSON or None on timeout."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = await client.get(f"/v1/jobs/{job_id}")
+        body = r.json()
+        if body["status"] in ("completed", "failed", "timed_out", "cancelled"):
+            return body
+        await asyncio.sleep(0.1)
+    return None
+
+
+class TestJobs:
+    """M4: autonomous background jobs integration tests."""
+
+    async def test_submit_and_poll_until_completed(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="job done")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "do something"})
+            assert r.status_code == 202
+            job_id = r.json()["job_id"]
+            assert r.json()["session_id"]  # dedicated session
+
+            result = await _poll_job(c, job_id)
+            assert result is not None
+            assert result["status"] == "completed"
+
+    async def test_list_jobs_by_owner(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            await c.post("/v1/jobs", json={"message": "job 1"})
+            await c.post("/v1/jobs", json={"message": "job 2"})
+            r = await c.get("/v1/jobs")
+            assert r.status_code == 200
+            assert len(r.json()) >= 2
+
+    async def test_get_unknown_job_404(self):
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
+            assert (await c.get("/v1/jobs/nonexistent")).status_code == 404
+
+    async def test_cancel_job(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "long job"})
+            job_id = r.json()["job_id"]
+            r2 = await c.post(f"/v1/jobs/{job_id}/cancel")
+            # The job may have completed before the cancel arrives (MockClient is instant).
+            # Either outcome is valid: 200 (cancelled) or 409 (already terminal).
+            assert r2.status_code in (200, 409)
+
+    async def test_cancel_already_terminal_409(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="done")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "quick"})
+            job_id = r.json()["job_id"]
+            await _poll_job(c, job_id)  # wait for completion
+            r2 = await c.post(f"/v1/jobs/{job_id}/cancel")
+            assert r2.status_code == 409
+
+    async def test_idempotency_key_returns_same_job(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r1 = await c.post("/v1/jobs", json={"message": "a"}, headers={"Idempotency-Key": "key-abc"})
+            r2 = await c.post("/v1/jobs", json={"message": "a"}, headers={"Idempotency-Key": "key-abc"})
+            assert r1.json()["job_id"] == r2.json()["job_id"]
+
+    async def test_job_403_other_owner(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+            api_keys=["key-a", "key-b"],
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "secret"}, headers={"Authorization": "Bearer key-a"})
+            job_id = r.json()["job_id"]
+            r2 = await c.get(f"/v1/jobs/{job_id}", headers={"Authorization": "Bearer key-b"})
+            assert r2.status_code == 403
+
+    async def test_job_stream_replays_events(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="streamed result")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "go"})
+            job_id = r.json()["job_id"]
+            # Wait for completion so the stream replays the full buffer.
+            await _poll_job(c, job_id)
+            # Now stream → should replay buffered events + [DONE].
+            async with c.stream("GET", f"/v1/jobs/{job_id}/stream") as resp:
+                assert resp.status_code == 200
+                text = (await resp.aread()).decode()
+            events = _parse_sse(text)
+            types = [e["type"] if isinstance(e, dict) else e for e in events]
+            assert "complete" in types
+            assert types[-1] == "[DONE]"

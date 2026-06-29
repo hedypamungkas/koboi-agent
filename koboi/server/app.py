@@ -7,6 +7,8 @@ OwnershipStore (tenant) + HealthRegistry + request-id middleware + routes.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +24,7 @@ from koboi.guardrails.approval_types import ApprovalResponse
 from koboi.server.approvals import ApprovalCoordinator, ApprovalRegistry
 from koboi.server.auth import KeyStore, make_auth_middleware
 from koboi.server.health import HealthRegistry, make_db_check, make_pool_alive_check
+from koboi.server.jobs import JobRegistry, JobStore, new_job_id, resume_on_startup, run_job
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
@@ -32,12 +35,16 @@ from koboi.server.schema import (
     CreateSessionResponse,
     ErrorDetail,
     ErrorResponse,
+    JobStatusResponse,
+    JobSubmitRequest,
     ReadyzCheck,
     ReadyzResponse,
     SessionDeletedResponse,
     SessionResponse,
 )
 from koboi.server.sse import sse_stream
+
+_logger = logging.getLogger(__name__)
 
 ExtraRouteRegistrar = Callable[[FastAPI, AgentPool], None]
 
@@ -95,11 +102,19 @@ def create_app(
     # M3: API-key auth (keys file + env back-compat; dev-allow when empty).
     key_store = _build_key_store(config, api_keys)
 
-    # M3: session ownership (SQLite sidecar; same db_path as memory when sqlite).
+    # M3: session ownership + M4: job store (same db_path as memory when sqlite).
     memory_backend = config.get("memory", "backend", default="sqlite")
     memory_db_path = config.get("memory", "db_path", default="koboi_memory.db")
-    ownership_db = memory_db_path if memory_backend == "sqlite" else ":memory:"
-    ownership = OwnershipStore(db_path=ownership_db)
+    shared_db = memory_db_path if memory_backend == "sqlite" else ":memory:"
+    ownership = OwnershipStore(db_path=shared_db)
+    job_store = JobStore(db_path=shared_db)
+
+    # M4: job config.
+    job_max_concurrent = config.get("jobs", "max_concurrent", default=64)
+    job_timeout = config.get("jobs", "timeout_seconds", default=1800)
+    job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
+    job_resume = config.get("jobs", "resume_on_startup", default=True)
+    job_registry = JobRegistry(max_events=job_max_events)
 
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
@@ -107,16 +122,30 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # M4: resume pending jobs on startup (simplified: running→failed).
+        if job_resume:
+            requeued = await resume_on_startup(job_store, pool, job_registry, job_timeout)
+            if requeued:
+                _logger.info("Resumed %d pending job(s) on startup", requeued)
         try:
             yield
         finally:
+            # Cancel running job tasks before closing the pool.
+            for rec in list(job_registry._jobs.values()):
+                if rec.task and not rec.task.done():
+                    rec.task.cancel()
             await pool.close_all()
             ownership.close()
+            job_store.close()
 
-    app = FastAPI(title=f"koboi-{config.agent_name}", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title=f"koboi-{config.agent_name}", version="0.4.0", lifespan=lifespan)
     app.state.pool = pool
     app.state.approvals = approvals
     app.state.ownership = ownership
+    app.state.job_store = job_store
+    app.state.job_registry = job_registry
+    app.state.job_max_concurrent = job_max_concurrent
+    app.state.job_timeout = job_timeout
     app.state.health = health
 
     if enable_cors:
@@ -137,7 +166,7 @@ def create_app(
         app.middleware("http")(mw)
     app.middleware("http")(request_id_middleware)
 
-    _register_routes(app, pool, health, approvals, ownership)
+    _register_routes(app, pool, health, approvals, ownership, job_store, job_registry, job_max_concurrent, job_timeout)
     for registrar in extra_routes:
         registrar(app, pool)
     return app
@@ -157,12 +186,28 @@ def _check_owner(ownership: OwnershipStore, session_id: str, request: Request) -
     return None
 
 
+def _check_job_access(
+    job_store: JobStore, job_id: str, owner: str, request: Request
+) -> tuple[dict | None, JSONResponse | None]:
+    """Returns (job_dict, error_response). Raises HTTPException(404) if not found."""
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job["owner"] != owner:
+        return None, _error_response(403, "forbidden", "not the job owner", request)
+    return job, None
+
+
 def _register_routes(
     app: FastAPI,
     pool: AgentPool,
     health: HealthRegistry,
     approvals: ApprovalRegistry,
     ownership: OwnershipStore,
+    job_store: JobStore,
+    job_registry: JobRegistry,
+    job_max_concurrent: int,
+    job_timeout: float,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -316,6 +361,122 @@ def _register_routes(
         if not resolved:
             raise HTTPException(status_code=404, detail="approval not found or already resolved")
         return ApproveResponse(approval_id=body.approval_id, resolved=True)
+
+    # ---- M4: Jobs (autonomous) ----
+
+    @app.post("/v1/jobs", status_code=202)
+    async def submit_job(body: JobSubmitRequest, request: Request) -> Response:
+        owner = getattr(request.state, "api_key_id", "dev")
+
+        # Idempotency: same key within window → return existing job.
+        idem_key = request.headers.get("Idempotency-Key")
+        if idem_key:
+            existing = job_store.find_by_idempotency_key(idem_key)
+            if existing and existing["owner"] == owner:
+                return {
+                    "job_id": existing["job_id"],
+                    "status": existing["status"],
+                    "session_id": existing["session_id"],
+                }
+
+        # Concurrency limit (global; per-tenant deferred to M5).
+        if job_registry.active_count >= job_max_concurrent:
+            return _error_response(429, "too_many_jobs", f"max_concurrent ({job_max_concurrent}) reached", request)
+
+        # Session: dedicated by default, or reuse existing (with ownership check).
+        session_id = body.session_id or pool.new_session_id()
+        if body.session_id:
+            if not is_safe_session_id(session_id):
+                return _error_response(400, "bad_request", "invalid session_id", request)
+            err = _check_owner(ownership, session_id, request)
+            if err:
+                return err
+        else:
+            is_new = pool.get(session_id) is None
+            try:
+                await pool.get_or_create(session_id)
+            except PoolFull as exc:
+                return _error_response(429, "pool_full", str(exc), request)
+            if is_new:
+                ownership.set_owner(session_id, owner)
+
+        job_id = new_job_id()
+        job_store.insert(job_id, session_id, owner, body.message, idempotency_key=idem_key)
+        job_registry.register(job_id, session_id, owner)
+        task = asyncio.create_task(run_job(job_id, pool, job_registry, job_store, body.message, job_timeout))
+        job_registry.set_running(job_id, task)
+        return {"job_id": job_id, "status": "pending", "session_id": session_id}
+
+    @app.get("/v1/jobs")
+    async def list_jobs(request: Request, status: str | None = None) -> list:
+        owner = getattr(request.state, "api_key_id", "dev")
+        jobs = job_store.list_by_owner(owner, status=status)
+        return [{"job_id": j["job_id"], "status": j["status"], "session_id": j["session_id"]} for j in jobs]
+
+    @app.get("/v1/jobs/{job_id}")
+    async def get_job(job_id: str, request: Request) -> Response:
+        owner = getattr(request.state, "api_key_id", "dev")
+        job, err = _check_job_access(job_store, job_id, owner, request)
+        if err:
+            return err
+        result = json.loads(job["result_json"]) if job.get("result_json") else None
+        return JobStatusResponse(
+            job_id=job_id,
+            status=job["status"],
+            session_id=job["session_id"],
+            result=result,
+            error=job.get("error"),
+        )
+
+    @app.get("/v1/jobs/{job_id}/stream")
+    async def stream_job(job_id: str, request: Request):
+        owner = getattr(request.state, "api_key_id", "dev")
+        job, err = _check_job_access(job_store, job_id, owner, request)
+        if err:
+            return err
+        record = job_registry.get(job_id)
+
+        async def event_gen():
+            last_index = 0
+            try:
+                while True:
+                    if record:
+                        events = record.events[last_index:]
+                        last_index = len(record.events)
+                        for ev in events:
+                            yield ev
+                        if record.terminal.is_set():
+                            break
+                    else:
+                        break
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+
+        return StreamingResponse(
+            sse_stream(event_gen()),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/v1/jobs/{job_id}/cancel")
+    async def cancel_job(job_id: str, request: Request) -> Response:
+        owner = getattr(request.state, "api_key_id", "dev")
+        job, err = _check_job_access(job_store, job_id, owner, request)
+        if err:
+            return err
+        if job["status"] in ("completed", "failed", "timed_out", "cancelled"):
+            raise HTTPException(status_code=409, detail=f"job already {job['status']}")
+        cancelled = await job_registry.cancel(job_id)
+        if not cancelled:
+            record = job_registry.get(job_id)
+            if record is not None and record.task is not None and record.task.done():
+                # Task finished between our status check and cancel.
+                raise HTTPException(status_code=409, detail=f"job already {job_store.get(job_id)['status']}")
+            # Pending (not yet running) → mark cancelled directly.
+            job_store.update_status(job_id, "cancelled")
+            job_registry.set_terminal(job_id, "cancelled")
+        return {"job_id": job_id, "status": "cancelled"}
 
 
 def _error_response(status: int, code: str, message: str, request: Request) -> JSONResponse:

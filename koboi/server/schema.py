@@ -83,3 +83,20 @@ class ApproveRequest(BaseModel):
 class ApproveResponse(BaseModel):
     approval_id: str
     resolved: bool
+
+
+class JobSubmitRequest(BaseModel):
+    """POST /v1/jobs body."""
+
+    model_config = {"extra": "ignore"}
+
+    message: str
+    session_id: str | None = None
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    session_id: str
+    result: dict[str, Any] | None = None
+    error: str | None = None
