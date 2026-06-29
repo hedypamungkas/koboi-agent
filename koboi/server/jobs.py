@@ -10,6 +10,7 @@ running-as-failed (simplified; full journal resume deferred to M5).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sqlite3
 import time
@@ -239,11 +240,12 @@ async def run_job(
         return
 
     try:
-        await asyncio.wait_for(
+        final_content = await asyncio.wait_for(
             _execute_job(job_id, pool, registry, store, message),
             timeout=timeout,
         )
-        store.update_status(job_id, "completed")
+        result_json = json.dumps({"content": final_content}) if final_content else None
+        store.update_status(job_id, "completed", result_json=result_json)
         registry.set_terminal(job_id, "completed")
     except asyncio.CancelledError:
         store.update_status(job_id, "cancelled")
@@ -266,8 +268,14 @@ async def _execute_job(
     registry: JobRegistry,
     store: JobStore,
     message: str,
-) -> None:
-    """Inner execution: agent setup + run_stream → event buffer."""
+) -> str | None:
+    """Inner execution: agent setup + run_stream → event buffer.
+
+    Returns the final content (from ``CompleteEvent``) for ``result_json``
+    persistence so completed jobs survive restart.
+    """
+    from koboi.events import CompleteEvent
+
     record = registry.get(job_id)
     agent = await pool.get_or_create(record.session_id)
 
@@ -277,6 +285,7 @@ async def _execute_job(
         lf_hook = agent._core.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
         if lf_hook:
             lf_hook.set_serving_metadata(mode="autonomous", job_id=job_id, owner=record.owner)
+    final_content: str | None = None
     async with pool.session_lock(record.session_id):
         prior_handler = agent._core.approval_handler
         had_pipeline = hasattr(agent._core, "_tool_pipeline")
@@ -292,10 +301,13 @@ async def _execute_job(
             )
             async for event in agent.run_stream(message):
                 registry.append_event(job_id, event)
+                if isinstance(event, CompleteEvent):
+                    final_content = event.content
         finally:
             agent._core.approval_handler = prior_handler
             if had_pipeline:
                 agent._core._tool_pipeline = prior_pipeline
+    return final_content
 
 
 async def resume_on_startup(

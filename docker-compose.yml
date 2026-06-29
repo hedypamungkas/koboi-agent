@@ -30,6 +30,7 @@ services:
       # Or use env (comma-separated): KOBOI_API_KEYS=koboi_aaa,koboi_bbb
       # --- LLM ---
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # --- Langfuse (optional) ---
       - LANGFUSE_PUBLIC_KEY=${LF_PUBLIC_KEY:-}
@@ -43,9 +44,6 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
-    depends_on:
-      nginx:
-        condition: service_started
 
   nginx:
     image: nginx:alpine

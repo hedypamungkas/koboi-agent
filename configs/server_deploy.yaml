@@ -13,6 +13,7 @@ llm:
   provider: openai
   model: gpt-4o-mini
   api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
   timeout: 120
 
 memory:
