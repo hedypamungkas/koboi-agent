@@ -41,28 +41,25 @@ class CompleteEvent:
     elapsed_seconds: float = 0.0
     iterations_used: int = 0
     tools_used: list[str] = field(default_factory=list)
+    trace_id: str = ""
 
 
 @dataclass
 class ErrorEvent:
     error: Exception
+    code: str = "internal_error"
+    retriable: bool = False
 
 
 @dataclass
 class PendingApprovalEvent:
-    """Emitted when a tool call is awaiting human approval (HITL).
-
-    M0 ships the type + serialization only; emission on the SSE stream is wired
-    in M2 (the interactive approval flow). All fields are JSON primitives so the
-    generic ``asdict`` path in ``event_to_dict`` handles it (no special case).
-    """
+    """Emitted when a tool call is awaiting human approval (HITL)."""
 
     approval_id: str
     tool_name: str
     arguments: str
     risk_level: str
     tool_call_id: str = ""
-    reason: str = ""
     reason: str = ""
     timeout_seconds: float = 120.0
 
@@ -170,9 +167,15 @@ def event_to_dict(event: StreamEvent) -> dict:
             "iterations_used": event.iterations_used,
             "tools_used": event.tools_used,
             "token_usage": usage,
+            "trace_id": event.trace_id or None,
         }
     if isinstance(event, ErrorEvent):
-        return {"type": event_type, "error": str(event.error)}
+        return {
+            "type": event_type,
+            "error": str(event.error),
+            "code": event.code,
+            "retriable": event.retriable,
+        }
 
     # Generic: asdict handles all remaining dataclass fields
     d = asdict(event)

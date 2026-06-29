@@ -52,6 +52,8 @@ class JobStore:
                 "  message TEXT,"
                 "  result_json TEXT,"
                 "  error TEXT,"
+                "  error_class TEXT,"
+                "  retriable INTEGER DEFAULT 0,"
                 "  idempotency_key TEXT,"
                 "  created_at REAL NOT NULL,"
                 "  updated_at REAL NOT NULL"
@@ -59,10 +61,19 @@ class JobStore:
             )
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_idem ON jobs(idempotency_key)")
+            self._migrate_add_columns()
             self._conn.commit()
         except Exception:
             self._conn.close()
             raise
+
+    def _migrate_add_columns(self) -> None:
+        """Idempotent ALTER TABLE for new columns on pre-existing M4 databases."""
+        existing = {r["name"] for r in self._conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        if "error_class" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN error_class TEXT")
+        if "retriable" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN retriable INTEGER DEFAULT 0")
 
     def insert(
         self,
@@ -84,10 +95,19 @@ class JobStore:
         row = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
         return dict(row) if row else None
 
-    def update_status(self, job_id: str, status: str, result_json: str | None = None, error: str | None = None) -> None:
+    def update_status(
+        self,
+        job_id: str,
+        status: str,
+        result_json: str | None = None,
+        error: str | None = None,
+        error_class: str | None = None,
+        retriable: bool = False,
+    ) -> None:
         self._conn.execute(
-            "UPDATE jobs SET status = ?, result_json = ?, error = ?, updated_at = ? WHERE job_id = ?",
-            (status, result_json, error, time.time(), job_id),
+            "UPDATE jobs SET status = ?, result_json = ?, error = ?, error_class = ?, "
+            "retriable = ?, updated_at = ? WHERE job_id = ?",
+            (status, result_json, error, error_class, 1 if retriable else 0, time.time(), job_id),
         )
         self._conn.commit()
 
@@ -185,6 +205,15 @@ class JobRegistry:
     def active_count(self) -> int:
         return sum(1 for r in self._jobs.values() if r.status == "running")
 
+    def cancel_all(self) -> int:
+        """Cancel all active job tasks (used by graceful shutdown). Returns count cancelled."""
+        count = 0
+        for record in self._jobs.values():
+            if record.task and not record.task.done():
+                record.task.cancel()
+                count += 1
+        return count
+
 
 # ---------------------------------------------------------------------------
 # run_job + resume_on_startup
@@ -221,11 +250,13 @@ async def run_job(
         registry.set_terminal(job_id, "cancelled")
         raise
     except asyncio.TimeoutError:
-        store.update_status(job_id, "timed_out")
+        store.update_status(
+            job_id, "timed_out", error="Job exceeded timeout", error_class="TimeoutError", retriable=True
+        )
         registry.set_terminal(job_id, "timed_out")
     except Exception as exc:
         _logger.exception("Job %s failed", job_id)
-        store.update_status(job_id, "failed", error=str(exc))
+        store.update_status(job_id, "failed", error=str(exc), error_class=type(exc).__name__, retriable=False)
         registry.set_terminal(job_id, "failed")
 
 

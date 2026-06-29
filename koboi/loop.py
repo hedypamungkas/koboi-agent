@@ -533,12 +533,19 @@ class AgentCore:
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 seen: set[str] = set()
                 unique_tools = [t for t in _stream_tools_used if t not in seen and not seen.add(t)]  # type: ignore[func-returns-value]
+                # M5: enrich CompleteEvent with Langfuse trace_id if available.
+                trace_id = ""
+                if self.hooks:
+                    lf_hook = self.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+                    if lf_hook:
+                        trace_id = getattr(lf_hook, "_trace_id", "") or ""
                 yield CompleteEvent(
                     response=final_response,
                     content=output,
                     elapsed_seconds=_time.monotonic() - _start,
                     iterations_used=i + 1,
                     tools_used=unique_tools,
+                    trace_id=trace_id,
                 )
                 return
 

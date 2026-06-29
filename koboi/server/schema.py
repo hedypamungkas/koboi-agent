@@ -53,6 +53,7 @@ class ErrorDetail(BaseModel):
     code: str
     message: str
     request_id: str | None = None
+    retriable: bool = False
 
 
 class ErrorResponse(BaseModel):
@@ -100,3 +101,5 @@ class JobStatusResponse(BaseModel):
     session_id: str
     result: dict[str, Any] | None = None
     error: str | None = None
+    error_class: str | None = None
+    retriable: bool = False

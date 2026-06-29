@@ -61,7 +61,10 @@ class TestSseEncoder:
             data += chunk
         parsed = _parse(data)
         assert parsed[0] == {"type": "text_delta", "content": "x"}
-        assert parsed[1] == {"type": "error", "error": "kaboom"}
+        assert parsed[1]["type"] == "error"
+        assert parsed[1]["error"] == "kaboom"
+        assert parsed[1]["code"] == "internal_error"
+        assert parsed[1]["retriable"] is False
         assert parsed[-1] == "[DONE]"
 
     def test_frame_compact_json(self):

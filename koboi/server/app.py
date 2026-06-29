@@ -120,6 +120,15 @@ def create_app(
     health.register("pool", make_pool_alive_check(pool))
     health.register("db", make_db_check(config))
 
+    drain_seconds = config.get("server", "timeouts", "drain_seconds", default=60.0) or 60.0
+
+    async def _shutdown():
+        """Cancel job tasks, close pool/ownership/store (M5: drain with timeout)."""
+        job_registry.cancel_all()
+        await pool.close_all()
+        ownership.close()
+        job_store.close()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # M4: resume pending jobs on startup (simplified: running→failed).
@@ -130,15 +139,12 @@ def create_app(
         try:
             yield
         finally:
-            # Cancel running job tasks before closing the pool.
-            for rec in list(job_registry._jobs.values()):
-                if rec.task and not rec.task.done():
-                    rec.task.cancel()
-            await pool.close_all()
-            ownership.close()
-            job_store.close()
+            try:
+                await asyncio.wait_for(_shutdown(), timeout=drain_seconds)
+            except asyncio.TimeoutError:
+                _logger.warning("Shutdown drain exceeded %.1fs; forcing exit", drain_seconds)
 
-    app = FastAPI(title=f"koboi-{config.agent_name}", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title=f"koboi-{config.agent_name}", version="0.5.0", lifespan=lifespan)
     app.state.pool = pool
     app.state.approvals = approvals
     app.state.ownership = ownership
@@ -426,6 +432,8 @@ def _register_routes(
             session_id=job["session_id"],
             result=result,
             error=job.get("error"),
+            error_class=job.get("error_class"),
+            retriable=bool(job.get("retriable", 0)),
         )
 
     @app.get("/v1/jobs/{job_id}/stream")
