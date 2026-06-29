@@ -221,7 +221,7 @@ class ToolExecutionPipeline:
         Returns:
             ToolPipelineResult with the tool's output or skip reason.
         """
-        self._log(f"tool: {tc.name}({tc.arguments})")
+        self._log(f"tool: {tc.name}({tc.arguments[:100]})")  # 16.17: truncate args in logs
 
         is_yolo = self.mode_manager is not None and self.mode_manager.current_mode == AgentMode.YOLO
 

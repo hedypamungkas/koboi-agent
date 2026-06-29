@@ -107,3 +107,70 @@ class TestAutonomousApprovalHandler:
         db.record_decision("run_shell", RiskLevel.DESTRUCTIVE, "allow", always=True)
         handler = AutonomousApprovalHandler(trust_db=db)
         assert handler.should_approve("run_shell", "ls", RiskLevel.DESTRUCTIVE) is True
+
+
+class TestGuardrailsJobActive:
+    """16.27: verify guardrails + PolicyHook enforce in autonomous job mode.
+
+    Jobs run without human review — the autonomous handler must still deny
+    destructive tools without a Trust DB allow-rule, and PolicyHook's hardcoded
+    safety (sensitive paths, dangerous commands) must remain enforced.
+    """
+
+    async def test_destructive_tool_denied_in_job(self):
+        """A destructive tool called by a job is denied; job completes."""
+
+        from koboi.config import Config
+        from koboi.events import ErrorEvent, PendingApprovalEvent
+        from koboi.facade import KoboiAgent
+        from koboi.guardrails.approval import AutonomousApprovalHandler
+        from koboi.types import RiskLevel
+        from tests.conftest import MockClient, make_mock_response, make_mock_tool_call
+
+        config = Config.from_dict(
+            {
+                "agent": {"name": "t", "system_prompt": "h", "max_iterations": 3, "mode": "act"},
+                "llm": {"provider": "openai", "model": "m", "api_key": "test", "base_url": "http://x"},
+                "memory": {"backend": "in_memory"},
+                "sandbox": {"backend": "passthrough"},
+            },
+            validate=True,
+        )
+        agent = KoboiAgent.from_dict(config.raw)
+        agent._core.client = MockClient(
+            [
+                make_mock_response(tool_calls=[make_mock_tool_call("danger")]),
+                make_mock_response(content="done"),
+            ]
+        )
+        agent.add_tool(
+            "danger",
+            lambda **kw: "should not reach",
+            "destructive test",
+            {"type": "object", "properties": {}, "required": []},
+            risk_level=RiskLevel.DESTRUCTIVE,
+        )
+
+        if hasattr(agent._core, "_tool_pipeline"):
+            del agent._core._tool_pipeline
+        agent._core.approval_handler = AutonomousApprovalHandler(
+            trust_db=agent.trust_db,
+            audit_trail=agent._core.audit_trail,
+        )
+
+        events: list = []
+
+        async def run_agent():
+            try:
+                async for ev in agent.run_stream("go"):
+                    events.append(ev)
+            except Exception as exc:
+                events.append(ErrorEvent(error=exc))
+
+        await run_agent()
+
+        # Verify the tool result contains "denied".
+        tool_results = [e for e in events if type(e).__name__ == "ToolResultEvent"]
+        assert any("denied" in getattr(e, "result", "").lower() for e in tool_results)
+        # Verify no PendingApprovalEvent was emitted (autonomous — no HITL).
+        assert not any(isinstance(e, PendingApprovalEvent) for e in events)

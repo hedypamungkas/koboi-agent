@@ -272,10 +272,12 @@ async def _execute_job(
     agent = await pool.get_or_create(record.session_id)
 
     store.update_status(job_id, "running")
+    # 16.21: enrich Langfuse trace with job context.
+    if agent._core and agent._core.hooks:
+        lf_hook = agent._core.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+        if lf_hook:
+            lf_hook.set_serving_metadata(mode="autonomous", job_id=job_id, owner=record.owner)
     async with pool.session_lock(record.session_id):
-        # Install AutonomousApprovalHandler UNDER the lock (prevents race with
-        # concurrent /chat/stream). Restore prior handler in finally so
-        # interactive HITL is not permanently replaced on the shared agent.
         prior_handler = agent._core.approval_handler
         had_pipeline = hasattr(agent._core, "_tool_pipeline")
         prior_pipeline = getattr(agent._core, "_tool_pipeline", None)

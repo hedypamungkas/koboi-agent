@@ -53,6 +53,8 @@ class LangfuseTracingHook(Hook):
         self._spans: dict[str, Any] = {}
         self._generations: dict[str, Any] = {}
         self._timings: dict[str, float] = {}
+        # M5 (16.21): serving context tagged on the trace for correlation.
+        self._serving_metadata: dict[str, str] = {}
 
         if _LANGFUSE_AVAILABLE and self._public_key and self._secret_key:
             try:
@@ -122,11 +124,21 @@ class LangfuseTracingHook(Hook):
 
     # --- Session lifecycle ---
 
+    def set_serving_metadata(self, **kwargs: str) -> None:
+        """Tag the trace with serving context (mode, request_id, owner, job_id).
+
+        Called by the route handler before ``agent.run_stream()`` so the trace
+        is enriched from the first span. Safe to call multiple times (merges).
+        """
+        self._serving_metadata.update(kwargs)
+
     def _on_session_start(self, ctx: HookContext) -> None:
+        metadata = {"environment": self._environment, "release": self._release}
+        metadata.update(self._serving_metadata)
         self._trace = self._client.trace(
             name="Agent Run",
             sessionId=self._session_id,
-            metadata={"environment": self._environment, "release": self._release},
+            metadata=metadata,
         )
         self._trace_id = getattr(self._trace, "trace_id", None) or getattr(self._trace, "id", None)
 

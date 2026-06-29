@@ -241,6 +241,14 @@ def _check_owner(ownership: OwnershipStore, session_id: str, request: Request) -
     return None
 
 
+def _enrich_trace(agent: Any, **metadata: str) -> None:
+    """Tag the Langfuse trace with serving context (16.21). No-op if no hook."""
+    if agent._core and agent._core.hooks:
+        lf_hook = agent._core.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+        if lf_hook:
+            lf_hook.set_serving_metadata(**metadata)
+
+
 def _check_job_access(
     job_store: JobStore, job_id: str, owner: str, request: Request
 ) -> tuple[dict | None, JSONResponse | None]:
@@ -386,6 +394,8 @@ def _register_routes(
             audit_trail=agent._core.audit_trail,
             timeout=APPROVAL_TIMEOUT,
         )
+        # 16.21: enrich Langfuse trace with serving context.
+        _enrich_trace(agent, mode="interactive", request_id=getattr(request.state, "request_id", ""), owner=owner)
 
         async def _run_agent():
             try:
