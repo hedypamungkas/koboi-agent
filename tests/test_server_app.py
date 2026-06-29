@@ -113,6 +113,31 @@ class TestSessions:
             assert r.status_code == 429
             assert r.json()["error"]["code"] == "pool_full"
 
+    async def test_resume_session_returns_result(self):
+        """POST /v1/sessions/:id/resume returns 200 with RunResult JSON."""
+        responses = [make_mock_response(content="resumed answer")]
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient(responses),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            sid = (await c.post("/v1/sessions")).json()["session_id"]
+            r = await c.post(f"/v1/sessions/{sid}/resume")
+            assert r.status_code == 200
+            body = r.json()
+            assert body["session_id"] == sid
+            assert body["success"] is True
+
+    async def test_resume_unknown_session_404(self):
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
+            assert (await c.post("/v1/sessions/nonexistent/resume")).status_code == 404
+
+    async def test_resume_unsafe_session_id_400(self):
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
+            r = await c.post("/v1/sessions/bad.id/resume")
+            assert r.status_code == 400
+
 
 class TestChatStream:
     async def test_sse_happy_path_message(self):
@@ -474,3 +499,42 @@ class TestJobs:
             types = [e["type"] if isinstance(e, dict) else e for e in events]
             assert "complete" in types
             assert types[-1] == "[DONE]"
+
+
+class TestWorkdirGC:
+    """16.24: workdir TTL GC tests."""
+
+    def test_cleanup_removes_old_dirs(self, tmp_path):
+        import os
+        import time
+
+        from koboi.server.app import _cleanup_workdirs
+
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        old_dir = ws / "old_session"
+        old_dir.mkdir()
+        new_dir = ws / "new_session"
+        new_dir.mkdir()
+        old_time = time.time() - 2 * 86400
+        os.utime(old_dir, (old_time, old_time))
+        removed = _cleanup_workdirs(str(ws), ttl_seconds=86400)
+        assert removed == 1
+        assert not old_dir.exists()
+        assert new_dir.exists()
+
+    def test_cleanup_no_root(self, tmp_path):
+        from koboi.server.app import _cleanup_workdirs
+
+        assert _cleanup_workdirs(str(tmp_path / "nonexistent"), ttl_seconds=60) == 0
+
+    def test_cleanup_keeps_recent(self, tmp_path):
+        from koboi.server.app import _cleanup_workdirs
+
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        recent = ws / "recent"
+        recent.mkdir()
+        removed = _cleanup_workdirs(str(ws), ttl_seconds=86400)
+        assert removed == 0
+        assert recent.exists()

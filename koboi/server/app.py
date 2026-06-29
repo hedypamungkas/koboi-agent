@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -50,6 +51,36 @@ ExtraRouteRegistrar = Callable[[FastAPI, AgentPool], None]
 
 #: Default approval timeout (seconds). Overridable via config in a future rev.
 APPROVAL_TIMEOUT = 120.0
+
+
+def _cleanup_workdirs(workspace_root: str, ttl_seconds: float) -> int:
+    """Remove session workdirs older than TTL. Returns count removed."""
+    import time
+
+    root = Path(workspace_root)
+    if not root.is_dir():
+        return 0
+    cutoff = time.time() - ttl_seconds
+    count = 0
+    for d in root.iterdir():
+        if d.is_dir():
+            try:
+                mtime = d.stat().st_mtime
+                if mtime < cutoff:
+                    shutil.rmtree(d, ignore_errors=True)
+                    count += 1
+            except OSError:
+                pass
+    return count
+
+
+async def _workdir_gc_loop(workspace_root: str, ttl_seconds: float, interval: float = 300) -> None:
+    """Periodic background sweep of expired session workdirs."""
+    while True:
+        await asyncio.sleep(interval)
+        removed = _cleanup_workdirs(workspace_root, ttl_seconds)
+        if removed:
+            _logger.info("Workdir GC: removed %d expired director(s)", removed)
 
 
 def _build_key_store(config: Config, api_keys: list[str] | None = None) -> KeyStore:
@@ -109,6 +140,17 @@ def create_app(
     ownership = OwnershipStore(db_path=shared_db)
     job_store = JobStore(db_path=shared_db)
 
+    # 16.16: warn if jobs are enabled but memory backend can't persist (resume won't work).
+    if memory_backend != "sqlite":
+        _logger.warning(
+            "memory.backend='%s' — job resume-on-startup will NOT work (JobStore is in :memory:). "
+            "Set memory.backend=sqlite for production job durability.",
+            memory_backend,
+        )
+
+    # 16.24: workdir TTL GC config.
+    workdir_ttl = config.get("server", "workdir_ttl_seconds", default=86400.0) or 86400.0
+
     # M4: job config.
     job_max_concurrent = config.get("jobs", "max_concurrent", default=64)
     job_timeout = config.get("jobs", "timeout_seconds", default=1800)
@@ -136,9 +178,16 @@ def create_app(
             requeued = await resume_on_startup(job_store, pool, job_registry, job_timeout)
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
+        # 16.24: start workdir TTL GC background sweep.
+        gc_task = asyncio.create_task(_workdir_gc_loop(workspace_root, workdir_ttl))
         try:
             yield
         finally:
+            gc_task.cancel()
+            try:
+                await gc_task
+            except asyncio.CancelledError:
+                pass
             try:
                 await asyncio.wait_for(_shutdown(), timeout=drain_seconds)
             except asyncio.TimeoutError:
@@ -264,6 +313,37 @@ def _register_routes(
             raise HTTPException(status_code=404, detail="session not found")
         ownership.delete(session_id)
         return SessionDeletedResponse(session_id=session_id, evicted=True)
+
+    @app.post("/v1/sessions/{session_id}/resume")
+    async def resume_session(session_id: str, request: Request) -> Response:
+        """Resume an interrupted session (rehydrate journal → continue loop).
+
+        Returns the RunResult as JSON (non-streaming). The client can then call
+        ``/chat/stream`` to continue interactively.
+        """
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        agent = pool.get(session_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        try:
+            async with pool.session_lock(session_id):
+                result = await agent.resume()
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "session_id": session_id,
+                    "content": result.content,
+                    "iterations_used": result.iterations_used,
+                    "success": result.success,
+                    "error": str(result.error) if result.error else None,
+                },
+            )
+        except Exception as exc:
+            return _error_response(500, "resume_failed", str(exc), request)
 
     # ---- M2: /chat/stream with queue-bridged HITL + /approve ----
 
