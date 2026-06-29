@@ -8,6 +8,7 @@ with a warning. Health endpoints (``/healthz``, ``/readyz``) are always open.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 from pathlib import Path
@@ -69,8 +70,16 @@ class KeyStore:
         return count
 
     def validate(self, token: str) -> str | None:
-        """Returns ``key_id`` if the token is valid, ``None`` otherwise."""
-        return self._keys.get(_hash_token(token))
+        """Returns ``key_id`` if the token is valid, ``None`` otherwise.
+
+        Uses ``hmac.compare_digest`` for constant-time comparison (standard
+        practice for credential validation — avoids timing side-channels).
+        """
+        candidate = _hash_token(token)
+        for stored_hash, key_id in self._keys.items():
+            if hmac.compare_digest(candidate, stored_hash):
+                return key_id
+        return None
 
     def __len__(self) -> int:
         return len(self._keys)

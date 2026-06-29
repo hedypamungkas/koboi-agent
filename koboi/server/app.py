@@ -129,8 +129,9 @@ def create_app(
             allow_headers=["*"],
         )
 
-    # Middleware stack: auth (innermost) → extras → request_id (outermost).
-    # request_id is outermost so 401/403 responses include X-Request-Id.
+    # Middleware: registration order is the REVERSE of execution order.
+    # request_id is registered LAST → executes FIRST (outermost), wrapping auth
+    # so 401/403 responses carry X-Request-Id.
     app.middleware("http")(make_auth_middleware(key_store))
     for mw in extra_middleware:
         app.middleware("http")(mw)
@@ -227,19 +228,23 @@ def _register_routes(
             return _error_response(400, "bad_request", "invalid X-Session-Id", request)
         session_id = header_sid or pool.new_session_id()
 
-        # M3: ownership check for existing sessions; set for new.
+        # M3: ownership — check for existing sessions (header-provided), set for
+        # NEW sessions AFTER get_or_create succeeds (avoids orphan rows on PoolFull
+        # and overwriting an existing owner after eviction+re-create).
         owner = getattr(request.state, "api_key_id", "dev")
+        is_new_session = header_sid is None and pool.get(session_id) is None
         if header_sid is not None:
             err = _check_owner(ownership, session_id, request)
             if err:
                 return err
-        else:
-            ownership.set_owner(session_id, owner)
 
         try:
             agent = await pool.get_or_create(session_id)
         except PoolFull as exc:
             return _error_response(429, "pool_full", str(exc), request)
+
+        if is_new_session:
+            ownership.set_owner(session_id, owner)
 
         queue: asyncio.Queue = asyncio.Queue()
         coordinator = ApprovalCoordinator(queue, timeout=APPROVAL_TIMEOUT)

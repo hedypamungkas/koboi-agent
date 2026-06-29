@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import time
 from pathlib import Path
@@ -16,16 +17,24 @@ DEFAULT_KEYS_FILE = "~/.koboi/keys.json"
 
 
 def _load_keys(file_path: str) -> list[dict]:
+    """Load keys from JSON file. Returns [] on missing/corrupt (graceful degradation)."""
     p = Path(file_path).expanduser()
     if not p.exists():
         return []
-    return json.loads(p.read_text())
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
 
 
 def _save_keys(file_path: str, keys: list[dict]) -> None:
+    """Atomically write keys with restrictive permissions (0600)."""
     p = Path(file_path).expanduser()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(keys, indent=2))
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(keys, indent=2))
+    os.replace(str(tmp), str(p))  # atomic on POSIX
+    os.chmod(str(p), 0o600)
 
 
 def _generate_key() -> tuple[str, str]:
