@@ -383,16 +383,30 @@ class AgentCore:
         }
 
     async def _repair_interrupted_turn(self) -> None:
-        """Re-execute tool calls from the trailing assistant message whose
+        """Re-execute tool calls from the last assistant message whose
         results never landed in memory (the crash window before a tool result
         was persisted). Idempotency caveat: non-idempotent tools may re-run;
         DESTRUCTIVE tools will re-prompt for approval on the way through the
         pipeline, which is the safe default.
+
+        16.7 fix: scan backwards for the last assistant message with
+        tool_calls — not just ``msgs[-1]`` — so partial turns (some tools
+        executed, some not) are correctly repaired.
         """
         msgs = self.memory.get_messages()
-        if not msgs or msgs[-1].get("role") != "assistant" or "tool_calls" not in msgs[-1]:
+        if not msgs:
             return
-        requested = msgs[-1].get("tool_calls") or []
+        # Find the last assistant message that has tool_calls (scan backwards
+        # so partial turns — where tool results follow the assistant message —
+        # are also repaired).
+        last_assistant = None
+        for m in reversed(msgs):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                last_assistant = m
+                break
+        if last_assistant is None:
+            return
+        requested = last_assistant.get("tool_calls") or []
         answered = {m.get("tool_call_id") for m in msgs if m.get("role") == "tool"}
         missing = [tc for tc in requested if tc.get("id") not in answered]
         if not missing:
