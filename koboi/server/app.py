@@ -1,13 +1,13 @@
 """koboi/server/app -- create_app composition root + ``koboi serve`` entrypoint.
 
-Composes: AgentPool (lifecycle brain) + ApprovalRegistry (HITL) +
-HealthRegistry + request-id middleware + routes (sessions CRUD, /chat/stream
-SSE with queue-bridged approval, /approve, /healthz, /readyz).
+Composes: AgentPool + ApprovalRegistry (HITL) + KeyStore (auth) +
+OwnershipStore (tenant) + HealthRegistry + request-id middleware + routes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -20,8 +20,10 @@ from koboi.events import ErrorEvent
 from koboi.guardrails.approval import AsyncCallbackApprovalHandler
 from koboi.guardrails.approval_types import ApprovalResponse
 from koboi.server.approvals import ApprovalCoordinator, ApprovalRegistry
+from koboi.server.auth import KeyStore, make_auth_middleware
 from koboi.server.health import HealthRegistry, make_db_check, make_pool_alive_check
 from koboi.server.middleware import request_id_middleware
+from koboi.server.ownership import OwnershipStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
 from koboi.server.schema import (
     ApproveRequest,
@@ -43,6 +45,23 @@ ExtraRouteRegistrar = Callable[[FastAPI, AgentPool], None]
 APPROVAL_TIMEOUT = 120.0
 
 
+def _build_key_store(config: Config, api_keys: list[str] | None = None) -> KeyStore:
+    """Load API keys from file + env + config (or the ``api_keys`` test seam)."""
+    ks = KeyStore()
+    ks.load_from_file(config.get("server", "api_keys_file", default=None))
+    if api_keys:
+        ks.load_from_env(",".join(api_keys))
+    else:
+        env_val = os.environ.get("KOBOI_API_KEYS", "")
+        if env_val:
+            ks.load_from_env(env_val)
+        cfg_keys = config.get("server", "api_keys", default=[])
+        if isinstance(cfg_keys, list):
+            for k in cfg_keys:
+                ks.load_from_env(str(k))
+    return ks
+
+
 def create_app(
     config: Config,
     *,
@@ -55,12 +74,12 @@ def create_app(
     workspace_root: str = "./workspace",
     cap: int = 100,
     enable_cors: bool = True,
+    api_keys: list[str] | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
 
-    ``client_factory`` is the test seam: when set, each session's agent is built
-    then has its LLM client swapped to ``client_factory()`` (e.g. a MockClient),
-    so integration tests run with no network. Production leaves it ``None``.
+    ``api_keys`` (test seam): when provided, enables auth with those plaintext
+    keys. When ``None`` (default), keys are loaded from file + env + config.
     """
     pool = AgentPool(
         config,
@@ -72,6 +91,16 @@ def create_app(
         approval_handler=approval_handler,
     )
     approvals = ApprovalRegistry()
+
+    # M3: API-key auth (keys file + env back-compat; dev-allow when empty).
+    key_store = _build_key_store(config, api_keys)
+
+    # M3: session ownership (SQLite sidecar; same db_path as memory when sqlite).
+    memory_backend = config.get("memory", "backend", default="sqlite")
+    memory_db_path = config.get("memory", "db_path", default="koboi_memory.db")
+    ownership_db = memory_db_path if memory_backend == "sqlite" else ":memory:"
+    ownership = OwnershipStore(db_path=ownership_db)
+
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
     health.register("db", make_db_check(config))
@@ -82,10 +111,12 @@ def create_app(
             yield
         finally:
             await pool.close_all()
+            ownership.close()
 
-    app = FastAPI(title=f"koboi-{config.agent_name}", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title=f"koboi-{config.agent_name}", version="0.3.0", lifespan=lifespan)
     app.state.pool = pool
     app.state.approvals = approvals
+    app.state.ownership = ownership
     app.state.health = health
 
     if enable_cors:
@@ -98,17 +129,40 @@ def create_app(
             allow_headers=["*"],
         )
 
-    app.middleware("http")(request_id_middleware)
+    # Middleware stack: auth (innermost) → extras → request_id (outermost).
+    # request_id is outermost so 401/403 responses include X-Request-Id.
+    app.middleware("http")(make_auth_middleware(key_store))
     for mw in extra_middleware:
         app.middleware("http")(mw)
+    app.middleware("http")(request_id_middleware)
 
-    _register_routes(app, pool, health, approvals)
+    _register_routes(app, pool, health, approvals, ownership)
     for registrar in extra_routes:
         registrar(app, pool)
     return app
 
 
-def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, approvals: ApprovalRegistry) -> None:
+def _check_owner(ownership: OwnershipStore, session_id: str, request: Request) -> JSONResponse | None:
+    """Returns an error response if the caller is not the session owner.
+
+    Sessions with NO owner set (header-provided, never POSTed) are allowed
+    (back-compat — the session_id is the secret). Only explicitly-owned sessions
+    (created via POST /v1/sessions) are restricted to their owner.
+    """
+    owner = getattr(request.state, "api_key_id", "dev")
+    actual = ownership.get_owner(session_id)
+    if actual is not None and actual != owner:
+        return _error_response(403, "forbidden", "not the session owner", request)
+    return None
+
+
+def _register_routes(
+    app: FastAPI,
+    pool: AgentPool,
+    health: HealthRegistry,
+    approvals: ApprovalRegistry,
+    ownership: OwnershipStore,
+) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
         return {"status": "ok"}
@@ -130,6 +184,7 @@ def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, appr
             await pool.get_or_create(sid)
         except PoolFull as exc:
             return _error_response(429, "pool_full", str(exc), request)
+        ownership.set_owner(sid, getattr(request.state, "api_key_id", "dev"))
         response.headers["X-Session-Id"] = sid
         return CreateSessionResponse(session_id=sid)
 
@@ -139,6 +194,9 @@ def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, appr
             return _error_response(400, "bad_request", "invalid session_id", request)
         if pool.get(session_id) is None:
             raise HTTPException(status_code=404, detail="session not found")
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
         messages = await pool.get_messages(session_id)
         return SessionResponse(session_id=session_id, messages=messages)
 
@@ -146,9 +204,13 @@ def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, appr
     async def delete_session(session_id: str, request: Request) -> Response:
         if not is_safe_session_id(session_id):
             return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
         evicted = await pool.evict(session_id)
         if not evicted:
             raise HTTPException(status_code=404, detail="session not found")
+        ownership.delete(session_id)
         return SessionDeletedResponse(session_id=session_id, evicted=True)
 
     # ---- M2: /chat/stream with queue-bridged HITL + /approve ----
@@ -164,13 +226,21 @@ def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, appr
         if header_sid is not None and not is_safe_session_id(header_sid):
             return _error_response(400, "bad_request", "invalid X-Session-Id", request)
         session_id = header_sid or pool.new_session_id()
+
+        # M3: ownership check for existing sessions; set for new.
+        owner = getattr(request.state, "api_key_id", "dev")
+        if header_sid is not None:
+            err = _check_owner(ownership, session_id, request)
+            if err:
+                return err
+        else:
+            ownership.set_owner(session_id, owner)
+
         try:
             agent = await pool.get_or_create(session_id)
         except PoolFull as exc:
             return _error_response(429, "pool_full", str(exc), request)
 
-        # Per-run HITL coordinator (always-on; inert unless a destructive /
-        # un-trusted tool triggers the approval gate).
         queue: asyncio.Queue = asyncio.Queue()
         coordinator = ApprovalCoordinator(queue, timeout=APPROVAL_TIMEOUT)
         approvals.register(session_id, coordinator)
@@ -182,11 +252,8 @@ def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, appr
         )
 
         async def _run_agent():
-            """Background task: acquire session lock, install per-run handler, stream."""
             try:
                 async with pool.session_lock(session_id):
-                    # Install handler UNDER the lock (prevents a concurrent
-                    # same-session request from overwriting it before the run).
                     if hasattr(agent._core, "_tool_pipeline"):
                         del agent._core._tool_pipeline
                     agent._core.approval_handler = handler
@@ -195,7 +262,7 @@ def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, appr
             except Exception as exc:
                 await queue.put(ErrorEvent(error=exc))
             finally:
-                await queue.put(None)  # sentinel
+                await queue.put(None)
 
         async def event_gen():
             task = asyncio.create_task(_run_agent())
@@ -229,6 +296,9 @@ def _register_routes(app: FastAPI, pool: AgentPool, health: HealthRegistry, appr
     async def approve(session_id: str, body: ApproveRequest, request: Request) -> Response:
         if not is_safe_session_id(session_id):
             return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
         coordinator = approvals.get(session_id)
         if coordinator is None:
             raise HTTPException(status_code=404, detail="no active session or pending approval")

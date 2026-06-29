@@ -292,3 +292,63 @@ class TestApprovals:
         async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
             r = await c.post("/v1/sessions/nope/approve", json={"approval_id": "x"})
             assert r.status_code == 404
+
+
+class TestAuth:
+    """M3: API-key auth + session ownership integration tests."""
+
+    async def test_dev_mode_no_auth_required(self):
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
+            assert (await c.get("/healthz")).status_code == 200
+            assert (await c.post("/v1/sessions")).status_code == 201
+
+    async def test_401_without_bearer_when_keys_configured(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=False,
+            api_keys=["secret-key"],
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            assert (await c.post("/v1/sessions")).status_code == 401
+
+    async def test_200_with_valid_bearer(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=False,
+            api_keys=["secret-key"],
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/sessions", headers={"Authorization": "Bearer secret-key"})
+            assert r.status_code == 201
+
+    async def test_401_with_invalid_bearer(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=False,
+            api_keys=["secret-key"],
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/sessions", headers={"Authorization": "Bearer wrong"})
+            assert r.status_code == 401
+
+    async def test_healthz_open_even_with_auth(self):
+        app = create_app(_config(), enable_cors=False, api_keys=["secret-key"])
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            assert (await c.get("/healthz")).status_code == 200
+
+    async def test_403_accessing_other_owner_session(self):
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=False,
+            api_keys=["key-alice", "key-bob"],
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            sid = (await c.post("/v1/sessions", headers={"Authorization": "Bearer key-alice"})).json()["session_id"]
+            r = await c.get(f"/v1/sessions/{sid}", headers={"Authorization": "Bearer key-bob"})
+            assert r.status_code == 403
+            r2 = await c.get(f"/v1/sessions/{sid}", headers={"Authorization": "Bearer key-alice"})
+            assert r2.status_code == 200
