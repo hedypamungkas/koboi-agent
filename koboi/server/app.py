@@ -100,6 +100,19 @@ def _build_key_store(config: Config, api_keys: list[str] | None = None) -> KeySt
     return ks
 
 
+def _sidecar_db_path(memory_backend: str, explicit_db_path: str | None) -> str:
+    """Control-plane DB path for ownership/jobs (so ``resume_on_startup`` can work).
+
+    ``sqlite`` → the conversation DB file (matches ``SQLiteMemory``'s own default),
+    so sidecars share it. non-sqlite (ephemeral conversations) → a durable file only
+    when the deployer set ``memory.db_path``; otherwise ``:memory:`` (explicit opt-out
+    that preserves test behavior — e.g. ``test_server_app`` builds in-memory apps).
+    """
+    if memory_backend == "sqlite":
+        return explicit_db_path or "koboi_memory.db"
+    return explicit_db_path or ":memory:"
+
+
 def create_app(
     config: Config,
     *,
@@ -133,18 +146,18 @@ def create_app(
     # M3: API-key auth (keys file + env back-compat; dev-allow when empty).
     key_store = _build_key_store(config, api_keys)
 
-    # M3: session ownership + M4: job store (same db_path as memory when sqlite).
+    # M3: session ownership + M4: job store. Control-plane state persists to a file
+    # so ``resume_on_startup`` works; see ``_sidecar_db_path`` for the resolution rules.
     memory_backend = config.get("memory", "backend", default="sqlite")
-    memory_db_path = config.get("memory", "db_path", default="koboi_memory.db")
-    shared_db = memory_db_path if memory_backend == "sqlite" else ":memory:"
+    shared_db = _sidecar_db_path(memory_backend, config.get("memory", "db_path"))
     ownership = OwnershipStore(db_path=shared_db)
     job_store = JobStore(db_path=shared_db)
 
-    # 16.16: warn if jobs are enabled but memory backend can't persist (resume won't work).
-    if memory_backend != "sqlite":
+    # 16.16: warn only in the genuinely-bad case — ephemeral sidecar can't resume.
+    if shared_db == ":memory:":
         _logger.warning(
-            "memory.backend='%s' — job resume-on-startup will NOT work (JobStore is in :memory:). "
-            "Set memory.backend=sqlite for production job durability.",
+            "memory.backend='%s' with no memory.db_path — job/ownership sidecar is :memory:; "
+            "resume-on-startup will NOT survive restart. Set memory.db_path to persist.",
             memory_backend,
         )
 
@@ -160,7 +173,7 @@ def create_app(
 
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
-    health.register("db", make_db_check(config))
+    health.register("db", make_db_check(ownership, backend=memory_backend))
 
     drain_seconds = config.get("server", "timeouts", "drain_seconds", default=60.0) or 60.0
 
@@ -586,18 +599,34 @@ def _error_response(status: int, code: str, message: str, request: Request) -> J
     )
 
 
-def serve_app(config_path: str | Path, *, host: str = "127.0.0.1", port: int = 8000) -> None:
-    """``koboi serve`` entrypoint: load config, build app, run uvicorn."""
+def _resolve_bind(config: Config, host: str | None, port: int | None) -> tuple[str, int]:
+    """Resolve bind host/port: CLI flag > YAML (server.host/server.port) > defaults.
+
+    ``serve_app`` receives ``None`` when the CLI flag is absent, so a YAML
+    ``server.host``/``server.port`` (then the hardcoded defaults) takes effect.
+    """
+    resolved_host = host or config.get("server", "host", default="127.0.0.1")
+    resolved_port = port or config.get("server", "port", default=8000)
+    return resolved_host, int(resolved_port)
+
+
+def serve_app(config_path: str | Path, *, host: str | None = None, port: int | None = None) -> None:
+    """``koboi serve`` entrypoint: load config, build app, run uvicorn.
+
+    ``host``/``port`` default to ``None`` (CLI flag absent) so YAML ``server.host``
+    / ``server.port`` are honored — see ``_resolve_bind``.
+    """
     import logging
 
     import uvicorn
 
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        logging.getLogger(__name__).warning(
-            "Binding to %s with NO authentication (auth lands in M3). "
-            "Do not expose this server to untrusted networks yet.",
-            host,
-        )
     cfg = Config.from_yaml(config_path)
+    resolved_host, resolved_port = _resolve_bind(cfg, host, port)
+    if resolved_host not in ("127.0.0.1", "localhost", "::1"):
+        logging.getLogger(__name__).warning(
+            "Binding to %s (non-loopback). Ensure API keys are configured "
+            "(KOBOI_API_KEYS or `koboi keys create`) before exposing to untrusted networks.",
+            resolved_host,
+        )
     app = create_app(cfg)
-    uvicorn.run(app, host=host, port=port)  # pragma: no cover (blocking server)
+    uvicorn.run(app, host=resolved_host, port=resolved_port)  # pragma: no cover (blocking server)

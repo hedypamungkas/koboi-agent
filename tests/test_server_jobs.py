@@ -174,3 +174,23 @@ class TestGuardrailsJobActive:
         assert any("denied" in getattr(e, "result", "").lower() for e in tool_results)
         # Verify no PendingApprovalEvent was emitted (autonomous — no HITL).
         assert not any(isinstance(e, PendingApprovalEvent) for e in events)
+
+
+class TestResumeOnStartup:
+    """resume_on_startup: running jobs are marked failed AND retriable (G3*)."""
+
+    async def test_running_marked_failed_retriable(self, tmp_path):
+        from koboi.server.jobs import JobRegistry, JobStore, resume_on_startup
+
+        store = JobStore(str(tmp_path / "jobs.db"))
+        store.insert("job_1", "s1", "alice", "do thing")
+        store.update_status("job_1", "running")
+        # No pending jobs → the requeue loop (which needs a live pool) never runs,
+        # so a dummy pool is sufficient to exercise the running→failed path.
+        requeued = await resume_on_startup(store, None, JobRegistry(), timeout=30)
+        assert requeued == 0
+        job = store.get("job_1")
+        assert job["status"] == "failed"
+        assert bool(job["retriable"]) is True
+        assert job["error_class"] == "InterruptedByRestart"
+        assert "interrupted" in job["error"]

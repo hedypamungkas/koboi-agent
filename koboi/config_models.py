@@ -282,7 +282,7 @@ class ServerConfig(BaseModel):
 
     enabled: bool = False
     host: str = "127.0.0.1"
-    port: int = Field(default=8080, ge=1, le=65535)
+    port: int = Field(default=8000, ge=1, le=65535)
     api_keys_file: str | None = None
     api_keys: list[str] = Field(default_factory=list)
     auth_required: bool = True

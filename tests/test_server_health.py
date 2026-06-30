@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
-from koboi.config import Config
 from koboi.server.health import CheckResult, HealthRegistry, make_db_check, make_pool_alive_check
+
+
+class _FakeDbStore:
+    """Stand-in for a store exposing ``.ping()`` (cf. ``OwnershipStore.ping``)."""
+
+    def __init__(self, alive: bool) -> None:
+        self._alive = alive
+
+    def ping(self) -> bool:
+        return self._alive
 
 
 def _ok(name: str):
@@ -56,11 +65,13 @@ class TestHealthRegistry:
         result = await make_pool_alive_check(_FakePool())()
         assert result.ok is False
 
-    async def test_db_check_reports_backend(self):
-        cfg = Config.from_dict(
-            {"agent": {"name": "t"}, "llm": {"model": "m"}, "memory": {"backend": "in_memory"}},
-            validate=True,
-        )
-        result = await make_db_check(cfg)()
+    async def test_db_check_ok_when_reachable(self):
+        result = await make_db_check(_FakeDbStore(alive=True), backend="sqlite")()
         assert result.ok is True
-        assert "in_memory" in result.detail
+        assert "sqlite" in result.detail
+        assert "reachable" in result.detail
+
+    async def test_db_check_false_when_unreachable(self):
+        result = await make_db_check(_FakeDbStore(alive=False), backend="sqlite")()
+        assert result.ok is False
+        assert "unreachable" in result.detail

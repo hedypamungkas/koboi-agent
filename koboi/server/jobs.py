@@ -320,9 +320,18 @@ async def resume_on_startup(
 
     Returns count of requeued jobs.
     """
-    # Mark running jobs as failed (interrupted by restart).
+    # Mark running jobs as failed (interrupted by restart). The job did not fail
+    # on its own merits — it was killed mid-flight by a redeploy — so resubmission
+    # is the correct recovery: retriable=True + a distinct error_class let clients
+    # distinguish restart failures from genuine job failures (cf. TimeoutError at run_job).
     for job in store.list_by_status("running"):
-        store.update_status(job["job_id"], "failed", error="interrupted by restart")
+        store.update_status(
+            job["job_id"],
+            "failed",
+            error="interrupted by restart",
+            error_class="InterruptedByRestart",
+            retriable=True,
+        )
         _logger.info("Job %s marked failed (interrupted by restart)", job["job_id"])
 
     # Requeue pending jobs.

@@ -42,3 +42,12 @@ class TestOwnershipStore:
         s2 = OwnershipStore(db)
         assert s2.get_owner("sess1") == "alice"
         s2.close()
+
+    def test_ping_alive(self, tmp_path):
+        store = OwnershipStore(str(tmp_path / "own.db"))
+        assert store.ping() is True
+
+    def test_ping_false_after_close(self, tmp_path):
+        store = OwnershipStore(str(tmp_path / "own.db"))
+        store.close()
+        assert store.ping() is False

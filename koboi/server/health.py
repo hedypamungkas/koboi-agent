@@ -8,10 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, asdict
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from koboi.config import Config
+from typing import Any
 
 
 @dataclass
@@ -54,15 +51,17 @@ def make_pool_alive_check(pool: Any) -> Callable[[], Awaitable[CheckResult]]:
     return _check
 
 
-def make_db_check(config: Config) -> Callable[[], Awaitable[CheckResult]]:
-    """Report the configured memory backend (no side-effecting probe in M1).
+def make_db_check(store: Any, *, backend: str = "sqlite") -> Callable[[], Awaitable[CheckResult]]:
+    """Probe the sidecar DB connection (``SELECT 1``) instead of just reporting the backend.
 
-    Per-session DB health surfaces as agent errors, not readiness. A real probe
-    (e.g. ``SELECT 1``) can be added in M5 without changing the registry shape.
+    A closed/wedged connection makes readiness fail (503). Honest limitation: this
+    probes the ownership sidecar connection (same file as the memory DB in the sqlite
+    case), not the memory backend's own connection — a sufficient liveness signal.
     """
 
     async def _check() -> CheckResult:
-        backend = config.get("memory", "backend", default="sqlite")
-        return CheckResult("db", ok=True, detail=f"backend={backend}")
+        ok = bool(store.ping())
+        state = "reachable" if ok else "unreachable"
+        return CheckResult("db", ok=ok, detail=f"backend={backend} ({state})")
 
     return _check

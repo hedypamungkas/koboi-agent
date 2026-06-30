@@ -49,6 +49,14 @@ class OwnershipStore:
     def is_owner(self, session_id: str, owner: str) -> bool:
         return self.get_owner(session_id) == owner
 
+    def ping(self) -> bool:
+        """Liveness probe for ``/readyz``: True iff the connection answers ``SELECT 1``."""
+        try:
+            self._conn.execute("SELECT 1").fetchone()
+            return True
+        except sqlite3.Error:
+            return False
+
     def delete(self, session_id: str) -> None:
         self._conn.execute("DELETE FROM session_owners WHERE session_id = ?", (session_id,))
         self._conn.commit()
