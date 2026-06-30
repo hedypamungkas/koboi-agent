@@ -21,7 +21,7 @@ from tests.e2e.framework.scenario import Scenario, Turn
 SCENARIOS: list[Scenario] = [
     # --- Product catalog (5) ---
     Scenario("rag_acme_erp_price", "rag", [
-        Turn("What is the annual price of the AcmeERP Enterprise product?", expect_keywords=["15,000", "15000"]),
+        Turn("What is the annual price of the AcmeERP Enterprise product?", expect_any_of=["15,000", "15000"]),
     ]),
     Scenario("rag_acme_pos_price", "rag", [
         Turn("How much does AcmePOS Professional cost per month?", expect_keywords=["500"]),

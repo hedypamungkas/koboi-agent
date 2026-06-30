@@ -79,6 +79,20 @@ def _is_hard_provider_block(events: list) -> str | None:
     return None
 
 
+def _kw_match(content: str, kw: str) -> bool:
+    """Case-insensitive substring match with number normalization.
+
+    Also matches with thousands separators stripped, so a keyword ``"1260"``
+    matches content ``"1,260"`` (and vice-versa) -- the e2e models frequently
+    format numbers with commas, which broke exact-substring assertions.
+    """
+    c = content.lower()
+    k = kw.lower()
+    if k in c:
+        return True
+    return k.replace(",", "") in c.replace(",", "")
+
+
 @dataclass
 class Turn:
     """A single user message + expectations."""
@@ -86,6 +100,9 @@ class Turn:
     message: str
     expect_tools: list[str] = field(default_factory=list)
     expect_keywords: list[str] = field(default_factory=list)
+    #: Pass if ANY of these is present (OR semantics). Use for answers with
+    #: multiple acceptable forms (e.g. ["15,000", "15000"]) or concept synonyms.
+    expect_any_of: list[str] = field(default_factory=list)
     min_events: int = 2
 
 
@@ -446,13 +463,11 @@ class ScenarioExecutor:
                             error = f"Turn {i+1} assertion failed for '{turn.message[:50]}'"
 
             # Keyword assertions (tolerant; recorded but do flip passed=False).
-            for i, tr in enumerate(turns_results):
-                if i < len(scenario.turns):
-                    for kw in scenario.turns[i].expect_keywords:
-                        if kw.lower() not in tr.content.lower():
-                            passed = False
-                            if not error:
-                                error = f"Keyword '{kw}' not found in turn {i+1}"
+            kw_passed, kw_error = self._evaluate_keywords(scenario, turns_results)
+            if not kw_passed:
+                passed = False
+                if not error:
+                    error = kw_error
 
         except ProviderBlocked as exc:
             # Mark the whole run blocked so subsequent scenarios skip fast.
@@ -467,6 +482,7 @@ class ScenarioExecutor:
 
         duration = time.monotonic() - start
         metrics = collect_system_metrics()
+        assertions_checked, assertions_passed = self._count_assertions(scenario, turns_results)
         result = ScenarioResult(
             scenario_name=scenario.name,
             category=scenario.category,
@@ -475,13 +491,8 @@ class ScenarioExecutor:
             turns=turns_results,
             system_metrics=metrics,
             error=error,
-            assertions_checked=sum(len(t.expect_keywords) + len(t.expect_tools) for t in scenario.turns),
-            assertions_passed=sum(
-                1
-                for i, tr in enumerate(turns_results)
-                for kw in (scenario.turns[i].expect_keywords if i < len(scenario.turns) else [])
-                if kw.lower() in tr.content.lower()
-            ),
+            assertions_checked=assertions_checked,
+            assertions_passed=assertions_passed,
         )
         result.save_json()
         return result
@@ -524,7 +535,11 @@ class ScenarioExecutor:
         checked = 0
         for kw in turn.expect_keywords:
             checked += 1
-            if kw.lower() not in content.lower():
+            if not _kw_match(content, kw):
+                return checked, False
+        if turn.expect_any_of:
+            checked += 1
+            if not any(_kw_match(content, k) for k in turn.expect_any_of):
                 return checked, False
         for tool in turn.expect_tools:
             checked += 1
@@ -535,6 +550,56 @@ class ScenarioExecutor:
             checked += 1
             return checked, False
         return checked, True
+
+    @staticmethod
+    def _evaluate_keywords(scenario: Scenario, turns_results: list[TurnResult]) -> tuple[bool, str | None]:
+        """Keyword pass logic. Returns (all_passed, first_error_or_None).
+
+        Sequential: each turn must contain ALL ``expect_keywords`` (AND) and, if
+        ``expect_any_of`` is set, at least one of them (OR).
+        Concurrent: each of the N session replies must independently contain at
+        least one keyword from the first turn's set (OR per session) -- requiring
+        one short reply to contain ALL keywords is impossible, which is what made
+        the stress fan-out scenarios fail.
+        """
+        if scenario.concurrent and turns_results:
+            first = scenario.turns[0] if scenario.turns else None
+            kws = (first.expect_keywords + first.expect_any_of) if first else []
+            for i, tr in enumerate(turns_results):
+                if kws and not any(_kw_match(tr.content, k) for k in kws):
+                    return False, f"Concurrent session {i+1}: none of {kws} found in reply"
+            return True, None
+        for i, tr in enumerate(turns_results):
+            if i < len(scenario.turns):
+                turn = scenario.turns[i]
+                for kw in turn.expect_keywords:
+                    if not _kw_match(tr.content, kw):
+                        return False, f"Keyword '{kw}' not found in turn {i+1}"
+                if turn.expect_any_of and not any(_kw_match(tr.content, k) for k in turn.expect_any_of):
+                    return False, f"None of {turn.expect_any_of} found in turn {i+1}"
+        return True, None
+
+    @staticmethod
+    def _count_assertions(scenario: Scenario, turns_results: list[TurnResult]) -> tuple[int, int]:
+        """Count assertions checked/passed, consistent with ``_evaluate_keywords``."""
+        if scenario.concurrent and turns_results:
+            first = scenario.turns[0] if scenario.turns else None
+            kws = (first.expect_keywords + first.expect_any_of) if first else []
+            checked = len(turns_results)
+            passed = sum(1 for tr in turns_results if (not kws or any(_kw_match(tr.content, k) for k in kws)))
+            return checked, passed
+        checked = sum(
+            len(t.expect_keywords) + len(t.expect_tools) + (1 if t.expect_any_of else 0) for t in scenario.turns
+        )
+        passed = 0
+        for i, tr in enumerate(turns_results):
+            if i >= len(scenario.turns):
+                break
+            turn = scenario.turns[i]
+            passed += sum(1 for kw in turn.expect_keywords if _kw_match(tr.content, kw))
+            if turn.expect_any_of and any(_kw_match(tr.content, k) for k in turn.expect_any_of):
+                passed += 1
+        return checked, passed
 
 
 def save_summary(results: list[ScenarioResult]) -> Path:

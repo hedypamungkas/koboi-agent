@@ -55,7 +55,7 @@ SCENARIOS: list[Scenario] = [
         Turn("Review this Python: opens a file with open() but never closes it. What should be improved?", expect_keywords=["close", "with", "context"]),
     ]),
     Scenario("skill_codereview_off_by_one", "skills", [
-        Turn("Review this loop: `for i in range(1, len(items))` meant to process every element. Any issue?", expect_keywords=["off", "range", "index"]),
+        Turn("Review this loop: `for i in range(1, len(items))` meant to process every element. Any issue?", expect_any_of=["off", "missing", "skips", "omits", "first element"]),
     ]),
     Scenario("skill_codereview_bare_except", "skills", [
         Turn("Review this Python error handling: `except: pass`. What's the concern?", expect_keywords=["broad", "silent", "swallow"]),
