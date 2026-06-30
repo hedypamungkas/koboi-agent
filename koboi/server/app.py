@@ -162,6 +162,9 @@ def create_app(
     key_store = _build_key_store(config, api_keys)
     # G5a: per_tenant_max is enforced only when real auth is configured (dev mode → owner "dev").
     auth_enabled = key_store.has_keys
+    # C1: honor server.auth_required (default true). When true and no keys are
+    # configured, the auth middleware fails closed (401) instead of serving open.
+    auth_required = config.get("server", "auth_required", default=True)
 
     # M3: session ownership + M4: job store. Control-plane state persists to a file
     # so ``resume_on_startup`` works; see ``_sidecar_db_path`` for the resolution rules.
@@ -242,20 +245,31 @@ def create_app(
     app.state.job_timeout = job_timeout
     app.state.health = health
 
-    if enable_cors:
+    # C4: CORS is config-driven, never a wildcard default. CORSMiddleware is
+    # added ONLY when `server.cors` is explicitly configured; the default (no
+    # `cors:` block) adds nothing → no cross-origin reads. An operator who wants
+    # open CORS sets `cors: {allow_origins: ["*"]}` explicitly.
+    cors_cfg = config.get("server", "cors", default={}) or {}
+    if enable_cors and cors_cfg:
         from fastapi.middleware.cors import CORSMiddleware
 
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_origins=cors_cfg.get("allow_origins", []),
+            allow_methods=cors_cfg.get("allow_methods", ["GET", "POST", "PUT", "DELETE", "OPTIONS"]),
+            allow_headers=cors_cfg.get(
+                "allow_headers",
+                ["Authorization", "Content-Type", "X-Session-Id", "Idempotency-Key", "X-Request-Id"],
+            ),
+            allow_credentials=cors_cfg.get("allow_credentials", False),
+            expose_headers=cors_cfg.get("expose_headers", []),
+            max_age=cors_cfg.get("max_age", 600),
         )
 
     # Middleware: registration order is the REVERSE of execution order.
     # request_id is registered LAST → executes FIRST (outermost), wrapping auth
     # so 401/403 responses carry X-Request-Id.
-    app.middleware("http")(make_auth_middleware(key_store))
+    app.middleware("http")(make_auth_middleware(key_store, auth_required=auth_required))
     for mw in extra_middleware:
         app.middleware("http")(mw)
     app.middleware("http")(request_id_middleware)
@@ -716,6 +730,13 @@ def serve_app(config_path: str | Path, *, host: str | None = None, port: int | N
     cfg = Config.from_yaml(config_path)
     resolved_host, resolved_port = _resolve_bind(cfg, host, port)
     if resolved_host not in ("127.0.0.1", "localhost", "::1"):
+        # C1: refuse to start a non-loopback server that would fail open.
+        if cfg.get("server", "auth_required", default=True) and not _build_key_store(cfg).has_keys:
+            raise SystemExit(
+                f"Refusing to bind {resolved_host}:{resolved_port}: auth_required=true with no API "
+                "keys configured would leave the server fully open. Run `koboi keys create`, set the "
+                "KOBOI_API_KEYS env, or set server.auth_required:false only for local dev."
+            )
         logging.getLogger(__name__).warning(
             "Binding to %s (non-loopback). Ensure API keys are configured "
             "(KOBOI_API_KEYS or `koboi keys create`) before exposing to untrusted networks.",

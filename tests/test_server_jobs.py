@@ -108,6 +108,13 @@ class TestAutonomousApprovalHandler:
         handler = AutonomousApprovalHandler(trust_db=db)
         assert handler.should_approve("run_shell", "ls", RiskLevel.DESTRUCTIVE) is True
 
+    def test_run_shell_benign_command_denied_without_trust(self):
+        # C2: run_shell is DESTRUCTIVE, so even a benign command (``ls``) is
+        # denied in autonomous mode -- denial is risk-based, not pattern-based,
+        # so jobs never execute unattended shell without a Trust DB allow-rule.
+        handler = AutonomousApprovalHandler()
+        assert handler.should_approve("run_shell", "ls -la", RiskLevel.DESTRUCTIVE) is False
+
 
 class TestGuardrailsJobActive:
     """16.27: verify guardrails + PolicyHook enforce in autonomous job mode.

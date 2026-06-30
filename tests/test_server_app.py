@@ -21,21 +21,24 @@ from koboi.server import create_app  # noqa: E402
 from tests.conftest import MockClient, make_mock_response  # noqa: E402
 
 
-def _config() -> Config:
-    return Config.from_dict(
-        {
-            "agent": {"name": "srv", "system_prompt": "h", "max_iterations": 3},
-            "llm": {
-                "provider": "openai",
-                "model": "gpt-4o-mini",
-                "api_key": "test",
-                "base_url": "http://localhost:8080/v1",
-            },
-            "memory": {"backend": "in_memory"},
-            "sandbox": {"backend": "passthrough"},
+def _config(**overrides) -> Config:
+    """Base server-test config: in-memory memory, restricted sandbox, dev-open
+    auth (``server.auth_required: false``) so non-auth integration tests don't
+    401. Pass top-level overrides, e.g. ``_config(sandbox={...})``."""
+    cfg = {
+        "agent": {"name": "srv", "system_prompt": "h", "max_iterations": 3},
+        "llm": {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "api_key": "test",
+            "base_url": "http://localhost:8080/v1",
         },
-        validate=True,
-    )
+        "memory": {"backend": "in_memory"},
+        "sandbox": {"backend": "restricted"},  # C3: jobs require containment
+        "server": {"auth_required": False},  # C1: dev-open by default for non-auth tests
+    }
+    cfg.update(overrides)
+    return Config.from_dict(cfg, validate=True)
 
 
 def _app(responses=None, **kw):
@@ -328,6 +331,32 @@ class TestAuth:
             assert (await c.get("/healthz")).status_code == 200
             assert (await c.post("/v1/sessions")).status_code == 201
 
+    async def test_fail_closed_when_auth_required_and_no_keys(self):
+        # C1: default auth_required=true with no keys configured → 401 (was 201,
+        # fully open). This is the core fail-closed fix. Health stays open.
+        app = create_app(
+            _config(server={"auth_required": True}),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            assert (await c.post("/v1/sessions")).status_code == 401
+            assert (await c.get("/healthz")).status_code == 200
+
+    def test_serve_app_refuses_non_loopback_without_keys(self, tmp_path):
+        # C1: serve_app refuses to start a non-loopback server that would fail
+        # open (auth_required=true default + no keys). Sync -- raises before uvicorn.
+        from koboi.server.app import serve_app
+
+        cfg = tmp_path / "agent.yaml"
+        cfg.write_text(
+            "agent:\n  name: t\n  system_prompt: h\n  max_iterations: 3\n"
+            "llm:\n  provider: openai\n  model: m\n  api_key: x\n  base_url: http://x\n"
+            "memory:\n  backend: in_memory\n"
+        )
+        with pytest.raises(SystemExit):
+            serve_app(str(cfg), host="0.0.0.0", port="0")
+
     async def test_401_without_bearer_when_keys_configured(self):
         app = create_app(
             _config(),
@@ -392,6 +421,51 @@ async def _poll_job(client, job_id, timeout=10.0):
             return body
         await asyncio.sleep(0.1)
     return None
+
+
+class TestCORS:
+    """C4: CORS is config-driven; default is no cross-origin reads (no wildcard)."""
+
+    @staticmethod
+    def _app_with(cors_cfg, enable_cors=True):
+        return create_app(
+            _config(server={"auth_required": False, "cors": cors_cfg}),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=enable_cors,
+        )
+
+    async def test_no_acao_when_cors_unconfigured(self):
+        # No `server.cors` block (default) → no Access-Control-Allow-Origin header.
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=True,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.options(
+                "/v1/sessions",
+                headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+            )
+            assert r.headers.get("access-control-allow-origin") is None
+
+    async def test_configured_origin_reflected_on_preflight(self):
+        app = self._app_with({"allow_origins": ["https://app.example"]})
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.options(
+                "/v1/sessions",
+                headers={"Origin": "https://app.example", "Access-Control-Request-Method": "POST"},
+            )
+            assert r.headers.get("access-control-allow-origin") == "https://app.example"
+
+    async def test_disallowed_origin_not_reflected(self):
+        app = self._app_with({"allow_origins": ["https://app.example"]})
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.options(
+                "/v1/sessions",
+                headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+            )
+            # Disallowed origin is not echoed back (no wildcard reflection).
+            assert r.headers.get("access-control-allow-origin") != "https://evil.example"
 
 
 class TestJobs:
@@ -570,6 +644,36 @@ class TestChatIdempotency:
                 assert r2.status_code == 200  # no key → no dedup
 
 
+class TestJobSandboxGuard:
+    """C3: autonomous jobs require a restricted sandbox; passthrough is refused."""
+
+    async def test_job_refused_with_passthrough_sandbox(self):
+        # Explicit passthrough → the job is refused at execute time (failed).
+        app = create_app(
+            _config(sandbox={"backend": "passthrough"}),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "do"})
+            assert r.status_code == 202
+            body = await _poll_job(c, r.json()["job_id"])
+            assert body is not None and body["status"] == "failed"
+            assert body.get("error_class") == "PermissionError" or "restricted" in (body.get("error") or "").lower()
+
+    async def test_job_runs_with_restricted_sandbox(self):
+        # Restricted (the _config default) → job completes normally.
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+        )
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "do"})
+            body = await _poll_job(c, r.json()["job_id"])
+            assert body is not None and body["status"] == "completed"
+
+
 class TestPerTenantLimit:
     """G5a: per_tenant_max enforced only with real auth; counts running jobs."""
 
@@ -580,7 +684,8 @@ class TestPerTenantLimit:
                 "agent": {"name": "t", "max_iterations": 1},
                 "llm": {"provider": "openai", "model": "m", "api_key": "x", "base_url": "http://x"},
                 "memory": {"backend": "in_memory"},
-                "sandbox": {"backend": "passthrough"},
+                "sandbox": {"backend": "restricted"},  # C3: jobs require containment
+                "server": {"auth_required": False},  # C1: dev-open (no api_keys in these tests)
                 "jobs": {"per_tenant_max": per_tenant},
             },
             validate=True,
@@ -626,7 +731,8 @@ class TestJobQueueBacklog:
                 "agent": {"name": "t", "max_iterations": 1},
                 "llm": {"provider": "openai", "model": "m", "api_key": "x", "base_url": "http://x"},
                 "memory": {"backend": "in_memory"},
-                "sandbox": {"backend": "passthrough"},
+                "sandbox": {"backend": "restricted"},  # C3: jobs require containment
+                "server": {"auth_required": False},  # C1: dev-open (no api_keys in these tests)
                 "jobs": {"max_concurrent": max_concurrent, "queue_depth": queue_depth, "per_tenant_max": 64},
             },
             validate=True,

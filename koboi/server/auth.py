@@ -89,8 +89,15 @@ class KeyStore:
         return len(self._keys) > 0
 
 
-def make_auth_middleware(key_store: KeyStore):
-    """Build a Starlette HTTP middleware that validates ``Bearer`` tokens."""
+def make_auth_middleware(key_store: KeyStore, *, auth_required: bool = True):
+    """Build a Starlette HTTP middleware that validates ``Bearer`` tokens.
+
+    ``auth_required`` (default True, mirrors ``server.auth_required``): when no
+    API keys are configured, True **fails closed** (401) so a production deploy
+    with a missing/unreadable keys file is never left open. Set
+    ``auth_required: false`` to opt into dev mode (no auth) -- intended only for
+    trusted loopback local development.
+    """
 
     _warned = False
 
@@ -99,9 +106,12 @@ def make_auth_middleware(key_store: KeyStore):
         if request.url.path in OPEN_PATHS:
             return await call_next(request)
         if not key_store.has_keys:
+            if auth_required:
+                # Fail closed: no keys + auth_required=true → never serve open.
+                return _unauthorized(request, "no API keys configured (auth_required is true)")
             if not _warned:
                 _logger.warning(
-                    "No API keys configured — auth disabled (dev mode). "
+                    "No API keys configured — auth disabled (dev mode, auth_required=false). "
                     "Configure keys via 'koboi keys create' or KOBOI_API_KEYS env."
                 )
                 _warned = True

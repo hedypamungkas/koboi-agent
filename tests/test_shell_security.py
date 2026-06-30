@@ -163,8 +163,9 @@ class TestWorkingDirectory:
 class TestOutputTruncation:
     def test_output_truncated_at_max(self):
         """Output longer than MAX_OUTPUT should be truncated."""
-        # Generate output larger than MAX_OUTPUT
-        large_cmd = f"python3 -c \"print('x' * {MAX_OUTPUT + 1000})\""
+        # Generate output larger than MAX_OUTPUT without an inline interpreter:
+        # `python3 -c` is now a deny pattern (C2), so use a shell-only generator.
+        large_cmd = f"yes x | head -c {MAX_OUTPUT + 1000}"
         result = run_shell(large_cmd)
         assert len(result) <= MAX_OUTPUT + 200  # allow room for truncation message
         assert "truncated" in result

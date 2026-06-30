@@ -68,6 +68,17 @@ COMMAND_DENY_PATTERNS = [
     re.compile(r"chmod\s+-R\s+777\s+/"),
     re.compile(r"shutdown\b"),
     re.compile(r"reboot\b"),
+    # C2: interpreter-exec / exfil-evasion vectors (defense-in-depth). Inline
+    # interpreters bypass file-based arguments and are the primary prompt-injection
+    # exfil path (python3 -c, perl -e, bash -c, ...); /dev/tcp is bash net-exfil;
+    # base64-decode-into-shell hides payloads. Blocked even with a Trust rule.
+    re.compile(r"\bpython[0-9.]*\s+-c\b"),
+    re.compile(r"\bperl\s+-e\b"),
+    re.compile(r"\b(?:bash|sh|dash|zsh)\s+-c\b"),
+    re.compile(r"\bnode\s+-e\b"),
+    re.compile(r"\bruby\s+-e\b"),
+    re.compile(r"/dev/tcp"),
+    re.compile(r"base64\b[^|]*\|\s*(?:bash|sh|python)"),
 ]
 
 

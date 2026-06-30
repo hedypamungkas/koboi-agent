@@ -341,6 +341,15 @@ async def _execute_job(
     record = registry.get(job_id)
     agent = await pool.get_or_create(record.session_id)
 
+    # C3: autonomous jobs must run contained. 'passthrough' has no fs/network
+    # isolation, so refuse it -- raise before running; run_job marks the job failed.
+    sb = agent._core.tools.get_dep("sandbox")
+    if getattr(sb, "name", "passthrough") == "passthrough":
+        raise PermissionError(
+            "Autonomous jobs require sandbox.backend='restricted'; 'passthrough' is refused. "
+            "Configure the 'sandbox:' section before enabling jobs."
+        )
+
     store.update_status(job_id, "running")
     # 16.21: enrich Langfuse trace with job context.
     if agent._core and agent._core.hooks:
