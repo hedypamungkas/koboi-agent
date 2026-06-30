@@ -44,19 +44,28 @@ class TestChat:
         assert "complete" in text
 
     async def test_session_isolation(self, client):
-        """8. Two sessions don't cross-contaminate."""
+        """8. Two sessions don't cross-contaminate (verified via messages API)."""
+        from tests.e2e.conftest import _headers
+
         sid_a = await create_session(client)
         sid_b = await create_session(client)
-        await stream_chat(client, "Remember: I like BLUE", session_id=sid_a)
-        await stream_chat(client, "Remember: I like RED", session_id=sid_b)
+        # Send distinct messages to each session.
+        await stream_chat(client, "I love sushi.", session_id=sid_a)
+        await stream_chat(client, "I love pizza.", session_id=sid_b)
 
-        events_a = await stream_chat(client, "What color do I like?", session_id=sid_a)
-        content_a = get_content(events_a).upper()
-        assert "BLUE" in content_a, f"session A should say BLUE, got: {content_a}"
+        # Verify isolation via the messages API (not LLM-dependent).
+        msgs_a = (await client.get(f"/v1/sessions/{sid_a}", headers=_headers())).json()["messages"]
+        msgs_b = (await client.get(f"/v1/sessions/{sid_b}", headers=_headers())).json()["messages"]
 
-        events_b = await stream_chat(client, "What color do I like?", session_id=sid_b)
-        content_b = get_content(events_b).upper()
-        assert "RED" in content_b, f"session B should say RED, got: {content_b}"
+        # Session A should contain "sushi" but NOT "pizza".
+        text_a = " ".join(m.get("content", "") for m in msgs_a).lower()
+        assert "sushi" in text_a, f"session A missing sushi: {text_a[:200]}"
+        assert "pizza" not in text_a, f"session A leaked pizza: {text_a[:200]}"
+
+        # Session B should contain "pizza" but NOT "sushi".
+        text_b = " ".join(m.get("content", "") for m in msgs_b).lower()
+        assert "pizza" in text_b, f"session B missing pizza: {text_b[:200]}"
+        assert "sushi" not in text_b, f"session B leaked sushi: {text_b[:200]}"
 
     async def test_resume(self, client):
         """9. POST /resume returns content from persisted memory."""
