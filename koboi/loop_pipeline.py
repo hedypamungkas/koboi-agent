@@ -154,7 +154,7 @@ class ToolExecutionPipeline:
         """
         # 1-2. Trust DB fast-path.
         if self.trust_db is not None:
-            trust_decision = self.trust_db.should_auto_approve(tc.name, risk)
+            trust_decision = self.trust_db.should_auto_approve(tc.name, risk, tc.arguments)
             if trust_decision.auto_approve:
                 self._audit(
                     "tool_approved",

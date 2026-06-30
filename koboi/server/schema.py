@@ -20,8 +20,8 @@ class ChatStreamRequest(BaseModel):
 
     model_config = {"extra": "ignore"}
 
-    message: str | None = None
-    messages: list[dict[str, Any]] | None = None
+    message: str | None = Field(default=None, max_length=65536)  # H6: bound body size
+    messages: list[dict[str, Any]] | None = Field(default=None, max_length=50)  # H6: bound turn count
 
     def user_message(self) -> str:
         if isinstance(self.message, str) and self.message.strip():
@@ -91,7 +91,7 @@ class JobSubmitRequest(BaseModel):
 
     model_config = {"extra": "ignore"}
 
-    message: str
+    message: str = Field(max_length=65536)  # H6: bound body size
     session_id: str | None = None
 
 

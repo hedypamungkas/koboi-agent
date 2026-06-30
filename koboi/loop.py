@@ -274,7 +274,9 @@ class AgentCore:
         skill_name, remaining = activation
         self.memory.add_assistant_message(content)
         if not self.skills.is_activated(skill_name):
-            body = self.skills.activate(skill_name)
+            # H3: model-activated skills never execute `!`cmd`` blocks (supply-chain
+            # RCE guard); only explicit user invocation (/skill) may run them.
+            body = self.skills.activate(skill_name, run_shell=False)
             if body:
                 skill = self.skills.get(skill_name)
                 self.memory.add_context_message(

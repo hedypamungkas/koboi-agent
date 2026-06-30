@@ -184,6 +184,8 @@ def git_diff(
 ) -> str:
     sandbox = (_deps or {}).get("sandbox")
     if target:
+        if target.startswith("-"):
+            return "Error: target cannot start with '-' (option injection guard)"
         if not SAFE_TARGET_RE.match(target):
             return "Error: target contains disallowed characters"
         return _run_git(["diff", target], repo_path, _tool_config, sandbox=sandbox)

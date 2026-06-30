@@ -16,6 +16,16 @@ class TestIdempotencyRegistry:
         assert reg.check_and_record("dev:s1:k") is True
         assert reg.check_and_record("dev:s1:k") is False
 
+    def test_max_entries_evicts_oldest(self):
+        # H6: a bounded registry evicts the oldest entry when full, so a
+        # key-storm can't grow _seen without bound.
+        reg = IdempotencyRegistry(ttl_seconds=60, max_entries=2)
+        assert reg.check_and_record("a") is True
+        assert reg.check_and_record("b") is True
+        assert reg.check_and_record("c") is True  # at cap → evicts "a" (oldest)
+        assert reg.check_and_record("b") is False  # "b" still present → deduped
+        assert reg.check_and_record("a") is True  # "a" was evicted → treated as new
+
     def test_isolation_by_owner_and_session(self):
         reg = IdempotencyRegistry(ttl_seconds=60)
         assert reg.check_and_record("alice:s1:k") is True

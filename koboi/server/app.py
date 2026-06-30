@@ -195,7 +195,9 @@ def create_app(
     job_registry = JobRegistry(max_events=job_max_events)
     # G6: /chat/stream Idempotency-Key (409-reject, in-memory TTL).
     chat_idem_ttl = config.get("server", "idempotency", "chat_ttl_seconds", default=600.0) or 600.0
-    chat_idem = IdempotencyRegistry(ttl_seconds=chat_idem_ttl)
+    chat_idem_max = config.get("server", "idempotency", "max_entries", default=10000)  # H6
+    chat_idem = IdempotencyRegistry(ttl_seconds=chat_idem_ttl, max_entries=chat_idem_max)
+    chat_queue_maxsize = config.get("server", "limits", "chat_queue_maxsize", default=1000)  # H6
 
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
@@ -235,7 +237,16 @@ def create_app(
             except asyncio.TimeoutError:
                 _logger.warning("Shutdown drain exceeded %.1fs; forcing exit", drain_seconds)
 
-    app = FastAPI(title=f"koboi-{config.agent_name}", version="0.5.0", lifespan=lifespan)
+    # H7: interactive docs are off by default; enable via server.docs_enabled.
+    docs_enabled = config.get("server", "docs_enabled", default=False)
+    app = FastAPI(
+        title=f"koboi-{config.agent_name}",
+        version="0.5.0",
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
     app.state.pool = pool
     app.state.approvals = approvals
     app.state.ownership = ownership
@@ -288,6 +299,7 @@ def create_app(
         job_per_tenant,
         job_queue_depth,
         auth_enabled,
+        chat_queue_maxsize,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -342,6 +354,7 @@ def _register_routes(
     job_per_tenant: int,
     job_queue_depth: int,
     auth_enabled: bool,
+    chat_queue_maxsize: int,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -442,7 +455,9 @@ def _register_routes(
         # NEW sessions AFTER get_or_create succeeds (avoids orphan rows on PoolFull
         # and overwriting an existing owner after eviction+re-create).
         owner = getattr(request.state, "api_key_id", "dev")
-        is_new_session = header_sid is None and pool.get(session_id) is None
+        # H1: check an existing header-supplied session, then claim ownership
+        # below for ANY session currently without an owner (covers header-supplied
+        # NEW sessions, which previously slipped through unowned → IDOR).
         if header_sid is not None:
             err = _check_owner(ownership, session_id, request)
             if err:
@@ -467,10 +482,12 @@ def _register_routes(
                     request,
                 )
 
-        if is_new_session:
+        # H1: claim ownership for any session without one (header-new or recovered
+        # orphan). set_owner is an upsert; an existing owner is never overwritten.
+        if ownership.get_owner(session_id) is None:
             ownership.set_owner(session_id, owner)
 
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=chat_queue_maxsize)  # H6: backpressure
         coordinator = ApprovalCoordinator(queue, timeout=APPROVAL_TIMEOUT)
         approvals.register(session_id, coordinator)
         handler = AsyncCallbackApprovalHandler(
@@ -604,14 +621,16 @@ def _register_routes(
             err = _check_owner(ownership, session_id, request)
             if err:
                 return err
+            # H1: claim ownership of a reused session that currently has none.
+            if ownership.get_owner(session_id) is None:
+                ownership.set_owner(session_id, owner)
         else:
-            is_new = pool.get(session_id) is None
             try:
                 await pool.get_or_create(session_id)
             except PoolFull as exc:
                 return _error_response(429, "pool_full", str(exc), request)
-            if is_new:
-                ownership.set_owner(session_id, owner)
+            # H1: dedicated new session — always acquires an owner.
+            ownership.set_owner(session_id, owner)
 
         job_id = new_job_id()
         job_store.insert(job_id, session_id, owner, body.message, idempotency_key=idem_key)

@@ -46,7 +46,7 @@ class ApprovalCoordinator:
             reason=req.reason or "risk-based approval",
             timeout_seconds=self._timeout,
         )
-        self._queue.put_nowait(event)  # sync; unbounded queue never blocks
+        await self._queue.put(event)  # H6: bounded queue → cooperative backpressure (was put_nowait)
         future: asyncio.Future[ApprovalResponse] = asyncio.get_event_loop().create_future()
         self._futures[req.approval_id] = future
         return await future  # handler's wait_for enforces the timeout

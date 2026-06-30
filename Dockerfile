@@ -27,6 +27,11 @@ ENV KOBOI_PORT=8080
 ENV KOBOI_DATA_DIR=/data
 RUN mkdir -p /data /data/workspace
 
+# H8: least-privilege non-root user (koboi binds 8080 >1024, so no NET_BIND_SERVICE).
+RUN groupadd -r koboi && useradd -r -g koboi -u 1000 koboi \
+    && chown -R koboi:koboi /app /data
+USER koboi
+
 EXPOSE 8080
 
 # Health check (liveness).

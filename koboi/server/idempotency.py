@@ -15,9 +15,12 @@ from collections.abc import Callable
 class IdempotencyRegistry:
     """Track recently-seen dedup keys with a TTL (lazy purge on access)."""
 
-    def __init__(self, ttl_seconds: float = 600.0, clock: Callable[[], float] | None = None) -> None:
+    def __init__(
+        self, ttl_seconds: float = 600.0, max_entries: int = 10000, clock: Callable[[], float] | None = None
+    ) -> None:
         self._seen: dict[str, float] = {}  # dedup_key -> timestamp
         self._ttl = ttl_seconds
+        self._max_entries = max_entries  # H6: bound memory against key-storms
         self._clock = clock or time.monotonic
 
     def _purge(self, now: float) -> None:
@@ -31,6 +34,11 @@ class IdempotencyRegistry:
         self._purge(now)
         if dedup_key in self._seen:
             return False
+        # H6: hard cap -- evict the oldest entry when full so a key-storm can't
+        # grow _seen without bound (lazy TTL purge runs first).
+        if len(self._seen) >= self._max_entries:
+            oldest = min(self._seen, key=self._seen.get)  # type: ignore[arg-type]
+            self._seen.pop(oldest, None)
         self._seen[dedup_key] = now
         return True
 

@@ -21,6 +21,11 @@ services:
     build: .
     container_name: koboi-agent
     restart: unless-stopped
+    user: "1000:1000"            # H8: run as the non-root image user
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - koboi-data:/data
       - ./configs:/app/configs:ro          # override agent config

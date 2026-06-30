@@ -242,8 +242,11 @@ PRIVATE_NETWORKS = [
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("0.0.0.0/8"),  # H2: "this host"/unset (AWS http://0/ SSRF gadget)
+    ipaddress.ip_network("100.64.0.0/10"),  # H2: CGNAT / shared address space
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("::ffff:0:0/96"),  # H2: IPv4-mapped IPv6 (::ffff:127.0.0.1, ::ffff:169.254.169.254)
 ]
 
 
@@ -333,48 +336,64 @@ async def web_fetch(url: str, timeout: int = 15) -> str:
 
     timeout = max(1, min(timeout, MAX_TIMEOUT))
 
-    # SSRF check: resolve DNS and verify the IP is not private
-    try:
-        await asyncio.to_thread(_check_url_ssrf, url)
-    except socket.gaierror:
-        return f"Error: failed to resolve hostname '{urlparse(url).hostname}'"
-    except ValueError as e:
-        return f"Error: {e}"
-
+    # H2: SSRF defense. follow_redirects=False + a manual loop so the
+    # DNS/private-range check runs on EVERY hop (initial URL + each Location).
+    # Blocks redirect-to-metadata (302 -> 169.254.169.254) and re-resolves DNS
+    # per hop (defeats DNS rebinding). Redirects capped at MAX_REDIRECTS.
+    MAX_REDIRECTS = 5
     async with httpx.AsyncClient(
         timeout=timeout,
-        follow_redirects=True,
-        max_redirects=10,
+        follow_redirects=False,
         headers={"User-Agent": USER_AGENT},
     ) as client:
-        last_error = ""
-        for attempt in range(MAX_RETRIES + 1):
+        current_url = url
+        for _redir in range(MAX_REDIRECTS + 1):
             try:
-                response = await client.get(url)
-            except httpx.ConnectError as e:
-                return f"Error: connection failed -- {e}"
-            except httpx.TimeoutException:
-                return f"Error: request timed out after {timeout}s"
+                await asyncio.to_thread(_check_url_ssrf, str(current_url))
+            except socket.gaierror:
+                return f"Error: failed to resolve hostname '{urlparse(str(current_url)).hostname}'"
+            except ValueError as e:
+                return f"Error: {e}"
 
-            if response.status_code < 400:
-                break
+            last_error = ""
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    response = await client.get(current_url)
+                except httpx.ConnectError as e:
+                    return f"Error: connection failed -- {e}"
+                except httpx.TimeoutException:
+                    return f"Error: request timed out after {timeout}s"
 
-            if response.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
-                last_error = f"HTTP {response.status_code}: {response.reason_phrase}"
-                wait = 2**attempt
-                _logger.warning(
-                    "Retrying %s (status %d, attempt %d/%d)",
-                    url,
-                    response.status_code,
-                    attempt + 1,
-                    MAX_RETRIES,
-                )
-                await asyncio.sleep(wait)
+                if response.status_code < 400:
+                    break
+
+                if response.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
+                    last_error = f"HTTP {response.status_code}: {response.reason_phrase}"
+                    wait = 2**attempt
+                    _logger.warning(
+                        "Retrying %s (status %d, attempt %d/%d)",
+                        current_url,
+                        response.status_code,
+                        attempt + 1,
+                        MAX_RETRIES,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                return f"Error: HTTP {response.status_code} -- {response.reason_phrase}"
+            else:
+                return f"Error: Max retries exceeded: {last_error}"
+
+            # Follow the redirect manually so the next hop is SSRF-checked.
+            if response.status_code in (301, 302, 303, 307, 308):
+                loc = response.headers.get("location")
+                if not loc:
+                    break
+                current_url = str(httpx.URL(current_url).join(loc))
                 continue
-
-            return f"Error: HTTP {response.status_code} -- {response.reason_phrase}"
+            break
         else:
-            return f"Error: Max retries exceeded: {last_error}"
+            return "Error: too many redirects"
 
         raw = response.content[: MAX_RESPONSE_SIZE + 1]
         truncated = len(response.content) > MAX_RESPONSE_SIZE

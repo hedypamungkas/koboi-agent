@@ -286,6 +286,7 @@ class ServerConfig(BaseModel):
     api_keys_file: str | None = None
     api_keys: list[str] = Field(default_factory=list)
     auth_required: bool = True
+    docs_enabled: bool = False  # H7: serve /docs,/redoc,/openapi.json only when true
     cors: dict = Field(default_factory=dict)
     pool: dict = Field(default_factory=dict)
     timeouts: dict = Field(default_factory=dict)

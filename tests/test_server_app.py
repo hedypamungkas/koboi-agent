@@ -468,6 +468,95 @@ class TestCORS:
             assert r.headers.get("access-control-allow-origin") != "https://evil.example"
 
 
+class TestDocs:
+    """H7: interactive docs are off by default; opt-in via server.docs_enabled."""
+
+    async def test_docs_disabled_by_default(self):
+        app = create_app(_config(), enable_cors=False)
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            assert (await c.get("/docs")).status_code == 404
+            assert (await c.get("/openapi.json")).status_code == 404
+
+    async def test_docs_enabled_when_configured(self):
+        app = create_app(_config(server={"auth_required": False, "docs_enabled": True}), enable_cors=False)
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            assert (await c.get("/docs")).status_code == 200
+            assert (await c.get("/openapi.json")).status_code == 200
+
+
+class TestSessionOwnershipH1:
+    """H1: any newly-touched session acquires an owner (no unowned sessions)."""
+
+    async def test_header_session_claims_owner(self):
+        # A fresh X-Session-Id on /chat/stream now claims ownership (previously
+        # left unowned → any caller could share it).
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="hi")]),
+            enable_cors=False,
+            api_keys=["keyA"],
+        )
+        sid = "header-shared-sid"
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            async with c.stream(
+                "POST",
+                "/v1/chat/stream",
+                json={"message": "hi"},
+                headers={"X-Session-Id": sid, "Authorization": "Bearer keyA"},
+            ) as r:
+                await r.aread()
+            assert app.state.ownership.get_owner(sid) is not None
+
+    async def test_reused_job_session_blocks_other_owner(self):
+        # A reused session_id on /v1/jobs is claimed by the first caller; a
+        # different caller is rejected (403), not silently shared.
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+            api_keys=["keyA", "keyB"],
+        )
+        sid = "job-shared-sid"
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            rA = await c.post(
+                "/v1/jobs",
+                json={"message": "a", "session_id": sid},
+                headers={"Authorization": "Bearer keyA"},
+            )
+            assert rA.status_code == 202
+            rB = await c.post(
+                "/v1/jobs",
+                json={"message": "b", "session_id": sid},
+                headers={"Authorization": "Bearer keyB"},
+            )
+            assert rB.status_code == 403
+
+
+class TestResourceLimits:
+    """H6: request-body caps reject oversized payloads (Pydantic 422)."""
+
+    async def test_oversize_chat_message_rejected(self):
+        app = create_app(_config(), enable_cors=False)
+        big = "x" * 70000  # > 65536 cap
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/chat/stream", json={"message": big})
+            assert r.status_code == 422
+
+    async def test_oversize_messages_list_rejected(self):
+        app = create_app(_config(), enable_cors=False)
+        payload = {"messages": [{"role": "user", "content": "x"} for _ in range(60)]}  # > 50 cap
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/chat/stream", json=payload)
+            assert r.status_code == 422
+
+    async def test_oversize_job_message_rejected(self):
+        app = create_app(_config(), enable_cors=False)
+        big = "x" * 70000
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": big})
+            assert r.status_code == 422
+
+
 class TestJobs:
     """M4: autonomous background jobs integration tests."""
 

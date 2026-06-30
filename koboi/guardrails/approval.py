@@ -194,14 +194,12 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
         #    prompt for calculator/memory/search/reads. Only MODERATE/DESTRUCTIVE
         #    reach the human. Auto-allow is auditable so the trail stays complete.
         if self._auto_approve_safe and risk_level == RiskLevel.SAFE:
-            self._audit(
-                tool_name, arguments, risk_level, True, "auto-approve (safe)", source="Async callback approval"
-            )
+            self._audit(tool_name, arguments, risk_level, True, "auto-approve (safe)", source="Async callback approval")
             return True
         # 1. Trust DB fast-path (auto-allow). Auto-deny is left to the pipeline's
         #    own trust consultation; here we only short-circuit on an allow rule.
         if self._trust_db:
-            trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level)
+            trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level, arguments)
             if trust_decision.auto_approve:
                 self._audit(
                     tool_name, arguments, risk_level, True, trust_decision.reason, source="Async callback approval"
@@ -232,6 +230,7 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
                 risk_level=risk_level,
                 decision="allow" if response.approved else "deny",
                 always=True,
+                arguments=arguments,
             )
 
         # 4. Audit.
@@ -264,7 +263,7 @@ class AutonomousApprovalHandler(ApprovalHandler):
             return True
         # Destructive: check Trust DB; deny if no rule.
         if self._trust_db:
-            decision = self._trust_db.should_auto_approve(tool_name, risk_level)
+            decision = self._trust_db.should_auto_approve(tool_name, risk_level, arguments)
             if decision.auto_approve:
                 self._audit(tool_name, arguments, risk_level, True, decision.reason, source="Autonomous")
                 return True
