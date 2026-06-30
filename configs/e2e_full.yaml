@@ -1,0 +1,131 @@
+# E2E Full-Featured Config — enables RAG, Skills, MCP, Tools, Sandbox.
+# Used by the e2e integration test suite (tests/e2e/).
+
+agent:
+  name: "koboi-e2e"
+  description: "Full-featured agent for end-to-end integration testing"
+  system_prompt: |
+    You are a versatile AI assistant for an e2e test deployment.
+    You have access to company documents (RAG), skills, tools, and MCP servers.
+    Answer questions accurately and use tools when appropriate.
+    When asked about hotel operations, act as a hotel receptionist.
+    When asked about shopping or returns, act as a customer service agent.
+  max_iterations: 15
+  mode: act
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+  timeout: 120
+
+tools:
+  builtin:
+    - calculator
+    - list_files
+    - read_file
+    - write_file
+    - grep_search
+    - glob_find
+    - memory_store
+    - memory_recall
+    - task_create
+    - task_list
+    - task_update
+    - git_status
+    - git_log
+  defaults:
+    timeout: 30
+    max_output: 10000
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+sandbox:
+  backend: restricted
+  workdir: /data/workspace
+  workdir_strategy: per_session
+  network: deny
+  timeout: 30
+  max_output: 15000
+
+journal:
+  enabled: true
+context:
+  strategy: smart_truncation
+  max_context_tokens: 12000
+  keep_last: 10
+
+rag:
+  enabled: true
+  chunker: paragraph
+  chunk_size: 400
+  retriever: keyword
+  top_k: 5
+  augmentation: on_the_fly
+  documents:
+    - path: /app/data/sample/product_catalog.md
+    - path: /app/data/sample/company_policy.md
+    - path: /app/data/sample/employee_handbook.md
+    - path: /app/data/e2e/hotel_operations.md
+    - path: /app/data/e2e/ecommerce_kb.md
+
+skills:
+  search_paths:
+    - /app/skills
+  budget_chars: 6000
+
+mcp:
+  servers:
+    - command: python3
+      args: ["/app/mcp_servers/todo_server.py"]
+      timeout: 30
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 20000
+  output:
+    detect_sensitive: true
+  rate_limit:
+    max_calls_per_session: 200
+    max_calls_per_minute: 30
+
+policy:
+  rules:
+    - tool: run_shell
+      pattern: "rm -rf /"
+      action: deny
+    - tool: run_shell
+      pattern: "curl.*\\|.*bash"
+      action: deny
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  api_keys_file: /data/keys.json
+  auth_required: true
+  timeouts:
+    request_seconds: 300
+    approval_seconds: 120
+    drain_seconds: 60
+  limits:
+    max_iterations_cap: 25
+
+jobs:
+  enabled: true
+  max_concurrent: 32
+  queue_depth: 16
+  default_dedicated_session: true
+  resume_on_startup: true
+  timeout_seconds: 1800
+  ttl_seconds: 86400
+
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 4
+  telemetry: false
+  carryover: true

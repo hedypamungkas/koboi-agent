@@ -24,6 +24,9 @@ services:
     volumes:
       - koboi-data:/data
       - ./configs:/app/configs:ro          # override agent config
+      - ./data:/app/data:ro               # RAG documents
+      - ./skills:/app/skills:ro           # Skills
+      - ./mcp_servers:/app/mcp_servers:ro  # MCP servers
     environment:
       # --- Auth ---
       - KOBOI_API_KEYS_FILE=/data/keys.json
