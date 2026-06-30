@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import os
 import re
 import time
 from collections.abc import AsyncIterator, Callable
@@ -112,7 +113,14 @@ class AgentPool:
         # the shared base. ``Config.raw`` is the live dict -> must copy.
         data = copy.deepcopy(self._config.raw)
         data.setdefault("memory", {})["session_id"] = session_id
-        data.setdefault("sandbox", {})["workdir"] = self.workdir_for(session_id)
+        workdir = self.workdir_for(session_id)
+        data.setdefault("sandbox", {})["workdir"] = workdir
+        # Eagerly create the per-session workdir. ``RestrictedProcessBackend.
+        # validate_path`` anchors relative fs-tool paths here; without this dir,
+        # list_files/read_file fail with "path not found" on any session that
+        # never calls write_file (which would otherwise ``makedirs`` lazily).
+        # Idempotent + cheap; correct for both restricted and passthrough.
+        os.makedirs(workdir, exist_ok=True)
         agent = KoboiAgent.from_dict(data)
         if self._client_factory is not None:
             # Test seam: replace the facade-built RetryClient with a MockClient.

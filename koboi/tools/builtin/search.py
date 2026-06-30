@@ -50,6 +50,7 @@ def _match_glob(rel_path: str, patterns: list[str]) -> bool:
 @tool(
     name="grep_search",
     group="file",
+    deps=["sandbox"],
     description="Search text in files using regex pattern. Like ripgrep/grep.",
     parameters={
         "type": "object",
@@ -85,6 +86,7 @@ def grep_search(
     context_lines: int = 0,
     output_mode: str = "content",
     _tool_config: dict | None = None,
+    _deps: dict | None = None,
 ) -> str:
     cfg = _tool_config or {}
     max_output = cfg.get("max_output", MAX_OUTPUT)
@@ -93,7 +95,19 @@ def grep_search(
     except re.error as e:
         return f"Error: invalid regex pattern: {e}"
 
-    if not os.path.isdir(path):
+    # Anchor the search root through the sandbox so grep_search shares the
+    # same root as list_files/read_file/write_file (the per-session workdir).
+    # Without this, grep_search walked the process CWD (repo root) while the
+    # fs-tools used the workdir -- so the model could grep a file it then
+    # couldn't read_file. Falls back to the raw path when no sandbox is wired
+    # (direct/test callers), preserving pre-P0 behavior.
+    sandbox = (_deps or {}).get("sandbox")
+    try:
+        search_root = sandbox.validate_path(path) if sandbox is not None else path
+    except PermissionError:
+        return f"Error: no access to '{path}'"
+
+    if not os.path.isdir(search_root):
         return f"Error: path '{path}' is not a directory or not found"
 
     filters = _expand_braces(file_filter) if file_filter else []
@@ -102,11 +116,11 @@ def grep_search(
     total_matches = 0
     total_size = 0
 
-    for root, dirs, files in os.walk(path):
+    for root, dirs, files in os.walk(search_root):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for fname in sorted(files):
             fpath = os.path.join(root, fname)
-            rel = os.path.relpath(fpath, path)
+            rel = os.path.relpath(fpath, search_root)
 
             if filters:
                 if not _match_glob(rel, filters):
@@ -165,6 +179,7 @@ MAX_RESULTS = 500
 @tool(
     name="glob_find",
     group="file",
+    deps=["sandbox"],
     description="Find files by name pattern. Like 'find' or 'glob'.",
     parameters={
         "type": "object",
@@ -181,12 +196,20 @@ MAX_RESULTS = 500
         "required": ["pattern"],
     },
 )
-def glob_find(pattern: str, path: str = "", _tool_config: dict | None = None) -> str:
+def glob_find(pattern: str, path: str = "", _tool_config: dict | None = None, _deps: dict | None = None) -> str:
     cfg = _tool_config or {}
     max_results = cfg.get("max_results", MAX_RESULTS)
-    base = path or "."
+    raw_base = path or "."
+    # Anchor the search root through the sandbox (per-session workdir) so
+    # glob_find shares the same root as the other fs-tools. See grep_search for
+    # rationale. Falls back to the raw base when no sandbox is wired.
+    sandbox = (_deps or {}).get("sandbox")
+    try:
+        base = sandbox.validate_path(raw_base) if sandbox is not None else raw_base
+    except PermissionError:
+        return f"Error: no access to '{raw_base}'"
     if not os.path.isdir(base):
-        return f"Error: path '{base}' is not a directory or not found"
+        return f"Error: path '{raw_base}' is not a directory or not found"
 
     full_pattern = os.path.join(base, pattern)
     try:
