@@ -15,7 +15,7 @@ agent:
 
 llm:
   provider: openai
-  model: mimo-v2.5
+  model: ${OPENAI_MODEL:}
   api_key: ${OPENAI_API_KEY:}
   base_url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
   timeout: 180

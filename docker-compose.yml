@@ -22,6 +22,7 @@ services:
     container_name: koboi-agent
     restart: unless-stopped
     user: "1000:1000"            # H8: run as the non-root image user
+    working_dir: /data           # relative artifacts (.logs) land in the writable volume, not root-owned /app
     cap_drop:
       - ALL
     security_opt:
@@ -39,6 +40,7 @@ services:
       # --- LLM ---
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # --- Langfuse (optional) ---
       # Pass the .env LANGFUSE_* vars straight through (prefix was LF_* which the
