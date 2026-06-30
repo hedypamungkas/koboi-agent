@@ -25,6 +25,7 @@ from koboi.guardrails.approval_types import ApprovalResponse
 from koboi.server.approvals import ApprovalCoordinator, ApprovalRegistry
 from koboi.server.auth import KeyStore, make_auth_middleware
 from koboi.server.health import HealthRegistry, make_db_check, make_pool_alive_check
+from koboi.server.idempotency import IdempotencyRegistry
 from koboi.server.jobs import JobRegistry, JobStore, new_job_id, resume_on_startup, run_job
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
@@ -145,6 +146,8 @@ def create_app(
 
     # M3: API-key auth (keys file + env back-compat; dev-allow when empty).
     key_store = _build_key_store(config, api_keys)
+    # G5a: per_tenant_max is enforced only when real auth is configured (dev mode → owner "dev").
+    auth_enabled = key_store.has_keys
 
     # M3: session ownership + M4: job store. Control-plane state persists to a file
     # so ``resume_on_startup`` works; see ``_sidecar_db_path`` for the resolution rules.
@@ -167,9 +170,13 @@ def create_app(
     # M4: job config.
     job_max_concurrent = config.get("jobs", "max_concurrent", default=64)
     job_timeout = config.get("jobs", "timeout_seconds", default=1800)
+    job_per_tenant = config.get("jobs", "per_tenant_max", default=5)  # G5a
     job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
     job_resume = config.get("jobs", "resume_on_startup", default=True)
     job_registry = JobRegistry(max_events=job_max_events)
+    # G6: /chat/stream Idempotency-Key (409-reject, in-memory TTL).
+    chat_idem_ttl = config.get("server", "idempotency", "chat_ttl_seconds", default=600.0) or 600.0
+    chat_idem = IdempotencyRegistry(ttl_seconds=chat_idem_ttl)
 
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
@@ -234,7 +241,20 @@ def create_app(
         app.middleware("http")(mw)
     app.middleware("http")(request_id_middleware)
 
-    _register_routes(app, pool, health, approvals, ownership, job_store, job_registry, job_max_concurrent, job_timeout)
+    _register_routes(
+        app,
+        pool,
+        health,
+        approvals,
+        ownership,
+        job_store,
+        job_registry,
+        job_max_concurrent,
+        job_timeout,
+        chat_idem,
+        job_per_tenant,
+        auth_enabled,
+    )
     for registrar in extra_routes:
         registrar(app, pool)
     return app
@@ -284,6 +304,9 @@ def _register_routes(
     job_registry: JobRegistry,
     job_max_concurrent: int,
     job_timeout: float,
+    chat_idem: IdempotencyRegistry,
+    job_per_tenant: int,
+    auth_enabled: bool,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -395,6 +418,20 @@ def _register_routes(
         except PoolFull as exc:
             return _error_response(429, "pool_full", str(exc), request)
 
+        # G6: 409-reject idempotency — same (owner, session, key) within TTL is a duplicate.
+        # Checked after pre-checks (so PoolFull/bad-request don't consume a key) and before the
+        # agent runs (so duplicates 409 fast, without waiting on the session lock).
+        idem_key = request.headers.get("Idempotency-Key")
+        if idem_key:
+            dedup_key = f"{owner}:{session_id}:{idem_key}"
+            if not chat_idem.check_and_record(dedup_key):
+                return _error_response(
+                    409,
+                    "duplicate_request",
+                    "Idempotency-Key already used for this session within the window",
+                    request,
+                )
+
         if is_new_session:
             ownership.set_owner(session_id, owner)
 
@@ -491,6 +528,16 @@ def _register_routes(
         # Concurrency limit (global; per-tenant deferred to M5).
         if job_registry.active_count >= job_max_concurrent:
             return _error_response(429, "too_many_jobs", f"max_concurrent ({job_max_concurrent}) reached", request)
+
+        # G5a: per-tenant cap — enforced only when real auth is configured (dev mode would
+        # collapse all owners to "dev"). Counts the owner's running jobs (matches active_count).
+        if auth_enabled and job_registry.active_count_for_owner(owner) >= job_per_tenant:
+            return _error_response(
+                429,
+                "too_many_jobs_per_tenant",
+                f"per_tenant_max ({job_per_tenant}) reached",
+                request,
+            )
 
         # Session: dedicated by default, or reuse existing (with ownership check).
         session_id = body.session_id or pool.new_session_id()

@@ -7,6 +7,7 @@ cleanly when fastapi isn't installed (CI without the extra).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 
 import pytest
@@ -538,3 +539,78 @@ class TestWorkdirGC:
         removed = _cleanup_workdirs(str(ws), ttl_seconds=86400)
         assert removed == 0
         assert recent.exists()
+
+
+class TestChatIdempotency:
+    """G6: /chat/stream rejects a duplicate Idempotency-Key with 409 (no replay)."""
+
+    async def test_duplicate_key_returns_409(self):
+        app = _app()
+        headers = {"X-Session-Id": "sess-idem", "Idempotency-Key": "k1"}
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            async with c.stream("POST", "/v1/chat/stream", json={"message": "hi"}, headers=headers) as r1:
+                await r1.aread()
+                assert r1.status_code == 200
+            r2 = await c.post("/v1/chat/stream", json={"message": "hi"}, headers=headers)
+            assert r2.status_code == 409
+            assert r2.json()["error"]["code"] == "duplicate_request"
+
+    async def test_no_key_no_dedup(self):
+        app = _app()
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            async with c.stream(
+                "POST", "/v1/chat/stream", json={"message": "hi"}, headers={"X-Session-Id": "sess-a"}
+            ) as r1:
+                await r1.aread()
+                assert r1.status_code == 200
+            async with c.stream(
+                "POST", "/v1/chat/stream", json={"message": "hi"}, headers={"X-Session-Id": "sess-a"}
+            ) as r2:
+                await r2.aread()
+                assert r2.status_code == 200  # no key → no dedup
+
+
+class TestPerTenantLimit:
+    """G5a: per_tenant_max enforced only with real auth; counts running jobs."""
+
+    @staticmethod
+    def _config(per_tenant: int = 1) -> Config:
+        return Config.from_dict(
+            {
+                "agent": {"name": "t", "max_iterations": 1},
+                "llm": {"provider": "openai", "model": "m", "api_key": "x", "base_url": "http://x"},
+                "memory": {"backend": "in_memory"},
+                "sandbox": {"backend": "passthrough"},
+                "jobs": {"per_tenant_max": per_tenant},
+            },
+            validate=True,
+        )
+
+    @staticmethod
+    def _mkapp(config: Config, *, api_keys=None) -> Config:
+        return create_app(
+            config,
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+            api_keys=api_keys,
+        )
+
+    async def test_skipped_in_dev_mode(self):
+        # No auth → every owner is "dev". Pre-seed a running "dev" job so enforcement
+        # WOULD yield 429 if applied; dev-skip means the submit still succeeds (202).
+        app = self._mkapp(self._config())
+        seed = app.state.job_registry.register("seed", "s", "dev")
+        seed.status = "running"
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "do"})
+            assert r.status_code == 202
+
+    async def test_enforced_with_auth(self):
+        owner = "env:" + hashlib.sha256(b"secret").hexdigest()[:12]
+        app = self._mkapp(self._config(), api_keys=["secret"])
+        seed = app.state.job_registry.register("seed", "s", owner)
+        seed.status = "running"  # count=1 >= per_tenant_max(1) → next submit is 429
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "do"}, headers={"Authorization": "Bearer secret"})
+            assert r.status_code == 429
+            assert r.json()["error"]["code"] == "too_many_jobs_per_tenant"

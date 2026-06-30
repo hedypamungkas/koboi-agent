@@ -194,3 +194,18 @@ class TestResumeOnStartup:
         assert bool(job["retriable"]) is True
         assert job["error_class"] == "InterruptedByRestart"
         assert "interrupted" in job["error"]
+
+
+class TestJobRegistryPerOwner:
+    """G5a: active_count_for_owner counts an owner's running jobs."""
+
+    async def test_counts_running_per_owner(self):
+        reg = JobRegistry()
+        alice = reg.register("job_1", "s1", "alice")
+        reg.register("job_2", "s2", "bob")  # stays pending
+        alice.status = "running"
+        assert reg.active_count_for_owner("alice") == 1
+        assert reg.active_count_for_owner("bob") == 0
+        reg.get("job_2").status = "running"
+        assert reg.active_count_for_owner("bob") == 1
+        assert reg.active_count_for_owner("nobody") == 0

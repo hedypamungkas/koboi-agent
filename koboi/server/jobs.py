@@ -206,6 +206,10 @@ class JobRegistry:
     def active_count(self) -> int:
         return sum(1 for r in self._jobs.values() if r.status == "running")
 
+    def active_count_for_owner(self, owner: str) -> int:
+        """Running jobs for one owner (per-tenant concurrency basis; G5a)."""
+        return sum(1 for r in self._jobs.values() if r.owner == owner and r.status == "running")
+
     def cancel_all(self) -> int:
         """Cancel all active job tasks (used by graceful shutdown). Returns count cancelled."""
         count = 0
