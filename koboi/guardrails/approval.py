@@ -251,13 +251,41 @@ class AutonomousApprovalHandler(ApprovalHandler):
     No human interaction (no pause, no Future). Destructive tools without a
     Trust DB allow-rule are denied by default — anti prompt-injection safeguard
     for jobs that run without human review.
+
+    ``auto_approve_tools`` is a job-scoped allowlist of tool names to
+    auto-approve regardless of risk (e.g. in-workdir ``write_file``/``delete_file``
+    for autonomous jobs). Containment is enforced by the restricted sandbox,
+    which rejects out-of-workdir paths at execution time (after approval), so
+    this only lifts the gate -- it does NOT bypass filesystem containment. We
+    use this instead of seeding a Trust-DB rule because the trust DB is shared
+    across all pooled agents (one ``db_path``), so a persistent seeded rule
+    would leak auto-approve to chat sessions.
     """
 
-    def __init__(self, trust_db: TrustDatabase | None = None, audit_trail: AuditTrail | None = None) -> None:
+    def __init__(
+        self,
+        trust_db: TrustDatabase | None = None,
+        audit_trail: AuditTrail | None = None,
+        auto_approve_tools: set[str] | None = None,
+    ) -> None:
         self._trust_db = trust_db
         self.audit_trail = audit_trail
+        self._auto_approve_tools = set(auto_approve_tools or ())
 
     def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
+        # Job-scoped allowlist first: auto-approve (e.g. in-workdir writes for
+        # autonomous jobs). The restricted sandbox already confines these to the
+        # workdir, so lifting the approval gate is safe.
+        if tool_name in self._auto_approve_tools:
+            self._audit(
+                tool_name,
+                arguments,
+                risk_level,
+                True,
+                "auto-approve (job allowlist)",
+                source="Autonomous",
+            )
+            return True
         # Safe / moderate: allow (base behavior).
         if risk_level != RiskLevel.DESTRUCTIVE:
             return True

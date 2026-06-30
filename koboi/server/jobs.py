@@ -369,6 +369,11 @@ async def _execute_job(
             agent._core.approval_handler = AutonomousApprovalHandler(
                 trust_db=agent.trust_db,
                 audit_trail=agent._core.audit_trail,
+                # Autonomous jobs run contained in a restricted sandbox (C3
+                # refuses passthrough above), so in-workdir file writes are safe
+                # to auto-approve. Without this, every write_file/delete_file is
+                # denied and file-producing jobs can't run (e.g. job_multi_write_grep).
+                auto_approve_tools={"write_file", "delete_file"},
             )
             async for event in agent.run_stream(message):
                 registry.append_event(job_id, event)
