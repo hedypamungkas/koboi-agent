@@ -15,14 +15,14 @@ agent:
 
 llm:
   provider: openai
-  model: gpt-4o-mini
+  model: mimo-v2.5
   api_key: ${OPENAI_API_KEY:}
   base_url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
-  timeout: 120
+  timeout: 180
 
 tools:
   builtin:
-    - calculator
+    - calculate
     - list_files
     - read_file
     - write_file
@@ -101,6 +101,15 @@ policy:
     - tool: run_shell
       pattern: "curl.*\\|.*bash"
       action: deny
+
+# Langfuse observability/tracing. The hook wires only when provider=langfuse,
+# and self-disables when keys are empty or the langfuse package isn't installed
+# — so this is safe to leave on. Set LANGFUSE_* env (see docker-compose.yml).
+tracing:
+  provider: langfuse
+  public_key: "${LANGFUSE_PUBLIC_KEY:}"
+  secret_key: "${LANGFUSE_SECRET_KEY:}"
+  base_url: "${LANGFUSE_BASE_URL:http://langfuse:3000}"
 
 server:
   enabled: true

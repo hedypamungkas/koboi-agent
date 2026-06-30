@@ -178,13 +178,26 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
         trust_db: TrustDatabase | None = None,
         audit_trail: AuditTrail | None = None,
         timeout: float = 120.0,
+        auto_approve_safe: bool = True,
     ) -> None:
         self._callback = callback
         self._trust_db = trust_db
         self.audit_trail = audit_trail
         self._timeout = timeout
+        #: SAFE tools (read-only / side-effect-free) auto-run without HITL;
+        #: only MODERATE/DESTRUCTIVE prompt the human. Matches the base-class
+        #: intent ("deny destructive, allow others") and keeps HITL meaningful.
+        self._auto_approve_safe = auto_approve_safe
 
     async def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
+        # 0. SAFE tools (read-only / side-effect-free) auto-approve — no HITL
+        #    prompt for calculator/memory/search/reads. Only MODERATE/DESTRUCTIVE
+        #    reach the human. Auto-allow is auditable so the trail stays complete.
+        if self._auto_approve_safe and risk_level == RiskLevel.SAFE:
+            self._audit(
+                tool_name, arguments, risk_level, True, "auto-approve (safe)", source="Async callback approval"
+            )
+            return True
         # 1. Trust DB fast-path (auto-allow). Auto-deny is left to the pipeline's
         #    own trust consultation; here we only short-circuit on an allow rule.
         if self._trust_db:

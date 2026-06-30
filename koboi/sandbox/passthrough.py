@@ -51,11 +51,16 @@ class PassthroughBackend(BaseSandbox):
         )
 
     def validate_path(self, path: str) -> str:
-        # Exact reproduction of the pre-P0b filesystem._validate_path behavior.
-        resolved = os.path.realpath(path)
+        # Exact reproduction of the pre-P0b filesystem._validate_path behavior,
+        # with the relative-path fix: anchor relative paths to the sandbox dir
+        # so realpath() doesn't resolve them against the process cwd (which
+        # would put them outside the sandbox and wrongly reject them).
         if self._legacy_sandbox_dir is None:
-            return resolved
+            return os.path.realpath(path)
         sandbox = os.path.realpath(self._legacy_sandbox_dir)
+        if not os.path.isabs(path):
+            path = os.path.join(sandbox, path)
+        resolved = os.path.realpath(path)
         if not (resolved.startswith(sandbox + os.sep) or resolved == sandbox):
             raise PermissionError(f"Path '{path}' is outside the sandbox directory")
         return resolved

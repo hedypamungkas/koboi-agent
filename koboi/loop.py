@@ -308,6 +308,7 @@ class AgentCore:
             total_usage = TokenUsage()
         total_usage.prompt_tokens += response.usage.prompt_tokens
         total_usage.completion_tokens += response.usage.completion_tokens
+        total_usage.reasoning_tokens += getattr(response.usage, "reasoning_tokens", 0)
         return total_usage
 
     async def _prepare_run(self, user_message: str | list) -> tuple[str | list, list[dict] | None, float]:

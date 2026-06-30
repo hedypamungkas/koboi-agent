@@ -22,6 +22,14 @@ import pytest
 BASE_URL = os.environ.get("KOBOI_HOST", "http://localhost")
 API_KEY = os.environ.get("KOBOI_API_KEY", "")
 
+# Stamp each pytest session with a unique run id so results are preserved per-run
+# in tests/e2e/results/run_<timestamp>/ (not overwritten). Override with
+# E2E_RUN_ID=... to group/label a run explicitly.
+if not os.environ.get("E2E_RUN_ID"):
+    from datetime import datetime
+
+    os.environ["E2E_RUN_ID"] = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+
 
 def _headers(**extra: str) -> dict:
     h = {"Content-Type": "application/json"}
@@ -36,6 +44,18 @@ async def client():
     """httpx AsyncClient pointed at the live server."""
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=300) as c:
         yield c
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _write_scenario_summary():
+    """Aggregate per-scenario JSON into results/summary.json at session end."""
+    yield
+    try:
+        from tests.e2e.framework.scenario import save_summary_from_disk
+
+        save_summary_from_disk()
+    except Exception:  # summary is best-effort; never fail the suite on it
+        pass
 
 
 async def create_session(client: httpx.AsyncClient) -> str:

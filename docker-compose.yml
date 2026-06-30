@@ -36,9 +36,10 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # --- Langfuse (optional) ---
-      - LANGFUSE_PUBLIC_KEY=${LF_PUBLIC_KEY:-}
-      - LANGFUSE_SECRET_KEY=${LF_SECRET_KEY:-}
-      - LANGFUSE_BASE_URL=${LF_BASE_URL:-http://langfuse:3000}
+      # Pass the .env LANGFUSE_* vars straight through (prefix was LF_* which the
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-http://langfuse:3000}
       # --- Data paths ---
       - KOBOI_DATA_DIR=/data
     healthcheck:

@@ -159,6 +159,13 @@ class RestrictedProcessBackend(BaseSandbox):
         return self._run_subprocess(command, resolved_cwd, run_env, effective_timeout, shell)
 
     def validate_path(self, path: str) -> str:
+        # Anchor RELATIVE paths to the workdir before resolving. A tool passing
+        # "hello.txt" means "inside my workdir" — but os.path.realpath() alone
+        # resolves it against the server process's cwd (typically /app), which
+        # is always outside the workdir, so every relative write_file/read_file
+        # was wrongly rejected with "no access".
+        if not os.path.isabs(path):
+            path = os.path.join(self._workdir, path)
         resolved = os.path.realpath(path)
         if resolved == self._workdir or resolved.startswith(self._workdir + os.sep):
             return resolved

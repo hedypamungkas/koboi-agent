@@ -153,12 +153,19 @@ def event_to_dict(event: StreamEvent) -> dict:
 
     # Special cases with non-serializable fields
     if isinstance(event, CompleteEvent):
+        resp = event.response
         usage = None
-        if event.response and event.response.usage:
+        if resp and resp.usage:
+            u = resp.usage
             usage = {
-                "prompt_tokens": event.response.usage.prompt_tokens,
-                "completion_tokens": event.response.usage.completion_tokens,
-                "total_tokens": event.response.usage.total_tokens,
+                "prompt_tokens": u.prompt_tokens,
+                "completion_tokens": u.completion_tokens,
+                "reasoning_tokens": getattr(u, "reasoning_tokens", 0),
+                "total_tokens": u.total_tokens,
+                # E2E/telemetry-friendly aliases (the names consumers ask for):
+                "token_input": u.prompt_tokens,
+                "token_output": u.completion_tokens,
+                "token_reasoning": getattr(u, "reasoning_tokens", 0),
             }
         return {
             "type": event_type,
@@ -167,6 +174,8 @@ def event_to_dict(event: StreamEvent) -> dict:
             "iterations_used": event.iterations_used,
             "tools_used": event.tools_used,
             "token_usage": usage,
+            "model_name": (resp.model if resp and resp.model else None),
+            "url_provider": (resp.base_url if resp and resp.base_url else None),
             "trace_id": event.trace_id or None,
         }
     if isinstance(event, ErrorEvent):

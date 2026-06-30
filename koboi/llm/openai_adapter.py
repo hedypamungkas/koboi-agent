@@ -60,7 +60,10 @@ class OpenAIAdapter(LLMClient):
         tool_calls = self._parse_tool_calls(msg.get("tool_calls"))
         usage = self._parse_usage(data.get("usage"))
 
-        result = AgentResponse(content=content, tool_calls=tool_calls, usage=usage)
+        result = AgentResponse(
+            content=content, tool_calls=tool_calls, usage=usage,
+            model=self._model, base_url=getattr(self._transport, "base_url", None),
+        )
 
         if self._logger:
             self._logger.log_llm_response(result)
@@ -73,6 +76,9 @@ class OpenAIAdapter(LLMClient):
         tools: list[dict] | None = None,
     ) -> AsyncIterator[TextDeltaEvent | ToolCallEvent | CompleteEvent]:
         body: dict = {"model": self._model, "messages": messages, "stream": True}
+        # Request usage in the final stream chunk — without this, OpenAI-compatible
+        # gateways omit usage from streamed responses (token accounting goes null).
+        body["stream_options"] = {"include_usage": True}
         if self._temperature is not None:
             body["temperature"] = self._temperature
         if tools:
@@ -160,6 +166,8 @@ class OpenAIAdapter(LLMClient):
             content=full_content,
             tool_calls=parsed_tool_calls,
             usage=usage,
+            model=self._model,
+            base_url=getattr(self._transport, "base_url", None),
         )
         if self._logger:
             self._logger.log_llm_response(final)
@@ -206,9 +214,14 @@ class OpenAIAdapter(LLMClient):
     def _parse_usage(raw: dict | None) -> TokenUsage | None:
         if not raw:
             return None
+        # Reasoning tokens live under completion_tokens_details.reasoning_tokens
+        # (OpenAI-compatible spec). Some gateways also surface a top-level alias.
+        details = raw.get("completion_tokens_details") or {}
+        reasoning = details.get("reasoning_tokens") or raw.get("reasoning_tokens") or 0
         return TokenUsage(
             prompt_tokens=raw.get("prompt_tokens", 0) or 0,
             completion_tokens=raw.get("completion_tokens", 0) or 0,
+            reasoning_tokens=int(reasoning),
         )
 
     async def close(self) -> None:

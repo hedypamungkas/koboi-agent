@@ -12,4 +12,4 @@ export KOBOI_HOST="${KOBOI_HOST:-http://localhost}"
 export KOBOI_API_KEY="${KOBOI_API_KEY:?KOBOI_API_KEY is required}"
 
 echo "Running E2E smoke tests against $KOBOI_HOST ..."
-python -m pytest tests/e2e/test_smoke.py -v -m smoke --tb=short "$@"
+python3 -m pytest tests/e2e/test_smoke.py -v -m smoke --tb=short "$@"

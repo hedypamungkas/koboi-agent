@@ -169,7 +169,18 @@ class JobRecord:
     status: str = "pending"
     events: list = field(default_factory=list)
     task: asyncio.Task | None = None
-    terminal: asyncio.Event = field(default_factory=asyncio.Event)
+    # Lazy: ``asyncio.Event()`` binds to the current event loop at creation time,
+    # and on Python 3.9 raises ``RuntimeError`` if no loop is set. Creating it
+    # eagerly in the dataclass default_factory coupled JobRecord construction to
+    # having a live loop — which broke sync callers (e.g. unit tests) when the
+    # loop had been cleared. Deferred to first access (always in async context).
+    _terminal: asyncio.Event | None = field(default=None, init=False, repr=False, compare=False)
+
+    @property
+    def terminal(self) -> asyncio.Event:
+        if self._terminal is None:
+            self._terminal = asyncio.Event()
+        return self._terminal
 
 
 class JobRegistry:
