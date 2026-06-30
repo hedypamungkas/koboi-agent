@@ -266,8 +266,22 @@ class AgentFactory:
             registry.set_dep("memory_store_ref", _MemoryStore(filepath=memory_file))
             registry.keep_only(builtin_list)
         # Sub-agents inherit the parent sandbox so isolation is consistent.
+        # build_orchestrator always wires one; warn (don't crash) if a caller
+        # (e.g. some unit tests) omits it -- they fall back to KOBOI_SANDBOX_DIR.
         if sandbox is not None:
             registry.set_dep("sandbox", sandbox)
+        else:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Sub-agent tools built without a sandbox handle; falling back to "
+                "KOBOI_SANDBOX_DIR/env validation. Production paths always wire one."
+            )
+        # M6: per-session tool state (read-before-write tracking), always wired so
+        # sub-agents get isolated state regardless of sandbox presence.
+        from koboi.tools.state import ToolState
+
+        registry.set_dep("tool_state", ToolState())
         # Apply defaults/overrides/disabled/groups via the shared helper so this
         # path stays in lock-step with facade._build_tools.
         from koboi.tools.registry import apply_tool_selection

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable
@@ -808,6 +809,11 @@ class AgentAssembler:
         self.sandbox = _build_sandbox(self.config, self.logger)
         if self.tools is not None:
             self.tools.set_dep("sandbox", self.sandbox)
+            # M6: per-session tool state (read-before-write tracking) so concurrent
+            # agents don't share the module-global _read_paths.
+            from koboi.tools.state import ToolState
+
+            self.tools.set_dep("tool_state", ToolState())
         return self.sandbox
 
     def build_mcp(self) -> list:
@@ -950,7 +956,7 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
     for server_conf in servers:
         transport = server_conf.get("transport", "stdio")
         try:
-            mcp_client = _create_mcp_client(server_conf, transport, logger)
+            mcp_client = _create_mcp_client(server_conf, transport, logger, config)
             mcp_client.connect()
             group = server_conf.get("group")
             register_mcp_tools(mcp_client, tools, group=group)
@@ -967,7 +973,11 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
     return clients
 
 
-def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger):
+# M4: allowed MCP stdio runners (basename match). Extend via mcp.allowlist_commands.
+_MCP_DEFAULT_RUNNERS = frozenset({"npx", "uvx", "python", "python3", "node", "uv", "deno", "bun"})
+
+
+def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger, config: Config | None = None):
     """Factory: create the right MCPClient subclass based on transport config."""
     if transport == "streamable-http":
         from koboi.mcp.http_client import StreamableHTTPMCPClient
@@ -989,6 +999,15 @@ def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger):
         args = server_conf.get("args", [])
         if not command:
             raise ValueError("stdio transport requires 'command'")
+        # M4: stdio command allow-list (basename match) -- blocks arbitrary-binary
+        # execution from a malicious/misconfigured YAML. Extend via mcp.allowlist_commands.
+        runner = os.path.basename(command)
+        extra = set(config.get("mcp", "allowlist_commands", default=[])) if config is not None else set()
+        if runner not in (_MCP_DEFAULT_RUNNERS | extra):
+            raise ValueError(
+                f"MCP stdio command {runner!r} not in allow-list. Permit it via "
+                f"mcp.allowlist_commands. Default runners: {sorted(_MCP_DEFAULT_RUNNERS)}"
+            )
         timeout = server_conf.get("timeout", 15.0)
         return MCPClient(server_command=[command] + args, logger=logger, connect_timeout=timeout)
 

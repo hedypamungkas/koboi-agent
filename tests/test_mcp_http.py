@@ -120,7 +120,54 @@ class TestStreamableHTTPMCPClientInit:
         assert client._extra_headers == {"X-Custom": "value"}
 
 
+class TestStreamableHTTPMCPClientSSRF:
+    def test_connect_ssrf_blocked(self):
+        # M4: a loopback MCP URL is rejected before any connection (no network).
+        client = StreamableHTTPMCPClient(url="http://127.0.0.1:1/mcp")
+        with pytest.raises(MCPError, match="SSRF-blocked"):
+            client.connect()
+
+
+class TestStdioAllowlist:
+    """M4: MCP stdio command allow-list (facade._create_mcp_client)."""
+
+    def test_default_runner_allowed(self):
+        from koboi.facade import _create_mcp_client
+
+        client = _create_mcp_client({"transport": "stdio", "command": "npx", "args": ["-y", "x"]}, "stdio", MagicMock())
+        assert client is not None
+
+    def test_basename_runner_allowed(self):
+        from koboi.facade import _create_mcp_client
+
+        client = _create_mcp_client({"transport": "stdio", "command": "/usr/bin/python3"}, "stdio", MagicMock())
+        assert client is not None
+
+    def test_unknown_runner_rejected(self):
+        from koboi.facade import _create_mcp_client
+
+        with pytest.raises(ValueError, match="not in allow-list"):
+            _create_mcp_client({"transport": "stdio", "command": "/usr/local/bin/evil"}, "stdio", MagicMock())
+
+    def test_config_extension_allows_custom_runner(self):
+        from koboi.facade import _create_mcp_client
+
+        class _Cfg:
+            def get(self, *path, default=None):
+                return ["my-runner"] if path == ("mcp", "allowlist_commands") else default
+
+        client = _create_mcp_client({"transport": "stdio", "command": "my-runner"}, "stdio", MagicMock(), config=_Cfg())
+        assert client is not None
+
+
 class TestStreamableHTTPMCPClientConnect:
+    @pytest.fixture(autouse=True)
+    def _bypass_ssrf(self):
+        # M4: connect() now runs _check_url_ssrf (real DNS). Bypass it here so the
+        # connect unit tests don't depend on network/DNS for example.com.
+        with patch("koboi.tools.builtin.web._check_url_ssrf", return_value=None):
+            yield
+
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_connect_success(self, MockClient):
         mock_client = MockClient.return_value

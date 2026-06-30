@@ -74,6 +74,58 @@ class TestReadBeforeWriteTracker:
         assert get_read_paths() == set()
 
 
+class TestPerSessionReadPaths:
+    """M6: per-session read-before-write tracking (isolated via ToolState)."""
+
+    def test_read_populates_only_own_session(self, tmp_path):
+        from koboi.tools.state import ToolState
+
+        ts1, ts2 = ToolState(), ToolState()
+        f = tmp_path / "a.txt"
+        f.write_text("hi")
+        read_file(str(f), _deps={"tool_state": ts1})
+        assert os.path.realpath(str(f)) in ts1.read_paths
+        assert ts2.read_paths == set()  # isolated
+
+    def test_write_uses_per_session_state(self, tmp_path):
+        # session 1 reads; session 2 writes the same path -> session 2 still gets
+        # the "not read first" note (no cross-session leakage).
+        from koboi.tools.state import ToolState
+
+        f = tmp_path / "a.txt"
+        f.write_text("hi")
+        read_file(str(f), _deps={"tool_state": ToolState()})  # session 1
+        result = write_file(str(f), "bye", _deps={"tool_state": ToolState()})  # session 2
+        assert "without having read it first" in result
+
+    def test_write_after_read_same_session_no_note(self, tmp_path):
+        from koboi.tools.state import ToolState
+
+        ts = ToolState()
+        f = tmp_path / "a.txt"
+        f.write_text("hi")
+        read_file(str(f), _deps={"tool_state": ts})
+        result = write_file(str(f), "bye", _deps={"tool_state": ts})
+        assert "Note:" not in result
+
+    def test_reset_clears_only_given_session(self):
+        from koboi.tools.state import ToolState
+
+        ts1, ts2 = ToolState(), ToolState()
+        ts1.read_paths.add("/a")
+        ts2.read_paths.add("/b")
+        reset_read_before_write(ts1)
+        assert ts1.read_paths == set()
+        assert ts2.read_paths == {"/b"}
+
+    def test_no_deps_falls_back_to_global(self, tmp_path):
+        # back-compat: no _deps -> module global (existing behavior preserved).
+        f = tmp_path / "a.txt"
+        f.write_text("hi")
+        read_file(str(f))
+        assert os.path.realpath(str(f)) in get_read_paths()
+
+
 class TestReadBeforeWriteResetHook:
     def test_priority_is_44(self):
         assert ReadBeforeWriteResetHook().priority == 44

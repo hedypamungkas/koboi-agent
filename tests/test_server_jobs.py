@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 
+import pytest
+
 from koboi.guardrails.approval import AutonomousApprovalHandler
-from koboi.server.jobs import JobRegistry, JobStore
+from koboi.server.jobs import DuplicateIdempotencyKey, JobRegistry, JobStore
 from koboi.trust import TrustDatabase
 from koboi.types import RiskLevel
 
@@ -17,6 +19,44 @@ class TestJobStore:
         assert job["status"] == "pending"
         assert job["owner"] == "alice"
         assert job["message"] == "hello"
+
+    def test_insert_duplicate_idempotency_key_raises(self, tmp_path):
+        # M1: a second insert with the same idempotency_key raises and carries
+        # the canonical (first) job_id.
+        store = JobStore(str(tmp_path / "jobs.db"))
+        store.insert("job_a", "sess", "alice", "m", idempotency_key="key-1")
+        with pytest.raises(DuplicateIdempotencyKey) as ei:
+            store.insert("job_b", "sess", "alice", "m", idempotency_key="key-1")
+        assert ei.value.existing_job_id == "job_a"
+
+    def test_insert_null_idempotency_key_multiple_ok(self, tmp_path):
+        # M1: NULL idempotency_key never conflicts (partial index WHERE NOT NULL).
+        store = JobStore(str(tmp_path / "jobs.db"))
+        store.insert("job_a", "sess", "alice", "m")
+        store.insert("job_b", "sess", "alice", "m")  # both NULL -> ok
+
+    def test_insert_distinct_idempotency_keys_ok(self, tmp_path):
+        store = JobStore(str(tmp_path / "jobs.db"))
+        store.insert("job_a", "sess", "alice", "m", idempotency_key="k1")
+        store.insert("job_b", "sess", "alice", "m", idempotency_key="k2")
+
+    def test_insert_duplicate_then_connection_reusable(self, tmp_path):
+        # M1: after a DuplicateIdempotencyKey (rollback), the shared connection
+        # is reusable -- a fresh insert succeeds.
+        store = JobStore(str(tmp_path / "jobs.db"))
+        store.insert("job_a", "sess", "alice", "m", idempotency_key="key-1")
+        with pytest.raises(DuplicateIdempotencyKey):
+            store.insert("job_b", "sess", "alice", "m", idempotency_key="key-1")
+        store.insert("job_c", "sess", "alice", "m", idempotency_key="key-2")
+        assert store.get("job_c")["job_id"] == "job_c"
+
+    def test_redact_error_masks_secrets_and_truncates(self):
+        # M2: secret-value shapes are masked; long errors are truncated.
+        from koboi.server.jobs import _redact_error
+
+        assert "sk-abcdef" not in _redact_error("auth failed for sk-abcdefghijklmnopqrstuvwxyz")
+        assert "hunter2" not in _redact_error("config password=hunter2 rejected")
+        assert len(_redact_error("x" * 1000)) == 500
 
     def test_update_status(self, tmp_path):
         store = JobStore(str(tmp_path / "jobs.db"))

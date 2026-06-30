@@ -69,3 +69,11 @@ class TestSseEncoder:
 
     def test_frame_compact_json(self):
         assert _frame({"type": "text_delta", "content": "hi"}) == b'data: {"type":"text_delta","content":"hi"}\n\n'
+
+    def test_frame_escapes_crlf_in_content(self):
+        # M14: a bare \r/\n in event content must not break the SSE frame boundary
+        # (json.dumps escapes control chars; invariant locked vs future regressions).
+        framed = _frame({"type": "text_delta", "content": "line1\r\nline2"})
+        assert framed.count(b"\n\n") == 1  # only the frame terminator
+        assert b"\r" not in framed  # raw CR is escaped, never literal in the frame
+        assert b"\\r\\n" in framed  # JSON-escaped form present

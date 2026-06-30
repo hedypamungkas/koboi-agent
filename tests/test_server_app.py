@@ -343,6 +343,22 @@ class TestAuth:
             assert (await c.post("/v1/sessions")).status_code == 401
             assert (await c.get("/healthz")).status_code == 200
 
+    async def test_keys_loaded_from_koboi_api_keys_file_env(self, tmp_path, monkeypatch):
+        # M8: KOBOI_API_KEYS_FILE env (set by docker-compose) is honored even when
+        # the YAML server.api_keys_file is absent.
+        import hashlib
+        import json as _json
+
+        from koboi.server.app import _build_key_store
+
+        token = "koboi_envfile_secret"
+        keys_file = tmp_path / "keys.json"
+        keys_file.write_text(_json.dumps([{"id": "k1", "hash": hashlib.sha256(token.encode()).hexdigest()}]))
+        monkeypatch.setenv("KOBOI_API_KEYS_FILE", str(keys_file))
+        ks = _build_key_store(_config(server={"api_keys_file": None}))
+        assert ks.has_keys
+        assert ks.validate(token) == "k1"
+
     def test_serve_app_refuses_non_loopback_without_keys(self, tmp_path):
         # C1: serve_app refuses to start a non-loopback server that would fail
         # open (auth_required=true default + no keys). Sync -- raises before uvicorn.
@@ -555,6 +571,45 @@ class TestResourceLimits:
         async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
             r = await c.post("/v1/jobs", json={"message": big})
             assert r.status_code == 422
+
+
+class TestJobStreamCap:
+    """M3: per-owner concurrent job-stream cap (slowloris guard)."""
+
+    @staticmethod
+    def _owner(token: str) -> str:
+        return "env:" + hashlib.sha256(token.encode()).hexdigest()[:12]
+
+    async def test_stream_over_cap_returns_429(self):
+        app = create_app(
+            _config(server={"auth_required": True, "limits": {"job_streams_per_owner": 1}}),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+            api_keys=["keyA"],
+        )
+        owner = self._owner("keyA")
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "do"}, headers={"Authorization": "Bearer keyA"})
+            job_id = r.json()["job_id"]
+            app.state.job_streams[owner] = 1  # simulate one active stream (at cap)
+            s = await c.get(f"/v1/jobs/{job_id}/stream", headers={"Authorization": "Bearer keyA"})
+            assert s.status_code == 429
+
+    async def test_stream_releases_slot_when_done(self):
+        app = create_app(
+            _config(server={"auth_required": True, "limits": {"job_streams_per_owner": 2}}),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+            api_keys=["keyA"],
+        )
+        owner = self._owner("keyA")
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            r = await c.post("/v1/jobs", json={"message": "do"}, headers={"Authorization": "Bearer keyA"})
+            job_id = r.json()["job_id"]
+            app.state.job_registry.get(job_id).terminal.set()  # simulate terminal job
+            async with c.stream("GET", f"/v1/jobs/{job_id}/stream", headers={"Authorization": "Bearer keyA"}) as s:
+                await s.aread()
+            assert app.state.job_streams.get(owner, 0) == 0
 
 
 class TestJobs:

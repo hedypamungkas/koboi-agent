@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sqlite3
 import time
 from collections import deque
@@ -26,6 +27,36 @@ _logger = logging.getLogger(__name__)
 
 #: Terminal statuses (no further state transitions).
 TERMINAL = frozenset({"completed", "failed", "timed_out", "cancelled"})
+
+
+class DuplicateIdempotencyKey(Exception):
+    """M1: raised by JobStore.insert when a concurrent same-key insert won the race.
+
+    Carries the existing (canonical) job_id so the caller can return it instead
+    of creating a duplicate (double side-effect).
+    """
+
+    def __init__(self, existing_job_id: str) -> None:
+        super().__init__(f"duplicate idempotency_key -> {existing_job_id}")
+        self.existing_job_id = existing_job_id
+
+
+# M2: redact common secret-value shapes from persisted error strings so a
+# failure message never durable-stores leaked credentials.
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),  # OpenAI-style keys
+    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key IDs
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+"),  # bearer tokens
+    re.compile(r"(?i)(api[_-]?key|token|password|passwd|secret)[=:]\s*\S+"),
+)
+
+
+def _redact_error(text: str, limit: int = 500) -> str:
+    """Mask common secret-value shapes and truncate a persisted error string (M2)."""
+    redacted = text
+    for pat in _SECRET_VALUE_PATTERNS:
+        redacted = pat.sub("***REDACTED***", redacted)
+    return redacted[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -63,6 +94,20 @@ class JobStore:
             )
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_owner ON jobs(owner)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_idem ON jobs(idempotency_key)")
+            # M1: unique partial index closes the find→insert TOCTOU window.
+            # WHERE NOT NULL so the many NULL idempotency_key rows never conflict.
+            # Wrapped: a legacy DB with pre-race duplicate keys degrades to
+            # app-level dedup (warn) instead of bricking startup.
+            try:
+                self._conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idem_unique "
+                    "ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL"
+                )
+            except sqlite3.IntegrityError:
+                _logger.warning(
+                    "Could not create unique idempotency index (legacy duplicate keys present); "
+                    "idempotency dedup degraded to app-level only."
+                )
             self._migrate_add_columns()
             self._conn.commit()
         except Exception:
@@ -86,12 +131,23 @@ class JobStore:
         idempotency_key: str | None = None,
     ) -> None:
         now = time.time()
-        self._conn.execute(
-            "INSERT INTO jobs (job_id, session_id, owner, status, message, "
-            "idempotency_key, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
-            (job_id, session_id, owner, message, idempotency_key, now, now),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "INSERT INTO jobs (job_id, session_id, owner, status, message, "
+                "idempotency_key, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
+                (job_id, session_id, owner, message, idempotency_key, now, now),
+            )
+            self._conn.commit()
+        except sqlite3.IntegrityError:
+            # M1: a concurrent same-key insert won the race. Roll back the failed
+            # statement so the shared connection is reusable, then surface the
+            # canonical job. (Without rollback the next SELECT raises
+            # "Recursive use of cursors" on the shared connection.)
+            self._conn.rollback()
+            existing = self.find_by_idempotency_key(idempotency_key) if idempotency_key else None
+            if existing:
+                raise DuplicateIdempotencyKey(existing["job_id"])
+            raise
 
     def get(self, job_id: str) -> dict | None:
         row = self._conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
@@ -319,8 +375,16 @@ async def run_job(
         )
         registry.set_terminal(job_id, "timed_out")
     except Exception as exc:
-        _logger.exception("Job %s failed", job_id)
-        store.update_status(job_id, "failed", error=str(exc), error_class=type(exc).__name__, retriable=False)
+        # M2: log type only (no traceback/locals) + mask/truncate the persisted
+        # error so a failure never durable-stores the user prompt or leaked creds.
+        _logger.error("Job %s failed: %s", job_id, type(exc).__name__)
+        store.update_status(
+            job_id,
+            "failed",
+            error=_redact_error(str(exc)),
+            error_class=type(exc).__name__,
+            retriable=False,
+        )
         registry.set_terminal(job_id, "failed")
 
 

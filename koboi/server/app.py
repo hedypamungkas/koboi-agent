@@ -27,7 +27,14 @@ from koboi.server.approvals import ApprovalCoordinator, ApprovalRegistry
 from koboi.server.auth import KeyStore, make_auth_middleware
 from koboi.server.health import HealthRegistry, make_db_check, make_pool_alive_check
 from koboi.server.idempotency import IdempotencyRegistry
-from koboi.server.jobs import JobRegistry, JobStore, new_job_id, resume_on_startup, run_job
+from koboi.server.jobs import (
+    DuplicateIdempotencyKey,
+    JobRegistry,
+    JobStore,
+    new_job_id,
+    resume_on_startup,
+    run_job,
+)
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
@@ -101,7 +108,10 @@ async def _job_ttl_gc_loop(
 def _build_key_store(config: Config, api_keys: list[str] | None = None) -> KeyStore:
     """Load API keys from file + env + config (or the ``api_keys`` test seam)."""
     ks = KeyStore()
-    ks.load_from_file(config.get("server", "api_keys_file", default=None))
+    # M8: KOBOI_API_KEYS_FILE env (set by docker-compose) takes precedence over
+    # the YAML server.api_keys_file path; both are absent → load_from_file no-ops.
+    keys_file = os.environ.get("KOBOI_API_KEYS_FILE") or config.get("server", "api_keys_file", default=None)
+    ks.load_from_file(keys_file)
     if api_keys:
         ks.load_from_env(",".join(api_keys))
     else:
@@ -198,6 +208,7 @@ def create_app(
     chat_idem_max = config.get("server", "idempotency", "max_entries", default=10000)  # H6
     chat_idem = IdempotencyRegistry(ttl_seconds=chat_idem_ttl, max_entries=chat_idem_max)
     chat_queue_maxsize = config.get("server", "limits", "chat_queue_maxsize", default=1000)  # H6
+    job_streams_per_owner = config.get("server", "limits", "job_streams_per_owner", default=4)  # M3
 
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
@@ -255,6 +266,8 @@ def create_app(
     app.state.job_max_concurrent = job_max_concurrent
     app.state.job_timeout = job_timeout
     app.state.health = health
+    app.state.job_streams_per_owner = job_streams_per_owner  # M3
+    app.state.job_streams = {}  # M3: owner -> active job-stream count
 
     # C4: CORS is config-driven, never a wildcard default. CORSMiddleware is
     # added ONLY when `server.cors` is explicitly configured; the default (no
@@ -633,7 +646,24 @@ def _register_routes(
             ownership.set_owner(session_id, owner)
 
         job_id = new_job_id()
-        job_store.insert(job_id, session_id, owner, body.message, idempotency_key=idem_key)
+        try:
+            job_store.insert(job_id, session_id, owner, body.message, idempotency_key=idem_key)
+        except DuplicateIdempotencyKey as exc:
+            # M1: a concurrent same-key submit won the race -- return the canonical
+            # job (if ours) or 409 so the client retries without the key.
+            existing = job_store.get(exc.existing_job_id)
+            if existing and existing["owner"] == owner:
+                return {  # type: ignore[return-value]  # (same FastAPI route-dict noise as the other handlers)
+                    "job_id": existing["job_id"],
+                    "status": existing["status"],
+                    "session_id": existing["session_id"],
+                }
+            return _error_response(
+                409,
+                "duplicate_request",
+                "Idempotency-Key already used for this session within the window",
+                request,
+            )
         job_registry.register(job_id, session_id, owner)
         if admit == "run":
             _start_job(job_id)
@@ -672,8 +702,23 @@ def _register_routes(
             return err
         record = job_registry.get(job_id)
 
+        # M3: per-owner concurrent-stream cap (slowloris guard). Skipped in dev
+        # mode (single "dev" owner). Decremented in the generator's finally so a
+        # disconnect/cancel always releases the slot.
+        if auth_enabled:
+            active = app.state.job_streams.get(owner, 0)
+            if active >= app.state.job_streams_per_owner:
+                return _error_response(
+                    429,
+                    "too_many_streams",
+                    "Max concurrent job streams reached for this owner",
+                    request,
+                )
+            app.state.job_streams[owner] = active + 1
+
         async def event_gen():
             last_index = 0
+            deadline = time.monotonic() + job_timeout  # M3: bound stream duration
             try:
                 while True:
                     if record:
@@ -685,9 +730,14 @@ def _register_routes(
                             break
                     else:
                         break
+                    if time.monotonic() >= deadline:
+                        break
                     await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 pass
+            finally:
+                if auth_enabled:
+                    app.state.job_streams[owner] = max(0, app.state.job_streams.get(owner, 0) - 1)
 
         return StreamingResponse(
             sse_stream(event_gen()),
