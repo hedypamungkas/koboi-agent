@@ -14,6 +14,7 @@ import json
 import logging
 import sqlite3
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -136,6 +137,19 @@ class JobStore:
         rows = self._conn.execute("SELECT * FROM jobs WHERE status = ? ORDER BY created_at", (status,)).fetchall()
         return [dict(r) for r in rows]
 
+    def reap_terminal_older_than(self, cutoff: float) -> list[str]:
+        """Delete terminal jobs updated before ``cutoff``. Returns reaped job_ids (G5c-a)."""
+        rows = self._conn.execute(
+            "SELECT job_id FROM jobs WHERE status IN (?, ?, ?, ?) AND updated_at < ?",
+            ("completed", "failed", "timed_out", "cancelled", cutoff),
+        ).fetchall()
+        reaped = [r["job_id"] for r in rows]
+        for jid in reaped:
+            self._conn.execute("DELETE FROM jobs WHERE job_id = ?", (jid,))
+        if reaped:
+            self._conn.commit()
+        return reaped
+
     def close(self) -> None:
         self._conn.close()
 
@@ -163,6 +177,7 @@ class JobRegistry:
 
     def __init__(self, max_events: int = 500) -> None:
         self._jobs: dict[str, JobRecord] = {}
+        self._pending: deque[str] = deque()
         self._max_events = max_events
 
     def register(self, job_id: str, session_id: str, owner: str) -> JobRecord:
@@ -209,6 +224,38 @@ class JobRegistry:
     def active_count_for_owner(self, owner: str) -> int:
         """Running jobs for one owner (per-tenant concurrency basis; G5a)."""
         return sum(1 for r in self._jobs.values() if r.owner == owner and r.status == "running")
+
+    def peek_admit(self, max_concurrent: int, queue_depth: int) -> str:
+        """Non-mutating admission decision for a new job: ``run`` | ``queue`` | ``reject``."""
+        if self.active_count < max_concurrent:
+            return "run"
+        if len(self._pending) < queue_depth:
+            return "queue"
+        return "reject"
+
+    def enqueue_pending(self, job_id: str) -> None:
+        self._pending.append(job_id)
+
+    def pop_pending(self) -> str | None:
+        return self._pending.popleft() if self._pending else None
+
+    def remove_pending(self, job_id: str) -> bool:
+        try:
+            self._pending.remove(job_id)
+            return True
+        except ValueError:
+            return False
+
+    @property
+    def pending_count(self) -> int:
+        return len(self._pending)
+
+    def forget(self, job_ids) -> None:
+        """Drop records (used by the job TTL reaper). Pending entries are cleaned defensively."""
+        ids = set(job_ids)
+        for jid in ids:
+            self._jobs.pop(jid, None)
+        self._pending = deque(j for j in self._pending if j not in ids)
 
     def cancel_all(self) -> int:
         """Cancel all active job tasks (used by graceful shutdown). Returns count cancelled."""

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -82,6 +83,19 @@ async def _workdir_gc_loop(workspace_root: str, ttl_seconds: float, interval: fl
         removed = _cleanup_workdirs(workspace_root, ttl_seconds)
         if removed:
             _logger.info("Workdir GC: removed %d expired director(s)", removed)
+
+
+async def _job_ttl_gc_loop(
+    job_store: JobStore, job_registry: JobRegistry, ttl_seconds: float, interval: float = 300
+) -> None:
+    """Periodic reaping of terminal jobs older than ``ttl_seconds`` (G5c-a)."""
+    while True:
+        await asyncio.sleep(interval)
+        cutoff = time.time() - ttl_seconds
+        reaped = job_store.reap_terminal_older_than(cutoff)
+        if reaped:
+            job_registry.forget(reaped)
+            _logger.info("Job TTL GC: reaped %d terminal job(s)", len(reaped))
 
 
 def _build_key_store(config: Config, api_keys: list[str] | None = None) -> KeyStore:
@@ -171,6 +185,8 @@ def create_app(
     job_max_concurrent = config.get("jobs", "max_concurrent", default=64)
     job_timeout = config.get("jobs", "timeout_seconds", default=1800)
     job_per_tenant = config.get("jobs", "per_tenant_max", default=5)  # G5a
+    job_queue_depth = config.get("jobs", "queue_depth", default=32)  # G5c-b
+    job_ttl = config.get("jobs", "ttl_seconds", default=86400.0) or 86400.0  # G5c-a
     job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
     job_resume = config.get("jobs", "resume_on_startup", default=True)
     job_registry = JobRegistry(max_events=job_max_events)
@@ -198,16 +214,19 @@ def create_app(
             requeued = await resume_on_startup(job_store, pool, job_registry, job_timeout)
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
-        # 16.24: start workdir TTL GC background sweep.
-        gc_task = asyncio.create_task(_workdir_gc_loop(workspace_root, workdir_ttl))
+        # 16.24: workdir TTL GC + G5c-a: job TTL GC background sweeps.
+        workdir_gc = asyncio.create_task(_workdir_gc_loop(workspace_root, workdir_ttl))
+        job_gc = asyncio.create_task(_job_ttl_gc_loop(job_store, job_registry, job_ttl))
         try:
             yield
         finally:
-            gc_task.cancel()
-            try:
-                await gc_task
-            except asyncio.CancelledError:
-                pass
+            workdir_gc.cancel()
+            job_gc.cancel()
+            for _gc in (workdir_gc, job_gc):
+                try:
+                    await _gc
+                except asyncio.CancelledError:
+                    pass
             try:
                 await asyncio.wait_for(_shutdown(), timeout=drain_seconds)
             except asyncio.TimeoutError:
@@ -253,6 +272,7 @@ def create_app(
         job_timeout,
         chat_idem,
         job_per_tenant,
+        job_queue_depth,
         auth_enabled,
     )
     for registrar in extra_routes:
@@ -306,6 +326,7 @@ def _register_routes(
     job_timeout: float,
     chat_idem: IdempotencyRegistry,
     job_per_tenant: int,
+    job_queue_depth: int,
     auth_enabled: bool,
 ) -> None:
     @app.get("/healthz")
@@ -510,6 +531,23 @@ def _register_routes(
 
     # ---- M4: Jobs (autonomous) ----
 
+    def _start_job(job_id: str) -> None:
+        """Admit one job: mark running, spawn run_job, attach drain-on-complete."""
+        job = job_store.get(job_id)
+        if job is None or job["status"] != "pending":
+            return  # cancelled or reaped while queued
+        task = asyncio.create_task(run_job(job_id, pool, job_registry, job_store, job["message"], job_timeout))
+        job_registry.set_running(job_id, task)
+        task.add_done_callback(_on_job_done)
+
+    def _on_job_done(_task: asyncio.Task) -> None:
+        """A slot freed — start queued jobs while capacity allows (G5c-b drain)."""
+        while job_registry.active_count < job_max_concurrent:
+            next_id = job_registry.pop_pending()
+            if next_id is None:
+                break
+            _start_job(next_id)
+
     @app.post("/v1/jobs", status_code=202)
     async def submit_job(body: JobSubmitRequest, request: Request) -> Response:
         owner = getattr(request.state, "api_key_id", "dev")
@@ -525,12 +563,17 @@ def _register_routes(
                     "session_id": existing["session_id"],
                 }
 
-        # Concurrency limit (global; per-tenant deferred to M5).
-        if job_registry.active_count >= job_max_concurrent:
-            return _error_response(429, "too_many_jobs", f"max_concurrent ({job_max_concurrent}) reached", request)
+        # G5c-b: global admission — run now, queue (up to queue_depth), or reject.
+        admit = job_registry.peek_admit(job_max_concurrent, job_queue_depth)
+        if admit == "reject":
+            return _error_response(
+                429,
+                "queue_full",
+                f"max_concurrent ({job_max_concurrent}) + queue_depth ({job_queue_depth}) reached",
+                request,
+            )
 
-        # G5a: per-tenant cap — enforced only when real auth is configured (dev mode would
-        # collapse all owners to "dev"). Counts the owner's running jobs (matches active_count).
+        # G5a: per-tenant running cap — hard 429 (not queued); skipped in dev mode.
         if auth_enabled and job_registry.active_count_for_owner(owner) >= job_per_tenant:
             return _error_response(
                 429,
@@ -559,8 +602,10 @@ def _register_routes(
         job_id = new_job_id()
         job_store.insert(job_id, session_id, owner, body.message, idempotency_key=idem_key)
         job_registry.register(job_id, session_id, owner)
-        task = asyncio.create_task(run_job(job_id, pool, job_registry, job_store, body.message, job_timeout))
-        job_registry.set_running(job_id, task)
+        if admit == "run":
+            _start_job(job_id)
+        else:  # "queue" — wait for a running slot to free (drained on completion)
+            job_registry.enqueue_pending(job_id)
         return {"job_id": job_id, "status": "pending", "session_id": session_id}
 
     @app.get("/v1/jobs")
@@ -631,7 +676,8 @@ def _register_routes(
             if record is not None and record.task is not None and record.task.done():
                 # Task finished between our status check and cancel.
                 raise HTTPException(status_code=409, detail=f"job already {job_store.get(job_id)['status']}")
-            # Pending (not yet running) → mark cancelled directly.
+            # Pending (not yet running) → drop from the queue + mark cancelled.
+            job_registry.remove_pending(job_id)
             job_store.update_status(job_id, "cancelled")
             job_registry.set_terminal(job_id, "cancelled")
         return {"job_id": job_id, "status": "cancelled"}

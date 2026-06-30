@@ -209,3 +209,60 @@ class TestJobRegistryPerOwner:
         reg.get("job_2").status = "running"
         assert reg.active_count_for_owner("bob") == 1
         assert reg.active_count_for_owner("nobody") == 0
+
+
+class TestJobStoreReap:
+    """G5c-a: reap_terminal_older_than deletes old terminal jobs only."""
+
+    def test_reaps_old_terminal_keeps_recent_and_inflight(self, tmp_path):
+        import time as _time
+
+        store = JobStore(str(tmp_path / "jobs.db"))
+        store.insert("old", "s", "a", "m")
+        store.update_status("old", "completed")
+        store._conn.execute("UPDATE jobs SET updated_at = ? WHERE job_id = ?", (_time.time() - 200000, "old"))
+        store.insert("recent", "s", "a", "m")
+        store.update_status("recent", "completed")  # recent terminal → kept
+        store.insert("running", "s", "a", "m")
+        store.update_status("running", "running")  # in-flight → kept even if old
+        store._conn.execute("UPDATE jobs SET updated_at = ? WHERE job_id = ?", (_time.time() - 200000, "running"))
+        store._conn.commit()
+
+        reaped = store.reap_terminal_older_than(_time.time() - 86400)
+        assert reaped == ["old"]
+        assert store.get("old") is None
+        assert store.get("recent") is not None
+        assert store.get("running") is not None
+
+
+class TestJobRegistryQueue:
+    """G5c-b: pending-queue admission (run/queue/reject), FIFO, forget."""
+
+    def test_peek_admit_run_queue_reject(self):
+        reg = JobRegistry()
+        assert reg.peek_admit(2, 2) == "run"  # active 0 < max 2
+        reg.register("j1", "s", "a").status = "running"
+        assert reg.peek_admit(2, 2) == "run"  # active 1 < max 2
+        reg.register("j2", "s", "a").status = "running"
+        assert reg.peek_admit(2, 2) == "queue"  # active 2 >= max 2, pending 0 < depth 2
+        reg.enqueue_pending("q1")
+        reg.enqueue_pending("q2")
+        assert reg.peek_admit(2, 2) == "reject"  # pending 2 >= depth 2
+
+    def test_pop_is_fifo_and_remove(self):
+        reg = JobRegistry()
+        reg.enqueue_pending("a")
+        reg.enqueue_pending("b")
+        assert reg.pop_pending() == "a"  # FIFO
+        assert reg.remove_pending("b") is True
+        assert reg.pop_pending() is None
+        assert reg.pending_count == 0
+        assert reg.remove_pending("nope") is False
+
+    def test_forget_drops_record_and_pending(self):
+        reg = JobRegistry()
+        reg.register("j1", "s", "a")
+        reg.enqueue_pending("j1")
+        reg.forget(["j1"])
+        assert reg.get("j1") is None
+        assert reg.pending_count == 0

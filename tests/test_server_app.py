@@ -614,3 +614,64 @@ class TestPerTenantLimit:
             r = await c.post("/v1/jobs", json={"message": "do"}, headers={"Authorization": "Bearer secret"})
             assert r.status_code == 429
             assert r.json()["error"]["code"] == "too_many_jobs_per_tenant"
+
+
+class TestJobQueueBacklog:
+    """G5c-b: overflow queues (up to queue_depth) then 429s; cancel + drain."""
+
+    @staticmethod
+    def _config(max_concurrent: int = 1, queue_depth: int = 2) -> Config:
+        return Config.from_dict(
+            {
+                "agent": {"name": "t", "max_iterations": 1},
+                "llm": {"provider": "openai", "model": "m", "api_key": "x", "base_url": "http://x"},
+                "memory": {"backend": "in_memory"},
+                "sandbox": {"backend": "passthrough"},
+                "jobs": {"max_concurrent": max_concurrent, "queue_depth": queue_depth, "per_tenant_max": 64},
+            },
+            validate=True,
+        )
+
+    @staticmethod
+    def _mkapp(config: Config):
+        return create_app(
+            config,
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+        )
+
+    async def test_overflow_queues_then_rejects(self):
+        app = self._mkapp(self._config())
+        seed = app.state.job_registry.register("seed", "s", "dev")
+        seed.status = "running"  # fill the single slot (no task → never completes/drains)
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            ra = await c.post("/v1/jobs", json={"message": "A"})
+            rb = await c.post("/v1/jobs", json={"message": "B"})
+            rc = await c.post("/v1/jobs", json={"message": "C"})
+            assert ra.status_code == 202 and ra.json()["status"] == "pending"
+            assert rb.status_code == 202 and rb.json()["status"] == "pending"
+            assert rc.status_code == 429 and rc.json()["error"]["code"] == "queue_full"
+            assert app.state.job_registry.pending_count == 2
+
+    async def test_cancel_queued_job(self):
+        app = self._mkapp(self._config())
+        seed = app.state.job_registry.register("seed", "s", "dev")
+        seed.status = "running"
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            ra = await c.post("/v1/jobs", json={"message": "A"})
+            job_id = ra.json()["job_id"]
+            assert app.state.job_registry.pending_count == 1
+            rc = await c.post(f"/v1/jobs/{job_id}/cancel")
+            assert rc.status_code == 200
+            assert app.state.job_registry.pending_count == 0
+            assert app.state.job_store.get(job_id)["status"] == "cancelled"
+
+    async def test_drain_to_completion_under_burst(self):
+        # 6 jobs, max_concurrent=2, queue_depth=10 → some queue, then all drain to completion.
+        app = self._mkapp(self._config(max_concurrent=2, queue_depth=10))
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            responses = await asyncio.gather(*(c.post("/v1/jobs", json={"message": f"j{i}"}) for i in range(6)))
+            ids = [r.json()["job_id"] for r in responses]
+            for jid in ids:
+                body = await _poll_job(c, jid)
+                assert body is not None and body["status"] == "completed"
