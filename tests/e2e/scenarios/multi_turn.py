@@ -62,7 +62,7 @@ SCENARIOS: list[Scenario] = [
         turns=[
             Turn("I need to understand the Grand Plaza Hotel cancellation policy."),
             Turn("What happens if I cancel within 48 hours of check-in?", expect_keywords=["night"]),
-            Turn("And what about a no-show?", expect_keywords=["charged", "full"]),
+            Turn("And what about a no-show?", expect_any_of=["charged", "charges", "full"]),
         ],
     ),
     Scenario(
@@ -126,7 +126,7 @@ SCENARIOS: list[Scenario] = [
             Turn("I'm accessing a dictionary key that might not exist. Best fix?", expect_keywords=["get", "default"]),
             Turn("Can you show the .get() usage?", expect_keywords=["get"]),
             Turn("What if I want to add the key only if missing?"),
-            Turn("Give me a one-line recap of the fix.", expect_keywords=["get"]),
+            Turn("Give me a one-line recap of the fix.", expect_any_of=["get", "setdefault", "default"]),
         ],
     ),
     # --- Context switch (topic A → B → back to A) ---

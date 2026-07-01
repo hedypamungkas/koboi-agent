@@ -58,6 +58,9 @@ SCENARIOS: list[Scenario] = [
         Turn("Review this loop: `for i in range(1, len(items))` meant to process every element. Any issue?", expect_any_of=["off", "missing", "skips", "omits", "first element"]),
     ]),
     Scenario("skill_codereview_bare_except", "skills", [
-        Turn("Review this Python error handling: `except: pass`. What's the concern?", expect_keywords=["broad", "silent", "swallow"]),
+        # OR semantics (any one term): models phrase this validly as "too broad",
+        # "silently hides", "swallows", "masks", etc. Requiring all three exact
+        # words (the old AND form) failed correct answers that just used a synonym.
+        Turn("Review this Python error handling: `except: pass`. What's the concern?", expect_any_of=["broad", "silent", "swallow", "hide", "hides", "mask", "masks", "catch", "bare"]),
     ]),
 ]

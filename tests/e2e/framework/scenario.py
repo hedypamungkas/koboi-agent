@@ -104,6 +104,11 @@ class Turn:
     #: multiple acceptable forms (e.g. ["15,000", "15000"]) or concept synonyms.
     expect_any_of: list[str] = field(default_factory=list)
     min_events: int = 2
+    #: Map of expected tool name -> equivalent tool names that also satisfy the
+    #: assertion. Use when a builtin tool has a functionally equivalent MCP tool
+    #: the model may pick instead (e.g. task_create vs add_todo). Backward
+    #: compatible (default empty = exact/substring behaviour unchanged).
+    tool_aliases: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -543,8 +548,12 @@ class ScenarioExecutor:
                 return checked, False
         for tool in turn.expect_tools:
             checked += 1
+            # An expected tool is satisfied by its canonical name OR any declared
+            # alias (e.g. task_create satisfied by MCP add_todo). Substring match
+            # is preserved so 'calculate' still matches tool-call names.
+            candidates = [tool, *turn.tool_aliases.get(tool, [])]
             tool_names = [tc.get("tool_name", "") for tc in tool_calls]
-            if not any(tool in tn for tn in tool_names):
+            if not any(c in tn for tn in tool_names for c in candidates):
                 return checked, False
         if turn.min_events and len(events) < turn.min_events:
             checked += 1

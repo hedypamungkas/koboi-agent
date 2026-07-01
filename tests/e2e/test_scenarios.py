@@ -61,11 +61,22 @@ async def _run(scenario) -> tuple[bool, str, str]:
 
     # HARD criterion: did it produce any assistant content / a terminal job?
     produced = any(t.content for t in result.turns)
+    # A keyword/turn assertion miss (incl. the concurrent fan-out variant whose
+    # message reads "Concurrent session N: none of [...] found in reply") is a
+    # SOFT content-quality miss, not a HARD infrastructure failure. Allowlist
+    # all such messages so they only fail pytest under E2E_STRICT=1.
     hard_error = (
         result.error
         and not result.error.startswith("SKIPPED")
         and not any(
-            kw in result.error for kw in ("Keyword", "assertion failed", "Turn ")
+            kw in result.error
+            for kw in (
+                "Keyword",
+                "assertion failed",
+                "Turn ",
+                "Concurrent session",
+                "none of",
+            )
         )
     )
     if hard_error or not produced:

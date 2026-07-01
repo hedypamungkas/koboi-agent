@@ -15,6 +15,11 @@ from __future__ import annotations
 
 from tests.e2e.framework.scenario import Scenario, Turn
 
+# The builtin task tools (task_create/task_list) have a functionally equivalent
+# MCP server (mcp_servers/todo_server.py: add_todo/list_todos). The model may
+# pick either; accept both so these scenarios don't flake on tool choice.
+TASK_TOOL_ALIASES = {"task_create": ["add_todo"], "task_list": ["list_todos"]}
+
 SCENARIOS: list[Scenario] = [
     # --- Calculator (5) ---
     Scenario("calc_basic_add", "multi_tool", [
@@ -66,16 +71,16 @@ SCENARIOS: list[Scenario] = [
     ]),
     # --- Task tool (4) ---
     Scenario("task_create_list", "multi_tool", [
-        Turn("Use task_create to create a task titled 'Prepare quarterly report'. Then use task_list to list all tasks.", expect_tools=["task_create", "task_list"], expect_keywords=["quarterly", "report"]),
+        Turn("Use task_create to create a task titled 'Prepare quarterly report'. Then use task_list to list all tasks.", expect_tools=["task_create", "task_list"], expect_keywords=["quarterly", "report"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     Scenario("task_create_update", "multi_tool", [
-        Turn("Create a task titled 'Review pull request' with task_create. Then use task_update to mark it as completed. Finally list tasks.", expect_tools=["task_create", "task_update", "task_list"]),
+        Turn("Create a task titled 'Review pull request' with task_create. Then use task_update to mark it as completed. Finally list tasks.", expect_tools=["task_create", "task_update", "task_list"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     Scenario("task_three_then_list", "multi_tool", [
-        Turn("Create three tasks: 'buy milk', 'buy eggs', 'buy flour'. Then list all tasks and count them.", expect_tools=["task_create", "task_list"], expect_keywords=["milk", "eggs"]),
+        Turn("Create three tasks: 'buy milk', 'buy eggs', 'buy flour'. Then list all tasks and count them.", expect_tools=["task_create", "task_list"], expect_keywords=["milk", "eggs"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     Scenario("task_create_priority", "multi_tool", [
-        Turn("Create a task titled 'Fix production bug' and another 'Write docs'. Then list tasks.", expect_tools=["task_create", "task_list"], expect_keywords=["production", "docs"]),
+        Turn("Create a task titled 'Fix production bug' and another 'Write docs'. Then list tasks.", expect_tools=["task_create", "task_list"], expect_keywords=["production", "docs"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     # --- Git (2) ---
     Scenario("git_status", "multi_tool", [
@@ -92,19 +97,19 @@ SCENARIOS: list[Scenario] = [
         Turn("Write a file called token.txt with content 'xyz789'. Then store that same value in memory under key 'token' and recall it.", expect_tools=["write_file", "memory_store", "memory_recall"], expect_keywords=["xyz789"]),
     ]),
     Scenario("mixed_task_calc", "multi_tool", [
-        Turn("Create a task titled 'Budget calc'. Then use the calculator to compute 5000 + 1250, and tell me the total.", expect_tools=["task_create", "calculate"], expect_keywords=["6250"]),
+        Turn("Create a task titled 'Budget calc'. Then use the calculator to compute 5000 + 1250, and tell me the total.", expect_tools=["task_create", "calculate"], expect_keywords=["6250"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     Scenario("mixed_mem_task", "multi_tool", [
-        Turn("Store in memory key 'task_name'='deploy v2'. Then create a task using that stored name and list tasks.", expect_tools=["memory_store", "memory_recall", "task_create", "task_list"], expect_keywords=["deploy"]),
+        Turn("Store in memory key 'task_name'='deploy v2'. Then create a task using that stored name and list tasks.", expect_tools=["memory_store", "memory_recall", "task_create", "task_list"], expect_keywords=["deploy"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     Scenario("mixed_calc_mem", "multi_tool", [
         Turn("Compute 18 * 25 with the calculator. Store the result in memory under key 'product' and recall it.", expect_tools=["calculate", "memory_store", "memory_recall"], expect_keywords=["450"]),
     ]),
     Scenario("mixed_fs_task", "multi_tool", [
-        Turn("Write a file called todo.txt with the line 'ship feature'. Then create a task titled 'ship feature' and list tasks.", expect_tools=["write_file", "task_create", "task_list"], expect_keywords=["feature"]),
+        Turn("Write a file called todo.txt with the line 'ship feature'. Then create a task titled 'ship feature' and list tasks.", expect_tools=["write_file", "task_create", "task_list"], expect_keywords=["feature"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     Scenario("mixed_git_task", "multi_tool", [
-        Turn("Run git_status to see the repo state. Then create a task titled 'review repo changes' and list tasks.", expect_tools=["git_status", "task_create", "task_list"], expect_keywords=["review"]),
+        Turn("Run git_status to see the repo state. Then create a task titled 'review repo changes' and list tasks.", expect_tools=["git_status", "task_create", "task_list"], expect_keywords=["review"], tool_aliases=TASK_TOOL_ALIASES),
     ]),
     Scenario("mixed_grep_calc", "multi_tool", [
         Turn("Write a file nums.txt with the line 'total 42'. Use grep_search to find 'total'. Then compute 42 * 100 with the calculator.", expect_tools=["write_file", "grep_search", "calculate"], expect_keywords=["4200"]),
