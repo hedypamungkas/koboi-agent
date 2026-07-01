@@ -519,6 +519,17 @@ def _build_context(config: Config, logger: AgentLogger, client: RetryClient | No
     return build_context(strategy, logger=logger, client=client, **kwargs)
 
 
+def _build_embedding_client(config: Config, logger: AgentLogger):
+    """Build a dedicated embedding client from an optional ``embedding:`` config
+    section (decoupled from chat). Delegates to the shared
+    ``koboi.llm.factory.build_embedding_client``; returns ``None`` when no usable
+    section is configured so callers fall back to the chat client.
+    """
+    from koboi.llm.factory import build_embedding_client
+
+    return build_embedding_client(config.get("embedding"), logger)
+
+
 def _build_rag(config: Config, client: RetryClient, logger: AgentLogger):
     if not config.rag_enabled:
         return None
@@ -534,7 +545,10 @@ def _build_rag(config: Config, client: RetryClient, logger: AgentLogger):
     if "augmentation" not in rag_dict:
         rag_dict["augmentation"] = "on_the_fly"
 
-    return build_rag(rag_dict, client=client, logger=logger)
+    # Use a dedicated embedding provider when configured (decoupled from chat);
+    # else fall back to the chat client. Only the SemanticRetriever consumes it.
+    rag_client = _build_embedding_client(config, logger) or client
+    return build_rag(rag_dict, client=rag_client, logger=logger)
 
 
 def _normalize_guardrail_config(conf: dict | list | None) -> list[dict]:
@@ -1142,6 +1156,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         parent_rag_config=parent_rag,
         hook_chain=assembler.hook_chain,
         sandbox=assembler.sandbox,
+        embedding_config=config.get("embedding"),
     )
 
     orch_conf = config.orchestration

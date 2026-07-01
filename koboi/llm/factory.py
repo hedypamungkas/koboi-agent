@@ -72,6 +72,32 @@ def create_client(
     )
 
 
+def build_embedding_client(embedding_config: dict | None, logger=None):
+    """Build a dedicated embedding client from an ``embedding:`` config section.
+
+    Decouples the embedding provider from the chat provider: when ``api_key`` is
+    set, semantic retrieval routes here instead of the chat client (useful when
+    the chat provider has no ``/embeddings`` endpoint). Returns ``None`` when the
+    section is absent or has no ``api_key`` (e.g. ``EMBEDDING_API_KEY`` unset) so
+    callers fall back to the chat client. Uses ``create_client`` so the
+    configured ``embedding_model`` is honored.
+
+    Shared by the single-agent facade and the orchestration factory.
+    """
+    emb = embedding_config or {}
+    if not emb.get("api_key"):
+        return None
+    model = emb.get("model") or "text-embedding-3-small"
+    return create_client(
+        provider=emb.get("provider", "openai"),
+        model=model,
+        api_key=emb.get("api_key", ""),
+        base_url=emb.get("base_url", ""),
+        embedding_model=model,
+        logger=logger,
+    )
+
+
 def _create_openai(
     model: str,
     api_key: str,

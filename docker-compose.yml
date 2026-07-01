@@ -41,6 +41,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
+      # --- Embeddings (optional dedicated provider, decoupled from chat) ---
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # --- Langfuse (optional) ---
       # Pass the .env LANGFUSE_* vars straight through (prefix was LF_* which the

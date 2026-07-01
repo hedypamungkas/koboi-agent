@@ -187,6 +187,7 @@ class AgentFactory:
         parent_rag_config: dict | None = None,
         hook_chain: HookChain | None = None,
         sandbox: object | None = None,
+        embedding_config: dict | None = None,
     ) -> Agent:
         """Build an AgentCore from an AgentDef (config-driven)."""
         from koboi.loop import AgentCore as Agent
@@ -196,6 +197,7 @@ class AgentFactory:
             parent_rag_config,
             logger,
             client=client,
+            embedding_config=embedding_config,
         )
 
         max_ctx = cls._defaults["max_context_tokens"]
@@ -224,6 +226,7 @@ class AgentFactory:
         parent_rag_config: dict | None = None,
         hook_chain: HookChain | None = None,
         sandbox: object | None = None,
+        embedding_config: dict | None = None,
     ) -> dict[str, Agent]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -243,6 +246,7 @@ class AgentFactory:
                 parent_rag_config,
                 hook_chain=hook_chain,
                 sandbox=sandbox,
+                embedding_config=embedding_config,
             )
         return agents
 
@@ -295,18 +299,25 @@ class AgentFactory:
         parent_rag_config: dict | None,
         logger: AgentLogger | None = None,
         client: Client | None = None,
+        embedding_config: dict | None = None,
     ):
         """Build RAG augmentation from agent-level or parent-level config.
 
-        Delegates to the RAG registry for component resolution.
+        Delegates to the RAG registry for component resolution. When
+        ``embedding_config`` (the top-level ``embedding:`` section) has an
+        ``api_key``, a dedicated embedding client is built and used for the
+        semantic leg, decoupling it from the chat ``client``; otherwise the chat
+        client is used (and semantic falls back to keyword).
         """
         rag_conf = agent_rag_config or parent_rag_config
         if not rag_conf or not rag_conf.get("enabled"):
             return None
 
+        from koboi.llm.factory import build_embedding_client
         from koboi.rag.registry import build_rag
 
-        return build_rag(rag_conf, client=client, logger=logger)
+        rag_client = build_embedding_client(embedding_config, logger) or client
+        return build_rag(rag_conf, client=rag_client, logger=logger)
 
 
 # ---------------------------------------------------------------------------
