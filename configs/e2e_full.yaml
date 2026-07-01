@@ -20,6 +20,17 @@ llm:
   base_url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
   timeout: 180
 
+# Optional dedicated embedding provider — decoupled from the chat provider above.
+# Use this when the chat provider has no /embeddings endpoint (e.g. surplusintelligence):
+# chat stays on llm.*, semantic retrieval routes here. Falls back to the chat client
+# (and then to keyword retrieval) if unset or the endpoint is unavailable.
+# Set EMBEDDING_API_KEY in .env
+embedding:
+  provider: openai
+  base_url: ${EMBEDDING_BASE_URL:https://api.openai.com/v1}
+  api_key: ${EMBEDDING_API_KEY:}
+  model: text-embedding-3-small
+
 tools:
   builtin:
     - calculate
@@ -62,9 +73,17 @@ rag:
   enabled: true
   chunker: paragraph
   chunk_size: 400
-  retriever: keyword
-  top_k: 5
+  retriever: hybrid
+  top_k: 10
   augmentation: on_the_fly
+  # hybrid = keyword + semantic (RRF). The semantic leg uses the `embedding:`
+  # section above (decoupled from the chat provider), backed by a process-level
+  # shared embedding cache (_EMBEDDING_CACHE) so the corpus embeds once per
+  # process. If `embedding:` is unset or the endpoint is down, both legs carry
+  # the synonym bridge and degrade cleanly to keyword (no RRF demotion).
+  synonyms:
+    dog: [pet]
+    dogs: [pet]
   documents:
     - path: /app/data/sample/product_catalog.md
     - path: /app/data/sample/company_policy.md

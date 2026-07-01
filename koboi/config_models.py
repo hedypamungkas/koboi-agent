@@ -61,6 +61,21 @@ class LLMConfig(BaseModel):
         return v
 
 
+class EmbeddingConfig(BaseModel):
+    """Optional dedicated embedding provider, decoupled from the chat ``llm``.
+
+    When ``api_key`` is set, semantic retrieval routes here instead of the chat
+    client -- useful when the chat provider has no ``/embeddings`` endpoint. If
+    unset, the chat client is used (and semantic falls back to keyword)."""
+
+    model_config = {"extra": "ignore"}
+
+    provider: str = "openai"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = "text-embedding-3-small"
+
+
 class ToolsConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -322,6 +337,7 @@ class KoboiConfig(BaseModel):
 
     agent: AgentConfig = Field(default_factory=AgentConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    embedding: EmbeddingConfig | None = None
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
     rag: RagConfig = Field(default_factory=RagConfig)

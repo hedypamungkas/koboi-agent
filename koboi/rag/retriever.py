@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import math
 import re
@@ -42,8 +44,15 @@ class BaseRetriever(ABC):
 
 
 class KeywordRetriever(BaseRetriever):
-    def __init__(self, chunks: list[Chunk]):
+    def __init__(self, chunks: list[Chunk], synonyms: dict[str, list[str]] | None = None):
         self._chunks = chunks
+        # Optional lexical-bridge map (e.g. {"dog": ["pet"]}) applied to the
+        # QUERY only, so vocabulary that differs from the document (synonyms /
+        # paraphrase) still matches. Opt-in via ``rag.synonyms`` in config; no
+        # effect when unset. Cheap (no re-indexing). Complements -- but does not
+        # replace -- semantic retrieval, which is the general fix but needs an
+        # embedding endpoint.
+        self._synonyms: dict[str, list[str]] = {k.lower(): v for k, v in (synonyms or {}).items()}
         self._tfidf_index: dict[str, dict[str, float]] = {}
         self._idf: dict[str, float] = {}
         self._build_index()
@@ -91,6 +100,13 @@ class KeywordRetriever(BaseRetriever):
         if not query_terms:
             return []
 
+        # Expand the query with configured synonyms (query-side only; the index
+        # is untouched). Bridges vocabulary gaps like "dog" vs document "pet".
+        if self._synonyms:
+            expanded = [a for term in query_terms for a in self._synonyms.get(term, [])]
+            if expanded:
+                query_terms = query_terms + expanded
+
         scored = [(chunk, self._score(query_terms, chunk.id)) for chunk in self._chunks]
         scored.sort(key=lambda x: x[1], reverse=True)
 
@@ -101,19 +117,93 @@ class KeywordRetriever(BaseRetriever):
         ]
 
 
+class _EmbeddingIndexCache:
+    """Process-level shared embedding index, keyed by a corpus signature.
+
+    Retrievers built from the same corpus (same chunk ids + contents) reuse one
+    embedding pass instead of each re-embedding every chunk. This makes semantic
+    / hybrid retrieval affordable for multi-session deployments (e.g. the e2e
+    suite, which builds a fresh agent per session): the corpus is embedded once
+    per process, not per session (~76 chunks once vs ~70 s x N sessions).
+
+    Only successful builds are cached; an unavailable embedding endpoint yields
+    a miss that is not stored, so a later retry once it recovers still works.
+    Concurrency: one ``asyncio.Lock`` per signature dedupes concurrent
+    first-builds (mirrors ``koboi/server/pool.py``'s per-key lock pattern).
+
+    Note: the signature is content-only and assumes a single embedding model per
+    process. A model change requires a process restart, which clears this
+    module-level cache.
+    """
+
+    def __init__(self) -> None:
+        self._index: dict[str, dict[str, list[float]]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    @staticmethod
+    def _signature(chunks: list[Chunk]) -> str:
+        h = hashlib.sha256()
+        for c in chunks:
+            h.update(c.id.encode())
+            h.update(b"\0")
+            h.update(c.content.encode())
+            h.update(b"\0")
+        return h.hexdigest()
+
+    async def get_or_build(self, chunks, embed_fn) -> tuple[dict[str, list[float]] | None, bool]:
+        """Return ``(id -> embedding, ok)``. ``ok=False`` means unavailable."""
+        sig = self._signature(chunks)
+        cached = self._index.get(sig)
+        if cached is not None:
+            return cached, True
+        # dict.setdefault is atomic in a single-threaded asyncio loop, so the
+        # lock is created safely before any await.
+        lock = self._locks.setdefault(sig, asyncio.Lock())
+        async with lock:
+            cached = self._index.get(sig)  # double-check after acquiring lock
+            if cached is not None:
+                return cached, True
+            emb_map: dict[str, list[float]] = {}
+            for c in chunks:
+                emb = await embed_fn(c.content)
+                if emb is None:
+                    return None, False  # endpoint unavailable; do not cache
+                emb_map[c.id] = emb
+            self._index[sig] = emb_map
+            return emb_map, True
+
+    def clear(self) -> None:
+        self._index.clear()
+        self._locks.clear()
+
+
+#: Process-wide shared embedding index (see ``_EmbeddingIndexCache``).
+_EMBEDDING_CACHE = _EmbeddingIndexCache()
+
+
+def clear_embedding_cache() -> None:
+    """Reset the shared embedding index (test isolation / forced rebuild)."""
+    _EMBEDDING_CACHE.clear()
+
+
 class SemanticRetriever(BaseRetriever):
     def __init__(
         self,
         chunks: list[Chunk],
         client: LLMClient | None = None,
+        synonyms: dict[str, list[str]] | None = None,
     ):
         self._chunks = chunks
         self._client = client
+        # Query-side synonym bridge, propagated to every keyword fallback so that
+        # when embeddings are unavailable (and semantic degrades to keyword) the
+        # bridge still closes vocabulary gaps -- keeping hybrid correct under
+        # fallback instead of RRF-demoting synonym-only matches.
+        self._synonyms = synonyms
         self._embedding_available = True
         self._fallback: KeywordRetriever | None = None
         self._chunk_embeddings: dict[str, list[float]] = {}
         self._index_built = False
-        self._building = False
         self._build_index()
 
     async def _get_embedding(self, text: str) -> list[float] | None:
@@ -134,7 +224,7 @@ class SemanticRetriever(BaseRetriever):
     def _build_index(self) -> None:
         if not self._client:
             self._embedding_available = False
-            self._fallback = KeywordRetriever(self._chunks)
+            self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
             _logger.warning(
                 "SemanticRetriever: no embedding client provided -- falling back to keyword retrieval for %d chunks",
                 len(self._chunks),
@@ -144,35 +234,34 @@ class SemanticRetriever(BaseRetriever):
     async def _ensure_index_built(self) -> None:
         if self._index_built:
             return
-        if self._building:
+        if not self._client:
+            # No embedding client: ``_build_index`` already armed the keyword fallback.
+            self._index_built = True
             return
-        self._building = True
-
-        for chunk in self._chunks:
-            emb = await self._get_embedding(chunk.content)
-            if emb is None:
-                self._fallback = KeywordRetriever(self._chunks)
-                self._embedding_available = False
-                self._index_built = True
-                self._building = False
-                _logger.info(
-                    "SemanticRetriever: falling back to keyword retrieval "
-                    "for %d chunks (embedding endpoint unavailable).",
-                    len(self._chunks),
-                )
-                return
-            self._chunk_embeddings[chunk.id] = emb
-            chunk.embedding = emb
-
+        # Shared, process-level index: the corpus is embedded once per process,
+        # not per retriever/session. Concurrent first-builds are deduped by the
+        # cache's per-signature lock.
+        emb_map, ok = await _EMBEDDING_CACHE.get_or_build(self._chunks, self._client.get_embeddings)
+        if not ok:
+            self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
+            self._embedding_available = False
+            self._index_built = True
+            _logger.info(
+                "SemanticRetriever: falling back to keyword retrieval for %d chunks (embedding endpoint unavailable).",
+                len(self._chunks),
+            )
+            return
+        self._chunk_embeddings = emb_map
+        for c in self._chunks:
+            c.embedding = emb_map.get(c.id)
         self._index_built = True
-        self._building = False
 
     async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
         await self._ensure_index_built()
 
         if not self._embedding_available:
             if self._fallback is None:
-                self._fallback = KeywordRetriever(self._chunks)
+                self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
             results = await self._fallback.retrieve(query, top_k)
             for r in results:
                 r.retrieval_method = "semantic (fallback to keyword)"
@@ -181,7 +270,7 @@ class SemanticRetriever(BaseRetriever):
         query_emb = await self._get_embedding(query)
         if query_emb is None:
             if self._fallback is None:
-                self._fallback = KeywordRetriever(self._chunks)
+                self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
             return await self._fallback.retrieve(query, top_k)
 
         scored = [
@@ -214,13 +303,17 @@ class HybridRetriever(BaseRetriever):
         rrf_k: int = 60,
         semantic_weight: float = 1.0,
         keyword_weight: float = 1.0,
+        synonyms: dict[str, list[str]] | None = None,
     ):
         self._chunks = chunks
         self._rrf_k = rrf_k
         self._semantic_weight = semantic_weight
         self._keyword_weight = keyword_weight
-        self._keyword = KeywordRetriever(chunks)
-        self._semantic = SemanticRetriever(chunks, client=client)
+        # Propagate the query-side synonym bridge to the keyword leg so that
+        # vocabulary gaps (e.g. user "dog" vs document "pet") are closed even
+        # when embeddings are unavailable and the semantic leg falls back.
+        self._keyword = KeywordRetriever(chunks, synonyms=synonyms)
+        self._semantic = SemanticRetriever(chunks, client=client, synonyms=synonyms)
 
     async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
         # Get results from both retrievers (fetch more than top_k for fusion)
