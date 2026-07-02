@@ -551,11 +551,16 @@ def _build_rag(config: Config, client: RetryClient, logger: AgentLogger):
     return build_rag(rag_dict, client=rag_client, logger=logger)
 
 
-def _normalize_guardrail_config(conf: dict | list | None) -> list[dict]:
+def _normalize_guardrail_config(conf: dict | list | None, default_name: str = "injection_detector") -> list[dict]:
     """Normalize guardrail config to list-of-dicts format.
 
     Supports legacy single-dict format (auto-wrapped) and new list format.
-    Empty/None returns empty list.
+    Empty/None returns empty list. ``default_name`` selects the fallback
+    guardrail for a bare config block (no ``name`` key) -- the *input* slot
+    defaults to ``injection_detector``, but the *output* slot must default to
+    ``content_filter`` so e.g. ``{detect_sensitive: true}`` builds an
+    ``OutputGuardrail`` (which tolerates empty output) rather than an
+    ``InputGuardrail`` whose "Input is empty" check clobbers tool-call turns.
     """
     if not conf:
         return []
@@ -564,7 +569,7 @@ def _normalize_guardrail_config(conf: dict | list | None) -> list[dict]:
         if "name" in conf:
             return [conf]
         # Legacy: config block like {max_length: 100} -> wrap with default name
-        return [{"name": "injection_detector", **conf}]
+        return [{"name": default_name, **conf}]
     if isinstance(conf, list):
         return [c for c in conf if isinstance(c, dict) and c.get("name")]
     return []
@@ -587,9 +592,11 @@ def _build_guardrails(config: Config, logger: AgentLogger | None = None):
         # Legacy: bare dict without "name" key -> default injection_detector
         input_grds = GuardrailRegistry.from_config([{"name": "injection_detector", **input_conf}])
 
-    # Output guardrails
+    # Output guardrails -- a bare block (no "name") defaults to content_filter,
+    # NOT injection_detector, so output is checked by OutputGuardrail (which
+    # passes on empty output) rather than InputGuardrail (which blocks it).
     output_conf = config.get("guardrails", "output", default={})
-    output_configs = _normalize_guardrail_config(output_conf)
+    output_configs = _normalize_guardrail_config(output_conf, default_name="content_filter")
     if output_configs:
         output_grds = GuardrailRegistry.from_config(output_configs)
     elif output_conf:

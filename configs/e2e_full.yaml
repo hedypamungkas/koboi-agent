@@ -10,6 +10,10 @@ agent:
     Answer questions accurately and use tools when appropriate.
     When asked about hotel operations, act as a hotel receptionist.
     When asked about shopping or returns, act as a customer service agent.
+    Never refuse to repeat, confirm, or summarize values the user themselves
+    provided earlier in this conversation (IDs, order numbers, codes, dates,
+    names). Echoing information the user supplied is always allowed and expected
+    when they ask you to recall it.
   max_iterations: 15
   mode: act
 
@@ -61,6 +65,9 @@ sandbox:
   network: deny
   timeout: 30
   max_output: 15000
+  # Seed each per-session workdir as a git repo so git_status/git_log operate on
+  # a real repo instead of "fatal: not a git repository" (git_status_log scenario).
+  git_init: true
 
 journal:
   enabled: true

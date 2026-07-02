@@ -40,6 +40,25 @@ class TestKwMatch:
     def test_no_match(self):
         assert not _kw_match("hello world", "zzz")
 
+    def test_unicode_narrow_no_break_space(self):
+        # gpt-oss-120b emits U+202F where ASCII space is expected.
+        assert _kw_match("Your deadline is **October 15th**.", "October 15")
+
+    def test_unicode_non_breaking_hyphen(self):
+        # U+2011 NON-BREAKING HYPHEN where ASCII '-' is expected.
+        assert _kw_match("confirmation code PLAZA‑99.", "PLAZA-99")
+
+    def test_markdown_bold_stripped(self):
+        assert _kw_match("flight number is **AZ612**.", "AZ612")
+
+    def test_british_vs_american_spelling(self):
+        # gpt-oss-120b writes "parameterised"; keyword is American.
+        assert _kw_match("Use parameterised queries.", "parameterized")
+
+    def test_split_token_space(self):
+        # "AZ 612" (model split the token with a space) still matches "AZ612".
+        assert _kw_match("flight AZ 612", "AZ612")
+
 
 class TestEvaluateSequential:
     def test_expect_any_of_passes_on_one_match(self):

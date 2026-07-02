@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 
@@ -166,4 +167,55 @@ class TestPoolRunStream:
         )
         agent = await pool.get_or_create("s1")
         assert "my_tool" in agent._core.tools
+        await pool.close_all()
+
+
+def _config_with_git_init(git_init: bool) -> Config:
+    return Config.from_dict(
+        {
+            "agent": {"name": "srv", "system_prompt": "h", "max_iterations": 3},
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "test",
+                "base_url": "http://localhost:8080/v1",
+            },
+            "memory": {"backend": "in_memory"},
+            "sandbox": {"backend": "passthrough", "git_init": git_init},
+        },
+        validate=True,
+    )
+
+
+@pytest.mark.skipif(
+    os.environ.get("KOBOI_SKIP_GIT_TESTS") == "1",
+    reason="git binary unavailable",
+)
+class TestGitInitWorkdir:
+    async def test_git_init_seeds_real_repo(self, tmp_path):
+        from koboi.tools.builtin.git import git_status
+
+        pool = AgentPool(
+            _config_with_git_init(True),
+            client_factory=_factory([make_mock_response(content="hi")]),
+            workspace_root=str(tmp_path),
+        )
+        await pool.get_or_create("s1")
+        wd = pool.workdir_for("s1")
+        assert os.path.isdir(os.path.join(wd, ".git")), "workdir should be a git repo"
+        # The real git_status tool must report a clean tree, not "not a git repository".
+        out = git_status(repo_path=wd)
+        assert "clean" in out.lower()
+        assert "not a git" not in out.lower()
+        await pool.close_all()
+
+    async def test_git_init_off_leaves_plain_dir(self, tmp_path):
+        pool = AgentPool(
+            _config_with_git_init(False),
+            client_factory=_factory([make_mock_response(content="hi")]),
+            workspace_root=str(tmp_path),
+        )
+        await pool.get_or_create("s1")
+        wd = pool.workdir_for("s1")
+        assert not os.path.isdir(os.path.join(wd, ".git"))
         await pool.close_all()

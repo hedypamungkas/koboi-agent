@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import os
 import re
+import subprocess
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -31,6 +33,32 @@ from koboi.events import StreamEvent
 if TYPE_CHECKING:
     from koboi.config import Config
     from koboi.facade import KoboiAgent
+
+_logger = logging.getLogger(__name__)
+
+
+def _git_init_workdir(workdir: str) -> bool:
+    """Initialize ``workdir`` as a git repo with an empty baseline commit.
+
+    Lets the git tools (``git_status``/``git_log``) operate on a real repo
+    instead of returning ``fatal: not a git repository`` -- which made the
+    agent abort before calling ``git_log``. Returns True on success, False if
+    git is unavailable or init fails (never raises: a missing repo must not
+    break session creation).
+    """
+    cmds = (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "agent@koboi.local"],
+        ["git", "config", "user.name", "koboi-agent"],
+        ["git", "commit", "--allow-empty", "-q", "-m", "baseline"],
+    )
+    try:
+        for cmd in cmds:
+            subprocess.run(cmd, cwd=workdir, check=True, capture_output=True, timeout=15)
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        _logger.warning("git_init failed for %s: %s", workdir, exc)
+        return False
+    return True
 
 
 class PoolFull(Exception):
@@ -121,6 +149,10 @@ class AgentPool:
         # never calls write_file (which would otherwise ``makedirs`` lazily).
         # Idempotent + cheap; correct for both restricted and passthrough.
         os.makedirs(workdir, exist_ok=True)
+        # Opt-in: seed the workdir as a git repo so git tools have a real repo
+        # to query (default off -- preserves behavior for existing deployments).
+        if self._config.get("sandbox", "git_init", default=False):
+            _git_init_workdir(workdir)
         agent = KoboiAgent.from_dict(data)
         if self._client_factory is not None:
             # Test seam: replace the facade-built RetryClient with a MockClient.

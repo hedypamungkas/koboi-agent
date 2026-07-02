@@ -11,7 +11,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +46,7 @@ def _write_latest_pointer(run_dir: Path) -> None:
         (RESULTS_DIR / "latest.txt").write_text(run_dir.name)
     except OSError:
         pass
+
 
 #: Provider error fragments that indicate a HARD, non-retriable block (monthly
 #: cost cap, exhausted quota, invalid key). Retrying these only burns wall-clock
@@ -79,18 +82,55 @@ def _is_hard_provider_block(events: list) -> str | None:
     return None
 
 
-def _kw_match(content: str, kw: str) -> bool:
-    """Case-insensitive substring match with number normalization.
+_DASH_TRANSLATE = str.maketrans(
+    {
+        "‐": "-",  # HYPHEN
+        "‑": "-",  # NON-BREAKING HYPHEN
+        "‒": "-",  # FIGURE DASH
+        "–": "-",  # EN DASH
+        "—": "-",  # EM DASH
+        "―": "-",  # HORIZONTAL BAR
+    }
+)
+_WHITESPACE_RE = re.compile(r"\s+")
+# British -> American suffix fold. Applied symmetrically to both sides, so it
+# can never break an existing match -- only make matching more permissive.
+_BRITISH_SUFFIX_RE = re.compile(r"(\w)is(ed|es|e|ing|ation|ations|able|ability)\b")
 
-    Also matches with thousands separators stripped, so a keyword ``"1260"``
-    matches content ``"1,260"`` (and vice-versa) -- the e2e models frequently
-    format numbers with commas, which broke exact-substring assertions.
+
+def _normalize_for_match(text: str) -> str:
+    """Normalize text for tolerant keyword substring matching.
+
+    Folds the cosmetic differences the e2e models introduce so that a correct
+    answer is not flagged as a miss: Unicode compatibility form, dash variants,
+    markdown emphasis, all Unicode whitespace, and British -ise/-ize spelling.
     """
-    c = content.lower()
-    k = kw.lower()
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_DASH_TRANSLATE)
+    # Strip common markdown emphasis that can split a keyword visually.
+    text = text.replace("**", "").replace("__", "").replace("`", "")
+    text = _WHITESPACE_RE.sub(" ", text)  # collapses U+00A0, U+202F, U+3000, ...
+    text = text.lower()
+    text = _BRITISH_SUFFIX_RE.sub(r"\1iz\2", text)
+    return text.strip()
+
+
+def _kw_match(content: str, kw: str) -> bool:
+    """Case-insensitive substring match with number/Unicode normalization.
+
+    Beyond the original thousands-separator strip (``"1,260"`` ~ ``"1260"``),
+    this also folds Unicode dash variants (U+2010-2015), Unicode whitespace
+    (U+00A0, U+202F narrow no-break space, U+3000, ...), markdown emphasis,
+    and British spelling (``"parameterised"`` ~ ``"parameterized"``) -- the e2e
+    models (notably gpt-oss-120b) frequently emit these, which broke the prior
+    exact-substring assertion on otherwise-correct answers.
+    """
+    c = _normalize_for_match(content)
+    k = _normalize_for_match(kw)
     if k in c:
         return True
-    return k.replace(",", "") in c.replace(",", "")
+    # Final fallback: drop commas and spaces entirely (number formatting).
+    return k.replace(",", "").replace(" ", "") in c.replace(",", "").replace(" ", "")
 
 
 @dataclass
@@ -203,9 +243,7 @@ class ScenarioResult:
             "error": self.error,
             "assertions_checked": self.assertions_checked,
             "assertions_passed": self.assertions_passed,
-            "total_tokens": sum(
-                (t.token_usage or {}).get("total_tokens", 0) for t in self.turns
-            ),
+            "total_tokens": sum((t.token_usage or {}).get("total_tokens", 0) for t in self.turns),
             "total_latency": round(sum(t.latency_seconds for t in self.turns), 3),
             "total_tool_calls": sum(len(t.tool_calls) for t in self.turns),
         }
@@ -257,9 +295,7 @@ class ScenarioExecutor:
         assert r.status_code == 201, f"session create failed: {r.status_code}"
         return r.json()["session_id"]
 
-    async def _stream_chat(
-        self, message: str, session_id: str | None, timeout: float
-    ) -> tuple[list[dict], float]:
+    async def _stream_chat(self, message: str, session_id: str | None, timeout: float) -> tuple[list[dict], float]:
         headers = self._headers()
         if session_id:
             headers["X-Session-Id"] = session_id
@@ -311,26 +347,20 @@ class ScenarioExecutor:
             _logger.warning("auto-approve %s error: %s", approval_id, exc)
 
     async def _run_as_job(self, message: str, timeout: float) -> tuple[list[dict], float]:
-        r = await self._client.post(
-            "/v1/jobs", json={"message": message}, headers=self._headers()
-        )
+        r = await self._client.post("/v1/jobs", json={"message": message}, headers=self._headers())
         assert r.status_code == 202
         job_id = r.json()["job_id"]
         t0 = time.monotonic()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            jr = await self._client.get(
-                f"/v1/jobs/{job_id}", headers=self._headers()
-            )
+            jr = await self._client.get(f"/v1/jobs/{job_id}", headers=self._headers())
             body = jr.json()
             if body["status"] in ("completed", "failed", "timed_out", "cancelled"):
                 break
             await asyncio.sleep(0.5)
         latency = time.monotonic() - t0
         events: list = []
-        async with self._client.stream(
-            "GET", f"/v1/jobs/{job_id}/stream", headers=self._headers(), timeout=30
-        ) as resp:
+        async with self._client.stream("GET", f"/v1/jobs/{job_id}/stream", headers=self._headers(), timeout=30) as resp:
             async for line in resp.aiter_lines():
                 if line.startswith("data: "):
                     payload = line[6:]
@@ -340,9 +370,7 @@ class ScenarioExecutor:
                     events.append(json.loads(payload))
         return events, latency
 
-    async def _run_one_turn(
-        self, turn: Turn, session_id: str | None, scenario: Scenario
-    ) -> TurnResult:
+    async def _run_one_turn(self, turn: Turn, session_id: str | None, scenario: Scenario) -> TurnResult:
         """Run a single turn with retry on recoverable errors.
 
         Recoverable = exception OR an SSE ``error`` event (LLM blip / timeout).
@@ -353,18 +381,17 @@ class ScenarioExecutor:
             await self._throttler.wait(scenario.throttle_seconds if attempt else 0)
             try:
                 if scenario.job:
-                    events, latency = await self._run_as_job(
-                        turn.message, scenario.timeout_per_turn
-                    )
+                    events, latency = await self._run_as_job(turn.message, scenario.timeout_per_turn)
                 else:
-                    events, latency = await self._stream_chat(
-                        turn.message, session_id, scenario.timeout_per_turn
-                    )
+                    events, latency = await self._stream_chat(turn.message, session_id, scenario.timeout_per_turn)
             except Exception as exc:  # network / timeout / non-200
                 last_exc = exc
                 _logger.warning(
                     "Scenario %s turn %r attempt %d raised %s",
-                    scenario.name, turn.message[:40], attempt + 1, type(exc).__name__,
+                    scenario.name,
+                    turn.message[:40],
+                    attempt + 1,
+                    type(exc).__name__,
                 )
                 continue
 
@@ -379,7 +406,9 @@ class ScenarioExecutor:
                 if attempt < scenario.retries:
                     _logger.warning(
                         "Scenario %s turn %r attempt %d got error event; retrying",
-                        scenario.name, turn.message[:40], attempt + 1,
+                        scenario.name,
+                        turn.message[:40],
+                        attempt + 1,
                     )
                     continue
             return self._parse_turn(turn, events, latency)
@@ -465,7 +494,7 @@ class ScenarioExecutor:
                     if not ok:
                         passed = False
                         if not error:
-                            error = f"Turn {i+1} assertion failed for '{turn.message[:50]}'"
+                            error = f"Turn {i + 1} assertion failed for '{turn.message[:50]}'"
 
             # Keyword assertions (tolerant; recorded but do flip passed=False).
             kw_passed, kw_error = self._evaluate_keywords(scenario, turns_results)
@@ -509,9 +538,7 @@ class ScenarioExecutor:
 
         async def _one(sid: str) -> TurnResult:
             # Jobs create their own session; interactive reuses the given one.
-            return await self._run_one_turn(
-                scenario.turns[0], None if scenario.job else sid, scenario
-            )
+            return await self._run_one_turn(scenario.turns[0], None if scenario.job else sid, scenario)
 
         results = await asyncio.gather(*[_one(s) for s in sessions], return_exceptions=True)
         out: list[TurnResult] = []
@@ -534,9 +561,7 @@ class ScenarioExecutor:
                 )
         return out
 
-    def _check_turn(
-        self, turn: Turn, content: str, tool_calls: list[dict], events: list[dict]
-    ) -> tuple[int, bool]:
+    def _check_turn(self, turn: Turn, content: str, tool_calls: list[dict], events: list[dict]) -> tuple[int, bool]:
         checked = 0
         for kw in turn.expect_keywords:
             checked += 1
@@ -576,16 +601,16 @@ class ScenarioExecutor:
             kws = (first.expect_keywords + first.expect_any_of) if first else []
             for i, tr in enumerate(turns_results):
                 if kws and not any(_kw_match(tr.content, k) for k in kws):
-                    return False, f"Concurrent session {i+1}: none of {kws} found in reply"
+                    return False, f"Concurrent session {i + 1}: none of {kws} found in reply"
             return True, None
         for i, tr in enumerate(turns_results):
             if i < len(scenario.turns):
                 turn = scenario.turns[i]
                 for kw in turn.expect_keywords:
                     if not _kw_match(tr.content, kw):
-                        return False, f"Keyword '{kw}' not found in turn {i+1}"
+                        return False, f"Keyword '{kw}' not found in turn {i + 1}"
                 if turn.expect_any_of and not any(_kw_match(tr.content, k) for k in turn.expect_any_of):
-                    return False, f"None of {turn.expect_any_of} found in turn {i+1}"
+                    return False, f"None of {turn.expect_any_of} found in turn {i + 1}"
         return True, None
 
     @staticmethod
@@ -628,16 +653,11 @@ def _build_summary(results: list[ScenarioResult]) -> dict:
         "passed": sum(1 for r in results if r.passed),
         "failed": sum(1 for r in results if not r.passed),
         "skipped": sum(
-            1 for r in results
-            if r.error and (r.error.startswith("SKIPPED") or r.error.startswith("BLOCKED"))
+            1 for r in results if r.error and (r.error.startswith("SKIPPED") or r.error.startswith("BLOCKED"))
         ),
         "blocked": sum(1 for r in results if r.error and r.error.startswith("BLOCKED")),
         "total_duration": round(sum(r.duration_seconds for r in results), 1),
-        "total_tokens": sum(
-            (t.token_usage or {}).get("total_tokens", 0)
-            for r in results
-            for t in r.turns
-        ),
+        "total_tokens": sum((t.token_usage or {}).get("total_tokens", 0) for r in results for t in r.turns),
         "categories": {},
         "scenarios": [
             {
@@ -645,9 +665,7 @@ def _build_summary(results: list[ScenarioResult]) -> dict:
                 "category": r.category,
                 "passed": r.passed,
                 "duration": round(r.duration_seconds, 1),
-                "tokens": sum(
-                    (t.token_usage or {}).get("total_tokens", 0) for t in r.turns
-                ),
+                "tokens": sum((t.token_usage or {}).get("total_tokens", 0) for t in r.turns),
                 "tool_calls": sum(len(t.tool_calls) for t in r.turns),
                 "error": r.error,
             }
@@ -655,9 +673,7 @@ def _build_summary(results: list[ScenarioResult]) -> dict:
         ],
     }
     for r in results:
-        cat = summary["categories"].setdefault(
-            r.category, {"total": 0, "passed": 0, "failed": 0, "duration": 0}
-        )
+        cat = summary["categories"].setdefault(r.category, {"total": 0, "passed": 0, "failed": 0, "duration": 0})
         cat["total"] += 1
         cat["passed" if r.passed else "failed"] += 1
         cat["duration"] += round(r.duration_seconds, 1)
