@@ -84,6 +84,56 @@ class TestHealth:
             assert r2.headers.get("X-Request-Id")  # minted when absent
 
 
+class TestCors:
+    """CORS preflight must pass through auth so CORSMiddleware can answer it."""
+
+    def _cors_app(self):
+        cfg = _config(server={"auth_required": True, "cors": {"allow_origins": ["https://app.example.com"]}})
+        ks_val = "testkey"
+        import hashlib
+
+        h = hashlib.sha256(ks_val.encode()).hexdigest()
+        from koboi.server.auth import KeyStore
+
+        ks = KeyStore()
+        ks._keys[h] = "k1"
+        from koboi.server import create_app
+
+        factory = lambda: MockClient([make_mock_response(content="x")])  # noqa: E731
+        return create_app(cfg, client_factory=factory, enable_cors=True)
+
+    async def test_preflight_returns_200_not_401(self):
+        app = self._cors_app()
+        async with httpx.AsyncClient(base_url="http://app.example.com", transport=ASGITransport(app=app)) as c:
+            r = await c.options(
+                "/v1/chat/stream",
+                headers={
+                    "Origin": "https://app.example.com",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "authorization, content-type",
+                },
+            )
+            assert r.status_code == 200, f"preflight 401'd — OPTIONS not bypassing auth (got {r.status_code})"
+            assert "access-control-allow-origin" in r.headers
+
+    async def test_cors_header_present_on_real_request(self):
+        app = self._cors_app()
+        async with httpx.AsyncClient(base_url="http://app.example.com", transport=ASGITransport(app=app)) as c:
+            r = await c.get(
+                "/healthz",
+                headers={"Origin": "https://app.example.com"},
+            )
+            assert r.status_code == 200
+            assert r.headers.get("access-control-allow-origin") == "https://app.example.com"
+
+    async def test_no_cors_block_no_cors_headers(self):
+        # fail-closed: no cors: config → no cross-origin headers
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:
+            r = await c.get("/healthz", headers={"Origin": "https://evil.example.com"})
+            assert r.status_code == 200
+            assert "access-control-allow-origin" not in r.headers
+
+
 class TestSessions:
     async def test_create_returns_id_in_header_and_body(self):
         async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=_app())) as c:

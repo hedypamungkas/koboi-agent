@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 
 from koboi.events import CompleteEvent, TextDeltaEvent, ToolCallEvent
-from koboi.server.sse import DONE_FRAME, _frame, sse_stream
+from koboi.server.sse import DONE_FRAME, KEEPALIVE_FRAME, _frame, sse_stream
 from koboi.types import AgentResponse, TokenUsage
 
 
@@ -69,6 +70,34 @@ class TestSseEncoder:
 
     def test_frame_compact_json(self):
         assert _frame({"type": "text_delta", "content": "hi"}) == b'data: {"type":"text_delta","content":"hi"}\n\n'
+
+    async def test_keepalive_emitted_during_silent_generator(self):
+        # A generator that sleeps longer than the interval must emit at least one
+        # keepalive comment frame before the real event arrives.
+        event_delay = 0.08  # 80 ms
+
+        async def slow_gen():
+            await asyncio.sleep(event_delay)
+            yield TextDeltaEvent(content="late")
+
+        chunks = []
+        async for chunk in sse_stream(slow_gen(), keepalive_interval=0.02):
+            chunks.append(chunk)
+
+        # At least one keepalive frame before the real data
+        assert KEEPALIVE_FRAME in chunks, "expected a keepalive comment frame during silence"
+        # Real event and [DONE] still arrive
+        combined = b"".join(chunks)
+        assert b'"late"' in combined
+        assert combined.endswith(DONE_FRAME)
+
+    async def test_keepalive_not_emitted_when_generator_is_fast(self):
+        # A fast generator should deliver all events without any keepalive frames.
+        events = [TextDeltaEvent(content="a"), TextDeltaEvent(content="b")]
+        chunks = []
+        async for chunk in sse_stream(_gen(events), keepalive_interval=10.0):
+            chunks.append(chunk)
+        assert KEEPALIVE_FRAME not in chunks
 
     def test_frame_escapes_crlf_in_content(self):
         # M14: a bare \r/\n in event content must not break the SSE frame boundary

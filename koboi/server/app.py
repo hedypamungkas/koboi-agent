@@ -269,10 +269,24 @@ def create_app(
     app.state.job_streams_per_owner = job_streams_per_owner  # M3
     app.state.job_streams = {}  # M3: owner -> active job-stream count
 
+    # Middleware: registration order is the REVERSE of execution order.
+    # auth is registered FIRST → executes LAST (innermost, closest to routes).
+    # request_id is registered SECOND → executes before auth so 401/403
+    # responses carry X-Request-Id.
+    # CORSMiddleware is registered LAST → executes FIRST (outermost) so it
+    # intercepts OPTIONS preflights before auth runs. Pure ASGI middleware
+    # (CORSMiddleware) must be outermost; BaseHTTPMiddleware.call_next does not
+    # chain into it reliably in Starlette 1.x when it sits innermost.
+    app.middleware("http")(make_auth_middleware(key_store, auth_required=auth_required))
+    for mw in extra_middleware:
+        app.middleware("http")(mw)
+    app.middleware("http")(request_id_middleware)
+
     # C4: CORS is config-driven, never a wildcard default. CORSMiddleware is
     # added ONLY when `server.cors` is explicitly configured; the default (no
     # `cors:` block) adds nothing → no cross-origin reads. An operator who wants
     # open CORS sets `cors: {allow_origins: ["*"]}` explicitly.
+    # Registered last (outermost) so it intercepts preflights before auth.
     cors_cfg = config.get("server", "cors", default={}) or {}
     if enable_cors and cors_cfg:
         from fastapi.middleware.cors import CORSMiddleware
@@ -289,14 +303,6 @@ def create_app(
             expose_headers=cors_cfg.get("expose_headers", []),
             max_age=cors_cfg.get("max_age", 600),
         )
-
-    # Middleware: registration order is the REVERSE of execution order.
-    # request_id is registered LAST → executes FIRST (outermost), wrapping auth
-    # so 401/403 responses carry X-Request-Id.
-    app.middleware("http")(make_auth_middleware(key_store, auth_required=auth_required))
-    for mw in extra_middleware:
-        app.middleware("http")(mw)
-    app.middleware("http")(request_id_middleware)
 
     _register_routes(
         app,

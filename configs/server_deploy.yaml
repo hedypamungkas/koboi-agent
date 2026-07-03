@@ -44,6 +44,11 @@ server:
     drain_seconds: 60
   limits:
     max_iterations_cap: 25
+  # CORS: required when a browser frontend calls this server from a different origin.
+  # Lock allow_origins to your CF Pages domain in production.
+  cors:
+    allow_origins: ["*"]
+    # allow_credentials: false   # keep false — auth uses Bearer header, not cookies
 
 jobs:
   enabled: true

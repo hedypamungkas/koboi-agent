@@ -1,20 +1,28 @@
 # docker-compose.yml — production self-host deployment for koboi-agent.
 #
+# Topology: browser → Cloudflare edge → cloudflared tunnel → koboi:8080
+# TLS is handled by Cloudflare; no certs needed on the VPS.
+#
 # Usage:
 #   1. Generate an API key:
 #        docker compose run --rm koboi koboi keys create --file /data/keys.json --label production
-#   2. Set your LLM key:
+#   2. Set your LLM key + Cloudflare tunnel token:
 #        export OPENAI_API_KEY=sk-...
+#        export CLOUDFLARE_TUNNEL_TOKEN=eyJ...   # from the CF dashboard (Zero Trust → Tunnels)
 #   3. Start:
 #        docker compose up -d
-#   4. Test:
+#   4. Test (replace with your tunnel domain):
 #        curl -N -H "Authorization: Bearer koboi_..." \
 #          -H "Content-Type: application/json" \
 #          -d '{"message":"hello"}' \
-#          https://localhost/v1/chat/stream
+#          https://koboi.yourdomain.com/v1/chat/stream
 #
 # The koboi-data volume persists SQLite (memory, journal, jobs, ownership) +
 # workspace dirs across container restarts. Resume works after restart.
+#
+# nginx alternative: if you prefer a local reverse proxy (no CF Tunnel), see
+# nginx.conf in this repo and replace the cloudflared service below with the
+# commented nginx block from the git history.
 
 services:
   koboi:
@@ -59,17 +67,13 @@ services:
       start_period: 10s
       retries: 3
 
-  nginx:
-    image: nginx:alpine
-    container_name: koboi-proxy
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: koboi-tunnel
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # M7: TLS certs (required by the default :443 server block in nginx.conf).
-      - ./certs:/etc/nginx/certs:ro
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       koboi:
         condition: service_healthy
