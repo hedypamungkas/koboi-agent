@@ -254,11 +254,24 @@ class AgentCore:
             raise AgentAbortedError(ctx.inject_message or "Input rejected by hook")
 
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
-        """Run output guardrails, emit POST_OUTPUT, save to memory."""
+        """Run output guardrails, emit POST_OUTPUT, save to memory.
+
+        ``block``/``deny``/``abort`` raises (denies the output); any other action
+        (incl. ``warn`` and non-string/absent) prepends a warning and continues.
+        The detailed reason is logged server-side only; the raised message carries
+        just the guardrail name so a leaky ``reason`` can't re-leak via the error
+        frame / durable job error.
+        """
         for grd in self.output_guardrails:
             out_result = await grd.check(output)
             self._audit("output_check", details=f"guardrail={type(grd).__name__} passed={out_result.passed}")
             if not out_result.passed:
+                action = out_result.action if isinstance(out_result.action, str) else ""
+                if action.lower() in {"block", "deny", "abort"}:
+                    self._log(f"Output blocked by {type(grd).__name__}: {out_result.reason}")
+                    raise AgentGuardrailError(
+                        f"output blocked by {type(grd).__name__}", direction="output"
+                    )
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
 
@@ -511,6 +524,12 @@ class AgentCore:
             return
 
         _stream_tools_used: list[str] = []
+        # G8b: when output guardrails are configured, buffer TextDeltas and flush
+        # them only after _process_output passes -- otherwise the tokens stream
+        # (interactive SSE) / are appended (job replay buffer) BEFORE the guardrail
+        # runs on the complete response, so a blocked output leaks. With no output
+        # guardrail, stream live (current behavior; no latency cost).
+        should_buffer = bool(self.output_guardrails)
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
@@ -520,10 +539,14 @@ class AgentCore:
 
             await self._emit(HookEvent.PRE_LLM_CALL, iteration=i, messages=messages)
 
+            delta_buffer: list[TextDeltaEvent] = []
             final_response = None
             async for event in self.client.complete_stream(messages=messages, tools=tool_defs):
                 if isinstance(event, TextDeltaEvent):
-                    yield event
+                    if should_buffer:
+                        delta_buffer.append(event)
+                    else:
+                        yield event
                 elif isinstance(event, ToolCallEvent):
                     yield event
                 elif isinstance(event, CompleteEvent):
@@ -537,15 +560,23 @@ class AgentCore:
                     self.context_manager.last_actual_tokens = final_response.usage.prompt_tokens
 
             if final_response is None:
+                for d in delta_buffer:
+                    yield d
                 yield ErrorEvent(error=AgentMaxIterationsError(i + 1))
                 return
 
             if final_response.content and self.skills and self._activate_skill(final_response.content):
+                for d in delta_buffer:
+                    yield d
                 self._journal_step(i, status="skill", response=final_response)
                 continue
 
             if final_response.is_complete:
+                # May raise AgentGuardrailError (block) -- the buffer is then
+                # discarded, so the blocked tokens never reach the stream.
                 output = await self._process_output(final_response.content or "", final_response, i)
+                for d in delta_buffer:
+                    yield d
                 self._journal_step(i, status="complete", response=final_response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 seen: set[str] = set()
@@ -567,6 +598,8 @@ class AgentCore:
                 return
 
             if final_response.tool_calls:
+                for d in delta_buffer:
+                    yield d
                 self._store_tool_response_in_memory(final_response)
                 for tc in final_response.tool_calls:
                     _stream_tools_used.append(tc.name)
