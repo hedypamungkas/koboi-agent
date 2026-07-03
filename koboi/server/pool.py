@@ -257,3 +257,31 @@ class AgentPool:
         self._closed = True
         for session_id in list(self._agents.keys()):
             await self.evict(session_id)
+
+    async def flush_langfuse(self) -> None:
+        """Best-effort flush of Langfuse traces for all pooled agents, off the loop.
+
+        ``KoboiAgent.close()`` does NOT flush -- the hook flushes on SESSION_END
+        from the loop, which never fires on shutdown. The Langfuse SDK ``flush()``
+        is a **blocking** call (joins its background worker) and each agent has its
+        own client, so each flush runs in a worker thread via ``asyncio.to_thread``
+        and all run concurrently -- otherwise a slow/unreachable Langfuse server
+        would pin the event loop, starving the cancelled stream tasks' cleanups and
+        defeating the ``wait_for(drain_seconds)`` timeout (G3).
+        """
+        hooks = []
+        for agent in self._agents.values():
+            core = getattr(agent, "_core", None)
+            chain = getattr(core, "hooks", None) if core else None
+            if chain:
+                lf = chain.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+                if lf:
+                    hooks.append(lf)
+        if hooks:
+            await asyncio.gather(
+                *(
+                    asyncio.to_thread(lf.flush)  # type: ignore[attr-defined]  # flush() not on Hook ABC; looked up by class name (cf. facade.push_langfuse_scores)
+                    for lf in hooks
+                ),
+                return_exceptions=True,
+            )

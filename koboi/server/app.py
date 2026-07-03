@@ -221,9 +221,20 @@ def create_app(
     health.register("db", make_db_check(ownership, backend=memory_backend))
 
     drain_seconds = config.get("server", "timeouts", "drain_seconds", default=60.0) or 60.0
+    # G3: in-flight interactive stream producers -- cancelled deterministically
+    # in _shutdown so each releases its session lock + we don't rely on uvicorn's
+    # graceful shutdown (not deterministic at the app layer).
+    stream_tasks: set[asyncio.Task] = set()
 
     async def _shutdown():
-        """Cancel job tasks, close pool/ownership/store (M5: drain with timeout)."""
+        """Drain: cancel in-flight streams, flush Langfuse, then close pool/store."""
+        # G3: cancel interactive stream producers deterministically; each releases
+        # its session lock via _run_agent's finally.
+        await _cancel_tasks(stream_tasks)
+        # G3: explicit Langfuse flush -- agent.close() doesn't (the hook flushes
+        # on SESSION_END from the loop, which never fires on shutdown). Runs
+        # off-loop + concurrently so a slow Langfuse server can't pin the drain.
+        await pool.flush_langfuse()
         job_registry.cancel_all()
         await pool.close_all()
         ownership.close()
@@ -327,6 +338,7 @@ def create_app(
         chat_queue_maxsize,
         allowed_modes,
         max_iter_cap,
+        stream_tasks,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -384,6 +396,7 @@ def _register_routes(
     chat_queue_maxsize: int,
     allowed_modes: frozenset[str],
     max_iter_cap: int,
+    stream_tasks: set[asyncio.Task],
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -568,6 +581,8 @@ def _register_routes(
 
         async def event_gen():
             task = asyncio.create_task(_run_agent())
+            stream_tasks.add(task)
+            task.add_done_callback(stream_tasks.discard)
             try:
                 while True:
                     ev = await queue.get()
@@ -834,6 +849,23 @@ def _register_routes(
             job_store.update_status(job_id, "cancelled")
             job_registry.set_terminal(job_id, "cancelled")
         return {"job_id": job_id, "status": "cancelled"}  # type: ignore[return-value]
+
+
+async def _cancel_tasks(tasks: set[asyncio.Task]) -> None:
+    """Cancel all then await them concurrently, then clear the set (drain path).
+
+    Extracted from ``_shutdown`` so the cancellation discipline is unit-testable
+    without spinning up uvicorn. Cancelling all before awaiting lets each task's
+    ``finally`` (e.g. ``_run_agent`` releasing the session lock) run concurrently
+    with the others. ``return_exceptions=True`` swallows CancelledError/exceptions
+    so one stuck task can't abort the drain.
+    """
+    snapshot = list(tasks)
+    for task in snapshot:
+        task.cancel()
+    if snapshot:
+        await asyncio.gather(*snapshot, return_exceptions=True)
+    tasks.clear()
 
 
 def _error_response(status: int, code: str, message: str, request: Request) -> JSONResponse:
