@@ -25,7 +25,8 @@ koboi/              Main package (~150 .py files)
   types.py          All dataclasses: RunResult, ToolDefinition, EvalCase, etc.
   exceptions.py     AgentError and LLMError hierarchies
   memory.py         In-memory ConversationMemory + MemoryBackend protocol
-  memory_sqlite.py  SQLite-backed memory backend (WAL mode)
+  memory_sqlite.py  SQLite-backed memory backend (WAL mode); also hosts the `steps` journal table
+  journal.py        StepJournal -- per-iteration step journal for crash/redeploy resume (P2-A)
   tokens.py         Token estimation helpers
   modes.py          AgentMode enum (chat/plan/act/auto/yolo), ModeManager
   trust.py          TrustDatabase for graduated permissions
@@ -41,15 +42,17 @@ koboi/              Main package (~150 .py files)
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid), augmentation, registry
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
-  harness/          Telemetry, carryover state, doom loop detection, policy engine
+  harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
+  sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry
   orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator, factory, dynamic agent builder
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
-  eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/
+  eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (8), widgets/ (13)
 tests/              ~108 test files, asyncio_mode="auto", shared conftest.py with MockClient
 configs/            12 YAML agent configs
-examples/           29 numbered example scripts (01-29) with matching YAMLs
+examples/           30 numbered example scripts (01-30) with matching YAMLs
+evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             2 skill definitions: code_review, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)
@@ -70,7 +73,10 @@ docs/               Architecture overview, TUI design docs
 
 ## Gotchas
 - `benchmarks/results.json` is 183MB -- never read it
-- `koboi_memory.db` is SQLite WAL-mode, 3 files (.db, .db-shm, .db-wal)
+- `koboi_memory.db` is SQLite WAL-mode, 3 files (.db, .db-shm, .db-wal); it also holds a `steps` table (P2-A journal, additive via `CREATE TABLE IF NOT EXISTS`)
+- `sandbox:` YAML section drives `koboi/sandbox/`; default `passthrough` preserves pre-P0b behavior, opt into `restricted` for cwd/env/PATH/network/rlimit isolation. `KOBOI_SANDBOX_DIR` is still honored as a back-compat fallback. Subprocess tools (`run_shell`, `git_*`, filesystem) declare `deps=["sandbox"]` and read `_deps["sandbox"]`; the facade always wires a (passthrough-or-better) sandbox
+- `journal:` YAML section (default `enabled: true`) drives `koboi/journal.py`; auto-disabled when `memory.backend != sqlite` (it borrows the SQLite connection). Loop writes are native (not hooks) so durability can't be bypassed
+- `koboi run --resume <session>` rehydrates-and-continues an interrupted session; `koboi sessions <config>` lists persisted sessions. Resume is unsupported in orchestration mode (v1)
 - `.agent_memory.json` is a runtime artifact at project root
 - `Config.from_yaml()` raises `FileNotFoundError`, not a generic error
 - `AgentCore` is in `loop.py`, not `core.py`

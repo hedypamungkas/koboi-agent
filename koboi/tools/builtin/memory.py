@@ -66,7 +66,7 @@ class _MemoryStore:
             except (IOError, OSError):
                 try:
                     fd.close()
-                except Exception:
+                except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                     pass
                 _logger.debug("Lock attempt %d/%d failed for %s", attempt + 1, LOCK_RETRIES, lock_path)
                 if attempt < LOCK_RETRIES - 1:

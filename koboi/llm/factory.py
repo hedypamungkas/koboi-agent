@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from koboi.llm.auth import (
     APIKeyHeaderAuth,
+    AuthStrategy,
     BearerAuth,
     CompositeAuth,
     StaticHeaderAuth,
@@ -116,7 +117,7 @@ def _create_anthropic(
 ) -> LLMClient:
     from koboi.llm.anthropic_adapter import AnthropicAdapter
 
-    strategies = []
+    strategies: list[AuthStrategy] = []
 
     if api_key:
         strategies.append(APIKeyHeaderAuth(api_key, header_name="x-api-key"))

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -323,7 +322,10 @@ class TestAgentOn:
 
     def test_on_with_string_event(self, tmp_path):
         agent = self._make_agent(tmp_path)
-        callback = lambda ctx: ctx
+
+        def callback(ctx):
+            return ctx
+
         result = agent.on("post_output", callback)
         assert result is agent  # chaining
         hook_names = [h["name"] for h in agent._core.hooks.list_hooks()]

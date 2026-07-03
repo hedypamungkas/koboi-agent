@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 
 from koboi.mcp.server import MCPServer
-from koboi.mcp.client import MCPClient, MCPError
+from koboi.mcp.client import MCPError
 from koboi.tools.registry import ToolRegistry
 
 

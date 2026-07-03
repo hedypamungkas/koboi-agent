@@ -15,7 +15,6 @@ from __future__ import annotations
 import sys
 
 import click
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
@@ -24,7 +23,6 @@ from conftest import (
     setup_example,
     dual_mode_options,
     create_agent,
-    automatic_batch,
     interactive_loop,
     run_async,
 )
@@ -49,7 +47,7 @@ def run_mcp_direct_demo():
 
     try:
         server_info = client.connect()
-        console.print(f"[green]Connected![/green]")
+        console.print("[green]Connected![/green]")
         console.print(f"  Server: {server_info.get('serverInfo', {}).get('name', 'unknown')}")
         console.print(f"  Version: {server_info.get('serverInfo', {}).get('version', '?')}")
 

@@ -29,7 +29,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # -- Session metadata --
-        meta = {
+        meta: dict[str, object] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "python_version": sys.version,
             "platform": platform.platform(),
@@ -42,7 +42,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
             meta["max_iterations"] = config.max_iterations
             meta["rag_enabled"] = config.rag_enabled
             meta["mode"] = config.mode
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
         # -- Session ID --
@@ -51,7 +51,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
             if hasattr(mem, "_session_id"):
                 session_id = mem._session_id
                 meta["session_id"] = session_id
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
         zf.writestr("metadata.json", json.dumps(meta, indent=2, default=str))
@@ -94,7 +94,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
             log_path = Path(".logs") / f"{session_id}.log"
             if log_path.exists():
                 zf.writestr("session.log", log_path.read_text(errors="replace"))
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
         # -- Registered tools --
@@ -108,7 +108,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
                 for name, td in tools_dict.items()
             }
             zf.writestr("tools.json", json.dumps(tools_info, indent=2))
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
         # -- Hooks --
@@ -116,7 +116,7 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
             hooks = agent.core.hooks.list_hooks()
             hooks_info = [{"name": h["name"], "events": h["events"]} for h in hooks]
             zf.writestr("hooks.json", json.dumps(hooks_info, indent=2))
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
     return buf.getvalue()

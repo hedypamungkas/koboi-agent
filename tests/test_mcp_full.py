@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 from io import BytesIO
 
 import pytest
 
-from koboi.mcp.server import MCPServer, _MCPToolDef
+from koboi.mcp.server import MCPServer
 from koboi.mcp.client import MCPClient, MCPError, register_mcp_tools
 
 

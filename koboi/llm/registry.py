@@ -103,7 +103,7 @@ def register_builtin_providers() -> None:
             default_model="claude-sonnet-4-20250514",
             default_base_url="https://api.anthropic.com/v1",
             factory=_create_anthropic,
-            extra_env={"auth_token": "ANTHROPIC_AUTH_TOKEN"},
+            extra_env={"auth_token": "ANTHROPIC_AUTH_TOKEN"},  # nosec B105 - ANTHROPIC_AUTH_TOKEN is an env-var NAME, not a secret
         )
     )
 

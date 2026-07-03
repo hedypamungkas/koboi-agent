@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
-from pathlib import Path
 
 import pytest
 
@@ -65,7 +62,7 @@ class TestDeleteSession:
         assert len(sessions) == 1
 
     def test_delete_nonexistent(self, populated_db):
-        result = SQLiteMemory.delete_session(populated_db, "nonexistent")
+        SQLiteMemory.delete_session(populated_db, "nonexistent")
         # No error, just returns whether any rows were affected
 
 

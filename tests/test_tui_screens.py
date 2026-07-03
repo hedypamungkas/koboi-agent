@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from koboi.tui.screens.permission_dialog import PermissionDialog, PermissionResult
 

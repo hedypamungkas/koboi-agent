@@ -5,13 +5,11 @@ Handles payment processing, refunds, currency conversion, and transaction
 reconciliation with an external payment provider via their REST API.
 """
 
-import hashlib
 import json
 import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from decimal import Decimal
 from enum import Enum
 from typing import Optional
 

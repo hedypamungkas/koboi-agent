@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 
-from koboi.harness.doom_loop import DoomLoopDetector, DoomLoopConfig, DoomLoopResult
+from koboi.harness.doom_loop import DoomLoopDetector, DoomLoopConfig
 from koboi.harness.policy import PolicyEngine, PolicyRule, PolicyAction
 from koboi.harness.carryover import CarryoverState
-from koboi.harness.telemetry import TelemetryCollector
-from koboi.harness.policy_audit import PolicyAuditLog
 from koboi.types import RiskLevel
 
 

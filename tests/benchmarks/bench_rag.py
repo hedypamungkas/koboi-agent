@@ -1,7 +1,5 @@
 """RAG pipeline benchmarks."""
 
-import pytest
-
 from koboi.rag.chunker import FixedSizeChunker, SentenceChunker, ParagraphChunker
 from koboi.rag.retriever import KeywordRetriever
 from koboi.rag.augmentation import InMemoryAugmentation

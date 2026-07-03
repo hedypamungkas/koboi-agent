@@ -5,6 +5,8 @@ Records tool calls and checks for doom loop patterns after each tool execution.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from koboi.hooks.chain import Hook, HookContext, HookEvent
 from koboi.harness.doom_loop import DoomLoopDetector, DoomLoopConfig, DoomLoopResult
 from koboi.harness.utils import is_tool_error
@@ -21,7 +23,7 @@ class DoomLoopHook(Hook):
     def __init__(
         self,
         config: DoomLoopConfig | None = None,
-        on_doom_loop: callable | None = None,
+        on_doom_loop: Callable[[DoomLoopResult, HookContext], None] | None = None,
     ):
         self.detector = DoomLoopDetector(config)
         self._on_doom_loop = on_doom_loop

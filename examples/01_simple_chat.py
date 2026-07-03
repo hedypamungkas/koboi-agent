@@ -12,8 +12,6 @@ Run:
 from __future__ import annotations
 
 import click
-from rich.markdown import Markdown
-from rich.panel import Panel
 
 from conftest import (
     console,

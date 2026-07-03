@@ -30,7 +30,6 @@ from conftest import (
 ensure_path()
 load_env()
 
-from pathlib import Path
 
 TEST_CASES = [
     {"scenario": "Read system file", "tool": "read_file", "args": {"path": "/etc/passwd"}, "expected_action": "allow"},

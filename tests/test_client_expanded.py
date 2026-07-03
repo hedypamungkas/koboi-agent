@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from koboi.client import Client, ClientError, PLACEHOLDER_KEYS
 from koboi.llm.registry import ProviderRegistry
-from koboi.llm.base import LLMServerError, LLMRateLimitError, LLMError
-from koboi.types import AgentResponse, TokenUsage
+from koboi.llm.base import LLMServerError, LLMError
+from koboi.types import AgentResponse
 
 
 class TestClientValidation:

@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from koboi.llm.openai_adapter import OpenAIAdapter
-from koboi.types import AgentResponse, ToolCall, TokenUsage
 
 
 class MockTransport:

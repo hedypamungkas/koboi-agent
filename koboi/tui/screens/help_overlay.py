@@ -81,7 +81,7 @@ class HelpOverlayScreen(ModalScreen[None]):
     ) -> None:
         super().__init__(**kwargs)
         self._commands = commands or []
-        self._bindings = bindings or []
+        self._bindings = bindings or []  # type: ignore[assignment]  # Textual BindingsMap accepts a list at runtime
         self._current_mode = current_mode
         self._keybinding_display = keybinding_display
 

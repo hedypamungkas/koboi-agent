@@ -249,7 +249,7 @@ class AnthropicAdapter(LLMClient):
         Translates image_url blocks to Anthropic's image source format.
         Text blocks pass through unchanged.
         """
-        result = []
+        result: list[dict] = []
         for block in blocks:
             if not isinstance(block, dict):
                 result.append({"type": "text", "text": str(block)})

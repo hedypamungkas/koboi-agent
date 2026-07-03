@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, AsyncMock
 
-import pytest
 
 from koboi.llm.anthropic_adapter import AnthropicAdapter
-from koboi.types import AgentResponse
 
 
 def _make_adapter() -> AnthropicAdapter:

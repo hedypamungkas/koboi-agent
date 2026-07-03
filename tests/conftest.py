@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
 
 import pytest
-import pytest_asyncio
 
-from koboi.types import AgentResponse, ToolCall, TokenUsage, ToolDefinition, RiskLevel, RunResult
+from koboi.types import AgentResponse, ToolCall, TokenUsage
 from koboi.llm.base import LLMClient
 from koboi.memory import ConversationMemory
 from koboi.tools.registry import ToolRegistry

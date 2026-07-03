@@ -326,6 +326,16 @@ class TestDynamicContextInjection:
         assert "one" in result
         assert "two" in result
 
+    def test_shell_command_does_not_leak_secret_env(self, monkeypatch):
+        """P0a: skill !`cmd` preprocessing must not leak secret env vars."""
+        from koboi.harness.env import configure_env_defaults
+
+        configure_env_defaults(None)  # ensure no passthrough from other tests
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-leak-me")
+        body = "Leaked: !`echo $OPENAI_API_KEY`"
+        result = _preprocess_shell_commands(body)
+        assert "sk-leak-me" not in result
+
 
 class TestActivateSkillDynamic:
     def test_activate_with_shell(self, tmp_path):

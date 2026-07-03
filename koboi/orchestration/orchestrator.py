@@ -175,7 +175,7 @@ class Orchestrator:
                     query=query,
                     agents=event.agents,
                     confidence=event.confidence,
-                    method=event.method,
+                    method=event.method,  # type: ignore[arg-type]  # event.method is str; constrained to the Literal at runtime by the router
                     reasoning=event.reasoning,
                     domain_label=event.domain_label,
                 )
@@ -202,7 +202,7 @@ class Orchestrator:
             agent_results=results,
             final_answer=combined_answer,
             total_elapsed_seconds=elapsed,
-            execution_mode=execution_mode,
+            execution_mode=execution_mode,  # type: ignore[arg-type]  # str var; one of the Literal execution modes
         )
         if self.logger:
             self.logger.log_orchestration_summary(orch_result)
@@ -233,7 +233,7 @@ class Orchestrator:
             agent_results=results,
             final_answer=final,
             total_elapsed_seconds=elapsed,
-            execution_mode=f"{mode}+revision",
+            execution_mode=f"{mode}+revision",  # type: ignore[arg-type]  # constructed from a validated mode
         )
         if self.logger:
             self.logger.log_orchestration_summary(orch_result)
@@ -271,7 +271,7 @@ class Orchestrator:
                     )
                 )
             else:
-                results.append(result)
+                results.append(result)  # type: ignore[arg-type]  # gather(return_exceptions=True): success branch; Exception handled above
                 if self.logger:
                     self.logger.log_agent_result(result)
 

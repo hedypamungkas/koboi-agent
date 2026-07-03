@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import sys
-import subprocess
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, AsyncMock
 
 from koboi.mcp.client import MCPClient, MCPError, register_mcp_tools
 from koboi.mcp.server import MCPServer
@@ -66,7 +64,6 @@ class TestMCPServer:
     def test_dispatch_unknown_method(self):
         server = MCPServer(name="test")
         responses = []
-        original_write = server._write_response
 
         def capture_write(msg):
             responses.append(msg)

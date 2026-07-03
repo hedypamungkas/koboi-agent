@@ -64,7 +64,7 @@ def ensure_tool_integrity(messages: list[dict]) -> list[dict]:
             final.append(m)
 
     # Pass 4: merge consecutive same-role messages (API rejects adjacent same roles)
-    merged = []
+    merged: list[dict] = []
     for m in final:
         if merged and merged[-1].get("role") == m.get("role") and m.get("role") != "system":
             prev = merged[-1]
@@ -79,22 +79,22 @@ def ensure_tool_integrity(messages: list[dict]) -> list[dict]:
 
     # Pass 5: ensure first non-system message is 'user', and list has at least one user
     first_non_system_seen = False
-    clean = []
+    clean_messages: list[dict] = []
     for m in merged:
         if m.get("role") == "system":
-            clean.append(m)
+            clean_messages.append(m)
             continue
         if not first_non_system_seen:
             first_non_system_seen = True
             if m.get("role") != "user":
-                clean.append({"role": "user", "content": "[continuing analysis]"})
-        clean.append(m)
+                clean_messages.append({"role": "user", "content": "[continuing analysis]"})
+        clean_messages.append(m)
 
     # Edge case: only system messages remain — add a synthetic user to avoid empty payload
     if not first_non_system_seen:
-        clean.append({"role": "user", "content": "[continuing analysis]"})
+        clean_messages.append({"role": "user", "content": "[continuing analysis]"})
 
-    return clean
+    return clean_messages
 
 
 class ContextManager(ABC):

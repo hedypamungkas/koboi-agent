@@ -10,8 +10,9 @@ Progressive disclosure:
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from koboi.types import SkillDefinition
 
@@ -26,7 +27,7 @@ def parse_frontmatter(content: str) -> dict:
         return {}
 
     raw = match.group(1)
-    result = {}
+    result: dict[str, Any] = {}
     current_key = None
     current_key_continuation = None
     metadata_lines = []
@@ -95,7 +96,7 @@ def parse_frontmatter(content: str) -> dict:
     return result
 
 
-def discover_skills(search_paths: list[str | Path], recursive: bool = False) -> list[SkillDefinition]:
+def discover_skills(search_paths: Sequence[str | Path], recursive: bool = False) -> list[SkillDefinition]:
     """Scan directories for SKILL.md files. Returns skills with metadata only (body=None).
 
     Args:
@@ -103,7 +104,7 @@ def discover_skills(search_paths: list[str | Path], recursive: bool = False) -> 
         recursive: if True, recursively walk subdirs to find SKILL.md files
                    (needed for plugin cache dirs with nested structure).
     """
-    skills = []
+    skills: list[SkillDefinition] = []
     seen_names: set[str] = set()
 
     for search_path in search_paths:
@@ -195,6 +196,7 @@ def _preprocess_shell_commands(body: str) -> str:
     is replaced with ``[command failed: <cmd>]``.
     """
     import subprocess
+    from koboi.harness.env import build_safe_env
 
     def _run(match: re.Match) -> str:
         cmd = match.group(1).strip()
@@ -205,6 +207,7 @@ def _preprocess_shell_commands(body: str) -> str:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=build_safe_env(),
             )
             output = result.stdout.strip()
             if result.returncode != 0 and not output:
@@ -312,7 +315,7 @@ class SkillRegistry:
         self.logger = logger
         self.budget_chars = budget_chars
 
-    def discover(self, search_paths: list[str | Path], recursive: bool = False) -> list[str]:
+    def discover(self, search_paths: Sequence[str | Path], recursive: bool = False) -> list[str]:
         """Scan paths for skills and register them. Returns list of names."""
         skills = discover_skills(search_paths, recursive=recursive)
         for skill in skills:

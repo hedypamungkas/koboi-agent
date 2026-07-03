@@ -32,7 +32,6 @@ from conftest import (
 ensure_path()
 load_env()
 
-from pathlib import Path
 
 QUERIES = [
     "How much annual leave do I have?",

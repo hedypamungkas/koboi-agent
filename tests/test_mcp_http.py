@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -366,9 +365,7 @@ class TestStreamableHTTPMCPClientSession:
 
         # Check that session ID was included in tools/list request
         tools_call = mock_client.post.call_args_list[2]  # 3rd call is tools/list
-        headers = (
-            tools_call[1].get("headers") or tools_call[0][2] if len(tools_call[0]) > 2 else tools_call[1].get("headers")
-        )
+        (tools_call[1].get("headers") or tools_call[0][2] if len(tools_call[0]) > 2 else tools_call[1].get("headers"))
         # The headers are passed as keyword arg
         call_kwargs = mock_client.post.call_args_list[2]
         sent_headers = call_kwargs.kwargs.get("headers", call_kwargs[1].get("headers", {}))

@@ -10,7 +10,7 @@ from koboi.plugins import discover_plugins
 class TestDiscoverPlugins:
     def test_returns_empty_when_no_plugins(self):
         """discover_plugins returns empty lists when no entry points exist."""
-        with patch("koboi.plugins.entry_points", return_value=[]) as mock_ep:
+        with patch("koboi.plugins.entry_points", return_value=[]):
             result = discover_plugins()
         assert all(v == [] for v in result.values())
 

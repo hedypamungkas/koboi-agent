@@ -31,7 +31,6 @@ Run:
 
 from __future__ import annotations
 
-import asyncio
 import re
 import time
 
@@ -434,7 +433,6 @@ class SeverityAssessmentHook(Hook):
                 "⚠️": "P1",
                 "🐛": "P2",
             }
-            sev_words = {"CRITICAL": "P0", "HIGH": "P1", "MEDIUM": "P2", "LOW": "P3", "WARNING": "P1", "INFO": "P3"}
             for match in re.finditer(
                 r"(🔴|🟠|🟡|🟢|⚠️|🐛)\s*(?:CRITICAL|HIGH|MEDIUM|LOW|INFO|WARNING|P[0-3])?\s*[—–:.-]\s*(.+?)(?:\n|$)",
                 output,
@@ -1230,7 +1228,6 @@ def run_eval(verbose: bool):
     console.print()
     for r in results:
         status = "PASS" if r.overall_score >= 0.6 else "FAIL"
-        border = "green" if r.overall_score >= 0.6 else "red"
 
         detail_table = Table(
             show_header=True, header_style="bold", title=f"[{status}] {r.case_name} -- {r.overall_score:.1%}"

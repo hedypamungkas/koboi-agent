@@ -26,7 +26,7 @@ class AuditTrail:
             self.logger.log(
                 f"[AUDIT] {entry.event_type}"
                 f"{' tool=' + entry.tool_name if entry.tool_name else ''}"
-                f"{' risk=' + entry.risk_level if entry.risk_level else ''}"
+                f"{f' risk={entry.risk_level}' if entry.risk_level else ''}"
                 f" | {entry.details}"
             )
 

@@ -20,12 +20,18 @@ tools:
     timeout: 60
     max_output: 15000
   overrides:
-    shell:
+    # Keys must be the registered tool name (run_shell, not "shell").
+    run_shell:
       timeout: 120
       max_output: 20000
-    git:
+    git_status:
+      timeout: 30
+    git_log:
       timeout: 30
       max_log_count: 100
+    git_diff:
+      timeout: 30
+  # disabled: [run_shell]   # example denylist: removes a tool from LLM view + execution
 
 context:
   strategy: "smart_truncation"

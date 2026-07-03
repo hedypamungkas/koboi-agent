@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import tempfile
-from unittest.mock import MagicMock, AsyncMock, patch, call
-from pathlib import Path
-from io import StringIO
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 import yaml
@@ -23,7 +20,6 @@ from koboi.tui.loop import (
 from koboi.events import (
     TextDeltaEvent,
     ToolCallEvent,
-    ToolResultEvent,
     IterationEvent,
     CompleteEvent,
     ErrorEvent,

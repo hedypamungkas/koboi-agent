@@ -12,7 +12,7 @@ import pytest
 
 from koboi.tui.screens.command_palette import CommandPaletteScreen
 from koboi.tui.screens.history_search import HistorySearchScreen
-from koboi.tui.screens.permission_dialog import PermissionDialog, PermissionResult
+from koboi.tui.screens.permission_dialog import PermissionDialog
 from koboi.tui.textual_app import KoboiApp
 from textual.widgets import Input, OptionList
 
@@ -115,7 +115,7 @@ class TestHistorySearchScreenInteraction:
     async def test_shows_reversed_entries(self):
         screen = HistorySearchScreen(["first", "second", "third"])
         app = _make_test_app(screen)
-        async with app.run_test() as pilot:
+        async with app.run_test():
             option_list = screen.query_one("#history-list", OptionList)
             assert len(option_list._options) == 3
             # Reversed: third, second, first

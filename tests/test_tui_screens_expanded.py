@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from koboi.tui.screens.subagent_monitor import _STATUS_SYMBOLS
 

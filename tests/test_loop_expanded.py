@@ -9,10 +9,10 @@ from koboi.loop import AgentCore
 from koboi.hooks.chain import HookEvent, HookChain, HookContext
 from koboi.memory import ConversationMemory
 from koboi.tools.registry import ToolRegistry
-from koboi.types import AgentResponse, TokenUsage, ToolCall, RunResult, RiskLevel
+from koboi.types import AgentResponse, TokenUsage, ToolCall
 from koboi.llm.base import LLMClient
-from koboi.events import TextDeltaEvent, ToolCallEvent, CompleteEvent, ErrorEvent, ToolResultEvent
-from koboi.exceptions import AgentMaxIterationsError, AgentGuardrailError, AgentAbortedError
+from koboi.events import TextDeltaEvent, CompleteEvent, ErrorEvent, ToolResultEvent
+from koboi.exceptions import AgentGuardrailError
 
 
 def _make_response(content=None, tool_calls=None):
@@ -542,7 +542,7 @@ class TestAgentCoreSkillsDiscovery:
 
         core = AgentCore(client=client, memory=mem, tools=tools, skills=skills)
         core._last_user_message = "hello"
-        msgs = await core._get_managed_messages()
+        await core._get_managed_messages()
         skills.get_routed_discovery_prompt.assert_called_once_with("hello")
 
     @pytest.mark.asyncio
@@ -554,7 +554,7 @@ class TestAgentCoreSkillsDiscovery:
 
         core = AgentCore(client=client, memory=mem, tools=tools, skills=skills)
         core._last_user_message = ""
-        msgs = await core._get_managed_messages()
+        await core._get_managed_messages()
         skills.get_discovery_prompt.assert_called_once()
 
     @pytest.mark.asyncio

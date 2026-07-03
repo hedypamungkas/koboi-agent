@@ -44,10 +44,15 @@ tools:
   defaults:                     # Default config for all tools
     timeout: 30
     max_output: 10000
-  overrides:                    # Per-tool config overrides
-    shell:
+    env_passthrough: false      # Escape hatch: pass full env to subprocess tools
+    env_allowlist: [CARGO_HOME] # Extra env-var name/glob patterns to allow through
+    env_blocklist: [MY_CUSTOM_*] # Extra env-var name/glob patterns to strip
+  overrides:                    # Per-tool config overrides (key = registered tool name)
+    run_shell:                  # use the real name; legacy "shell" alias also works
       timeout: 60
       max_output: 20000
+  disabled: [delegate_tasks]    # DENYLIST: remove a tool from LLM view AND execution
+  groups: [math, file]          # HIDE: only advertise these groups (tools stay callable)
 ```
 
 ## context

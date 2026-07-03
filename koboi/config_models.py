@@ -68,6 +68,10 @@ class ToolsConfig(BaseModel):
     custom: list[dict] = Field(default_factory=list)
     defaults: dict = Field(default_factory=dict)
     overrides: dict = Field(default_factory=dict)
+    # DENYLIST: remove these tools entirely (LLM view + execution).
+    disabled: list[str] = Field(default_factory=list)
+    # HIDE FROM LLM: only advertise these tool groups; tools stay executable.
+    groups: list[str] | None = None
 
 
 class ContextConfig(BaseModel):
@@ -216,6 +220,55 @@ class MCPConfig(BaseModel):
     servers: list[MCPServerConfig] = Field(default_factory=list)
 
 
+class RlimitsConfig(BaseModel):
+    """POSIX resource limits applied to restricted sandbox subprocesses.
+
+    Applied in the child via ``preexec_fn`` (RLIMIT_*). ``as_mb`` is
+    best-effort on Darwin; ``cpu`` (seconds) and ``fsize_mb`` are hard limits.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    cpu: int | None = None
+    as_mb: int | None = None
+    fsize_mb: int | None = None
+    nofile: int | None = None
+
+
+class SandboxConfig(BaseModel):
+    """Top-level ``sandbox:`` section -- subprocess/filesystem isolation.
+
+    ``passthrough`` (default) preserves pre-P0b behavior; ``restricted`` adds
+    cwd/env/PATH/network/rlimit containment. Docker (P0c) is deferred.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    backend: str = "passthrough"
+    workdir: str = "."
+    network: str = "deny"
+    network_binaries: list[str] = Field(default_factory=list)
+    safe_path: list[str] = Field(default_factory=list)
+    env_passthrough: bool = False
+    rlimits: RlimitsConfig | None = None
+    timeout: float = Field(default=30.0, gt=0)
+    max_output: int = Field(default=10000, ge=1)
+
+
+class JournalConfig(BaseModel):
+    """Top-level ``journal:`` section -- step journal + resume (P2-A).
+
+    The journal records one row per loop iteration and enables crash/redeploy
+    recovery via ``koboi run --resume <session>``. Auto-disabled when the memory
+    backend is not SQLite (it borrows the SQLite connection).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = True
+    record_tool_calls: bool = True
+
+
 class KoboiConfig(BaseModel):
     """Top-level config schema for koboi-agent."""
 
@@ -234,6 +287,8 @@ class KoboiConfig(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
+    journal: JournalConfig = Field(default_factory=JournalConfig)
 
     @model_validator(mode="before")
     @classmethod

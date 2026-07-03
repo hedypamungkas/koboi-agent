@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from koboi.hooks.chain import Hook, HookContext, HookChain, HookEvent
+from koboi.hooks.chain import HookContext, HookChain, HookEvent
 
 
 class TestLangfuseTracingHook:
@@ -161,7 +161,7 @@ class TestLangfuseTracingHookWithMockClient:
         hook._dispatch(ctx_pre)
 
         # Verify timing was recorded
-        assert f"llm_0" in hook._timings
+        assert "llm_0" in hook._timings
 
         # Post LLM call - this should end generation
         response = AgentResponse(
@@ -176,7 +176,7 @@ class TestLangfuseTracingHookWithMockClient:
         hook._dispatch(ctx_post)
 
         # Verify timing was cleaned up (generation ended)
-        assert f"llm_0" not in hook._timings
+        assert "llm_0" not in hook._timings
 
     def test_tool_use_creates_span(self, mock_langfuse_client):
         """Tool use should create a span in the trace."""

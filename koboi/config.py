@@ -3,9 +3,12 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from koboi.config_models import KoboiConfig
 
 
 _ENV_PATTERN = re.compile(r"\$\{(\w+)(?::([^}]*))?\}")
@@ -70,7 +73,7 @@ def _load_yaml_with_extends(path: Path, _seen: set[Path] | None = None) -> dict:
 class Config:
     def __init__(self, data: dict, validate: bool = False):
         self._data = _walk_resolve(data)
-        self._schema = None
+        self._schema: KoboiConfig | None = None
         if validate:
             self._validate()
 
@@ -179,6 +182,14 @@ class Config:
     @property
     def subagent(self) -> dict:
         return self.get("subagent", default={})
+
+    @property
+    def sandbox(self) -> dict:
+        return self.get("sandbox", default={})
+
+    @property
+    def journal(self) -> dict:
+        return self.get("journal", default={})
 
     @property
     def agent_name(self) -> str:
@@ -510,6 +521,48 @@ class ConfigBuilder:
             section.setdefault("execution", {})["mode"] = execution_mode
         if agents is not None:
             section["agents"] = agents
+        return self
+
+    def sandbox(
+        self,
+        *,
+        backend: str | None = None,
+        workdir: str | None = None,
+        network: str | None = None,
+        network_binaries: list[str] | None = None,
+        safe_path: list[str] | None = None,
+        env_passthrough: bool | None = None,
+        rlimits: dict | None = None,
+        timeout: float | None = None,
+        max_output: int | None = None,
+    ) -> ConfigBuilder:
+        section = self._data.setdefault("sandbox", {})
+        for key, val in {
+            "backend": backend,
+            "workdir": workdir,
+            "network": network,
+            "network_binaries": network_binaries,
+            "safe_path": safe_path,
+            "env_passthrough": env_passthrough,
+            "rlimits": rlimits,
+            "timeout": timeout,
+            "max_output": max_output,
+        }.items():
+            if val is not None:
+                section[key] = val
+        return self
+
+    def journal(
+        self,
+        *,
+        enabled: bool | None = None,
+        record_tool_calls: bool | None = None,
+    ) -> ConfigBuilder:
+        section = self._data.setdefault("journal", {})
+        if enabled is not None:
+            section["enabled"] = enabled
+        if record_tool_calls is not None:
+            section["record_tool_calls"] = record_tool_calls
         return self
 
     def build(self) -> Config:

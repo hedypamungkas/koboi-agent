@@ -62,7 +62,7 @@ class SWEBenchLoader(DatasetLoader):
     ) -> list[EvalCase]:
         """Load from HuggingFace datasets."""
         try:
-            ds = hf_load_dataset(source, split=split)
+            ds = hf_load_dataset(source, split=split)  # nosec B615 - trusted public benchmark dataset
         except Exception as e:
             _logger.warning("HuggingFace load failed: %s, falling back to local", e)
             return await self._load_from_local(source, max_cases)

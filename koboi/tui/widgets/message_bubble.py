@@ -198,7 +198,7 @@ class MessageBubble(Widget):
             self._markdown.update(self._content)
         else:
             for child in self.query("Static.content"):
-                child.update(Text(self._content))
+                child.update(Text(self._content))  # type: ignore[attr-defined]  # Textual Static.update; query yields Widget-typed
 
     def _check_thinking_blocks(self) -> None:
         """Detect and extract thinking blocks from accumulated content."""

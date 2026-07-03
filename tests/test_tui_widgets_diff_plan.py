@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from koboi.tui.widgets.diff_view import is_diff_content, count_changes, _parse_diff_lines
 from koboi.tui.widgets.plan_view import PlanStep

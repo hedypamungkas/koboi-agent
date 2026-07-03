@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import pytest
 import yaml
-from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 
 from koboi.facade import (
     KoboiAgent,
@@ -21,7 +19,6 @@ from koboi.facade import (
 )
 from koboi.config import Config
 from koboi.logger import AgentLogger
-from koboi.types import RiskLevel
 
 
 def _write_config(tmp_path, config_data):
@@ -90,6 +87,35 @@ class TestBuildTools:
         config = Config.from_yaml(_write_config(tmp_path, cfg))
         registry = _build_tools(config)
         assert len(registry._tools) == 0  # no tools, just config
+
+    def test_disabled_tools_via_config(self, tmp_path):
+        """P3g: tools.disabled removes a tool from the built registry end-to-end."""
+        cfg = _base_config()
+        cfg["tools"] = {"builtin": ["calculate", "run_shell", "read_file"], "disabled": ["run_shell"]}
+        config = Config.from_yaml(_write_config(tmp_path, cfg))
+        registry = _build_tools(config)
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert "run_shell" not in names
+        assert {"calculate", "read_file"} <= names
+
+    def test_disabled_alias_via_config(self, tmp_path):
+        """P3g: the 'shell' alias resolves in tools.disabled too."""
+        cfg = _base_config()
+        cfg["tools"] = {"builtin": ["calculate", "run_shell"], "disabled": ["shell"]}
+        config = Config.from_yaml(_write_config(tmp_path, cfg))
+        registry = _build_tools(config)
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert "run_shell" not in names
+        assert "calculate" in names
+
+    def test_groups_via_config(self, tmp_path):
+        """P3g: tools.groups hides non-matching groups from the LLM view."""
+        cfg = _base_config()
+        cfg["tools"] = {"builtin": ["calculate", "web_search"], "groups": ["math"]}
+        config = Config.from_yaml(_write_config(tmp_path, cfg))
+        registry = _build_tools(config)
+        names = {d["function"]["name"] for d in registry.get_definitions()}
+        assert names == {"calculate"}  # web_search (group "web") hidden
 
 
 class TestBuildContext:

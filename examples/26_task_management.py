@@ -15,10 +15,8 @@ Run:
 
 from __future__ import annotations
 
-import sys
 
 import click
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
@@ -31,7 +29,6 @@ from conftest import (
     create_agent,
     automatic_batch,
     interactive_loop,
-    run_async,
 )
 
 ensure_path()
@@ -86,13 +83,15 @@ def _show_task_tools_info() -> None:
     )
 
 
+# Set in main() once the agent is built; the helpers below read it (the
+# TaskManager lives on the agent's tool registry, not as a process global).
+_task_mgr = None
+
+
 def _show_task_state(label: str = "Current Tasks") -> None:
     """Display current task state from the TaskManager."""
-    from koboi.tools.builtin.task import get_manager
-
-    try:
-        mgr = get_manager()
-    except RuntimeError:
+    mgr = _task_mgr
+    if not mgr:
         console.print("[dim]TaskManager not initialized.[/dim]")
         return
 
@@ -117,13 +116,8 @@ def _show_task_state(label: str = "Current Tasks") -> None:
 
 def _clear_tasks() -> None:
     """Clear all tasks between questions."""
-    from koboi.tools.builtin.task import get_manager
-
-    try:
-        mgr = get_manager()
-        mgr.clear()
-    except RuntimeError:
-        pass
+    if _task_mgr:
+        _task_mgr.clear()
 
 
 def _post_answer_hook(result, q, i, total) -> None:
@@ -149,6 +143,10 @@ def main(mode: str, verbose: bool):
 
     agent = create_agent("26_task_management", verbose=verbose)
     console.print(f"[dim]Agent: {agent.config.agent_name} | Model: {agent.config.model}[/dim]")
+
+    # Expose the TaskManager to the module-level helper functions below.
+    global _task_mgr
+    _task_mgr = agent.core.tools.get_dep("task_manager") if agent.core else None
 
     # Register RichTaskHook so task activity is visible in console
     from koboi.hooks.rich_task_hook import RichTaskHook

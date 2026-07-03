@@ -18,7 +18,6 @@ from __future__ import annotations
 import time
 
 import click
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 

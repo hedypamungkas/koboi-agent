@@ -353,7 +353,7 @@ class TestEdgeCases:
         result = grep_search(pattern="ERROR", path=str(tmp_path))
         # Should only match exact case
         lines = result.split("\n")
-        error_lines = [l for l in lines if "error" in l.lower()]
+        error_lines = [line for line in lines if "error" in line.lower()]
         # At least the uppercase ERROR should match
         assert len(error_lines) >= 1
 

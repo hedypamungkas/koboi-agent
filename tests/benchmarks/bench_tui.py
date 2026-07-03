@@ -15,7 +15,6 @@ Benchmarks measure real TUI operations to catch performance regressions:
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.tui.loop import build_slash_commands
 
@@ -66,7 +65,7 @@ def _make_messages_with_tool_calls(n: int) -> list[dict]:
 
 def _make_large_diff(n_lines: int) -> str:
     """Generate a diff with n_lines of changes."""
-    lines = [f"diff --git a/big.py b/big.py", "index 000..111 100644"]
+    lines = ["diff --git a/big.py b/big.py", "index 000..111 100644"]
     for i in range(n_lines):
         if i % 3 == 0:
             lines.append(f"+added line {i}")
@@ -310,7 +309,6 @@ def test_bridge_mixed_message_creation(benchmark):
         StreamToolResult,
         StreamIteration,
         StreamComplete,
-        StreamError,
     )
 
     def create_messages():

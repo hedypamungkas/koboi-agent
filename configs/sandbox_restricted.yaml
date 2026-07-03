@@ -1,0 +1,46 @@
+agent:
+  name: "sandbox-restricted-demo"
+  description: "Demo: restricted sandbox (cwd/env/network/rlimit containment) + SQLite journal for resume"
+  system_prompt: |
+    You are a demo agent running inside a RESTRICTED sandbox. File writes and
+    shell commands are confined to the workdir; network egress is soft-denied.
+  mode: "act" # act/yolo so filesystem + shell tools may execute
+  max_iterations: 10
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL:gpt-4o-mini}"
+  api_key: "${OPENAI_API_KEY:}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+memory:
+  backend: "sqlite" # required for the step journal + resume
+  db_path: "koboi_demo.db"
+
+# P0b: restricted sandbox -- production-grade isolation without a container.
+# Default is `passthrough` (pre-P0b behavior); opt into `restricted` here.
+sandbox:
+  backend: "restricted"
+  workdir: "./demo_workspace" # all file writes / shell cwd confined here
+  network: "deny" # soft-deny: curl/wget/nc/ssh... blocked at the token layer
+  network_binaries: [curl, wget, nc, ssh, scp]
+  env_passthrough: false # strip secret-shaped + proxy env from subprocesses
+  rlimits:
+    cpu: 30 # RLIMIT_CPU seconds (hard)
+    fsize_mb: 50 # RLIMIT_FSIZE MB (hard; SIGXFSZ past it)
+    # as_mb: 1024  # RLIMIT_AS -- omit on macOS: the shell can't exec under a
+    #                 tight virtual-address limit (Darwin maps large VM at startup)
+  timeout: 30
+  max_output: 10000
+
+# P2-A: step journal (one row per loop iteration). Auto-disabled when
+# memory.backend != sqlite. Enable crash/redeploy recovery via:
+#   koboi run configs/sandbox_restricted.yaml --resume <session-id>
+journal:
+  enabled: true
+  record_tool_calls: true
+
+tools:
+  builtin: [list_files, read_file, write_file, run_shell, git_status, git_log]
+  defaults:
+    timeout: 30

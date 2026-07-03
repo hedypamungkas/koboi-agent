@@ -166,7 +166,7 @@ class SubAgentManager:
                     )
                 )
             else:
-                final.append(result)
+                final.append(result)  # type: ignore[arg-type]  # gather(return_exceptions=True): Exception branch above handles errors; here result is a SubagentResult
         return final
 
     async def _run_single(
@@ -358,7 +358,7 @@ class SubAgentManager:
             if child_logger and hasattr(child_logger, "close"):
                 try:
                     child_logger.close()
-                except Exception:
+                except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                     pass
 
     # -- Cancel / status methods -----------------------------------------------

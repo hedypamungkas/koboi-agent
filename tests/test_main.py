@@ -5,8 +5,6 @@ from __future__ import annotations
 import runpy
 from unittest.mock import patch
 
-import pytest
-
 
 class TestMainModule:
     def test_main_module_importable(self):

@@ -1,7 +1,5 @@
 """Hook chain and telemetry benchmarks."""
 
-import pytest
-
 from koboi.hooks.chain import HookChain, Hook, HookContext, HookEvent
 from koboi.harness.telemetry import TelemetryCollector
 from koboi.harness.doom_loop import DoomLoopDetector, DoomLoopConfig
@@ -67,7 +65,6 @@ def test_hook_chain_10_hooks(benchmark):
 
 def test_telemetry_collection(benchmark):
     """Benchmark recording 100 telemetry iterations."""
-    import time
 
     def record_iterations():
         tc = TelemetryCollector(session_id="bench")
@@ -165,7 +162,7 @@ def test_doom_loop_pattern_detection(benchmark):
         for tool, args in pattern:
             detector.record(tool, args, is_error=False)
 
-    result = benchmark(detector.check)
+    benchmark(detector.check)
     # May detect depending on pattern length
 
 

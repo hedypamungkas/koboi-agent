@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from koboi.hooks.chain import HookContext, HookEvent
-from koboi.hooks.rich_task_hook import RichTaskHook, _TASK_TOOLS
+from koboi.hooks.rich_task_hook import RichTaskHook
 from koboi.hooks.notification_hook import NotificationHook, _EVENT_MESSAGES
 from koboi.hooks.rich_subagent_hook import RichSubagentHook
 
@@ -30,7 +29,7 @@ class TestRichTaskHook:
     async def test_ignores_non_task_tools(self):
         hook = RichTaskHook(console=MagicMock())
         ctx = _make_ctx(tool_name="calculator")
-        result = await hook.execute(ctx)
+        await hook.execute(ctx)
         hook._console.print.assert_not_called()
 
     async def test_no_console_does_nothing(self):

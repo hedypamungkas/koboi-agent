@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 from koboi.orchestration.router import KeywordRouter, LLMRouter
-from koboi.types import RoutingDecision
 from tests.conftest import MockClient, make_mock_response
 
 

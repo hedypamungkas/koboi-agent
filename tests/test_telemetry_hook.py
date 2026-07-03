@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-import pytest
 
 from koboi.hooks.chain import HookContext, HookEvent
 from koboi.hooks.telemetry_hook import TelemetryHook

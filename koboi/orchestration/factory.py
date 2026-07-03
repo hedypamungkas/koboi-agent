@@ -18,6 +18,7 @@ from koboi.types import AgentBlueprint, AgentDef
 
 if TYPE_CHECKING:
     from koboi.client import Client
+    from koboi.hooks.chain import HookChain
     from koboi.logger import AgentLogger
     from koboi.loop import AgentCore as Agent
 
@@ -184,7 +185,8 @@ class AgentFactory:
         client: Client,
         logger: AgentLogger | None = None,
         parent_rag_config: dict | None = None,
-        hook_chain: object | None = None,
+        hook_chain: HookChain | None = None,
+        sandbox: object | None = None,
     ) -> Agent:
         """Build an AgentCore from an AgentDef (config-driven)."""
         from koboi.loop import AgentCore as Agent
@@ -200,7 +202,7 @@ class AgentFactory:
         if agent_def.llm_config and "max_context_tokens" in agent_def.llm_config:
             max_ctx = agent_def.llm_config["max_context_tokens"]
 
-        tools = cls._build_tools_from_config(agent_def.tools_config)
+        tools = cls._build_tools_from_config(agent_def.tools_config, sandbox=sandbox)
 
         return Agent(
             client=client,
@@ -220,7 +222,8 @@ class AgentFactory:
         client: Client,
         logger: AgentLogger | None = None,
         parent_rag_config: dict | None = None,
-        hook_chain: object | None = None,
+        hook_chain: HookChain | None = None,
+        sandbox: object | None = None,
     ) -> dict[str, Agent]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -239,11 +242,12 @@ class AgentFactory:
                 child_logger,
                 parent_rag_config,
                 hook_chain=hook_chain,
+                sandbox=sandbox,
             )
         return agents
 
     @staticmethod
-    def _build_tools_from_config(tools_config: dict | None):
+    def _build_tools_from_config(tools_config: dict | None, sandbox: object | None = None):
         """Build a ToolRegistry from agent-level tools config."""
         if not tools_config:
             return None
@@ -261,6 +265,14 @@ class AgentFactory:
             memory_file = tools_config.get("memory_file", ".agent_memory.json")
             registry.set_dep("memory_store_ref", _MemoryStore(filepath=memory_file))
             registry.keep_only(builtin_list)
+        # Sub-agents inherit the parent sandbox so isolation is consistent.
+        if sandbox is not None:
+            registry.set_dep("sandbox", sandbox)
+        # Apply defaults/overrides/disabled/groups via the shared helper so this
+        # path stays in lock-step with facade._build_tools.
+        from koboi.tools.registry import apply_tool_selection
+
+        apply_tool_selection(registry, tools_config)
         return registry
 
     @staticmethod

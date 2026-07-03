@@ -1,0 +1,27 @@
+# Example 31: tool selection + secret hygiene configuration.
+# Pairs with examples/31_tool_selection.py.
+#
+# Demonstrates the tools.* selection keys and the env-hygiene defaults:
+#   - tools.disabled : DENYLIST, removes a tool from the LLM view AND execution
+#   - tools.groups   : HIDE non-matching groups from the LLM (tool stays callable)
+#   - tools.defaults env_* : secret-hygiene env filtering for subprocess tools
+agent:
+  name: "tool-selection-demo"
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL:gpt-4o-mini}"
+  api_key: "${OPENAI_API_KEY:}"   # not needed for this demo (no LLM call)
+
+tools:
+  builtin: [calculate, read_file, write_file, run_shell, web_search]
+  defaults:
+    timeout: 30
+    max_output: 10000
+    # Secret hygiene (P0a): subprocess tools (run_shell, git_*, skill !`cmd`)
+    # receive a sanitized env by default -- secret-shaped vars are stripped.
+    env_passthrough: false        # escape hatch: set true to pass the full env
+    env_allowlist: [CARGO_HOME]   # extra name/glob patterns to allow through
+    env_blocklist: [MY_CUSTOM_*]  # extra name/glob patterns to strip
+  disabled: [run_shell]           # run_shell ceases to exist for this agent
+  groups: [math, file]            # only advertise math + file groups to the LLM

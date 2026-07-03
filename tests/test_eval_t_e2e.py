@@ -1,0 +1,38 @@
+"""Golden end-to-end test: run the shipped ``evals/`` directory and assert outcomes.
+
+Unlike the other ``test_eval_t_*`` files (which build throwaway cases in memory),
+this runs the *committed* sample evals through the real discover -> run -> fold
+pipeline. It locks the samples from rotting and catches regressions in the
+end-to-end path against actual files (no API key -- all samples are mock-driven).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from koboi.eval.t import run_tests
+
+EVALS_DIR = Path(__file__).resolve().parent.parent / "evals"
+
+
+class TestShippedEvalsGolden:
+    async def test_evals_directory_outcomes(self):
+        results = await run_tests(EVALS_DIR, threshold=0.6)
+
+        # 4 tests shipped: weather (2) + no_tools (1) + multi_turn (1).
+        assert len(results) == 4
+
+        passed = [r for r in results if r.passed]
+        failed = [r for r in results if not r.passed]
+        assert len(passed) == 3
+        assert len(failed) == 1
+        # The single failure is the intentional negative sample.
+        assert failed[0].case_name.endswith("test_rejects_wrong_arguments")
+
+    async def test_multi_turn_sample_recorded_two_turns(self):
+        results = await run_tests(EVALS_DIR, threshold=0.6)
+        multi = next(r for r in results if "multi_turn_conversation" in r.case_name)
+
+        assert multi.passed is True
+        assert multi.metadata["turns"] == 2
+        assert len(multi.tool_calls_made) == 1  # get_weather called once, in turn 1

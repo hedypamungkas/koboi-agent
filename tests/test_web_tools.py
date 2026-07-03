@@ -9,10 +9,6 @@ import httpx
 import pytest
 
 from koboi.tools.builtin.web import (
-    MAX_OUTPUT,
-    MAX_RESPONSE_SIZE,
-    MAX_TIMEOUT,
-    PRIVATE_NETWORKS,
     _check_url_ssrf,
     _extract_html_content,
     _resolve_and_check,

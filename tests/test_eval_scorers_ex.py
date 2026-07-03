@@ -19,7 +19,7 @@ from koboi.eval.scorers.base import (
     ToolSelectionScorer,
     TokenEfficiencyScorer,
 )
-from koboi.types import EvalCase, EvalScore, TokenUsage, ToolCall
+from koboi.types import EvalCase, TokenUsage, ToolCall
 
 
 def _case(**kwargs):

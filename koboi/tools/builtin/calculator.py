@@ -4,36 +4,55 @@ from __future__ import annotations
 
 import ast
 import math
+import operator
+from collections.abc import Callable
+from typing import Any
 
 from koboi.tools.registry import tool
 
-_ALLOWED_AST_NODES = (
-    ast.Expression,
-    ast.BinOp,
-    ast.UnaryOp,
-    ast.Num,
-    ast.Constant,
-    ast.Add,
-    ast.Sub,
-    ast.Mult,
-    ast.Div,
-    ast.Pow,
-    ast.Mod,
-    ast.FloorDiv,
-    ast.USub,
-    ast.UAdd,
-    ast.Call,
-    ast.Name,
-    ast.Load,
-)
+_BINOPS: dict[type, Callable[[Any, Any], Any]] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.Mod: operator.mod,
+    ast.FloorDiv: operator.floordiv,
+}
+_UNARYOPS: dict[type, Callable[[Any], Any]] = {ast.USub: operator.neg, ast.UAdd: operator.pos}
+
+
+def _eval_node(node, names: dict):
+    """Recursively evaluate a whitelisted math AST node.
+
+    No ``eval``/``compile``: only arithmetic, constants, whitelisted names, and
+    calls to whitelisted functions are handled; anything else raises. This makes
+    the calculator safe by construction rather than by post-filtering.
+    """
+    if isinstance(node, ast.Expression):
+        return _eval_node(node.body, names)
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
+        return _BINOPS[type(node.op)](_eval_node(node.left, names), _eval_node(node.right, names))
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARYOPS:
+        return _UNARYOPS[type(node.op)](_eval_node(node.operand, names))
+    if isinstance(node, ast.Name):
+        if node.id in names:
+            return names[node.id]
+        raise ValueError(f"Unknown name: {node.id}")
+    if isinstance(node, ast.Call):
+        if not isinstance(node.func, ast.Name) or node.func.id not in names:
+            raise ValueError("Only whitelisted math functions may be called")
+        args = [_eval_node(a, names) for a in node.args]
+        return names[node.func.id](*args)
+    raise ValueError(f"Disallowed expression element: {type(node).__name__}")
 
 
 def _safe_eval(expression: str, names: dict) -> float:
+    """Parse and evaluate a math expression without eval()."""
     tree = ast.parse(expression, mode="eval")
-    for node in ast.walk(tree):
-        if not isinstance(node, _ALLOWED_AST_NODES):
-            raise ValueError(f"Disallowed expression element: {type(node).__name__}")
-    return eval(compile(tree, "<calc>", "eval"), {"__builtins__": {}}, names)
+    return _eval_node(tree, names)
 
 
 @tool(

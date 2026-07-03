@@ -9,7 +9,7 @@ from koboi.loop_pipeline import ToolExecutionPipeline
 from koboi.memory import ConversationMemory
 from koboi.modes import AgentMode, ModeManager
 from koboi.tools.registry import ToolRegistry
-from koboi.types import RiskLevel, ToolCall
+from koboi.types import ToolCall
 
 
 def _make_registry() -> ToolRegistry:

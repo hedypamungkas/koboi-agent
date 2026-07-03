@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock
-from collections.abc import Awaitable
-
-import pytest
 
 from koboi.hooks.chain import HookContext, HookEvent
 from koboi.hooks.guardrail_hook import GuardrailHook

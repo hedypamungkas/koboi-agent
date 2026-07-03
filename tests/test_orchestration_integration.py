@@ -7,7 +7,7 @@ import json
 import yaml
 
 from koboi.config import Config
-from koboi.types import AgentDef, RoutingDecision
+from koboi.types import AgentDef
 from tests.conftest import MockClient, make_mock_response
 
 
@@ -295,13 +295,6 @@ class TestOrchestratorAgentsMap:
 
 class TestOrchestratorStream:
     async def test_stream_yields_events(self):
-        from koboi.events import (
-            RoutingDecisionEvent,
-            AgentDispatchEvent,
-            AgentResultEvent,
-            OrchestrationCompleteEvent,
-            TextDeltaEvent,
-        )
         from koboi.orchestration.orchestrator import Orchestrator
         from koboi.orchestration.router import KeywordRouter
 

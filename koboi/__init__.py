@@ -110,7 +110,7 @@ try:
     from koboi.plugins import discover_plugins as _discover_plugins
 
     _discover_plugins()
-except Exception:
+except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
     pass  # Plugin discovery is best-effort
 
 __all__ = [

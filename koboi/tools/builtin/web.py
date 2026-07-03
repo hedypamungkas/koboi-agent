@@ -253,9 +253,9 @@ def _resolve_and_check(hostname: str) -> list[str]:
     if not addrs:
         raise ValueError(f"DNS resolution returned no addresses for '{hostname}'")
 
-    resolved = []
+    resolved: list[str] = []
     for _, _, _, _, sa in addrs:
-        ip_str = sa[0]
+        ip_str = str(sa[0])
         ip = ipaddress.ip_address(ip_str)
         for net in PRIVATE_NETWORKS:
             if ip in net:

@@ -15,7 +15,6 @@ Run:
 from __future__ import annotations
 
 import click
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
@@ -34,7 +33,6 @@ from conftest import (
 ensure_path()
 load_env()
 
-from pathlib import Path
 
 QUESTIONS = [
     "What is the weather in Jakarta?",
@@ -84,7 +82,7 @@ def _run_tool_registration_demo():
         fn=reverse_text,
         risk_level=reverse_text._tool_def.risk_level,
     )
-    console.print(f"  Registered: [cyan]reverse_text[/cyan]")
+    console.print("  Registered: [cyan]reverse_text[/cyan]")
     result = run_async(registry.execute("reverse_text", '{"text": "koboi"}'))
     console.print(f"  Test: reverse_text('koboi') = [green]{result}[/green]")
 
@@ -101,7 +99,7 @@ def _run_tool_registration_demo():
         fn=lambda text: text.upper(),
         risk_level=RiskLevel.SAFE,
     )
-    console.print(f"  Registered: [cyan]uppercase[/cyan]")
+    console.print("  Registered: [cyan]uppercase[/cyan]")
     result = run_async(registry.execute("uppercase", '{"text": "hello koboi"}'))
     console.print(f"  Test: uppercase('hello koboi') = [green]{result}[/green]")
 
@@ -110,9 +108,9 @@ def _run_tool_registration_demo():
     from examples.data.custom_tools import weather, translate
 
     register_decorated(registry, weather)
-    console.print(f"  Registered from weather: [cyan]get_weather[/cyan]")
+    console.print("  Registered from weather: [cyan]get_weather[/cyan]")
     register_decorated(registry, translate)
-    console.print(f"  Registered from translate: [cyan]translate_text[/cyan]")
+    console.print("  Registered from translate: [cyan]translate_text[/cyan]")
 
     result = run_async(registry.execute("get_weather", '{"city": "jakarta"}'))
     console.print(f"  Test: get_weather('jakarta') = [green]{result}[/green]")

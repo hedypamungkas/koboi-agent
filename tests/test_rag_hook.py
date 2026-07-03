@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from koboi.hooks.chain import HookContext, HookEvent
 from koboi.hooks.rag_hook import RAGHook

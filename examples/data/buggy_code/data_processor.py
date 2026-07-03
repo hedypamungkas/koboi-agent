@@ -1,7 +1,6 @@
 """Data processing pipeline for batch record transformation."""
 
 import json
-from typing import Any
 
 
 class DataProcessor:

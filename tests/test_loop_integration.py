@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
 
 import pytest
 
 from koboi.loop import AgentCore
 from koboi.memory import ConversationMemory
 from koboi.tools.registry import ToolRegistry
-from koboi.types import AgentResponse, ToolCall, TokenUsage, RiskLevel, RateLimitConfig
+from koboi.types import RiskLevel, RateLimitConfig
 from koboi.exceptions import AgentMaxIterationsError, AgentGuardrailError
 from koboi.guardrails.input import InputGuardrail
 from koboi.guardrails.output import OutputGuardrail

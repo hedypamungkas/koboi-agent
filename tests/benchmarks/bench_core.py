@@ -1,9 +1,7 @@
 """Core performance benchmarks for koboi-agent."""
 
 import tempfile
-from pathlib import Path
 
-import pytest
 import yaml
 
 from koboi.config import Config

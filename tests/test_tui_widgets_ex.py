@@ -85,7 +85,7 @@ class TestCompositeSuggester:
         slash = SlashSuggester(["/help"])
         file_s = FileSuggester(str(tmp_path))
         composite = CompositeSuggester(slash, file_s)
-        result = await composite.get_suggestion(f"@{tmp_path}/test")
+        await composite.get_suggestion(f"@{tmp_path}/test")
 
     @pytest.mark.asyncio
     async def test_no_match(self):

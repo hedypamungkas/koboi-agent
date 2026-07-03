@@ -22,9 +22,23 @@ from koboi.types import RunResult, RiskLevel
 from koboi.hooks.chain import HookEvent
 
 if TYPE_CHECKING:
+    import threading
+
+    from koboi.context.manager import ContextManager
     from koboi.events import StreamEvent
+    from koboi.guardrails.approval import ApprovalHandler
+    from koboi.guardrails.audit import AuditTrail
+    from koboi.guardrails.base import BaseGuardrail
+    from koboi.guardrails.rate_limiter import RateLimiter
+    from koboi.harness.policy import PolicyEngine
     from koboi.hooks.chain import HookChain
+    from koboi.journal import StepJournal
     from koboi.loop import AgentCore
+    from koboi.orchestration.orchestrator import Orchestrator
+    from koboi.rag.augmentation import AugmentationStrategy
+    from koboi.sandbox.base import BaseSandbox
+    from koboi.skills.registry import SkillRegistry
+    from koboi.trust import TrustDatabase
 
 
 class KoboiAgent:
@@ -46,8 +60,8 @@ class KoboiAgent:
         logger: AgentLogger | None = None,
         mcp_clients: list | None = None,
         mode_manager: ModeManager | None = None,
-        trust_db: object | None = None,
-        orchestrator: object | None = None,
+        trust_db: TrustDatabase | None = None,
+        orchestrator: Orchestrator | None = None,
     ):
         self._core = core
         self._config = config
@@ -55,16 +69,27 @@ class KoboiAgent:
         self._mcp_clients = mcp_clients or []
         self._sync_loop: asyncio.AbstractEventLoop | None = None
         self._bg_loop: asyncio.AbstractEventLoop | None = None
-        self._bg_thread: object | None = None  # threading.Thread
+        self._bg_thread: threading.Thread | None = None
         self._mode_manager = mode_manager
         self._trust_db = trust_db
         self._orchestrator = orchestrator
 
     @classmethod
-    def from_config(cls, config_path: str | Path, verbose: bool = False) -> KoboiAgent:
-        """Factory method: create a KoboiAgent from YAML config."""
+    def from_config(
+        cls,
+        config_path: str | Path,
+        verbose: bool = False,
+        resume_session: str | None = None,
+    ) -> KoboiAgent:
+        """Factory method: create a KoboiAgent from YAML config.
+
+        Pass ``resume_session`` to rehydrate-and-continue an interrupted session
+        (P2-A): the SQLite memory reloads that session's conversation and the
+        journal inherits its turn numbering. Call ``agent.resume()`` to actually
+        resume the loop.
+        """
         config = Config.from_yaml(config_path)
-        return cls._from_config(config, verbose=verbose)
+        return cls._from_config(config, verbose=verbose, resume_session=resume_session)
 
     @classmethod
     def from_dict(cls, data: dict, verbose: bool = False) -> KoboiAgent:
@@ -96,8 +121,17 @@ class KoboiAgent:
         return cls._from_config(config, verbose=verbose)
 
     @classmethod
-    def _from_config(cls, config: Config, verbose: bool = False) -> KoboiAgent:
+    def _from_config(
+        cls,
+        config: Config,
+        verbose: bool = False,
+        resume_session: str | None = None,
+    ) -> KoboiAgent:
         """Shared builder: assemble all subsystems from a Config object."""
+        if resume_session:
+            # Point the SQLite memory at the target session so it rehydrates that
+            # conversation (and the journal inherits its turn numbering).
+            config._data.setdefault("memory", {})["session_id"] = resume_session
         # Orchestration mode: transparent to caller
         if config.orchestration.get("enabled"):
             return _build_orchestration(config, verbose=verbose)
@@ -112,7 +146,10 @@ class KoboiAgent:
 
     async def run_stream(self, message: str | list) -> AsyncGenerator[StreamEvent, None]:
         if self._orchestrator is not None:
-            async for event in self._orchestrator.run_stream(message):
+            from koboi.loop import _extract_text
+
+            query = message if isinstance(message, str) else _extract_text(message)
+            async for event in self._orchestrator.run_stream(query):
                 yield event
         else:
             async for event in self._core.run_stream(message):
@@ -122,6 +159,22 @@ class KoboiAgent:
         if self._orchestrator is not None:
             return await _run_orchestrator(self._orchestrator, message)
         return await self._core.chat(message)
+
+    async def resume(self) -> RunResult:
+        """Rehydrate-and-continue an interrupted session (P2-A).
+
+        Construct the agent with ``from_config(..., resume_session=<id>)`` (or
+        the ``--resume`` CLI flag) so memory rehydrates that session, then call
+        this to resume the loop without re-asking the user message. Not supported
+        in orchestration mode (v1).
+        """
+        from koboi.exceptions import AgentError
+
+        if self._orchestrator is not None:
+            raise AgentError("Resume is not supported in orchestration mode (v1)")
+        if self._core is None:
+            raise AgentError("No core agent to resume")
+        return await self._core.resume()
 
     def run_sync(self, message: str | list) -> RunResult:
         """Blocking wrapper for sync callers.
@@ -158,7 +211,7 @@ class KoboiAgent:
         for mcp in self._mcp_clients:
             try:
                 mcp.close()
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
         if self._orchestrator is not None:
             # Clean up orchestrator's sub-agent memories
@@ -195,28 +248,28 @@ class KoboiAgent:
         for mcp in self._mcp_clients:
             try:
                 mcp.close()
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
         if self._logger is not None:
             try:
                 self._logger.close()
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
         bg_loop = getattr(self, "_bg_loop", None)
         if bg_loop is not None:
             try:
                 bg_loop.call_soon_threadsafe(bg_loop.stop)
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
             bg_thread = getattr(self, "_bg_thread", None)
             if bg_thread is not None:
                 try:
                     bg_thread.join(timeout=1.0)
-                except Exception:
+                except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                     pass
             try:
                 bg_loop.close()
-            except Exception:
+            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
 
     async def __aenter__(self) -> KoboiAgent:
@@ -252,7 +305,9 @@ class KoboiAgent:
         from koboi.hooks.callback_hook import CallbackHook
 
         if self._core is not None:
-            self._core.hooks.add(CallbackHook(callback=callback, events=events))
+            self._core.hooks.add(
+                CallbackHook(callback=callback, events=events)  # type: ignore[arg-type]  # on()/add_hook() accept sync or async callbacks
+            )
         return self
 
     def add_hook(
@@ -264,7 +319,9 @@ class KoboiAgent:
         from koboi.hooks.callback_hook import CallbackHook
 
         if self._core is not None:
-            self._core.hooks.add(CallbackHook(callback=callback, events=events))
+            self._core.hooks.add(
+                CallbackHook(callback=callback, events=events)  # type: ignore[arg-type]  # on()/add_hook() accept sync or async callbacks
+            )
 
     def add_tool(
         self,
@@ -312,7 +369,7 @@ class KoboiAgent:
         if tel:
             return tel
         found = self._core.hooks.find_hook(lambda h: hasattr(h, "telemetry"))
-        return found.telemetry if found else None
+        return found.telemetry if found else None  # type: ignore[attr-defined]  # dynamic attr, guarded by the hasattr lambda above
 
     def ensure_telemetry_hook(self) -> None:
         """Attach a TelemetryHook if not already present."""
@@ -335,7 +392,7 @@ class KoboiAgent:
         hook = self._core.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
         if hook is None or not hasattr(hook, "available") or not hook.available:
             return
-        client = hook.get_client()
+        client = hook.get_client()  # type: ignore[attr-defined]  # dynamic attr on LangfuseTracingHook, guarded by hasattr above
         if not client:
             return
         try:
@@ -369,7 +426,7 @@ class KoboiAgent:
         return self._core
 
     @property
-    def orchestrator(self) -> object | None:
+    def orchestrator(self) -> Orchestrator | None:
         return self._orchestrator
 
     @property
@@ -377,7 +434,7 @@ class KoboiAgent:
         return self._mode_manager
 
     @property
-    def trust_db(self) -> object | None:
+    def trust_db(self) -> TrustDatabase | None:
         return self._trust_db
 
 
@@ -400,10 +457,6 @@ def _build_client(config: Config, logger: AgentLogger) -> RetryClient:
 
 def _build_tools(config: Config) -> ToolRegistry:
     registry = ToolRegistry()
-    tool_defaults = config.get("tools", "defaults", default={})
-    tool_overrides = config.get("tools", "overrides", default={})
-    if tool_defaults or tool_overrides:
-        registry.set_tool_config(tool_defaults, tool_overrides)
     builtin_list = config.get("tools", "builtin", default=[])
     if builtin_list:
         from koboi.tools.builtin import register_all
@@ -430,6 +483,13 @@ def _build_tools(config: Config) -> ToolRegistry:
 
                     logging.getLogger(__name__).warning("Failed to import custom tool module '%s': %s", module_name, e)
 
+    # Apply defaults/overrides (with alias normalization), disabled denylist,
+    # and groups -- via the shared helper so this stays in sync with the
+    # orchestration factory's _build_tools_from_config. The helper also mirrors
+    # defaults onto the env-hygiene module config (see apply_tool_selection).
+    from koboi.tools.registry import apply_tool_selection
+
+    apply_tool_selection(registry, config.get("tools", default={}))
     return registry
 
 
@@ -500,8 +560,8 @@ def _build_guardrails(config: Config, logger: AgentLogger | None = None):
 
     input_grds: list = []
     output_grds: list = []
-    rate_limiter = None
-    audit_trail = None
+    rate_limiter: RateLimiter | None = None
+    audit_trail: AuditTrail | None = None
 
     # Input guardrails -- supports both legacy and new config formats
     input_conf = config.get("guardrails", "input", default={})
@@ -642,21 +702,23 @@ class AgentAssembler:
         # Intermediate state -- populated by build steps
         self.logger: AgentLogger | None = None
         self.client: RetryClient | None = None
-        self.memory: object | None = None
+        self.memory: ConversationMemory | None = None
         self.tools: ToolRegistry | None = None
         self.mcp_clients: list | None = None
-        self.context_manager: object | None = None
-        self.augmentation: object | None = None
-        self.input_guardrails: list = []
-        self.output_guardrails: list = []
-        self.rate_limiter: object | None = None
-        self.audit_trail: object | None = None
-        self.approval_handler: object | None = None
-        self.policy_engine: object | None = None
-        self.skills: object | None = None
+        self.context_manager: ContextManager | None = None
+        self.augmentation: AugmentationStrategy | None = None
+        self.input_guardrails: list[BaseGuardrail] = []
+        self.output_guardrails: list[BaseGuardrail] = []
+        self.rate_limiter: RateLimiter | None = None
+        self.audit_trail: AuditTrail | None = None
+        self.approval_handler: ApprovalHandler | None = None
+        self.policy_engine: PolicyEngine | None = None
+        self.skills: SkillRegistry | None = None
         self.mode_manager: ModeManager | None = None
-        self.trust_db: object | None = None
-        self.hook_chain: object | None = None
+        self.trust_db: TrustDatabase | None = None
+        self.hook_chain: HookChain | None = None
+        self.sandbox: BaseSandbox | None = None
+        self.journal: StepJournal | None = None
 
     def build_logger(self) -> AgentLogger:
         self.logger = AgentLogger(session_id=self.config.agent_name)
@@ -678,6 +740,12 @@ class AgentAssembler:
                 logger=self.logger,
                 system_prompt=self.config.system_prompt or None,
             )
+            # Record the session row so `koboi sessions` lists it (and resume can
+            # target it). Upsert -- safe on resume (re-hydrated session_id).
+            self.memory.ensure_session_record(
+                agent_name=self.config.agent_name,
+                model=self.config.model,
+            )
         else:
             self.memory = ConversationMemory(
                 logger=self.logger,
@@ -685,9 +753,48 @@ class AgentAssembler:
             )
         return self.memory
 
+    def build_journal(self) -> object:
+        """Build the step journal (P2-A) for SQLite-backed memory.
+
+        Returns None when journaling is disabled or the memory backend isn't
+        SQLite (the journal borrows the SQLite connection). Built right after
+        memory so it can read the session_id that memory rehydrated.
+        """
+        journal_conf = self.config.get("journal", default={})
+        if not journal_conf.get("enabled", True):
+            self.journal = None
+            return None
+        from koboi.memory_sqlite import SQLiteMemory
+
+        # The journal borrows the SQLite connection; only SQLiteMemory qualifies.
+        if not isinstance(self.memory, SQLiteMemory):
+            self.journal = None
+            return None
+        from koboi.journal import StepJournal
+
+        record_tool_calls = journal_conf.get("record_tool_calls", True)
+        self.journal = StepJournal(
+            self.memory._ensure_conn(),
+            self.memory.session_id,
+            record_tool_calls=record_tool_calls,
+        )
+        return self.journal
+
     def build_tools(self) -> ToolRegistry:
         self.tools = _build_tools(self.config)
         return self.tools
+
+    def build_sandbox(self) -> object:
+        """Build the sandbox and inject it into the tool registry.
+
+        Always built (even for ``passthrough``) so tools can rely on
+        ``_deps["sandbox"]`` being non-None; the passthrough backend reproduces
+        pre-P0b behavior exactly.
+        """
+        self.sandbox = _build_sandbox(self.config, self.logger)
+        if self.tools is not None:
+            self.tools.set_dep("sandbox", self.sandbox)
+        return self.sandbox
 
     def build_mcp(self) -> list:
         self.mcp_clients = _build_mcp(self.config, self.tools, self.logger)
@@ -744,7 +851,9 @@ class AgentAssembler:
         self.build_logger()
         self.build_client()
         self.build_memory()
+        self.build_journal()
         self.build_tools()
+        self.build_sandbox()
         self.build_mcp()
         self.build_context()
         self.build_rag()
@@ -764,6 +873,21 @@ class AgentAssembler:
             from koboi.hooks.skill_persistence_hook import SkillPersistenceHook
 
             self.hook_chain.add(SkillPersistenceHook(skills=self.skills))
+
+        # P3b: compaction-aware tool-state preservation hooks.
+        # TaskPersistenceHook re-injects the active todo list after a compact;
+        # ReadBeforeWriteResetHook clears stale read-tracking on session start
+        # and real compaction. Each is added only when its collaborator exists.
+        if self.hook_chain:
+            task_mgr = self.tools.get_dep("task_manager")
+            if task_mgr is not None:
+                from koboi.hooks.task_persistence_hook import TaskPersistenceHook
+
+                self.hook_chain.add(TaskPersistenceHook(manager=task_mgr))
+            if "read_file" in self.tools:
+                from koboi.hooks.read_before_write_reset_hook import ReadBeforeWriteResetHook
+
+                self.hook_chain.add(ReadBeforeWriteResetHook())
 
         from koboi.loop import AgentCore
 
@@ -786,6 +910,7 @@ class AgentAssembler:
             skills=self.skills,
             hook_chain=self.hook_chain,
             mode_manager=self.mode_manager,
+            journal=self.journal,
         )
 
         return KoboiAgent(
@@ -884,6 +1009,18 @@ def _build_policy(config: Config):
     return engine
 
 
+def _build_sandbox(config: Config, logger: AgentLogger):
+    """Build the sandbox backend from the ``sandbox:`` config section.
+
+    Always returns a handle (defaults to ``PassthroughBackend``) so subprocess
+    tools can rely on ``_deps["sandbox"]`` without None-checks. Never raises on
+    bad config -- ``build_sandbox`` falls back to passthrough and warns.
+    """
+    from koboi.sandbox import build_sandbox
+
+    return build_sandbox(config.sandbox, logger=logger)
+
+
 # ---------------------------------------------------------------------------
 # Orchestration support
 # ---------------------------------------------------------------------------
@@ -958,6 +1095,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
     assembler.build_mode_manager()
     assembler.build_trust_db()
     assembler.build_hooks()
+    assembler.build_sandbox()
 
     agent_defs = _parse_agent_defs(config)
     router = _build_router(config, assembler.client, agent_defs)
@@ -969,6 +1107,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         assembler.logger,
         parent_rag_config=parent_rag,
         hook_chain=assembler.hook_chain,
+        sandbox=assembler.sandbox,
     )
 
     orch_conf = config.orchestration
@@ -1020,8 +1159,8 @@ def _setup_subagent(
             timeout=timeout,
         )
         if memory is not None:
-            manager._parent_memory = memory
-        tools.set_dep("manager", manager)
+            manager._parent_memory = memory  # type: ignore[attr-defined]  # injected attr consumed by SubAgentManager._run_single
+        tools.set_dep("subagent_manager", manager)
 
 
 def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None = None) -> None:
@@ -1030,7 +1169,7 @@ def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None 
         from koboi.task import TaskManager
 
         mgr = TaskManager()
-        tools.set_dep("manager", mgr)
+        tools.set_dep("task_manager", mgr)
         # Inject manager into TaskHook if present in the chain
         if hook_chain is not None:
             for hook in getattr(hook_chain, "_hooks", []):
@@ -1039,13 +1178,19 @@ def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None 
                     break
 
 
-async def _run_orchestrator(orchestrator, message: str) -> RunResult:
-    """Run orchestrator and adapt OrchestratorResult to RunResult."""
-    import time
+async def _run_orchestrator(orchestrator, message: str | list) -> RunResult:
+    """Run orchestrator and adapt OrchestratorResult to RunResult.
 
+    The orchestrator takes a ``str`` query; multimodal (list) input is reduced
+    to its text portion -- orchestration mode has no multimodal support.
+    """
+    import time
+    from koboi.loop import _extract_text
+
+    query = message if isinstance(message, str) else _extract_text(message)
     start = time.time()
 
-    result = await orchestrator.run(message)
+    result = await orchestrator.run(query)
     elapsed = time.time() - start
 
     total_tokens = sum(r.tokens_used for r in result.agent_results)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from koboi.tools.builtin.web import (
     _format_results,

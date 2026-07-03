@@ -172,7 +172,7 @@ class SubagentMonitorScreen(ModalScreen[None]):
         try:
             summary = self.query_one("#monitor-summary", Static)
             summary.update(self._build_summary())
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass
 
         try:
@@ -180,5 +180,5 @@ class SubagentMonitorScreen(ModalScreen[None]):
             agent_list.remove_children()
             for child in self._build_rows():
                 agent_list.mount(child)
-        except Exception:
+        except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
             pass

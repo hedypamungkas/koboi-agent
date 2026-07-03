@@ -97,7 +97,7 @@ def _extract_parameters(cls: type) -> dict[str, dict[str, Any]]:
     Returns dict mapping param_name -> {"default": ..., "annotation": ...}.
     Skips 'self' and *args/**kwargs.
     """
-    sig = inspect.signature(cls.__init__)
+    sig = inspect.signature(cls.__init__)  # type: ignore[misc]  # __init__ params drive config->kwargs resolution
     params: dict[str, dict[str, Any]] = {}
     for name, param in sig.parameters.items():
         if name == "self":

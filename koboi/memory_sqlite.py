@@ -78,6 +78,26 @@ class SQLiteMemory(ConversationMemory):
                 tags TEXT
             )
         """)
+        # P2-A: step journal. One row per loop iteration (1 LLM call + its tool
+        # calls). Additive -- CREATE TABLE IF NOT EXISTS is safe on existing DBs
+        # (no migration code, same convention as messages/sessions above).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                turn_index INTEGER NOT NULL,
+                step_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                llm_prompt_tokens INTEGER,
+                llm_completion_tokens INTEGER,
+                tool_call_count INTEGER DEFAULT 0,
+                tool_calls_json TEXT,
+                is_terminal INTEGER DEFAULT 0,
+                error TEXT,
+                created_at REAL DEFAULT (julianday('now'))
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_session ON steps(session_id, turn_index, step_index)")
         conn.commit()
 
     def _load_from_db(self) -> None:

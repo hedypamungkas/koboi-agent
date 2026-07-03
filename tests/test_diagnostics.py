@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import zipfile
 from io import BytesIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from koboi.diagnostics import (
     collect_diagnostics,
