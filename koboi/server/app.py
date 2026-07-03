@@ -408,7 +408,7 @@ def _register_routes(
             return _error_response(429, "pool_full", str(exc), request)
         ownership.set_owner(sid, getattr(request.state, "api_key_id", "dev"))
         response.headers["X-Session-Id"] = sid
-        return CreateSessionResponse(session_id=sid)
+        return CreateSessionResponse(session_id=sid)  # type: ignore[return-value]
 
     @app.get("/v1/sessions/{session_id}", response_model=SessionResponse)
     async def get_session(session_id: str, request: Request) -> Response:
@@ -420,7 +420,7 @@ def _register_routes(
         if err:
             return err
         messages = await pool.get_messages(session_id)
-        return SessionResponse(session_id=session_id, messages=messages)
+        return SessionResponse(session_id=session_id, messages=messages)  # type: ignore[return-value]
 
     @app.delete("/v1/sessions/{session_id}", response_model=SessionDeletedResponse)
     async def delete_session(session_id: str, request: Request) -> Response:
@@ -433,7 +433,7 @@ def _register_routes(
         if not evicted:
             raise HTTPException(status_code=404, detail="session not found")
         ownership.delete(session_id)
-        return SessionDeletedResponse(session_id=session_id, evicted=True)
+        return SessionDeletedResponse(session_id=session_id, evicted=True)  # type: ignore[return-value]
 
     @app.post("/v1/sessions/{session_id}/resume")
     async def resume_session(session_id: str, request: Request) -> Response:
@@ -612,7 +612,7 @@ def _register_routes(
         )
         if not resolved:
             raise HTTPException(status_code=404, detail="approval not found or already resolved")
-        return ApproveResponse(approval_id=body.approval_id, resolved=True)
+        return ApproveResponse(approval_id=body.approval_id, resolved=True)  # type: ignore[return-value]
 
     # ---- M4: Jobs (autonomous) ----
 
@@ -663,7 +663,7 @@ def _register_routes(
         if idem_key:
             existing = job_store.find_by_idempotency_key(idem_key)
             if existing and existing["owner"] == owner:
-                return {
+                return {  # type: ignore[return-value]
                     "job_id": existing["job_id"],
                     "status": existing["status"],
                     "session_id": existing["session_id"],
@@ -739,7 +739,7 @@ def _register_routes(
             _start_job(job_id)
         else:  # "queue" — wait for a running slot to free (drained on completion)
             job_registry.enqueue_pending(job_id)
-        return {"job_id": job_id, "status": "pending", "session_id": session_id}
+        return {"job_id": job_id, "status": "pending", "session_id": session_id}  # type: ignore[return-value]
 
     @app.get("/v1/jobs")
     async def list_jobs(request: Request, status: str | None = None) -> list:
@@ -754,7 +754,7 @@ def _register_routes(
         if err:
             return err
         result = json.loads(job["result_json"]) if job.get("result_json") else None
-        return JobStatusResponse(
+        return JobStatusResponse(  # type: ignore[return-value]
             job_id=job_id,
             status=job["status"],
             session_id=job["session_id"],
@@ -833,7 +833,7 @@ def _register_routes(
             job_registry.remove_pending(job_id)
             job_store.update_status(job_id, "cancelled")
             job_registry.set_terminal(job_id, "cancelled")
-        return {"job_id": job_id, "status": "cancelled"}
+        return {"job_id": job_id, "status": "cancelled"}  # type: ignore[return-value]
 
 
 def _error_response(status: int, code: str, message: str, request: Request) -> JSONResponse:

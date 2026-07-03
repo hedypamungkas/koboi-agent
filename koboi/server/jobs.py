@@ -17,10 +17,11 @@ import sqlite3
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 if TYPE_CHECKING:
+    from koboi.hooks.langfuse_hook import LangfuseTracingHook
     from koboi.server.pool import AgentPool
 
 _logger = logging.getLogger(__name__)
@@ -435,7 +436,11 @@ async def _execute_job(
     if agent._core and agent._core.hooks:
         lf_hook = agent._core.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
         if lf_hook:
-            lf_hook.set_serving_metadata(mode="autonomous", job_id=job_id, owner=record.owner)
+            # find_hook returns the base Hook type; cast to the duck-typed langfuse
+            # hook (looked up by class name) to satisfy mypy's attr-defined check.
+            cast("LangfuseTracingHook", lf_hook).set_serving_metadata(
+                mode="autonomous", job_id=job_id, owner=record.owner
+            )
     final_content: str | None = None
     async with pool.session_lock(record.session_id):
         prior_handler = agent._core.approval_handler

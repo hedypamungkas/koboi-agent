@@ -14,7 +14,7 @@ the contract is cheap to import and stable across milestones.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Callable, Coroutine, Literal
 
 from koboi.types import RiskLevel
 
@@ -52,16 +52,12 @@ class ApprovalResponse:
     always_allow: bool = False
 
 
-class ApprovalCallback(Protocol):
-    """Async contract ``AsyncCallbackApprovalHandler`` consumes.
-
-    Decoupled from the legacy ``ApprovalHandler.should_approve -> bool`` ABC so
-    the server can carry ``approval_id`` / ``scope`` through one typed object.
-    Implementations may be a plain ``async def`` or any callable matching this.
-    """
-
-    async def __call__(self, request: ApprovalRequest) -> ApprovalResponse:  # pragma: no cover - protocol
-        ...
+#: Async contract ``AsyncCallbackApprovalHandler`` consumes.
+#:
+#: Decoupled from the legacy ``ApprovalHandler.should_approve -> bool`` ABC so the
+#: server can carry ``approval_id`` / ``scope`` through one typed object. A plain
+#: ``async def`` or any callable matching this signature.
+ApprovalCallback = Callable[[ApprovalRequest], Coroutine[Any, Any, ApprovalResponse]]
 
 
 @dataclass
