@@ -250,7 +250,7 @@ class AgentPool:
         try:
             await agent.close()
         except Exception:
-            pass
+            pass  # nosec B110 - best-effort cleanup; evict must not fail on agent.close error
         return True
 
     async def close_all(self) -> None:

@@ -513,9 +513,7 @@ def _register_routes(
             effective_mode = _resolve_mode(body.mode, allowed_modes, allow_yolo=True)
         except ValueError as exc:
             return _error_response(400, "invalid_mode", str(exc), request)
-        effective_max_iter = (
-            min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
-        )
+        effective_max_iter = min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
 
         try:
             agent = await pool.get_or_create(session_id)
@@ -669,9 +667,7 @@ def _register_routes(
             job_mode = _resolve_mode(body.mode, allowed_modes, allow_yolo=False)
         except ValueError as exc:
             return _error_response(400, "invalid_mode", str(exc), request)
-        job_max_iter = (
-            min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
-        )
+        job_max_iter = min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
 
         # Idempotency: same key within window → return existing job.
         idem_key = request.headers.get("Idempotency-Key")
@@ -923,9 +919,7 @@ def _resolve_mode(
     # ModeManager.from_string raises ValueError ("Unknown mode ...") on bad input.
     mode = ModeManager.from_string(mode_str)
     if mode.value not in allowed_modes:
-        raise ValueError(
-            f"mode '{mode.value}' is not allowed; permitted modes: {sorted(allowed_modes)}"
-        )
+        raise ValueError(f"mode '{mode.value}' is not allowed; permitted modes: {sorted(allowed_modes)}")
     if mode is AgentMode.YOLO and not allow_yolo:
         raise ValueError("yolo mode is not allowed for autonomous jobs")
     return mode

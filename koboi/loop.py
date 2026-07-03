@@ -269,9 +269,7 @@ class AgentCore:
                 action = out_result.action if isinstance(out_result.action, str) else ""
                 if action.lower() in {"block", "deny", "abort"}:
                     self._log(f"Output blocked by {type(grd).__name__}: {out_result.reason}")
-                    raise AgentGuardrailError(
-                        f"output blocked by {type(grd).__name__}", direction="output"
-                    )
+                    raise AgentGuardrailError(f"output blocked by {type(grd).__name__}", direction="output")
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
 

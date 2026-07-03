@@ -61,8 +61,11 @@ class OpenAIAdapter(LLMClient):
         usage = self._parse_usage(data.get("usage"))
 
         result = AgentResponse(
-            content=content, tool_calls=tool_calls, usage=usage,
-            model=self._model, base_url=getattr(self._transport, "base_url", None),
+            content=content,
+            tool_calls=tool_calls,
+            usage=usage,
+            model=self._model,
+            base_url=getattr(self._transport, "base_url", None),
         )
 
         if self._logger:
