@@ -23,6 +23,13 @@ class ChatStreamRequest(BaseModel):
     message: str | None = Field(default=None, max_length=65536)  # H6: bound body size
     messages: list[dict[str, Any]] | None = Field(default=None, max_length=50)  # H6: bound turn count
 
+    # G2: per-request mode + iteration cap. mode + the cap are enforced in the
+    # route handler (400 invalid_mode / clamped to server.limits.max_iterations_cap);
+    # the ge=1 floor is Pydantic (422). None = config default (config-only path
+    # unchanged).
+    mode: str | None = Field(default=None)
+    max_iterations: int | None = Field(default=None, ge=1)
+
     def user_message(self) -> str:
         if isinstance(self.message, str) and self.message.strip():
             return self.message
@@ -93,6 +100,12 @@ class JobSubmitRequest(BaseModel):
 
     message: str = Field(max_length=65536)  # H6: bound body size
     session_id: str | None = None
+
+    # G2: per-request mode + iteration cap; see ChatStreamRequest. Jobs always
+    # reject yolo (allow_yolo=False) regardless of server.allowed_modes — an
+    # autonomous (no-HITL) run must not drop the approval gate + rate limiter.
+    mode: str | None = Field(default=None)
+    max_iterations: int | None = Field(default=None, ge=1)
 
 
 class JobStatusResponse(BaseModel):

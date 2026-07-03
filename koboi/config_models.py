@@ -308,6 +308,10 @@ class ServerConfig(BaseModel):
     limits: dict = Field(default_factory=dict)
     idempotency: dict = Field(default_factory=dict)
     workdir_ttl_seconds: float = Field(default=86400.0, gt=0)
+    # G2: operator policy boundary for per-request mode. Unset → the safe default
+    # {chat, plan, act, auto}; yolo requires explicit opt-in. limits.max_iterations_cap
+    # (default 25) clamps the per-request max_iterations knob.
+    allowed_modes: list[str] = Field(default_factory=list)
 
 
 class JobsConfig(BaseModel):

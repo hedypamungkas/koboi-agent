@@ -23,6 +23,7 @@ from koboi.config import Config
 from koboi.events import ErrorEvent
 from koboi.guardrails.approval import AsyncCallbackApprovalHandler
 from koboi.guardrails.approval_types import ApprovalResponse
+from koboi.modes import AgentMode, ModeManager
 from koboi.server.approvals import ApprovalCoordinator, ApprovalRegistry
 from koboi.server.auth import KeyStore, make_auth_middleware
 from koboi.server.health import HealthRegistry, make_db_check, make_pool_alive_check
@@ -209,6 +210,11 @@ def create_app(
     chat_idem = IdempotencyRegistry(ttl_seconds=chat_idem_ttl, max_entries=chat_idem_max)
     chat_queue_maxsize = config.get("server", "limits", "chat_queue_maxsize", default=1000)  # H6
     job_streams_per_owner = config.get("server", "limits", "job_streams_per_owner", default=4)  # M3
+    # G2: per-request mode/iteration knobs -- operator policy boundary. unset
+    # allowed_modes ⇒ safe default (all except yolo); max_iterations_cap clamps
+    # the per-request knob (ceiling, not a limit the caller can exceed).
+    allowed_modes = _resolve_allowed_modes(config.get("server", "allowed_modes", default=None))
+    max_iter_cap = int(config.get("server", "limits", "max_iterations_cap", default=25))
 
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
@@ -319,6 +325,8 @@ def create_app(
         job_queue_depth,
         auth_enabled,
         chat_queue_maxsize,
+        allowed_modes,
+        max_iter_cap,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -374,6 +382,8 @@ def _register_routes(
     job_queue_depth: int,
     auth_enabled: bool,
     chat_queue_maxsize: int,
+    allowed_modes: frozenset[str],
+    max_iter_cap: int,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -482,6 +492,18 @@ def _register_routes(
             if err:
                 return err
 
+        # G2: validate per-request mode/max_iterations BEFORE consuming a pool
+        # slot (mirrors the idempotency pre-check rationale). Interactive path
+        # honors server.allowed_modes; yolo is permitted only if the operator
+        # explicitly opted in. max_iterations is clamped to the cap (ceiling).
+        try:
+            effective_mode = _resolve_mode(body.mode, allowed_modes, allow_yolo=True)
+        except ValueError as exc:
+            return _error_response(400, "invalid_mode", str(exc), request)
+        effective_max_iter = (
+            min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
+        )
+
         try:
             agent = await pool.get_or_create(session_id)
         except PoolFull as exc:
@@ -524,8 +546,21 @@ def _register_routes(
                     if hasattr(agent._core, "_tool_pipeline"):
                         del agent._core._tool_pipeline
                     agent._core.approval_handler = handler
-                    async for ev in agent.run_stream(message):
-                        await queue.put(ev)
+                    # G2: per-request mode + cap; restore in finally (pooled agent
+                    # is reused, so without restore a later mode=None inherits this
+                    # request's mode). switch_mode is live (shared ModeManager ref).
+                    prior_mode = agent._core.mode_manager.current_mode
+                    prior_max_iter = agent._core.max_iterations
+                    try:
+                        if effective_mode is not None:
+                            agent._core.mode_manager.switch_mode(effective_mode)
+                        if effective_max_iter is not None:
+                            agent._core.max_iterations = effective_max_iter
+                        async for ev in agent.run_stream(message):
+                            await queue.put(ev)
+                    finally:
+                        agent._core.mode_manager.switch_mode(prior_mode)
+                        agent._core.max_iterations = prior_max_iter
             except Exception as exc:
                 await queue.put(ErrorEvent(error=exc))
             finally:
@@ -586,7 +621,18 @@ def _register_routes(
         job = job_store.get(job_id)
         if job is None or job["status"] != "pending":
             return  # cancelled or reaped while queued
-        task = asyncio.create_task(run_job(job_id, pool, job_registry, job_store, job["message"], job_timeout))
+        task = asyncio.create_task(
+            run_job(
+                job_id,
+                pool,
+                job_registry,
+                job_store,
+                job["message"],
+                job_timeout,
+                job.get("mode"),
+                job.get("max_iterations"),
+            )
+        )
         job_registry.set_running(job_id, task)
         task.add_done_callback(_on_job_done)
 
@@ -601,6 +647,16 @@ def _register_routes(
     @app.post("/v1/jobs", status_code=202)
     async def submit_job(body: JobSubmitRequest, request: Request) -> Response:
         owner = getattr(request.state, "api_key_id", "dev")
+
+        # G2: jobs reject yolo outright (allow_yolo=False) — an autonomous run
+        # has no human review, so it must keep the approval gate + rate limiter.
+        try:
+            job_mode = _resolve_mode(body.mode, allowed_modes, allow_yolo=False)
+        except ValueError as exc:
+            return _error_response(400, "invalid_mode", str(exc), request)
+        job_max_iter = (
+            min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
+        )
 
         # Idempotency: same key within window → return existing job.
         idem_key = request.headers.get("Idempotency-Key")
@@ -653,7 +709,15 @@ def _register_routes(
 
         job_id = new_job_id()
         try:
-            job_store.insert(job_id, session_id, owner, body.message, idempotency_key=idem_key)
+            job_store.insert(
+                job_id,
+                session_id,
+                owner,
+                body.message,
+                idempotency_key=idem_key,
+                mode=job_mode.value if job_mode else None,
+                max_iterations=job_max_iter,
+            )
         except DuplicateIdempotencyKey as exc:
             # M1: a concurrent same-key submit won the race -- return the canonical
             # job (if ours) or 409 so the client retries without the key.
@@ -779,6 +843,60 @@ def _error_response(status: int, code: str, message: str, request: Request) -> J
             error=ErrorDetail(code=code, message=message, request_id=getattr(request.state, "request_id", None))
         ).model_dump(),
     )
+
+
+# G2 default HTTP mode allowlist: everything except yolo. yolo drops the rate
+# limiter, the approval gate, and the CHAT/PLAN mode block (only PolicyHook's
+# hardcoded safety remains), so it stays opt-in via server.allowed_modes.
+_DEFAULT_ALLOWED_MODES = frozenset({"chat", "plan", "act", "auto"})
+
+
+def _resolve_allowed_modes(raw: object) -> frozenset[str]:
+    """Normalize the operator's ``server.allowed_modes``; raise on invalid entries.
+
+    None/empty -> the safe default (all modes except yolo). Otherwise each entry
+    must be a valid ``AgentMode`` value; an invalid entry fails loud at startup so
+    a YAML typo can't silently widen or narrow the policy boundary.
+    """
+    if not raw:
+        return _DEFAULT_ALLOWED_MODES
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError(f"server.allowed_modes must be a list, got {type(raw).__name__}")
+    resolved: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, str):
+            raise ValueError(f"server.allowed_modes entry must be a string, got {entry!r}")
+        try:
+            resolved.add(ModeManager.from_string(entry).value)
+        except ValueError as exc:
+            raise ValueError(f"server.allowed_modes: {exc}") from exc
+    return frozenset(resolved) or _DEFAULT_ALLOWED_MODES
+
+
+def _resolve_mode(
+    mode_str: str | None,
+    allowed_modes: frozenset[str],
+    *,
+    allow_yolo: bool,
+) -> AgentMode | None:
+    """Validate a per-request mode against the operator allowlist.
+
+    Returns None when the caller omitted ``mode`` (config default applies, so the
+    config-only path is unchanged). Raises ValueError (-> 400 invalid_mode) for
+    an unknown mode, a mode outside ``allowed_modes``, or yolo when ``allow_yolo``
+    is False (e.g. jobs).
+    """
+    if mode_str is None:
+        return None
+    # ModeManager.from_string raises ValueError ("Unknown mode ...") on bad input.
+    mode = ModeManager.from_string(mode_str)
+    if mode.value not in allowed_modes:
+        raise ValueError(
+            f"mode '{mode.value}' is not allowed; permitted modes: {sorted(allowed_modes)}"
+        )
+    if mode is AgentMode.YOLO and not allow_yolo:
+        raise ValueError("yolo mode is not allowed for autonomous jobs")
+    return mode
 
 
 def _resolve_bind(config: Config, host: str | None, port: int | None) -> tuple[str, int]:

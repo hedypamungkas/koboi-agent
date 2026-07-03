@@ -121,6 +121,11 @@ class JobStore:
             self._conn.execute("ALTER TABLE jobs ADD COLUMN error_class TEXT")
         if "retriable" not in existing:
             self._conn.execute("ALTER TABLE jobs ADD COLUMN retriable INTEGER DEFAULT 0")
+        # G2: per-request mode + iteration cap, persisted so resume re-applies them.
+        if "mode" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN mode TEXT")
+        if "max_iterations" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN max_iterations INTEGER")
 
     def insert(
         self,
@@ -129,13 +134,16 @@ class JobStore:
         owner: str,
         message: str,
         idempotency_key: str | None = None,
+        mode: str | None = None,
+        max_iterations: int | None = None,
     ) -> None:
         now = time.time()
         try:
             self._conn.execute(
                 "INSERT INTO jobs (job_id, session_id, owner, status, message, "
-                "idempotency_key, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)",
-                (job_id, session_id, owner, message, idempotency_key, now, now),
+                "idempotency_key, mode, max_iterations, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
+                (job_id, session_id, owner, message, idempotency_key, mode, max_iterations, now, now),
             )
             self._conn.commit()
         except sqlite3.IntegrityError:
@@ -350,8 +358,14 @@ async def run_job(
     store: JobStore,
     message: str,
     timeout: float = 1800,
+    mode: str | None = None,
+    max_iterations: int | None = None,
 ) -> None:
-    """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events."""
+    """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events.
+
+    G2: ``mode``/``max_iterations`` are persisted on the jobs row and re-applied
+    on resume. ``mode`` is validated + yolo-rejected at submit, so it is trusted here.
+    """
 
     record = registry.get(job_id)
     if record is None:
@@ -359,7 +373,7 @@ async def run_job(
 
     try:
         final_content = await asyncio.wait_for(
-            _execute_job(job_id, pool, registry, store, message),
+            _execute_job(job_id, pool, registry, store, message, mode, max_iterations),
             timeout=timeout,
         )
         result_json = json.dumps({"content": final_content}) if final_content else None
@@ -394,6 +408,8 @@ async def _execute_job(
     registry: JobRegistry,
     store: JobStore,
     message: str,
+    mode: str | None = None,
+    max_iterations: int | None = None,
 ) -> str | None:
     """Inner execution: agent setup + run_stream → event buffer.
 
@@ -425,10 +441,16 @@ async def _execute_job(
         prior_handler = agent._core.approval_handler
         had_pipeline = hasattr(agent._core, "_tool_pipeline")
         prior_pipeline = getattr(agent._core, "_tool_pipeline", None)
+        # G2: save mode + iteration cap to restore after the run; the pooled agent
+        # is reused across jobs/sessions. mode persists on the jobs row so a
+        # resumed job re-stamps the same mode.
+        prior_mode = agent._core.mode_manager.current_mode
+        prior_max_iter = agent._core.max_iterations
         try:
             if had_pipeline:
                 del agent._core._tool_pipeline
             from koboi.guardrails.approval import AutonomousApprovalHandler
+            from koboi.modes import AgentMode
 
             agent._core.approval_handler = AutonomousApprovalHandler(
                 trust_db=agent.trust_db,
@@ -439,6 +461,10 @@ async def _execute_job(
                 # denied and file-producing jobs can't run (e.g. job_multi_write_grep).
                 auto_approve_tools={"write_file", "delete_file"},
             )
+            if mode is not None:
+                agent._core.mode_manager.switch_mode(AgentMode(mode))
+            if max_iterations is not None:
+                agent._core.max_iterations = max_iterations
             async for event in agent.run_stream(message):
                 registry.append_event(job_id, event)
                 if isinstance(event, CompleteEvent):
@@ -447,6 +473,8 @@ async def _execute_job(
             agent._core.approval_handler = prior_handler
             if had_pipeline:
                 agent._core._tool_pipeline = prior_pipeline
+            agent._core.mode_manager.switch_mode(prior_mode)
+            agent._core.max_iterations = prior_max_iter
     return final_content
 
 
@@ -478,7 +506,18 @@ async def resume_on_startup(
     count = 0
     for job in store.list_by_status("pending"):
         registry.register(job["job_id"], job["session_id"], job["owner"])
-        task = asyncio.create_task(run_job(job["job_id"], pool, registry, store, job["message"], timeout))
+        task = asyncio.create_task(
+            run_job(
+                job["job_id"],
+                pool,
+                registry,
+                store,
+                job["message"],
+                timeout,
+                job.get("mode"),
+                job.get("max_iterations"),
+            )
+        )
         registry.set_running(job["job_id"], task)
         count += 1
         _logger.info("Requeued job %s on startup", job["job_id"])
