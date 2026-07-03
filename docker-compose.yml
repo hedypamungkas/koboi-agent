@@ -1,6 +1,15 @@
 # docker-compose.yml — production self-host deployment for koboi-agent.
 #
-# Topology: browser → Cloudflare edge → cloudflared tunnel → koboi:8080
+# Topology:
+#   browser → CF edge → cloudflared → koboi:8080
+#   browser → CF edge → cloudflared → langfuse-web:3000  (via koboi-net)
+#   koboi   → langfuse-web:3000  (direct, internal koboi-net — no tunnel hop)
+#
+# Requires the shared 'koboi-net' network (create once):
+#   docker network create koboi-net
+# Then start Langfuse alongside this stack:
+#   docker compose -f docker-compose.langfuse.yml up -d
+#
 # TLS is handled by Cloudflare; no certs needed on the VPS.
 #
 # Usage:
@@ -53,11 +62,11 @@ services:
       - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
       - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      # --- Langfuse (optional) ---
-      # Pass the .env LANGFUSE_* vars straight through (prefix was LF_* which the
+      # --- Langfuse (self-hosted via docker-compose.langfuse.yml) ---
+      # Keys are created in the Langfuse UI after first boot, then set in .env.
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
-      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-http://langfuse:3000}
+      - LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
       # --- Data paths ---
       - KOBOI_DATA_DIR=/data
     healthcheck:
@@ -77,6 +86,13 @@ services:
     depends_on:
       koboi:
         condition: service_healthy
+    networks:
+      - default
+      - koboi-net   # reach langfuse-web:3000 for the second CF Tunnel hostname
+
+networks:
+  koboi-net:
+    external: true   # shared with docker-compose.langfuse.yml
 
 volumes:
   koboi-data:
