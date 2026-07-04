@@ -1,0 +1,21 @@
+# Tier 2 — reference the mounted extension module via tools.custom.
+agent:
+  name: tier2
+  system_prompt: "Tier 2 extensions-dir proof."
+  max_iterations: 3
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: "${OPENAI_API_KEY:}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  custom:
+    - module: my_ext        # resolved via KOBOI_EXTENSIONS_DIR on sys.path
+
+server:
+  auth_required: false
+
+sandbox:
+  backend: passthrough

@@ -9,6 +9,10 @@ Usage:
 
 from __future__ import annotations
 
+# Container customization (Tier 2): make a KOBOI_EXTENSIONS_DIR importable before
+# any custom_modules/tools.custom load. No-op when unset (see koboi/_extensions_path.py).
+from koboi import _extensions_path  # noqa: F401
+
 try:
     from importlib.metadata import version as _get_version
 

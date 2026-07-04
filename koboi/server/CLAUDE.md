@@ -64,6 +64,11 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
   `config.get("jobs", "max_concurrent", default=64)`, `config.get("server", "limits",
   "max_iterations_cap", default=25)`. Pydantic `ServerConfig`/`JobsConfig` are cosmetic
   (validation only); dotted-path reads are the runtime truth.
+- **Container env hooks** (Dockerfile): `KOBOI_CONFIG`/`KOBOI_HOST`/`KOBOI_PORT` drive the
+  `koboi serve` entrypoint; `KOBOI_EXTENSIONS_DIR` is added to `sys.path` at `import koboi`
+  (`koboi/_extensions_path.py`) so mounted custom modules (`tools.custom`/`rag.custom_modules`/
+  `context.custom_modules`) are importable. For full code customization, derive `FROM` the image
+  with a `create_app(extra_tools=…, extra_routes=…)` entrypoint (see `examples/docker/`).
 - **SSE protocol**: `data: {json}\n\n` via `event_to_dict()`; keepalive comment every
   15s (resets Cloudflare's ~100s idle); always ends `data: [DONE]\n\n` (after an
   `ErrorEvent` on failure).

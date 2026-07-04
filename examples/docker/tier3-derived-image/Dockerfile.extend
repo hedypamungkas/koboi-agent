@@ -1,0 +1,14 @@
+# Tier 3 — derive a new image from the koboi base; add a customize-by-code entrypoint.
+# Build (from this directory):
+#   docker build -t koboi-tier3 -f Dockerfile.extend .
+FROM koboi-agent:exp
+
+# Base image runs as non-root `koboi`; switch to root to COPY, then drop back.
+USER root
+COPY my_server.py /app/my_server.py
+COPY agent.yaml /app/agent.yaml
+RUN chown koboi:koboi /app/my_server.py /app/agent.yaml
+USER koboi
+
+# Override the base CMD with the customize-by-code entrypoint.
+CMD ["python", "/app/my_server.py"]

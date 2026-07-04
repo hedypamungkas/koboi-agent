@@ -82,6 +82,16 @@ Two paths, same composition: **`koboi serve <config>`** (built-in) or
 `koboi/server/CLAUDE.md`, and `docs/rest-sse-requirements.md`. Self-host deploy via the
 bundled `Dockerfile` + `docker-compose.yml` (Cloudflare Tunnel).
 
+### Container customization (3 tiers)
+
+The published image (`ghcr.io/hedypamungkas/koboi-agent:<version>`) is a **base layer** — all three customization paths work without rebuilding koboi:
+
+- **Mount a YAML config** — `docker run -e KOBOI_CONFIG=/app/agent.yaml -v agent.yaml:/app/agent.yaml …` (built-in path, zero code).
+- **Mount an extensions dir** — `docker run -e KOBOI_EXTENSIONS_DIR=/app/ext -v ext/:/app/ext …` (custom tools / RAG retrievers via `tools.custom` / `rag.custom_modules`; the dir is auto-added to `sys.path`).
+- **Derive a new image** — `FROM ghcr.io/hedypamungkas/koboi-agent:<version>` for full `create_app(extra_tools=…, extra_routes=…)` composition.
+
+See [`examples/docker/`](examples/docker) for runnable, LLM-free proofs of each tier.
+
 ## Configuration
 
 Agents are configured via YAML. Key sections:
