@@ -58,6 +58,37 @@ def _write_scenario_summary():
         pass
 
 
+def _server_reachable() -> bool:
+    """Quick liveness ping so the suite self-skips when no live server is up."""
+    try:
+        r = httpx.get(f"{BASE_URL}/healthz", timeout=3.0)
+        return r.status_code < 500
+    except Exception:
+        return False
+
+
+_REACHED: bool | None = None
+
+
+@pytest.fixture(autouse=True)
+def _require_live_server():
+    """Skip the whole e2e suite unless a live server is reachable.
+
+    E2E tests hit a live Docker deployment (``KOBOI_HOST`` + ``KOBOI_API_KEY``).
+    They must NOT run in regular CI (no deployment) -- self-skip there, and only
+    run when pointed at a live server (e.g. ``make e2e`` / docker-compose). Without
+    this, CI's ``pytest`` would collect ``tests/e2e/`` and fail with ConnectError.
+    """
+    global _REACHED
+    if _REACHED is None:
+        _REACHED = _server_reachable()
+    if not _REACHED:
+        pytest.skip(
+            f"e2e: live server not reachable at {BASE_URL} (set KOBOI_HOST/KOBOI_API_KEY for a live deployment)",
+            allow_module_level=False,
+        )
+
+
 async def create_session(client: httpx.AsyncClient) -> str:
     """Create a new session and return its id."""
     r = await client.post("/v1/sessions", headers=_headers())

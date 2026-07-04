@@ -13,8 +13,6 @@ passes on empty output.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from koboi.config import Config
@@ -43,16 +41,16 @@ class TestOutputSlotRouting:
         assert in_g, "input guardrails should not be empty"
         assert all(isinstance(g, InputGuardrail) for g in in_g)
 
-    def test_output_guardrail_passes_on_empty_output(self):
+    async def test_output_guardrail_passes_on_empty_output(self):
         # The behaviour that eliminates the clobber on tool-call-only turns.
         grd = OutputGuardrail()
-        result = asyncio.get_event_loop().run_until_complete(grd.check(""))
+        result = await grd.check("")
         assert result.passed
 
-    def test_input_guardrail_blocks_on_empty_input(self):
+    async def test_input_guardrail_blocks_on_empty_input(self):
         # Confirms the asymmetry -- InputGuardrail MUST stay out of the output slot.
         grd = InputGuardrail()
-        result = asyncio.get_event_loop().run_until_complete(grd.check(""))
+        result = await grd.check("")
         assert not result.passed
         assert "empty" in result.reason.lower()
 
