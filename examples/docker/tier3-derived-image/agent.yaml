@@ -1,0 +1,18 @@
+# Tier 3 — config consumed by my_server.py's create_app(). Minimal; no LLM call is
+# made for the proof (we only hit the custom /__tier3__ route).
+agent:
+  name: tier3
+  system_prompt: "Tier 3 derived-image proof."
+  max_iterations: 3
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: "${OPENAI_API_KEY:}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+server:
+  auth_required: false
+
+sandbox:
+  backend: passthrough

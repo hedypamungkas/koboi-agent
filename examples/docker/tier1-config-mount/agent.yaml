@@ -1,0 +1,19 @@
+# Tier 1 — a custom agent YAML mounted into the container (built-in path).
+# Distinct agent.name + docs_enabled so the proof can read it via /openapi.json.
+agent:
+  name: tier1
+  system_prompt: "Tier 1 config-mount proof."
+  max_iterations: 3
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: "${OPENAI_API_KEY:}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+server:
+  auth_required: false
+  docs_enabled: true
+
+sandbox:
+  backend: passthrough
