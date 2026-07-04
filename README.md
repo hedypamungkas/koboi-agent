@@ -6,13 +6,15 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 - **Multi-provider LLM**: OpenAI, Anthropic, Cloudflare Workers AI
 - **YAML-driven config** with `${ENV_VAR}` interpolation
-- **Built-in tools**: calculator, filesystem, shell, web search, memory, git, subagent, task
+- **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task
 - **Hook lifecycle**: 15 event types for logging, guardrails, telemetry
 - **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/semantic/hybrid), augmentation
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing, sequential/parallel execution
 - **Context management**: truncation, smart truncation, key facts, sliding window
+- **Sandboxed execution**: pluggable passthrough/restricted backends (per-session workdir, network/rlimit isolation)
 - **MCP** client (stdio + HTTP) and server support
+- **HTTP/SSE server & jobs**: `koboi serve` — interactive SSE chat (HITL) + autonomous background jobs; API keys, ownership, idempotency, durable resume
 - **Evaluation**: BFCL, GAIA, SWE-bench, RAGAS, DeepEval scorers
 - **Terminal UI** (Textual): chat, command palette, diff view, session management
 
@@ -51,6 +53,35 @@ async def main():
 asyncio.run(main())
 ```
 
+## Serving (HTTP/SSE)
+
+Run koboi as a stateless HTTP service: **interactive SSE chat** (with human-in-the-loop
+approvals) and **autonomous background jobs** (durable resume). Requires the `[api]` extra.
+
+```bash
+pip install -e ".[api]"
+koboi keys create                               # mint an API key (Bearer auth)
+koboi serve configs/server_deploy.yaml --host 0.0.0.0 --port 8080
+```
+
+Then:
+
+```bash
+# interactive SSE chat (stream tokens + HITL approvals)
+curl -N -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"message":"What is 2+2?"}' http://localhost:8080/v1/chat/stream
+
+# autonomous job (202 + poll / SSE replay)
+curl -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"message":"Summarize the Q3 report"}' http://localhost:8080/v1/jobs
+```
+
+Two paths, same composition: **`koboi serve <config>`** (built-in) or
+**`create_app(config, extra_tools=..., extra_hooks=..., approval_handler=...)`**
+(customize by code). See `configs/server_simple.yaml` / `configs/server_deploy.yaml`,
+`koboi/server/CLAUDE.md`, and `docs/rest-sse-requirements.md`. Self-host deploy via the
+bundled `Dockerfile` + `docker-compose.yml` (Cloudflare Tunnel).
+
 ## Configuration
 
 Agents are configured via YAML. Key sections:
@@ -60,7 +91,7 @@ agent:
   name: "my-agent"
   system_prompt: "You are helpful."
   max_iterations: 10
-  mode: "chat"  # chat | plan | act | auto
+  mode: "chat"  # chat | plan | act | auto | yolo
 
 llm:
   provider: "openai"        # openai | anthropic | cloudflare
@@ -80,8 +111,8 @@ context:
 rag:
   enabled: true
   chunker: "paragraph"       # fixed | sentence | paragraph
-  retriever: "keyword"       # keyword | semantic
-  top_k: 3
+  retriever: "keyword"       # keyword | semantic | hybrid
+  top_k: 10
   documents:
     - path: "./data/sample/product_catalog.md"
 
@@ -111,7 +142,7 @@ pytest --cov=koboi            # with coverage
 
 ## Examples
 
-`examples/` contains 28 numbered scripts covering every feature:
+`examples/` contains 32 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` for HTTP serving:
 
 | Range | Features |
 |-------|----------|
@@ -124,6 +155,8 @@ pytest --cov=koboi            # with coverage
 | 18-20 | Harness (telemetry, doom loop, carryover) |
 | 21-24 | Evaluation, production setup, SWE-bench, config-driven orchestration |
 | 25-28 | Subagent delegation, task management, benchmarks, custom RAG |
+| 29-32 | Skills (enhanced), eval-test, tool selection, sandbox + resume |
+| server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 
 Run any example:
 
@@ -149,6 +182,9 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **SkillRegistry** (`skills/`) -- skill discovery
 - **ModeManager** (`modes.py`) -- chat/plan/act/auto modes
 - **TrustDatabase** (`trust.py`) -- graduated permissions
+- **Sandbox** (`sandbox/`) -- passthrough/restricted execution backends (per-session workdir, network/rlimit isolation)
+- **StepJournal** (`journal.py`) -- per-iteration step journal for crash/redeploy resume
+- **Server** (`server/`) -- FastAPI HTTP/SSE serving (interactive chat + autonomous jobs)
 - **Orchestrator** (`orchestration/`) -- multi-agent coordination
 - **SubAgentManager** (`subagent.py`) -- parallel sub-agent delegation
 - **MCP clients** (`mcp/`) -- external tool servers

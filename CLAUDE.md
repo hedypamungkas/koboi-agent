@@ -11,13 +11,18 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 - Coverage:    `pytest --cov=koboi --cov-report=term-missing`
 - Run CLI:     `koboi chat configs/simple_chat.yaml`
 - Run example: `python examples/01_simple_chat.py`
+- Serve HTTP:  `koboi serve configs/server_deploy.yaml`  (needs `[api]` extra: `pip install -e ".[api]"`)
+- API keys:    `koboi keys create`                       (Bearer auth; `koboi keys list|revoke|rotate`)
+- Resume:      `koboi run --resume <session>`            (`koboi sessions <config>` lists persisted sessions)
+- Eval (eve):  `koboi eval-test evals/ --mock --strict`
 
 ## Directory map
 ```
-koboi/              Main package (~150 .py files)
+koboi/              Main package (~185 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
+  cli.py            Console-script entry (`koboi`): chat/run/sessions/eval/eval-test/serve/keys/diagnostics/validate/init-zsh
   loop.py           AgentCore -- async agent loop, hook integration
   loop_pipeline.py  ToolExecutionPipeline -- 8-step tool execution flow
   client.py         RetryClient -- LLM HTTP transport with exponential backoff
@@ -44,14 +49,15 @@ koboi/              Main package (~150 .py files)
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
   harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
   sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry
+  server/           FastAPI HTTP/SSE serving layer: app, jobs, pool, auth, ownership, idempotency, approvals, keys_cli, schema, sse, health, middleware, protocols
   orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator, factory, dynamic agent builder
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
-  tui/              Terminal UI (Textual): app, screens/ (8), widgets/ (13)
-tests/              ~108 test files, asyncio_mode="auto", shared conftest.py with MockClient
-configs/            12 YAML agent configs
-examples/           30 numbered example scripts (01-30) with matching YAMLs
+  tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (13)
+tests/              ~160 test files, asyncio_mode="auto", shared conftest.py with MockClient
+configs/            20 YAML agent configs
+examples/           32 numbered example scripts (01-32) + server_built_in/server_customize, with matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             2 skill definitions: code_review, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
@@ -94,3 +100,10 @@ docs/               Architecture overview, TUI design docs
 - RAG/Context/Guardrail components use registry pattern with `@register_*` decorators
 - Plugin entry points: `koboi.providers`, `koboi.tools`, `koboi.guardrails`, `koboi.scorers`
 - YOLO mode (`/mode yolo`) bypasses rate limiting, approval, and mode blocks -- but PolicyHook's hardcoded safety (sensitive paths, dangerous commands) is always enforced via `pre_ctx.abort` check in pipeline
+- `server:` + `jobs:` + `sandbox:` + `journal:` YAML sections drive `koboi/server/`, `koboi/sandbox/`, `koboi/journal.py`. `koboi serve` needs the `[api]` extra (`fastapi`, `uvicorn`); `koboi keys` mints/rotates Bearer keys (file: `~/.koboi/keys.json`, hashed). Config is read via dotted-path `config.get("server", ...)` (Pydantic `ServerConfig`/`JobsConfig` are cosmetic validation only)
+- AgentCore is NOT concurrent-safe → the server wraps each session in its own `asyncio.Lock` (per-session, not per-core); `pool.session_lock` is the seam to install per-run state under
+- Per-request mode/iteration knobs (G2): `/v1/chat/stream` + `/v1/jobs` bodies accept `mode` + `max_iterations`; validated against `server.allowed_modes` (default = chat/plan/act/auto; **yolo is opt-in**), **jobs always reject yolo**, clamped to `server.limits.max_iterations_cap` (default 25). Stamped per-request under the session lock, restored in `finally`
+- Output guardrail (`loop.py` `_process_output`) honors `GuardrailResult.action`: `block`/`deny`/`abort` raises `AgentGuardrailError` (denies); `warn`/absent prepends a warning. When any output guardrail is configured, `run_stream` **buffers TextDeltas** until the check passes (G8) — otherwise blocked tokens would stream before the guardrail runs
+- Graceful drain (`_shutdown`): cancels in-flight interactive stream tasks, flushes Langfuse **off-loop + concurrently** (`asyncio.to_thread`+`gather`; `agent.close()` does NOT flush), then closes jobs/pool/store, under `wait_for(server.timeouts.drain_seconds)`
+- `Idempotency-Key` header: 409-reject on `/v1/chat/stream` (same owner+session+key within `server.idempotency.chat_ttl_seconds`); dedup on `/v1/jobs` (same key → same job_id, replay-friendly)
+- `AutonomousApprovalHandler` (jobs) is deny-by-default on destructive tools without a Trust-DB rule; autonomous jobs additionally **require `sandbox.backend='restricted'`** (passthrough refused at execution, C3)

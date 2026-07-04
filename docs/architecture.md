@@ -280,7 +280,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (14)
+### Config sections (18)
 
 | Section | Controls |
 |---------|----------|
@@ -297,9 +297,37 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `mcp` | MCP server connections |
 | `memory` | Backend (sqlite/in_memory), db_path |
 | `orchestration` | Router type, agents, execution mode |
+| `sandbox` | Backend (passthrough/restricted), workdir strategy, network, rlimits |
+| `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume |
+| `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
+| `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup |
 | `keybindings` | TUI key overrides |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
+
+---
+
+## Serving Layer (HTTP/SSE)
+
+`koboi/server/` exposes the agent over HTTP/SSE via a FastAPI app (`create_app()` /
+`koboi serve`). Two execution modes share one `AgentPool` (per-session `KoboiAgent` +
+per-session `asyncio.Lock` — AgentCore is not concurrent-safe — + per-session sandbox
+workdir):
+
+- **Interactive** (`POST /v1/chat/stream`) — SSE stream of `run_stream()` events with
+  human-in-the-loop approvals (`POST /v1/sessions/{id}/approve`). Per-request `mode` +
+  `max_iterations` knobs (G2), `Idempotency-Key` dedup.
+- **Autonomous jobs** (`POST /v1/jobs`) — background runs with no HITL, deny-by-default
+  `AutonomousApprovalHandler`, restricted sandbox mandatory, durable `resume_on_startup`.
+
+Cross-cutting: API-key (Bearer) auth + per-session ownership, `/healthz` + `/readyz`,
+request-id middleware, graceful drain (cancel in-flight streams + off-loop Langfuse
+flush), and M5 `Protocol` seams (`SessionStore`/`LockProvider`/`EventBuffer`) for a
+future Redis/SaaS state swap.
+
+Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
+(`fastapi`, `uvicorn`). See `koboi/server/CLAUDE.md` for routes/conventions/gotchas and
+`docs/rest-sse-requirements.md` for the design spec.
 
 ---
 
@@ -765,5 +793,6 @@ LLMError
 | Run examples | `examples/README.md` |
 | See config examples | `configs/CLAUDE.md` |
 | Work on the TUI | `koboi/tui/CLAUDE.md` |
+| Serve over HTTP/SSE | `koboi/server/CLAUDE.md` |
 | Extend the eval framework | `koboi/eval/CLAUDE.md` |
 | Write tests | `tests/conftest.py` and `.claude/rules/tests.md` |
