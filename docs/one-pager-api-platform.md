@@ -1,5 +1,14 @@
 # Koboi Agent Platform -- One-Pager Requirements
 
+> **⚠️ SUPERSEDED — kept for historical context only.**
+> This describes an early **NATS + multi-container** design that was **not built**.
+> The shipped serving layer is a **single-process FastAPI app** in
+> [`koboi/server/`](../koboi/server/): interactive SSE chat (HITL) + autonomous
+> background jobs, with API-key (Bearer) auth, per-session ownership, idempotency,
+> and durable resume-on-startup — no NATS, no worker manager.
+> For the authoritative spec see [`rest-sse-requirements.md`](rest-sse-requirements.md);
+> for routes / auth / config see [`koboi/server/CLAUDE.md`](../koboi/server/CLAUDE.md).
+
 ## Vision
 
 Self-hosted AI agent platform yang expose API untuk client, mendukung single/multi-agent

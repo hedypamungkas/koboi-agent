@@ -95,14 +95,14 @@ class TestTUIApprovalHandler:
         app = MagicMock()
         trail = MagicMock()
         handler = TUIApprovalHandler(app, audit_trail=trail)
-        handler._audit("tool", "{}", RiskLevel.SAFE, True, "test")
+        handler._audit("tool", "{}", RiskLevel.SAFE, True, "test", source="TUI approval")
         trail.record.assert_called_once()
 
     def test_audit_no_trail(self):
         app = MagicMock()
         handler = TUIApprovalHandler(app)
         # Should not raise
-        handler._audit("tool", "{}", RiskLevel.SAFE, True, "test")
+        handler._audit("tool", "{}", RiskLevel.SAFE, True, "test", source="TUI approval")
 
     @pytest.mark.asyncio
     async def test_should_approve_with_trust_auto_approve(self):

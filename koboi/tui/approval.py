@@ -8,14 +8,13 @@ PermissionDialog modal overlay.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import TYPE_CHECKING
 
 from textual.app import App
 from textual.message import Message
 
 from koboi.guardrails.approval import ApprovalHandler
-from koboi.types import RiskLevel, AuditEntry
+from koboi.types import RiskLevel
 
 if TYPE_CHECKING:
     from koboi.guardrails.audit import AuditTrail
@@ -81,7 +80,7 @@ class TUIApprovalHandler(ApprovalHandler):
         if self._trust_db:
             trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level)
             if trust_decision.auto_approve:
-                self._audit(tool_name, arguments, risk_level, True, trust_decision.reason)
+                self._audit(tool_name, arguments, risk_level, True, trust_decision.reason, source="TUI approval")
                 return True
 
         # 2. Create a future for the agent worker to await
@@ -122,6 +121,7 @@ class TUIApprovalHandler(ApprovalHandler):
             risk_level,
             response.approved,
             "always_allow" if response.always_allow else "one_shot",
+            source="TUI approval",
         )
 
         return response.approved
@@ -135,24 +135,3 @@ class TUIApprovalHandler(ApprovalHandler):
         """Cancel any pending approval (e.g., on session end)."""
         if self._pending_future and not self._pending_future.done():
             self._pending_future.cancel()
-
-    def _audit(
-        self,
-        tool_name: str,
-        arguments: str,
-        risk_level: RiskLevel,
-        approved: bool,
-        details: str,
-    ) -> None:
-        if self.audit_trail:
-            self.audit_trail.record(
-                AuditEntry(
-                    timestamp=time.time(),
-                    event_type="tool_approved" if approved else "tool_denied",
-                    tool_name=tool_name,
-                    arguments=arguments[:500],
-                    result="approved" if approved else "denied",
-                    risk_level=risk_level.value,
-                    details=f"TUI approval: {details}",
-                )
-            )

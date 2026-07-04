@@ -51,6 +51,15 @@ class StreamableHTTPMCPClient(BaseMCPClient):
 
     def connect(self) -> dict:
         """Create HTTP client, send initialize handshake, return server info."""
+        # M4: SSRF defense -- reject private/internal/loopback MCP URLs before any
+        # egress. Reuses the web tool's checker (single source of PRIVATE_NETWORKS);
+        # lazy import keeps the module cheap and avoids a facade/tools cycle.
+        from koboi.tools.builtin.web import _check_url_ssrf
+
+        try:
+            _check_url_ssrf(self._url)
+        except (ValueError, OSError) as e:
+            raise MCPError(code=-1, message=f"SSRF-blocked MCP URL: {e}") from e
         self._client = httpx.Client(timeout=self._timeout)
         try:
             result = self._do_initialize_handshake(self._url)

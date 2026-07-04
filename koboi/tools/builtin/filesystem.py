@@ -23,14 +23,30 @@ _MAX_READ_SIZE = 50000
 _read_paths: set[str] = set()
 
 
-def reset_read_before_write() -> None:
-    """Clear the read-before-write tracker (hook: SESSION_START / real compaction)."""
+def reset_read_before_write(tool_state=None) -> None:
+    """Clear the read-before-write tracker (hook: SESSION_START / real compaction).
+
+    If ``tool_state`` is given, clear only that per-session set; otherwise clear
+    the module global (direct/test callers + the legacy reset hook).
+    """
+    if tool_state is not None:
+        tool_state.read_paths.clear()
     _read_paths.clear()
 
 
 def get_read_paths() -> set[str]:
     """Return a copy of the paths recorded by read_file (test/debug visibility)."""
     return set(_read_paths)
+
+
+def _read_paths_for(_deps: dict | None) -> set[str]:
+    """M6: the per-session read-path set when wired, else the module global.
+
+    Direct callers (e.g. unit tests) pass no _deps and keep using the legacy
+    module-global set; per-session agents get an isolated ToolState.
+    """
+    ts = (_deps or {}).get("tool_state")
+    return ts.read_paths if ts is not None else _read_paths
 
 
 def _validate_path(path: str, sandbox=None) -> str:
@@ -112,7 +128,10 @@ def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = 
     max_read_size = cfg.get("max_read_size", _MAX_READ_SIZE)
     try:
         path = _validate_path(path, sandbox=(_deps or {}).get("sandbox"))
-        _read_paths.add(path)
+        _read_paths.add(path)  # legacy global (back-compat / test visibility)
+        ts = (_deps or {}).get("tool_state")  # M6: per-session tracking
+        if ts is not None:
+            ts.read_paths.add(path)
         with open(path) as f:
             content = f.read(max_read_size)
         if len(content) == max_read_size:
@@ -151,8 +170,12 @@ def write_file(path: str, content: str, _deps: dict | None = None) -> str:
     try:
         path = _validate_path(path, sandbox=(_deps or {}).get("sandbox"))
         note = ""
-        if path not in _read_paths:
+        if path not in _read_paths_for(_deps):  # M6: per-session when wired
             note = f"\nNote: writing to '{path}' without having read it first -- verify the path is correct."
+        # M11: accepted residual risk -- validate_path resolves at validation time
+        # and open() happens later (a TOCTOU via symlink swap). Low-risk in this
+        # single-process agent (no concurrent attacker within the workdir). A future
+        # hardening pass can switch the leaf to os.open(path, O_WRONLY|O_NOFOLLOW).
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
@@ -184,7 +207,7 @@ def delete_file(path: str, _deps: dict | None = None) -> str:
     try:
         path = _validate_path(path, sandbox=(_deps or {}).get("sandbox"))
         note = ""
-        if path not in _read_paths:
+        if path not in _read_paths_for(_deps):  # M6: per-session when wired
             note = f"\nNote: deleting '{path}' without having read it first -- verify the path is correct."
         os.remove(path)
         return f"Successfully deleted '{path}'{note}"

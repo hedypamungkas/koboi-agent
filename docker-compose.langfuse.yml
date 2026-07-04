@@ -1,0 +1,70 @@
+# docker-compose.langfuse.yml — self-hosted Langfuse v2 (observability/tracing).
+#
+# Run alongside the main koboi stack on the shared 'koboi-net' network so
+# koboi can reach Langfuse via http://langfuse-web:3000 (no tunnel hop).
+# The Langfuse UI is exposed publicly via the same CF Tunnel — add a second
+# public hostname in CF Zero Trust → Tunnels → Configure:
+#
+#   langfuse.<your-domain>  →  http://langfuse-web:3000
+#
+# Protect it with CF Access (Zero Trust → Access → Applications → Self-hosted)
+# so only your email can reach the UI.
+#
+# Usage:
+#   1. Fill LANGFUSE_* vars in .env (see section below)
+#   2. docker network create koboi-net          # once, shared with koboi stack
+#   3. docker compose -f docker-compose.langfuse.yml up -d
+#   4. Open https://langfuse.<your-domain> and create your org + project
+#   5. Copy the project's public/secret keys into .env → restart koboi stack
+
+services:
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: langfuse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:?set LANGFUSE_DB_PASSWORD in .env}
+    volumes:
+      - langfuse-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  langfuse-web:
+    image: langfuse/langfuse:2
+    container_name: langfuse-web
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:?LANGFUSE_NEXTAUTH_URL required in .env}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?LANGFUSE_NEXTAUTH_SECRET required in .env}
+      SALT: ${LANGFUSE_SALT:?LANGFUSE_SALT required in .env}
+      HOSTNAME: "0.0.0.0"    # bind on all interfaces (fixes healthcheck + koboi-net access)
+      LANGFUSE_TELEMETRY_ENABLED: "false"
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - default
+      - koboi-net   # reachable by koboi + cloudflared on the shared network
+
+networks:
+  koboi-net:
+    external: true   # created once: docker network create koboi-net
+
+volumes:
+  langfuse-db:
+    driver: local

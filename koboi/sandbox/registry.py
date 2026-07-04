@@ -42,24 +42,27 @@ def register_sandbox(name: str, description: str = ""):
 def build_sandbox(sandbox_conf: dict | None, *, logger: AgentLogger | None = None) -> BaseSandbox:
     """Build a sandbox backend from the ``sandbox:`` config dict.
 
-    Defaults to ``passthrough`` when the section is absent or the backend is
-    unknown -- a misconfigured sandbox must never brick the agent, so this never
-    raises on bad config; it logs a warning and falls back instead.
+    Defaults to ``passthrough`` when the section is absent, empty, or explicitly
+    ``backend: passthrough`` (the safe local-dev default). A *typo'd* backend
+    name is a genuine misconfiguration and **fails closed** (``ValueError``):
+    a security control must never silently downgrade to no isolation. (C3 fix;
+    previously this logged a warning and fell back to passthrough.)
     """
     conf = dict(sandbox_conf or {})
     backend = conf.pop("backend", "passthrough")
 
     entry = sandbox_registry.get(backend)
     if entry is None:
-        _logger.warning(
-            "Unknown sandbox backend '%s', falling back to 'passthrough'. Available: %s",
-            backend,
-            sandbox_registry.list_available(),
-        )
+        if backend not in (None, "", "passthrough"):
+            # Genuine typo/misconfig → fail closed rather than silently run uncontained.
+            raise ValueError(
+                f"Unknown sandbox backend {backend!r}; available: {sandbox_registry.list_available()}. "
+                "Use 'passthrough' (local dev only) or 'restricted' (serving/jobs)."
+            )
         entry = sandbox_registry.get("passthrough")
-        if entry is None:
-            raise RuntimeError("No sandbox backends registered")
         conf = {}  # passthrough takes no kwargs; drop unknown keys
+    if entry is None:  # passthrough itself not registered (shouldn't happen post-import)
+        raise RuntimeError("No sandbox backends registered")
 
     kwargs = _resolve_kwargs(entry, conf)
     return entry.cls(**kwargs)

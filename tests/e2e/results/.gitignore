@@ -1,0 +1,4 @@
+# Per-run E2E output (per-scenario JSON + summary). Keep the directory, ignore contents.
+*
+!.gitignore
+!.gitkeep

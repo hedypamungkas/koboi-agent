@@ -106,3 +106,62 @@ class TestTrustDatabase:
         assert TrustDatabase._risk_leq("safe", "destructive") is True
         assert TrustDatabase._risk_leq("moderate", "safe") is False
         assert TrustDatabase._risk_leq("destructive", "destructive") is True
+
+    def test_default_ttl_applied(self, trust_db):
+        # H5: recording without an explicit ttl gets the default (no permanent rules).
+        from koboi.trust import DEFAULT_TRUST_TTL_SECONDS
+
+        trust_db.record_decision("tool.*", RiskLevel.SAFE, "allow", always=True)
+        rows = list(trust_db._conn.execute("SELECT expires_at, created_at FROM trust_rules"))
+        assert rows and rows[0][0] is not None
+        assert abs((rows[0][0] - rows[0][1]) - DEFAULT_TRUST_TTL_SECONDS) < 5
+
+    def test_args_scoped_allow_does_not_match_other_args(self, trust_db):
+        # H5: an arg-scoped allow rule matches only its exact arguments.
+        trust_db.record_decision(
+            "write_file", RiskLevel.DESTRUCTIVE, "allow", always=True, arguments='{"path":"/tmp/x"}'
+        )
+        assert (
+            trust_db.should_auto_approve("write_file", RiskLevel.DESTRUCTIVE, '{"path":"/tmp/x"}').auto_approve is True
+        )
+        assert (
+            trust_db.should_auto_approve("write_file", RiskLevel.DESTRUCTIVE, '{"path":"/etc/passwd"}').auto_approve
+            is False
+        )
+
+    def test_args_wildcard_backcompat(self, trust_db):
+        # H5: a rule recorded without args (NULL args_hash) matches any arguments.
+        trust_db.record_decision("write_file", RiskLevel.DESTRUCTIVE, "allow", always=True)
+        assert (
+            trust_db.should_auto_approve("write_file", RiskLevel.DESTRUCTIVE, '{"path":"/etc/passwd"}').auto_approve
+            is True
+        )
+
+    def test_args_hash_exact_match(self, trust_db):
+        trust_db.record_decision("t", RiskLevel.SAFE, "allow", always=True, arguments="abc")
+        assert trust_db.should_auto_approve("t", RiskLevel.SAFE, "abc").auto_approve is True
+
+
+class TestTrustStoreProtocol:
+    """TrustStore Protocol (M0) -- structural surface the pipeline consumes."""
+
+    def test_trust_database_satisfies_protocol(self, trust_db):
+        # TrustDatabase exposes the two methods TrustStore declares.
+        assert callable(getattr(trust_db, "should_auto_approve", None))
+        assert callable(getattr(trust_db, "record_decision", None))
+
+    def test_fake_store_is_usable(self):
+        # A duck-typed store (no SQLite) satisfies TrustStore structurally;
+        # this is the seam a future multi-tenant/Redis store will plug into.
+        from koboi.trust import TrustDecision
+        from koboi.types import RiskLevel
+
+        class _FakeStore:
+            def should_auto_approve(self, tool_name, risk_level):
+                return TrustDecision(auto_approve=False)
+
+            def record_decision(self, tool_name, risk_level, decision, always=False, ttl_seconds=None):
+                pass
+
+        fake = _FakeStore()
+        assert fake.should_auto_approve("x", RiskLevel.SAFE).auto_approve is False

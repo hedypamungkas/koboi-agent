@@ -193,13 +193,20 @@ def _preprocess_shell_commands(body: str) -> str:
     """Replace `` !`command` `` blocks with their stdout output.
 
     Commands are executed with a 10-second timeout. On failure, the block
-    is replaced with ``[command failed: <cmd>]``.
+    is replaced with ``[command failed: <cmd>]``. Deny-listed commands
+    (COMMAND_DENY_PATTERNS / SENSITIVE_PATHS, reused from the shell tool) are
+    refused and replaced with a placeholder -- H3 supply-chain hardening so a
+    malicious SKILL.md can't ``curl|bash`` as the agent process.
     """
     import subprocess
     from koboi.harness.env import build_safe_env
+    from koboi.tools.builtin.shell import _check_command_blocked
 
     def _run(match: re.Match) -> str:
         cmd = match.group(1).strip()
+        blocked = _check_command_blocked(cmd)
+        if blocked:
+            return f"[command blocked: {cmd}]"
         try:
             result = subprocess.run(
                 cmd,
@@ -348,13 +355,18 @@ class SkillRegistry:
     def list_skills(self) -> list[SkillDefinition]:
         return list(self._skills.values())
 
-    def activate(self, name: str) -> str | None:
-        """Activate a skill by name. Loads body if not yet loaded."""
+    def activate(self, name: str, run_shell: bool = True) -> str | None:
+        """Activate a skill by name. Loads body if not yet loaded.
+
+        ``run_shell``: when False, `` !`command` `` blocks are left as-is (not
+        executed) -- used for model-activated skills (H3) so an untrusted
+        SKILL.md can't run shell on activation. User-invoked skills keep True.
+        """
         skill = self._skills.get(name)
         if not skill:
             return None
         if skill.body is None:
-            activate_skill(skill)
+            activate_skill(skill, run_shell=run_shell)
         self._activated.add(name)
         if self.logger:
             self.logger.log(f"Skill activated: {name} ({len(skill.body or '')} chars)")

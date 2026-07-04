@@ -67,9 +67,11 @@ class TestSandboxRegistry:
         sb = build_sandbox({"backend": "passthrough"})
         assert isinstance(sb, PassthroughBackend)
 
-    def test_build_sandbox_unknown_backend_falls_back(self):
-        sb = build_sandbox({"backend": "does-not-exist"})
-        assert isinstance(sb, PassthroughBackend)
+    def test_build_sandbox_unknown_backend_raises(self):
+        # C3: a typo'd backend name fails closed (ValueError) instead of silently
+        # downgrading to passthrough (no isolation).
+        with pytest.raises(ValueError, match="Unknown sandbox backend"):
+            build_sandbox({"backend": "does-not-exist"})
 
     def test_build_sandbox_restricted_with_kwargs(self):
         sb = build_sandbox({"backend": "restricted", "workdir": "/tmp", "rlimits": {"cpu": 5}})

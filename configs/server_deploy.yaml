@@ -1,0 +1,66 @@
+# Production server config — tuned for self-host deployment.
+#
+# This config is used by the Docker image (Dockerfile CMD). Override any
+# field via volume mount (docker-compose mounts ./configs:/app/configs:ro).
+
+agent:
+  name: koboi-server
+  system_prompt: "You are a helpful koboi assistant deployed as a service."
+  max_iterations: 12
+  mode: act
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+  timeout: 120
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db        # Docker volume mount
+
+sandbox:
+  backend: restricted                   # Production: isolate subprocess/fs
+  workdir: /data/workspace              # Docker volume mount
+  workdir_strategy: per_session         # Each session gets its own subdir
+  network: deny                         # No outbound network from tools
+  timeout: 30
+  max_output: 20000
+
+journal:
+  enabled: true
+  record_tool_calls: true
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  api_keys_file: /data/keys.json       # Generated via `koboi keys create`
+  auth_required: true
+  timeouts:
+    request_seconds: 300
+    approval_seconds: 120
+    drain_seconds: 60
+  limits:
+    max_iterations_cap: 25
+  # CORS: required when a browser frontend calls this server from a different origin.
+  # Lock allow_origins to your CF Pages domain in production.
+  cors:
+    allow_origins: ["*"]
+    # allow_credentials: false   # keep false — auth uses Bearer header, not cookies
+
+jobs:
+  enabled: true
+  max_concurrent: 32
+  queue_depth: 16
+  default_dedicated_session: true
+  resume_on_startup: true
+  timeout_seconds: 1800
+  ttl_seconds: 86400
+
+tracing:
+  provider: ${LANGFUSE_PROVIDER:}
+  public_key: ${LANGFUSE_PUBLIC_KEY:}
+  secret_key: ${LANGFUSE_SECRET_KEY:}
+  base_url: ${LANGFUSE_BASE_URL:http://localhost:3000}

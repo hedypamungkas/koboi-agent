@@ -30,6 +30,10 @@ from koboi.tools.registry import truncate_text
 
 _logger = logging.getLogger(__name__)
 
+# M10: warn once per process that the restricted sandbox's network denial is a
+# soft boundary (see module docstring) -- real isolation needs the Docker backend.
+_network_soft_boundary_warned = False
+
 # Network-capable binaries denied at the command-token layer (soft boundary).
 # True network isolation requires a container (P0c); this list blocks the
 # obvious egress tools so a model can't trivially phone home.
@@ -125,6 +129,15 @@ class RestrictedProcessBackend(BaseSandbox):
     ):
         self._workdir = os.path.realpath(workdir)
         self._network = network
+        # M10: one-time warning that restricted network denial is advisory-only.
+        global _network_soft_boundary_warned
+        if network == "deny" and not _network_soft_boundary_warned:
+            _network_soft_boundary_warned = True
+            _logger.warning(
+                "sandbox.backend='restricted' network=deny is a SOFT boundary -- it "
+                "blocks obvious egress tools but not interpreters (e.g. python3 -c "
+                "'import urllib'). Use the Docker backend (P0c) for true network isolation."
+            )
         self._network_binaries = set(network_binaries) if network_binaries else set(DEFAULT_NETWORK_BINARIES)
         self._safe_path = list(safe_path) if safe_path else list(DEFAULT_SAFE_PATH_DIRS)
         self._env_passthrough = env_passthrough
@@ -159,6 +172,13 @@ class RestrictedProcessBackend(BaseSandbox):
         return self._run_subprocess(command, resolved_cwd, run_env, effective_timeout, shell)
 
     def validate_path(self, path: str) -> str:
+        # Anchor RELATIVE paths to the workdir before resolving. A tool passing
+        # "hello.txt" means "inside my workdir" — but os.path.realpath() alone
+        # resolves it against the server process's cwd (typically /app), which
+        # is always outside the workdir, so every relative write_file/read_file
+        # was wrongly rejected with "no access".
+        if not os.path.isabs(path):
+            path = os.path.join(self._workdir, path)
         resolved = os.path.realpath(path)
         if resolved == self._workdir or resolved.startswith(self._workdir + os.sep):
             return resolved

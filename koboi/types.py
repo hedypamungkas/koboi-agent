@@ -49,6 +49,10 @@ class ToolResult:
 class TokenUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: Reasoning/thinking tokens (reasoning models: deepseek-v4-flash, mimo-v2.5,
+    #: etc.). Reported under ``completion_tokens_details.reasoning_tokens`` by
+    #: OpenAI-compatible gateways. Separate from completion_tokens (the answer).
+    reasoning_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -60,6 +64,9 @@ class AgentResponse:
     content: str | None
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: TokenUsage | None = None
+    #: Model + provider base URL that produced this response (for telemetry/E2E).
+    model: str | None = None
+    base_url: str | None = None
 
     @property
     def is_complete(self) -> bool:

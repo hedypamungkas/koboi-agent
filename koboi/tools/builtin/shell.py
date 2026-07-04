@@ -87,7 +87,11 @@ def _check_command_blocked(command: str) -> str | None:
     name="run_shell",
     group="system",
     description="Run shell command and return output",
-    risk_level=RiskLevel.MODERATE,
+    # DESTRUCTIVE: shell can read/write the host fs and reach the network, so it
+    # must require approval in every mode -- including autonomous jobs, where the
+    # AutonomousApprovalHandler auto-approves everything below DESTRUCTIVE.
+    # (Matches .claude/rules/builtin-tools.md; was previously MODERATE -- a C2 fix.)
+    risk_level=RiskLevel.DESTRUCTIVE,
     deps=["sandbox"],
     parameters={
         "type": "object",

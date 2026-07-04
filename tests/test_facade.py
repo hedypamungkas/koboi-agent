@@ -252,3 +252,49 @@ tools:
         assert agent.core.memory is not None
         assert agent.core.tools is not None
         assert agent.core.hooks is not None
+
+
+class TestBuildEmbeddingClient:
+    """Dedicated embedding provider, decoupled from the chat provider."""
+
+    def test_no_section_returns_none(self):
+        from koboi.facade import _build_embedding_client
+
+        config = Config.from_dict({}, validate=False)
+        assert _build_embedding_client(config, None) is None
+
+    def test_section_without_credentials_returns_none(self):
+        from koboi.facade import _build_embedding_client
+
+        # An empty/placeholder embedding section (e.g. EMBEDDING_API_KEY unset ->
+        # api_key "") must NOT build a client; caller falls back to the chat client.
+        config = Config.from_dict({"embedding": {"base_url": "https://x/v1"}}, validate=False)
+        assert _build_embedding_client(config, None) is None
+
+    def test_section_builds_client_with_embedding_params(self, monkeypatch):
+        from koboi.facade import _build_embedding_client
+
+        config = Config.from_dict(
+            {
+                "embedding": {
+                    "provider": "openai",
+                    "base_url": "https://emb.example/v1",
+                    "api_key": "sk-emb",
+                    "model": "text-embedding-3-small",
+                }
+            },
+            validate=False,
+        )
+        captured: dict = {}
+
+        def fake_create(**kwargs):
+            captured.update(kwargs)
+            return "EMBEDDING_CLIENT"
+
+        monkeypatch.setattr("koboi.llm.factory.create_client", fake_create)
+        result = _build_embedding_client(config, None)
+        assert result == "EMBEDDING_CLIENT"
+        assert captured["base_url"] == "https://emb.example/v1"
+        assert captured["api_key"] == "sk-emb"
+        assert captured["embedding_model"] == "text-embedding-3-small"
+        assert captured["provider"] == "openai"

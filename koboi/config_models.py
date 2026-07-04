@@ -61,6 +61,21 @@ class LLMConfig(BaseModel):
         return v
 
 
+class EmbeddingConfig(BaseModel):
+    """Optional dedicated embedding provider, decoupled from the chat ``llm``.
+
+    When ``api_key`` is set, semantic retrieval routes here instead of the chat
+    client -- useful when the chat provider has no ``/embeddings`` endpoint. If
+    unset, the chat client is used (and semantic falls back to keyword)."""
+
+    model_config = {"extra": "ignore"}
+
+    provider: str = "openai"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = "text-embedding-3-small"
+
+
 class ToolsConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -246,6 +261,7 @@ class SandboxConfig(BaseModel):
 
     backend: str = "passthrough"
     workdir: str = "."
+    workdir_strategy: str = "shared"  # "shared" (legacy global) | "per_session" (M1 serving)
     network: str = "deny"
     network_binaries: list[str] = Field(default_factory=list)
     safe_path: list[str] = Field(default_factory=list)
@@ -269,6 +285,55 @@ class JournalConfig(BaseModel):
     record_tool_calls: bool = True
 
 
+class ServerConfig(BaseModel):
+    """Top-level ``server:`` section -- REST/SSE serving (M0 skeleton; M1+ wiring).
+
+    M0 ships the schema only; no runtime code reads it yet. Nested groups
+    (``pool``/``timeouts``/``limits``/``cors``/``idempotency``) are dicts now and
+    are promoted to typed sub-models as each is consumed in M1+.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = Field(default=8000, ge=1, le=65535)
+    api_keys_file: str | None = None
+    api_keys: list[str] = Field(default_factory=list)
+    auth_required: bool = True
+    docs_enabled: bool = False  # H7: serve /docs,/redoc,/openapi.json only when true
+    cors: dict = Field(default_factory=dict)
+    pool: dict = Field(default_factory=dict)
+    timeouts: dict = Field(default_factory=dict)
+    limits: dict = Field(default_factory=dict)
+    idempotency: dict = Field(default_factory=dict)
+    workdir_ttl_seconds: float = Field(default=86400.0, gt=0)
+    # G2: operator policy boundary for per-request mode. Unset → the safe default
+    # {chat, plan, act, auto}; yolo requires explicit opt-in. limits.max_iterations_cap
+    # (default 25) clamps the per-request max_iterations knob.
+    allowed_modes: list[str] = Field(default_factory=list)
+
+
+class JobsConfig(BaseModel):
+    """Top-level ``jobs:`` section -- background/autonomous job runner (M0 skeleton; M4 wiring).
+
+    Drives long-running agent runs outside the request lifecycle with
+    resume-on-startup durability. M0 ships the schema only.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    max_concurrent: int = Field(default=64, ge=1)
+    per_tenant_max: int = Field(default=5, ge=1)
+    queue_depth: int = Field(default=32, ge=1)
+    default_dedicated_session: bool = True
+    event_buffer: dict = Field(default_factory=dict)
+    resume_on_startup: bool = True
+    timeout_seconds: float = Field(default=1800.0, gt=0)
+    ttl_seconds: float = Field(default=86400.0, gt=0)
+
+
 class KoboiConfig(BaseModel):
     """Top-level config schema for koboi-agent."""
 
@@ -276,6 +341,7 @@ class KoboiConfig(BaseModel):
 
     agent: AgentConfig = Field(default_factory=AgentConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    embedding: EmbeddingConfig | None = None
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
     rag: RagConfig = Field(default_factory=RagConfig)
@@ -289,6 +355,8 @@ class KoboiConfig(BaseModel):
     orchestration: OrchestrationConfig = Field(default_factory=OrchestrationConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     journal: JournalConfig = Field(default_factory=JournalConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    jobs: JobsConfig = Field(default_factory=JobsConfig)
 
     @model_validator(mode="before")
     @classmethod

@@ -211,3 +211,49 @@ class TestPrompts:
         assert "hr" in KNOWN_DOMAINS
         assert "sales" in KNOWN_DOMAINS
         assert "finance" in KNOWN_DOMAINS
+
+
+class TestBuildRagEmbeddingClient:
+    """build_rag_from_config routes to a dedicated embedding client when the
+    ``embedding:`` section has an api_key, else uses the chat client."""
+
+    def test_no_embedding_config_uses_chat_client(self, monkeypatch):
+        captured: dict = {}
+
+        def fake_build_rag(rag_dict, *, client=None, logger=None):
+            captured["client"] = client
+            return "AUG"
+
+        monkeypatch.setattr("koboi.rag.registry.build_rag", fake_build_rag)
+
+        chat_client = MagicMock(name="chat_client")
+        AgentFactory.build_rag_from_config(
+            {"enabled": True, "augmentation": "in_memory"}, None, None, client=chat_client
+        )
+        assert captured["client"] is chat_client
+
+    def test_embedding_config_with_api_key_uses_dedicated_client(self, monkeypatch):
+        captured: dict = {}
+
+        def fake_build_rag(rag_dict, *, client=None, logger=None):
+            captured["client"] = client
+            return "AUG"
+
+        monkeypatch.setattr("koboi.rag.registry.build_rag", fake_build_rag)
+
+        chat_client = MagicMock(name="chat_client")
+        AgentFactory.build_rag_from_config(
+            {"enabled": True, "augmentation": "in_memory"},
+            None,
+            None,
+            client=chat_client,
+            embedding_config={
+                "api_key": "sk-emb",
+                "base_url": "https://emb.example/v1",
+                "model": "text-embedding-3-small",
+            },
+        )
+        # A dedicated embedding client is built (real adapter; no network at
+        # construction) and used INSTEAD of the chat client.
+        assert captured["client"] is not chat_client
+        assert captured["client"] is not None

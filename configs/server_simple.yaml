@@ -1,0 +1,14 @@
+agent:
+  name: server-agent
+  system_prompt: "You are a helpful koboi assistant."
+  max_iterations: 8
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY:}
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+sandbox:
+  backend: passthrough
+  workdir: ./workspace

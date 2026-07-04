@@ -239,6 +239,16 @@ class TestSafeTargetValidation:
         assert "Error" in result
         assert "disallowed" in result.lower() or "invalid" in result.lower()
 
+    def test_git_diff_rejects_leading_dash(self):
+        """H4: a target starting with '-' is rejected (option-injection guard).
+
+        The ``=`` form is also blocked by SAFE_TARGET_RE, but the leading-dash
+        guard is defense-in-depth against any future git option that writes files.
+        """
+        result = git_diff(repo_path=".", target="--output=/etc/cron.d/x")
+        assert "Error" in result
+        assert "cannot start with '-'" in result
+
 
 class TestToolConfig:
     def test_tool_config_passed_to_run_git(self, temp_git_repo):

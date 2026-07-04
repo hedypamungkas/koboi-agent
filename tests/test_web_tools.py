@@ -211,3 +211,65 @@ class TestWebFetchSSRFProtection:
             result = await web_fetch("http://ipv6-loopback/test")
         assert "Error" in result
         assert "internal IP" in result
+
+    async def test_blocks_zero_network(self):
+        # H2: 0.0.0.0/8 ("this host"/unset) was missing from the allow-list.
+        with _mock_dns("0.0.0.5"):
+            result = await web_fetch("http://zero.example/x")
+        assert "internal IP" in result
+
+    async def test_blocks_cgnat_100_64(self):
+        # H2: 100.64.0.0/10 (CGNAT) was missing from the allow-list.
+        with _mock_dns("100.64.0.1"):
+            result = await web_fetch("http://cgnat.example/x")
+        assert "internal IP" in result
+
+    async def test_blocks_ipv4_mapped_ipv6_loopback(self):
+        # H2: ::ffff:0:0/96 (IPv4-mapped IPv6) was missing from the allow-list.
+        results = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::ffff:127.0.0.1", 0, 0, 0))]
+        with patch("koboi.tools.builtin.web.socket.getaddrinfo", return_value=results):
+            result = await web_fetch("http://mapped-v6.example/x")
+        assert "internal IP" in result
+
+    async def test_blocks_redirect_to_metadata(self):
+        # H2: a public URL that 302-redirects to the metadata IP is blocked --
+        # _check_url_ssrf is re-run on the redirect target (hop 1).
+        redirect = httpx.Response(
+            302,
+            headers={"location": "http://169.254.169.254/latest/meta-data/"},
+            request=httpx.Request("GET", "http://attacker.example/redir"),
+        )
+
+        async def fake_get(_self, _url, **_kw):
+            return redirect
+
+        with (
+            patch("koboi.tools.builtin.web._check_url_ssrf", side_effect=[None, ValueError("internal IP")]),
+            patch("httpx.AsyncClient.get", new=fake_get),
+        ):
+            result = await web_fetch("http://attacker.example/redir")
+        assert "internal IP" in result
+
+    async def test_follows_safe_redirect(self):
+        # H2: a public -> public redirect is still followed and the body returned.
+        redirect = httpx.Response(
+            302,
+            headers={"location": "http://safe-target.example/ok"},
+            request=httpx.Request("GET", "http://safe.example/r"),
+        )
+        ok = httpx.Response(
+            200, content=b"final content", request=httpx.Request("GET", "http://safe-target.example/ok")
+        )
+        state = {"n": 0}
+
+        async def fake_get(_self, _url, **_kw):
+            r = redirect if state["n"] == 0 else ok
+            state["n"] += 1
+            return r
+
+        with (
+            patch("koboi.tools.builtin.web._check_url_ssrf", return_value=None),
+            patch("httpx.AsyncClient.get", new=fake_get),
+        ):
+            result = await web_fetch("http://safe.example/r")
+        assert "final content" in result

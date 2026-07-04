@@ -12,14 +12,17 @@ builtin.py            LoggingHook (all events), AuditHook (tool events)
 mode_hook.py          Mode-aware tool filtering and system prompt injection
 guardrail_hook.py     Input/output guardrail integration
 context_hook.py       Context window management trigger
+read_before_write_reset_hook.py  P3b tool-state preservation (read-before-write reset on compaction)
 rag_hook.py           RAG augmentation trigger
 skill_hook.py         Skill injection into system prompt
+skill_persistence_hook.py  Re-injects activated skills after POST_COMPACT (priority 45)
 policy_hook.py        Policy engine enforcement
 telemetry_hook.py     Telemetry collection
 langfuse_hook.py      Langfuse tracing integration
 carryover_hook.py     Cross-session state carryover
 doom_loop_hook.py     Repeated-action detection and abort
 task_hook.py          Task management lifecycle
+task_persistence_hook.py   Persists task state across compaction
 subagent_hook.py      Sub-agent lifecycle tracking
 notification_hook.py  Notification dispatch
 rich_subagent_hook.py Rich TUI sub-agent display
@@ -50,5 +53,5 @@ PRE_ROUTING, POST_ROUTING, AGENT_DISPATCHED, AGENT_COMPLETED
 - 0-19: Infrastructure (LoggingHook = 0)
 - 20-39: Security (PolicyHook = 25)
 - 40-59: Business logic (default = 50)
-- 60-79: Post-processing (AuditHook = 80)
-- 80-100: Cleanup
+- 60-79: Post-processing
+- 80-100: Cleanup (AuditHook = 80)

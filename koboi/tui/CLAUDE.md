@@ -6,6 +6,8 @@ Textual-based terminal UI for interactive agent chat. Entry point: `app.py:main`
 ## Key files
 ```
 app.py              CLI entry point (click + Textual setup), main() function
+commands.py          Slash-command registry (/help, /reset, /mode, /skills, etc.)
+approval.py          CLI approval handler bridge (guardrails.approval=cli)
 textual_app.py      Textual App subclass, screen management
 bridge.py           Async bridge between Textual event loop and AgentCore
 loop.py             TUI-specific agent loop wrapper
@@ -25,6 +27,7 @@ session_manager.py    Multi-session management
 subagent_monitor.py   Sub-agent activity display
 transcript_viewer.py  Full transcript view
 welcome_screen.py     First-run welcome
+yolo_confirm.py       YOLO-mode confirmation dialog (/mode yolo)
 ```
 
 ## Widgets (`widgets/`)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable
@@ -518,6 +519,17 @@ def _build_context(config: Config, logger: AgentLogger, client: RetryClient | No
     return build_context(strategy, logger=logger, client=client, **kwargs)
 
 
+def _build_embedding_client(config: Config, logger: AgentLogger):
+    """Build a dedicated embedding client from an optional ``embedding:`` config
+    section (decoupled from chat). Delegates to the shared
+    ``koboi.llm.factory.build_embedding_client``; returns ``None`` when no usable
+    section is configured so callers fall back to the chat client.
+    """
+    from koboi.llm.factory import build_embedding_client
+
+    return build_embedding_client(config.get("embedding"), logger)
+
+
 def _build_rag(config: Config, client: RetryClient, logger: AgentLogger):
     if not config.rag_enabled:
         return None
@@ -533,14 +545,22 @@ def _build_rag(config: Config, client: RetryClient, logger: AgentLogger):
     if "augmentation" not in rag_dict:
         rag_dict["augmentation"] = "on_the_fly"
 
-    return build_rag(rag_dict, client=client, logger=logger)
+    # Use a dedicated embedding provider when configured (decoupled from chat);
+    # else fall back to the chat client. Only the SemanticRetriever consumes it.
+    rag_client = _build_embedding_client(config, logger) or client
+    return build_rag(rag_dict, client=rag_client, logger=logger)
 
 
-def _normalize_guardrail_config(conf: dict | list | None) -> list[dict]:
+def _normalize_guardrail_config(conf: dict | list | None, default_name: str = "injection_detector") -> list[dict]:
     """Normalize guardrail config to list-of-dicts format.
 
     Supports legacy single-dict format (auto-wrapped) and new list format.
-    Empty/None returns empty list.
+    Empty/None returns empty list. ``default_name`` selects the fallback
+    guardrail for a bare config block (no ``name`` key) -- the *input* slot
+    defaults to ``injection_detector``, but the *output* slot must default to
+    ``content_filter`` so e.g. ``{detect_sensitive: true}`` builds an
+    ``OutputGuardrail`` (which tolerates empty output) rather than an
+    ``InputGuardrail`` whose "Input is empty" check clobbers tool-call turns.
     """
     if not conf:
         return []
@@ -549,7 +569,7 @@ def _normalize_guardrail_config(conf: dict | list | None) -> list[dict]:
         if "name" in conf:
             return [conf]
         # Legacy: config block like {max_length: 100} -> wrap with default name
-        return [{"name": "injection_detector", **conf}]
+        return [{"name": default_name, **conf}]
     if isinstance(conf, list):
         return [c for c in conf if isinstance(c, dict) and c.get("name")]
     return []
@@ -572,9 +592,11 @@ def _build_guardrails(config: Config, logger: AgentLogger | None = None):
         # Legacy: bare dict without "name" key -> default injection_detector
         input_grds = GuardrailRegistry.from_config([{"name": "injection_detector", **input_conf}])
 
-    # Output guardrails
+    # Output guardrails -- a bare block (no "name") defaults to content_filter,
+    # NOT injection_detector, so output is checked by OutputGuardrail (which
+    # passes on empty output) rather than InputGuardrail (which blocks it).
     output_conf = config.get("guardrails", "output", default={})
-    output_configs = _normalize_guardrail_config(output_conf)
+    output_configs = _normalize_guardrail_config(output_conf, default_name="content_filter")
     if output_configs:
         output_grds = GuardrailRegistry.from_config(output_configs)
     elif output_conf:
@@ -608,7 +630,7 @@ def _build_guardrails(config: Config, logger: AgentLogger | None = None):
     return input_grds, output_grds, rate_limiter, audit_trail
 
 
-def _build_approval(config: Config):
+def _build_approval(config: Config, trust_db=None):
     handler_conf = config.get("guardrails", "approval", default={})
     handler_type = handler_conf.get("handler", "auto")
     if handler_type == "cli":
@@ -619,6 +641,20 @@ def _build_approval(config: Config):
         from koboi.guardrails.approval import CallbackApprovalHandler
 
         return CallbackApprovalHandler(handler_conf.get("callback", lambda *a: True))
+    elif handler_type == "async_callback":
+        # REST/SSE-friendly non-blocking handler. ``callback``/``audit_trail`` are
+        # caller-injected (non-serializable) -- the M2 server bootstrap populates
+        # them programmatically; absent a callback we return None (no handler).
+        from koboi.guardrails.approval import AsyncCallbackApprovalHandler
+
+        callback = handler_conf.get("callback")
+        if callback is None:
+            return None
+        timeout = handler_conf.get("timeout", 120)
+        audit_trail = handler_conf.get("audit_trail")
+        return AsyncCallbackApprovalHandler(
+            callback=callback, trust_db=trust_db, audit_trail=audit_trail, timeout=timeout
+        )
     return None
 
 
@@ -794,6 +830,11 @@ class AgentAssembler:
         self.sandbox = _build_sandbox(self.config, self.logger)
         if self.tools is not None:
             self.tools.set_dep("sandbox", self.sandbox)
+            # M6: per-session tool state (read-before-write tracking) so concurrent
+            # agents don't share the module-global _read_paths.
+            from koboi.tools.state import ToolState
+
+            self.tools.set_dep("tool_state", ToolState())
         return self.sandbox
 
     def build_mcp(self) -> list:
@@ -815,7 +856,7 @@ class AgentAssembler:
         return self.input_guardrails, self.output_guardrails, self.rate_limiter, self.audit_trail
 
     def build_approval(self) -> object:
-        self.approval_handler = _build_approval(self.config)
+        self.approval_handler = _build_approval(self.config, trust_db=self.trust_db)
         return self.approval_handler
 
     def build_policy(self) -> object:
@@ -858,11 +899,11 @@ class AgentAssembler:
         self.build_context()
         self.build_rag()
         self.build_guardrails()
+        self.build_trust_db()
         self.build_approval()
         self.build_policy()
         self.build_skills()
         self.build_mode_manager()
-        self.build_trust_db()
         self.build_hooks()
 
         _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
@@ -911,6 +952,7 @@ class AgentAssembler:
             hook_chain=self.hook_chain,
             mode_manager=self.mode_manager,
             journal=self.journal,
+            trust_db=self.trust_db,
         )
 
         return KoboiAgent(
@@ -935,7 +977,7 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
     for server_conf in servers:
         transport = server_conf.get("transport", "stdio")
         try:
-            mcp_client = _create_mcp_client(server_conf, transport, logger)
+            mcp_client = _create_mcp_client(server_conf, transport, logger, config)
             mcp_client.connect()
             group = server_conf.get("group")
             register_mcp_tools(mcp_client, tools, group=group)
@@ -952,7 +994,11 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
     return clients
 
 
-def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger):
+# M4: allowed MCP stdio runners (basename match). Extend via mcp.allowlist_commands.
+_MCP_DEFAULT_RUNNERS = frozenset({"npx", "uvx", "python", "python3", "node", "uv", "deno", "bun"})
+
+
+def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger, config: Config | None = None):
     """Factory: create the right MCPClient subclass based on transport config."""
     if transport == "streamable-http":
         from koboi.mcp.http_client import StreamableHTTPMCPClient
@@ -974,6 +1020,15 @@ def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger):
         args = server_conf.get("args", [])
         if not command:
             raise ValueError("stdio transport requires 'command'")
+        # M4: stdio command allow-list (basename match) -- blocks arbitrary-binary
+        # execution from a malicious/misconfigured YAML. Extend via mcp.allowlist_commands.
+        runner = os.path.basename(command)
+        extra = set(config.get("mcp", "allowlist_commands", default=[])) if config is not None else set()
+        if runner not in (_MCP_DEFAULT_RUNNERS | extra):
+            raise ValueError(
+                f"MCP stdio command {runner!r} not in allow-list. Permit it via "
+                f"mcp.allowlist_commands. Default runners: {sorted(_MCP_DEFAULT_RUNNERS)}"
+            )
         timeout = server_conf.get("timeout", 15.0)
         return MCPClient(server_command=[command] + args, logger=logger, connect_timeout=timeout)
 
@@ -1089,11 +1144,11 @@ def _build_orchestration(config: Config, verbose: bool = False):
     assembler.build_logger()
     assembler.build_client()
     assembler.build_guardrails()
+    assembler.build_trust_db()
     assembler.build_approval()
     assembler.build_policy()
     assembler.build_skills()
     assembler.build_mode_manager()
-    assembler.build_trust_db()
     assembler.build_hooks()
     assembler.build_sandbox()
 
@@ -1108,6 +1163,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         parent_rag_config=parent_rag,
         hook_chain=assembler.hook_chain,
         sandbox=assembler.sandbox,
+        embedding_config=config.get("embedding"),
     )
 
     orch_conf = config.orchestration

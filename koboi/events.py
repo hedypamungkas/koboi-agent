@@ -41,11 +41,27 @@ class CompleteEvent:
     elapsed_seconds: float = 0.0
     iterations_used: int = 0
     tools_used: list[str] = field(default_factory=list)
+    trace_id: str = ""
 
 
 @dataclass
 class ErrorEvent:
     error: Exception
+    code: str = "internal_error"
+    retriable: bool = False
+
+
+@dataclass
+class PendingApprovalEvent:
+    """Emitted when a tool call is awaiting human approval (HITL)."""
+
+    approval_id: str
+    tool_name: str
+    arguments: str
+    risk_level: str
+    tool_call_id: str = ""
+    reason: str = ""
+    timeout_seconds: float = 120.0
 
 
 @dataclass
@@ -101,6 +117,7 @@ StreamEvent = Union[
     IterationEvent,
     CompleteEvent,
     ErrorEvent,
+    PendingApprovalEvent,
     RoutingDecisionEvent,
     AgentDispatchEvent,
     AgentResultEvent,
@@ -115,6 +132,7 @@ _EVENT_TYPE_MAP: dict[type, str] = {
     IterationEvent: "iteration",
     CompleteEvent: "complete",
     ErrorEvent: "error",
+    PendingApprovalEvent: "pending_approval",
     RoutingDecisionEvent: "routing_decision",
     AgentDispatchEvent: "agent_dispatch",
     AgentResultEvent: "agent_result",
@@ -135,12 +153,19 @@ def event_to_dict(event: StreamEvent) -> dict:
 
     # Special cases with non-serializable fields
     if isinstance(event, CompleteEvent):
+        resp = event.response
         usage = None
-        if event.response and event.response.usage:
+        if resp and resp.usage:
+            u = resp.usage
             usage = {
-                "prompt_tokens": event.response.usage.prompt_tokens,
-                "completion_tokens": event.response.usage.completion_tokens,
-                "total_tokens": event.response.usage.total_tokens,
+                "prompt_tokens": u.prompt_tokens,
+                "completion_tokens": u.completion_tokens,
+                "reasoning_tokens": getattr(u, "reasoning_tokens", 0),
+                "total_tokens": u.total_tokens,
+                # E2E/telemetry-friendly aliases (the names consumers ask for):
+                "token_input": u.prompt_tokens,
+                "token_output": u.completion_tokens,
+                "token_reasoning": getattr(u, "reasoning_tokens", 0),
             }
         return {
             "type": event_type,
@@ -149,9 +174,17 @@ def event_to_dict(event: StreamEvent) -> dict:
             "iterations_used": event.iterations_used,
             "tools_used": event.tools_used,
             "token_usage": usage,
+            "model_name": (resp.model if resp and resp.model else None),
+            "url_provider": (resp.base_url if resp and resp.base_url else None),
+            "trace_id": event.trace_id or None,
         }
     if isinstance(event, ErrorEvent):
-        return {"type": event_type, "error": str(event.error)}
+        return {
+            "type": event_type,
+            "error": str(event.error),
+            "code": event.code,
+            "retriable": event.retriable,
+        }
 
     # Generic: asdict handles all remaining dataclass fields
     d = asdict(event)

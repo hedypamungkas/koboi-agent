@@ -9,6 +9,7 @@ from koboi.events import (
     IterationEvent,
     CompleteEvent,
     ErrorEvent,
+    PendingApprovalEvent,
     RoutingDecisionEvent,
     AgentDispatchEvent,
     AgentResultEvent,
@@ -119,3 +120,33 @@ class TestEventToDict:
     def test_unknown_event(self):
         d = event_to_dict("not an event")
         assert d["type"] == "unknown"
+
+    def test_pending_approval(self):
+        event = PendingApprovalEvent(
+            approval_id="ap_123",
+            tool_name="run_shell",
+            tool_call_id="call_1",
+            arguments='{"cmd": "ls"}',
+            risk_level="destructive",
+            reason="risk-based",
+            timeout_seconds=120,
+        )
+        d = event_to_dict(event)
+        assert d["type"] == "pending_approval"
+        assert d["approval_id"] == "ap_123"
+        assert d["tool_name"] == "run_shell"
+        assert d["tool_call_id"] == "call_1"
+        assert d["risk_level"] == "destructive"
+        assert d["timeout_seconds"] == 120
+
+    def test_pending_approval_defaults(self):
+        event = PendingApprovalEvent(
+            approval_id="ap_1",
+            tool_name="t",
+            tool_call_id="c",
+            arguments="{}",
+            risk_level="moderate",
+        )
+        d = event_to_dict(event)
+        assert d["reason"] == ""
+        assert d["timeout_seconds"] == 120.0

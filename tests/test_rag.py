@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+import pytest
+
 from koboi.rag.types import Chunk, Document, RetrievalResult
+
+
+@pytest.fixture(autouse=True)
+def _isolate_embedding_cache():
+    """Reset the process-wide shared embedding index around each test."""
+    from koboi.rag.retriever import clear_embedding_cache
+
+    clear_embedding_cache()
+    yield
+    clear_embedding_cache()
 
 
 class TestChunkTypes:
@@ -51,6 +63,39 @@ class TestChunkers:
         chunker = ParagraphChunker(max_chunk_size=500)
         chunks = chunker.chunk(doc)
         assert len(chunks) == 3
+
+
+class TestKeywordRetrieverSynonyms:
+    async def test_synonym_bridge_closes_vocabulary_gap(self):
+        """Query-side synonyms let a term absent from the docs (``dog``) still
+        retrieve a chunk phrased with a synonym (``pet``). Regression for the
+        hotel-pet e2e scenario, which had zero keyword overlap (score 0.0)."""
+        from koboi.rag.chunker import ParagraphChunker
+        from koboi.rag.retriever import KeywordRetriever
+
+        doc = Document(
+            id="hotel",
+            title="hotel",
+            content="### Pet Policy\nSmall pets welcome. Pet fee: $25 per night.",
+        )
+        chunks = ParagraphChunker().chunk(doc)
+
+        plain = KeywordRetriever(chunks)
+        assert await plain.retrieve("Can I bring a 10kg dog?", top_k=3) == []
+
+        bridged = KeywordRetriever(chunks, synonyms={"dog": ["pet"]})
+        hits = await bridged.retrieve("Can I bring a 10kg dog?", top_k=3)
+        assert hits and "Pet Policy" in hits[0].chunk.content
+
+    async def test_no_synonyms_is_noop(self):
+        from koboi.rag.chunker import ParagraphChunker
+        from koboi.rag.retriever import KeywordRetriever
+
+        doc = Document(id="d1", title="t", content="The pet fee is $25.")
+        chunks = ParagraphChunker().chunk(doc)
+        retriever = KeywordRetriever(chunks)  # no synonyms arg
+        hits = await retriever.retrieve("pet fee", top_k=3)
+        assert hits and "$25" in hits[0].chunk.content
 
 
 class TestRetrievers:
@@ -288,3 +333,121 @@ class TestRetrieverIntegration:
             assert hasattr(result, "score")
             assert hasattr(result, "retrieval_method")
             assert result.retrieval_method == "keyword"
+
+
+class TestEmbeddingCache:
+    """The process-level shared embedding index (_EMBEDDING_CACHE)."""
+
+    async def test_second_instance_reuses_index_zero_chunk_embeds(self):
+        """A second retriever over the same corpus must not re-embed chunks."""
+        from koboi.rag.retriever import SemanticRetriever
+        from unittest.mock import AsyncMock
+
+        chunks = [
+            Chunk(id="c1", doc_id="d1", content="alpha beta"),
+            Chunk(id="c2", doc_id="d1", content="gamma delta"),
+        ]
+        client1 = AsyncMock()
+        client1.get_embeddings = AsyncMock(return_value=[0.1, 0.2])
+        r1 = SemanticRetriever(chunks=chunks, client=client1)
+        await r1.retrieve("alpha", top_k=2)
+        # 2 chunk embeds (index build) + 1 query embed.
+        assert client1.get_embeddings.call_count == 3
+
+        # Fresh retriever, SAME chunks -> served from cache. Only the query embeds.
+        client2 = AsyncMock()
+        client2.get_embeddings = AsyncMock(return_value=[0.9, 0.9])
+        r2 = SemanticRetriever(chunks=chunks, client=client2)
+        await r2.retrieve("alpha", top_k=2)
+        assert client2.get_embeddings.call_count == 1, "chunks must be served from cache"
+
+    async def test_different_corpus_embeds_again(self):
+        """A different corpus (different signature) must embed afresh."""
+        from koboi.rag.retriever import SemanticRetriever
+        from unittest.mock import AsyncMock
+
+        chunks_a = [Chunk(id="a1", doc_id="d", content="one two")]
+        c1 = AsyncMock()
+        c1.get_embeddings = AsyncMock(return_value=[0.1, 0.2])
+        await SemanticRetriever(chunks=chunks_a, client=c1).retrieve("one", top_k=1)
+
+        chunks_b = [Chunk(id="b1", doc_id="d", content="three four")]  # different content
+        c2 = AsyncMock()
+        c2.get_embeddings = AsyncMock(return_value=[0.3, 0.4])
+        await SemanticRetriever(chunks=chunks_b, client=c2).retrieve("three", top_k=1)
+        # 1 chunk embed (new corpus) + 1 query embed.
+        assert c2.get_embeddings.call_count == 2
+
+    async def test_unavailable_endpoint_not_cached_as_success(self):
+        """A failed build (None embeddings) must not poison the cache for later."""
+        from koboi.rag.retriever import SemanticRetriever
+        from unittest.mock import AsyncMock
+
+        chunks = [Chunk(id="c1", doc_id="d1", content="Python programming")]
+
+        down = AsyncMock()
+        down.get_embeddings = AsyncMock(return_value=None)
+        r1 = SemanticRetriever(chunks=chunks, client=down)
+        await r1.retrieve("Python", top_k=1)
+        assert r1._embedding_available is False
+
+        up = AsyncMock()
+        up.get_embeddings = AsyncMock(return_value=[0.5, 0.5, 0.5])
+        r2 = SemanticRetriever(chunks=chunks, client=up)
+        await r2.retrieve("Python", top_k=1)
+        assert r2._embedding_available is True, "recovered endpoint must rebuild, not reuse a cached failure"
+
+
+class TestHybridRetrieverSynonyms:
+    async def test_synonyms_propagate_to_keyword_leg(self):
+        """HybridRetriever must pass `synonyms` to its keyword leg so vocabulary
+        gaps close even when embeddings are unavailable (semantic falls back to
+        keyword). Regression for the e2e hotel-pet failure on a no-embedding
+        provider, where the synonym bridge was silently dropped under hybrid."""
+        from koboi.rag.chunker import ParagraphChunker
+        from koboi.rag.retriever import HybridRetriever
+
+        doc = Document(
+            id="hotel",
+            title="hotel",
+            content="### Pet Policy\nSmall pets welcome. Pet fee: $25 per night.",
+        )
+        chunks = ParagraphChunker().chunk(doc)
+        # client=None -> semantic leg falls back to keyword; only the keyword
+        # leg carries the synonym bridge here.
+        retriever = HybridRetriever(chunks, client=None, synonyms={"dog": ["pet"]})
+        hits = await retriever.retrieve("Can I bring a 10kg dog?", top_k=3)
+        assert hits and "Pet Policy" in hits[0].chunk.content
+
+    async def test_without_synonyms_dog_misses(self):
+        from koboi.rag.chunker import ParagraphChunker
+        from koboi.rag.retriever import HybridRetriever
+
+        doc = Document(
+            id="hotel", title="hotel",
+            content="### Pet Policy\nSmall pets welcome. Pet fee: $25 per night.",
+        )
+        chunks = ParagraphChunker().chunk(doc)
+        retriever = HybridRetriever(chunks, client=None)  # no synonyms
+        hits = await retriever.retrieve("Can I bring a 10kg dog?", top_k=3)
+        assert not hits or all("Pet Policy" not in h.chunk.content for h in hits)
+
+
+class TestSemanticRetrieverFallbackSynonyms:
+    async def test_fallback_leg_carries_synonyms(self):
+        """When embeddings are unavailable (client=None), SemanticRetriever falls
+        back to keyword -- that fallback must carry the synonym bridge, so hybrid
+        degrades cleanly instead of RRF-demoting synonym-only matches."""
+        from koboi.rag.chunker import ParagraphChunker
+        from koboi.rag.retriever import SemanticRetriever
+
+        doc = Document(
+            id="hotel",
+            title="hotel",
+            content="### Pet Policy\nSmall pets welcome. Pet fee: $25 per night.",
+        )
+        chunks = ParagraphChunker().chunk(doc)
+        retriever = SemanticRetriever(chunks, client=None, synonyms={"dog": ["pet"]})
+        assert retriever._embedding_available is False  # no client -> fallback armed
+        hits = await retriever.retrieve("Can I bring a 10kg dog?", top_k=3)
+        assert hits and "Pet Policy" in hits[0].chunk.content

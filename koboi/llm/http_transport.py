@@ -44,6 +44,11 @@ class HttpTransport:
         self._max_retries = max_retries
         self._client = httpx.AsyncClient(timeout=timeout)
 
+    @property
+    def base_url(self) -> str:
+        """Provider base URL (for telemetry / result attribution)."""
+        return self._base_url
+
     async def post(self, path: str, body: dict) -> dict:
         url = f"{self._base_url}{path}"
         headers = self._auth.apply({**self._default_headers})

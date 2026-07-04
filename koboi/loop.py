@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from koboi.skills.registry import SkillRegistry
     from koboi.modes import ModeManager
     from koboi.journal import StepJournal
+    from koboi.trust import TrustStore
 
 _log = _logging.getLogger("koboi.loop")
 
@@ -91,6 +92,7 @@ class AgentCore:
         hook_chain: HookChain | None = None,
         mode_manager: ModeManager | None = None,
         journal: StepJournal | None = None,
+        trust_db: TrustStore | None = None,
         # Backward-compatible singular kwargs
         input_guardrail: BaseGuardrail | None = None,
         output_guardrail: BaseGuardrail | None = None,
@@ -118,6 +120,7 @@ class AgentCore:
         self.hooks = hook_chain or HookChain()
         self.mode_manager = mode_manager
         self.journal = journal
+        self.trust_db = trust_db
         # P2-A: turn counter. On a fresh agent this is 0; on resume it inherits
         # the journal's highest recorded turn so numbering stays continuous.
         self._turn_index: int = journal.turn_index if journal else 0
@@ -233,6 +236,7 @@ class AgentCore:
                 verbose=self.verbose,
                 audit_fn=self._audit,
                 mode_manager=self.mode_manager,
+                trust_db=self.trust_db,
             )
         return self._tool_pipeline
 
@@ -250,11 +254,22 @@ class AgentCore:
             raise AgentAbortedError(ctx.inject_message or "Input rejected by hook")
 
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
-        """Run output guardrails, emit POST_OUTPUT, save to memory."""
+        """Run output guardrails, emit POST_OUTPUT, save to memory.
+
+        ``block``/``deny``/``abort`` raises (denies the output); any other action
+        (incl. ``warn`` and non-string/absent) prepends a warning and continues.
+        The detailed reason is logged server-side only; the raised message carries
+        just the guardrail name so a leaky ``reason`` can't re-leak via the error
+        frame / durable job error.
+        """
         for grd in self.output_guardrails:
             out_result = await grd.check(output)
             self._audit("output_check", details=f"guardrail={type(grd).__name__} passed={out_result.passed}")
             if not out_result.passed:
+                action = out_result.action if isinstance(out_result.action, str) else ""
+                if action.lower() in {"block", "deny", "abort"}:
+                    self._log(f"Output blocked by {type(grd).__name__}: {out_result.reason}")
+                    raise AgentGuardrailError(f"output blocked by {type(grd).__name__}", direction="output")
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
 
@@ -270,7 +285,9 @@ class AgentCore:
         skill_name, remaining = activation
         self.memory.add_assistant_message(content)
         if not self.skills.is_activated(skill_name):
-            body = self.skills.activate(skill_name)
+            # H3: model-activated skills never execute `!`cmd`` blocks (supply-chain
+            # RCE guard); only explicit user invocation (/skill) may run them.
+            body = self.skills.activate(skill_name, run_shell=False)
             if body:
                 skill = self.skills.get(skill_name)
                 self.memory.add_context_message(
@@ -304,6 +321,7 @@ class AgentCore:
             total_usage = TokenUsage()
         total_usage.prompt_tokens += response.usage.prompt_tokens
         total_usage.completion_tokens += response.usage.completion_tokens
+        total_usage.reasoning_tokens += getattr(response.usage, "reasoning_tokens", 0)
         return total_usage
 
     async def _prepare_run(self, user_message: str | list) -> tuple[str | list, list[dict] | None, float]:
@@ -379,16 +397,30 @@ class AgentCore:
         }
 
     async def _repair_interrupted_turn(self) -> None:
-        """Re-execute tool calls from the trailing assistant message whose
+        """Re-execute tool calls from the last assistant message whose
         results never landed in memory (the crash window before a tool result
         was persisted). Idempotency caveat: non-idempotent tools may re-run;
         DESTRUCTIVE tools will re-prompt for approval on the way through the
         pipeline, which is the safe default.
+
+        16.7 fix: scan backwards for the last assistant message with
+        tool_calls — not just ``msgs[-1]`` — so partial turns (some tools
+        executed, some not) are correctly repaired.
         """
         msgs = self.memory.get_messages()
-        if not msgs or msgs[-1].get("role") != "assistant" or "tool_calls" not in msgs[-1]:
+        if not msgs:
             return
-        requested = msgs[-1].get("tool_calls") or []
+        # Find the last assistant message that has tool_calls (scan backwards
+        # so partial turns — where tool results follow the assistant message —
+        # are also repaired).
+        last_assistant = None
+        for m in reversed(msgs):
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                last_assistant = m
+                break
+        if last_assistant is None:
+            return
+        requested = last_assistant.get("tool_calls") or []
         answered = {m.get("tool_call_id") for m in msgs if m.get("role") == "tool"}
         missing = [tc for tc in requested if tc.get("id") not in answered]
         if not missing:
@@ -490,6 +522,12 @@ class AgentCore:
             return
 
         _stream_tools_used: list[str] = []
+        # G8b: when output guardrails are configured, buffer TextDeltas and flush
+        # them only after _process_output passes -- otherwise the tokens stream
+        # (interactive SSE) / are appended (job replay buffer) BEFORE the guardrail
+        # runs on the complete response, so a blocked output leaks. With no output
+        # guardrail, stream live (current behavior; no latency cost).
+        should_buffer = bool(self.output_guardrails)
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
@@ -499,10 +537,14 @@ class AgentCore:
 
             await self._emit(HookEvent.PRE_LLM_CALL, iteration=i, messages=messages)
 
+            delta_buffer: list[TextDeltaEvent] = []
             final_response = None
             async for event in self.client.complete_stream(messages=messages, tools=tool_defs):
                 if isinstance(event, TextDeltaEvent):
-                    yield event
+                    if should_buffer:
+                        delta_buffer.append(event)
+                    else:
+                        yield event
                 elif isinstance(event, ToolCallEvent):
                     yield event
                 elif isinstance(event, CompleteEvent):
@@ -516,29 +558,46 @@ class AgentCore:
                     self.context_manager.last_actual_tokens = final_response.usage.prompt_tokens
 
             if final_response is None:
+                for d in delta_buffer:
+                    yield d
                 yield ErrorEvent(error=AgentMaxIterationsError(i + 1))
                 return
 
             if final_response.content and self.skills and self._activate_skill(final_response.content):
+                for d in delta_buffer:
+                    yield d
                 self._journal_step(i, status="skill", response=final_response)
                 continue
 
             if final_response.is_complete:
+                # May raise AgentGuardrailError (block) -- the buffer is then
+                # discarded, so the blocked tokens never reach the stream.
                 output = await self._process_output(final_response.content or "", final_response, i)
+                for d in delta_buffer:
+                    yield d
                 self._journal_step(i, status="complete", response=final_response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 seen: set[str] = set()
                 unique_tools = [t for t in _stream_tools_used if t not in seen and not seen.add(t)]  # type: ignore[func-returns-value]
+                # M5: enrich CompleteEvent with Langfuse trace_id if available.
+                trace_id = ""
+                if self.hooks:
+                    lf_hook = self.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+                    if lf_hook:
+                        trace_id = getattr(lf_hook, "_trace_id", "") or ""
                 yield CompleteEvent(
                     response=final_response,
                     content=output,
                     elapsed_seconds=_time.monotonic() - _start,
                     iterations_used=i + 1,
                     tools_used=unique_tools,
+                    trace_id=trace_id,
                 )
                 return
 
             if final_response.tool_calls:
+                for d in delta_buffer:
+                    yield d
                 self._store_tool_response_in_memory(final_response)
                 for tc in final_response.tool_calls:
                     _stream_tools_used.append(tc.name)

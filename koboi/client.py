@@ -7,7 +7,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from koboi.llm.base import LLMClient, LLMError, LLMServerError, LLMRateLimitError
+from koboi.llm.base import LLMClient, LLMConnectionError, LLMError, LLMRateLimitError, LLMServerError
 from koboi.llm.factory import create_client
 from koboi.types import AgentResponse
 
@@ -27,6 +27,13 @@ ClientError = RetryClientError
 
 
 _RETRYABLE_ERRORS = (LLMServerError, LLMRateLimitError)
+
+# Streaming adds ``LLMConnectionError`` (raised by ``HttpTransport`` on
+# httpx timeouts/connect failures) to the retryable set. A stalled upstream
+# (no bytes streamed yet) is a transient failure we can safely retry; once a
+# single event has been yielded we can no longer retry (can't resume a partial
+# stream), so the ``yielded`` guard in ``complete_stream`` still raises then.
+_STREAM_RETRYABLE_ERRORS = _RETRYABLE_ERRORS + (LLMConnectionError,)
 _MAX_CLIENT_RETRIES = 3
 
 
@@ -148,7 +155,7 @@ class RetryClient(LLMClient):
                     yielded = True
                     yield event
                 return  # stream completed successfully
-            except _RETRYABLE_ERRORS as e:
+            except _STREAM_RETRYABLE_ERRORS as e:
                 last_error = e
                 if yielded:
                     raise  # can't retry mid-stream

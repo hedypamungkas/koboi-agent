@@ -29,6 +29,7 @@ gaia_scorer.py        GAIA exact-match
 swe_bench_scorer.py   SWE-bench patch-apply
 ragas_scorer.py       RAGAS faithfulness/relevancy
 deepeval_scorer.py    DeepEval integration
+skill_scorer.py       Skill scorers: trigger_accuracy, routing_accuracy, token_overhead
 ```
 
 ## How to run evals
