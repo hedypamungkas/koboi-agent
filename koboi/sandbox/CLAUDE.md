@@ -28,11 +28,19 @@ __init__.py    Re-exports register_sandbox, build_sandbox, BaseSandbox; calls re
 - **Path containment**: `validate_path(path)` anchors relative paths to the workdir and
   rejects anything resolving outside it (`PermissionError`). Defense-in-depth:
   `session_id` is validated at the server route boundary AND in `workdir_for()`.
-- **Network**: soft-deny of obvious egress binaries (`curl`/`wget`/etc. via
-  `network_binaries`); NOTE this is a SOFT boundary -- it does NOT block interpreters
-  (`python3 -c 'import urllib'`). Use a true network-isolated runtime (e.g. Docker) for
-  hard egress control.
-- **rlimits**: optional cpu/as_mb/fsize_mb/nofile caps.
+- **Network** (two layers):
+  - *Soft* (default): token-scan deny of obvious egress binaries (`curl`/`wget`/etc. via
+    `network_binaries`). SOFT -- does NOT block interpreters (`python3 -c 'import urllib'`)
+    or shell builtins (`bash /dev/tcp`).
+  - *Hard* (`network_isolation: seccomp`): syscall-layer deny of `connect`/`connectat`/
+    `sendto`/`sendmsg` via a seccomp filter applied in the child (preexec_fn) that
+    persists across execve. Blocks interpreters + builtins too. Linux-only + requires the
+    `[sandbox-seccomp]` extra (`pip install koboi-agent[sandbox-seccomp]`); gated by
+    `_HAS_SECCOMP` and degrades to soft with a one-time warning if unavailable.
+    `server_deploy.yaml` / `e2e_full.yaml` enable this by default.
+- **rlimits**: optional cpu/as_mb/fsize_mb/nofile caps (applied in the child via preexec_fn;
+  the seccomp filter shares the same preexec_fn, which is now built whenever rlimits OR
+  seccomp is active -- not rlimits-only).
 - **workdir strategy**: `shared` or `per_session` (the server uses per-session:
   `{workspace_root}/{session_id}`, GC'd at `server.workdir_ttl_seconds`).
 

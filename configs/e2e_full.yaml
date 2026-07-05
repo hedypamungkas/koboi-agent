@@ -63,6 +63,7 @@ sandbox:
   workdir: /data/workspace
   workdir_strategy: per_session
   network: deny
+  network_isolation: seccomp            # HARD egress deny via seccomp (needs [sandbox-seccomp] extra + Linux)
   timeout: 30
   max_output: 15000
   # Seed each per-session workdir as a git repo so git_status/git_log operate on

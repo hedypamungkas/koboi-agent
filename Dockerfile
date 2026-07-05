@@ -1,22 +1,28 @@
 FROM python:3.12-slim AS base
 
-# System deps for sandbox (restricted backend uses subprocess + rlimits).
+# System deps for sandbox (restricted backend uses subprocess + rlimits; the
+# [sandbox-seccomp] extra's `seccomp` package builds against libseccomp-dev and
+# needs libseccomp2 at runtime for HARD network isolation).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         git \
+        libseccomp-dev \
+        libseccomp2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install the package with api + tracing extras (editable so config/examples
-# from the repo are available; for a published image, replace with a wheel).
+# Install the package with api + tracing + sandbox-seccomp extras (editable so
+# config/examples from the repo are available; for a published image, replace
+# with a wheel). [sandbox-seccomp] enables the HARD egress-deny filter used by
+# configs/server_deploy.yaml's network_isolation: seccomp.
 COPY pyproject.toml README.md ./
 COPY koboi/ koboi/
 COPY configs/ configs/
 COPY examples/ examples/
 COPY skills/ skills/
 
-RUN pip install --no-cache-dir -e ".[api,tracing]"
+RUN pip install --no-cache-dir -e ".[api,tracing,sandbox-seccomp]"
 
 # Default runtime config — override via volume mount or KOBOI_CONFIG env.
 ENV KOBOI_CONFIG=/app/configs/server_simple.yaml

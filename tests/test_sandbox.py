@@ -15,6 +15,7 @@ from koboi.sandbox.restricted import (
     DEFAULT_SAFE_PATH_DIRS,
     NETWORK_ENV_BLOCKLIST,
     RestrictedProcessBackend,
+    _HAS_SECCOMP,
 )
 from koboi.sandbox.registry import build_sandbox, register_sandbox, sandbox_registry
 
@@ -327,3 +328,128 @@ class TestConfigSurface:
         cfg = Config.builder().agent(name="t").llm(model="m").sandbox(backend="restricted", network="deny").build()
         assert cfg.sandbox["backend"] == "restricted"
         assert cfg.sandbox["network"] == "deny"
+
+
+# ---------------------------------------------------------------------------
+# seccomp hard network isolation (network_isolation: seccomp)
+# ---------------------------------------------------------------------------
+
+
+class TestSeccompFallback:
+    """When seccomp is requested but unavailable, degrade to soft deny (no crash).
+
+    Runs on every platform (verifies the graceful fallback path that macOS and
+    extra-less installs hit).
+    """
+
+    def test_requested_but_unavailable_yields_no_loader(self, tmp_path):
+        with patch("koboi.sandbox.restricted._HAS_SECCOMP", False):
+            sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        assert sb._seccomp_load is None  # graceful fallback, not a crash
+
+    def test_unavailable_keeps_soft_token_deny(self, tmp_path):
+        with patch("koboi.sandbox.restricted._HAS_SECCOMP", False):
+            sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        # curl as a command token is still soft-blocked.
+        r = sb.run("curl -s http://127.0.0.1:1", shell=True)
+        assert r.returncode == 126
+        assert "network binary" in r.stderr
+
+    def test_not_requested_engages_no_seccomp(self, tmp_path):
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny")
+        assert sb._seccomp_load is None
+        assert sb.run("echo ok", shell=True).returncode == 0
+
+
+def _fresh_listener():
+    """Spin up a localhost TCP listener; return (port, received_box, thread).
+
+    The listener accepts exactly one connection, records what it receives, then
+    closes. Used to prove (no-)egress: if the sandboxed process connects + sends,
+    the bytes appear in ``received_box[0]``.
+    """
+    import socket
+    import threading
+
+    received: list[bytes] = []
+    ready = threading.Event()
+    port = [0]
+
+    def _run():
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port[0] = srv.getsockname()[1]
+        ready.set()
+        srv.settimeout(6)
+        try:
+            conn, _ = srv.accept()
+            received.append(conn.recv(64))
+            conn.close()
+        except socket.timeout:
+            received.append(b"<timeout: no connection>")
+        srv.close()
+
+    t = threading.Thread(target=_run)
+    t.start()
+    ready.wait(5)
+    return port[0], received, t
+
+
+@pytest.mark.skipif(not _HAS_SECCOMP, reason="seccomp hard isolation is Linux-only")
+class TestSeccompEgress:
+    """Reproduces the 4 empirical bypass vectors -- all must be blocked under seccomp.
+
+    These are the exact egress paths proven permeable against the SOFT token-scan
+    (python3 socket, bash /dev/tcp, absolute-path interpreter, real outbound TCP).
+    Under ``network_isolation='seccomp'`` the syscall-layer filter must deny them.
+    """
+
+    def test_seccomp_active_on_this_host(self, tmp_path):
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        assert sb._seccomp_load is not None  # sanity: the CI host has [sandbox-seccomp]
+
+    def test_interpreter_socket_blocked(self, tmp_path):
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        port, received, thr = _fresh_listener()
+        code = f"import socket; s=socket.create_connection(('127.0.0.1',{port}),timeout=3); s.send(b'EXFIL'); s.close()"
+        r = sb.run(["python3", "-c", code], timeout=10)
+        thr.join(timeout=7)
+        assert r.returncode != 0  # seccomp denied connect() -> python raised
+        assert received and b"EXFIL" not in received[0]
+
+    def test_bash_dev_tcp_blocked(self, tmp_path):
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        port, received, thr = _fresh_listener()
+        r = sb.run(["bash", "-c", f"echo BASH >/dev/tcp/127.0.0.1/{port}"], timeout=10)
+        thr.join(timeout=7)
+        assert r.returncode != 0
+        assert received and b"BASH" not in received[0]
+
+    def test_absolute_path_interpreter_blocked(self, tmp_path):
+        import shutil
+
+        if not shutil.which("python3"):
+            pytest.skip("python3 not on PATH")
+        py = shutil.which("python3")
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        port, received, thr = _fresh_listener()
+        code = f"import socket; s=socket.create_connection(('127.0.0.1',{port}),timeout=3); s.send(b'ABS'); s.close()"
+        r = sb.run([py, "-c", code], timeout=10)
+        thr.join(timeout=7)
+        assert r.returncode != 0
+        assert received and b"ABS" not in received[0]
+
+    def test_soft_still_blocks_curl_token(self, tmp_path):
+        """The soft token layer still fires for curl under seccomp (defense in depth)."""
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        r = sb.run("curl -s http://127.0.0.1:1", shell=True)
+        assert r.returncode == 126
+
+    def test_echo_still_works(self, tmp_path):
+        """Positive control: non-network commands are unaffected by the filter."""
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        r = sb.run("echo ok", shell=True)
+        assert r.returncode == 0
+        assert "ok" in r.stdout
