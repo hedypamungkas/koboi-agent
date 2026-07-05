@@ -10,11 +10,7 @@ from koboi.eval.scorers.base import (
     LLMJudgeScorer,
     CostScorer,
 )
-from koboi.eval.scorers.skill_scorer import (
-    SkillTriggerAccuracyScorer,
-    SkillRoutingAccuracyScorer,
-    SkillTokenOverheadScorer,
-)
+from koboi.eval.scorers.skill_scorer import SkillTriggerAccuracyScorer
 from koboi.eval.registry import ScorerRegistry, register_default_scorers, register_framework_scorers
 from koboi.eval.config import EvalConfig
 from koboi.eval.regression import RegressionTracker
@@ -35,8 +31,6 @@ __all__ = [
     "LLMJudgeScorer",
     "CostScorer",
     "SkillTriggerAccuracyScorer",
-    "SkillRoutingAccuracyScorer",
-    "SkillTokenOverheadScorer",
     "ScorerRegistry",
     "register_default_scorers",
     "register_framework_scorers",

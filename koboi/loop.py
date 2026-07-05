@@ -113,6 +113,7 @@ class AgentCore:
         self.output_guardrails = list(output_guardrails) if output_guardrails else []
         if output_guardrail is not None and output_guardrail not in self.output_guardrails:
             self.output_guardrails.insert(0, output_guardrail)
+        self._last_output_guardrail: dict | None = None  # R2: warn outcome -> RunResult.metadata
         self.rate_limiter = rate_limiter
         self.audit_trail = audit_trail
         self.approval_handler = approval_handler
@@ -270,6 +271,11 @@ class AgentCore:
                 if action.lower() in {"block", "deny", "abort"}:
                     self._log(f"Output blocked by {type(grd).__name__}: {out_result.reason}")
                     raise AgentGuardrailError(f"output blocked by {type(grd).__name__}", direction="output")
+                self._last_output_guardrail = {
+                    "guardrail": type(grd).__name__,
+                    "reason": out_result.reason,
+                    "action": "warn",
+                }
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
 
@@ -288,6 +294,11 @@ class AgentCore:
             # H3: model-activated skills never execute `!`cmd`` blocks (supply-chain
             # RCE guard); only explicit user invocation (/skill) may run them.
             body = self.skills.activate(skill_name, run_shell=False)
+            # R3: record activation to telemetry so evals can assert (t.activatedSkill
+            # + skill_trigger_accuracy scorer). No-op when no TelemetryHook is wired.
+            tel_hook = self.hooks.find_hook(lambda h: hasattr(h, "telemetry"))
+            if tel_hook is not None:
+                tel_hook.telemetry.record_skill_activation(skill_name)  # type: ignore[attr-defined]  # TelemetryHook found via hasattr lambda; Hook base has no telemetry attr
             if body:
                 skill = self.skills.get(skill_name)
                 self.memory.add_context_message(
@@ -408,6 +419,9 @@ class AgentCore:
                     }
                     for r in results
                 ]
+        # R2: stamp output-guardrail warn outcome so evals can assert (t.warned).
+        if self._last_output_guardrail is not None:
+            meta["guardrail_outcomes"] = [{"direction": "output", **self._last_output_guardrail}]
         return meta
 
     async def _repair_interrupted_turn(self) -> None:
@@ -460,6 +474,7 @@ class AgentCore:
         tool_calls_made: list[ToolCall] = []
         pipeline_outcomes: list[dict] = []
         total_usage: TokenUsage | None = None
+        self._last_output_guardrail = None  # R2: reset per run
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
