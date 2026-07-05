@@ -19,7 +19,7 @@ COPY skills/ skills/
 RUN pip install --no-cache-dir -e ".[api,tracing]"
 
 # Default runtime config — override via volume mount or KOBOI_CONFIG env.
-ENV KOBOI_CONFIG=/app/configs/e2e_full.yaml
+ENV KOBOI_CONFIG=/app/configs/server_simple.yaml
 ENV KOBOI_HOST=0.0.0.0
 ENV KOBOI_PORT=8080
 # Tier 2: a mounted/derived extensions dir made importable by koboi/_extensions_path.py.
@@ -42,4 +42,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Shell form so KOBOI_CONFIG/HOST/PORT env vars are honored (override at `docker run`
 # without retyping the CMD). Defaults preserve the prior behavior (e2e_full on :8080).
-CMD python -m koboi.cli serve "${KOBOI_CONFIG:-/app/configs/e2e_full.yaml}" --host "${KOBOI_HOST:-0.0.0.0}" --port "${KOBOI_PORT:-8080}"
+CMD python -m koboi.cli serve "${KOBOI_CONFIG:-/app/configs/server_simple.yaml}" --host "${KOBOI_HOST:-0.0.0.0}" --port "${KOBOI_PORT:-8080}"
