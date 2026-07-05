@@ -23,6 +23,9 @@ class AugmentationStrategy(ABC):
         self.top_k = top_k
         self.relevance_threshold = relevance_threshold
         self.logger = logger
+        # Last retrieved chunks (R4): surfaced so AgentCore can stamp them onto
+        # RunResult.metadata['rag_results'] for eval assertions (t.retrievedChunk).
+        self.last_results: list[RetrievalResult] = []
 
     async def _retrieve_and_format(self, query: str) -> tuple[str, list[RetrievalResult]]:
         results = await self.retriever.retrieve(query, top_k=self.top_k)
@@ -30,6 +33,10 @@ class AugmentationStrategy(ABC):
         # Relevance gate: filter out results below threshold
         if self.relevance_threshold is not None and results:
             results = [r for r in results if r.score >= self.relevance_threshold]
+
+        # Surface retrieved chunks (R4): overwrite each call so this reflects the
+        # latest retrieval (multi-turn safe -- assignment, not accumulation).
+        self.last_results = list(results)
 
         if not results:
             return "", results
