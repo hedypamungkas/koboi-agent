@@ -10,9 +10,24 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 from unittest.mock import patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env():
+    """Snapshot/restore os.environ around each test.
+
+    ``cli.main`` calls ``load_dotenv()``, which would otherwise leak the project
+    ``.env`` (real API keys) into later tests -- e.g. the client key-validation
+    tests where ``Client(api_key="")`` falls back to env.
+    """
+    saved = os.environ.copy()
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
 
 
 def _invoke(argv: list[str]) -> tuple[int, str, str]:

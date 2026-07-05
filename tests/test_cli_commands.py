@@ -9,12 +9,23 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 import yaml
 
 from koboi.cli_commands import cmd_eval, cmd_run, cmd_validate
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env():
+    """Snapshot/restore os.environ (these handlers reach cli.main/load_dotenv indirectly)."""
+    saved = os.environ.copy()
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
 
 
 def _invoke(fn, *args, **kwargs) -> tuple[int, str, str]:
@@ -30,7 +41,7 @@ def _make_temp_config() -> str:
         yaml.dump(
             {
                 "agent": {"name": "test-agent", "max_iterations": 5},
-                "llm": {"model": "gpt-4o-mini", "provider": "openai"},
+                "llm": {"model": "gpt-4o-mini", "provider": "openai", "api_key": "sk-test-key-1234"},
             },
             f,
         )
