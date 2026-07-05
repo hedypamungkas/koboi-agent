@@ -15,7 +15,7 @@ from koboi.eval.t.assertions import (
     coerce_matcher,
     describe_value,
 )
-from koboi.exceptions import AgentError
+from koboi.exceptions import AgentError, AgentGuardrailError
 
 if TYPE_CHECKING:
     from koboi.eval.scorers.base import BaseScorer
@@ -75,6 +75,12 @@ class TestContext:
             # as a soft note so the report explains the empty reply; completed()
             # and downstream checks will surface the hard failure.
             result = RunResult(content="", iterations_used=0, success=False, error=exc)
+            # R2: stamp guardrail block outcomes so t.blocked() can assert without
+            # isinstance-checking t.last.error.
+            if isinstance(exc, AgentGuardrailError):
+                result.metadata["guardrail_outcomes"] = [
+                    {"direction": exc.direction, "action": "block", "reason": exc.reason}
+                ]
             self._record(
                 "send:error",
                 Severity.SOFT,
@@ -202,6 +208,68 @@ class TestContext:
             return binary_outcome(sev, count > 0, f"retrievedChunk({needle!r}) -> {count} match(es)")
 
         self._record(f"retrievedChunk:{needle}", sev, _evaluate)
+
+    def blocked(self, direction: str | None = None, *, severity: Severity | None = None) -> None:
+        """Assert a guardrail BLOCKED the turn at least once (gate by default).
+
+        Reads ``RunResult.metadata['guardrail_outcomes']`` (R2). ``direction``
+        filters to 'input'/'output'. Input and output blocks both raise
+        AgentGuardrailError -> caught by t.send -> stamped there.
+        """
+        sev = self._sev(severity)
+
+        def _evaluate() -> AssertionOutcome:
+            count = sum(
+                1
+                for turn in self._turns
+                for o in (turn.metadata or {}).get("guardrail_outcomes", []) or []
+                if o.get("action") == "block" and (direction is None or o.get("direction") == direction)
+            )
+            label = f"blocked({direction!r})" if direction else "blocked()"
+            return binary_outcome(sev, count > 0, f"{label} -> {count} block(s)")
+
+        self._record(f"blocked:{direction or 'any'}", sev, _evaluate)
+
+    def warned(self, name: str | None = None, *, severity: Severity | None = None) -> None:
+        """Assert an output guardrail WARNED at least once (soft by default).
+
+        Reads ``RunResult.metadata['guardrail_outcomes']`` (R2) for action='warn'.
+        ``name`` filters by guardrail class name.
+        """
+        sev = self._sev(severity if severity is not None else Severity.SOFT)
+
+        def _evaluate() -> AssertionOutcome:
+            count = sum(
+                1
+                for turn in self._turns
+                for o in (turn.metadata or {}).get("guardrail_outcomes", []) or []
+                if o.get("action") == "warn" and (name is None or o.get("guardrail") == name)
+            )
+            label = f"warned({name!r})" if name else "warned()"
+            return binary_outcome(sev, count > 0, f"{label} -> {count} warn(s)")
+
+        self._record(f"warned:{name or 'any'}", sev, _evaluate)
+
+    def activatedSkill(self, name: str, *, severity: Severity | None = None) -> None:
+        """Assert a skill named ``name`` was activated this run (gate by default).
+
+        Reads ``telemetry.snapshot.skills_activated`` (R3), populated by
+        ``AgentCore._activate_skill`` when a ``[ACTIVATE_SKILL: name]`` marker is
+        detected. Lets mock-mode evals assert skill triggering deterministically.
+        """
+        sev = self._sev(severity)
+
+        def _evaluate() -> AssertionOutcome:
+            count = 0
+            agent = self._agent
+            if hasattr(agent, "get_telemetry"):
+                telemetry = agent.get_telemetry()
+                snapshot = getattr(telemetry, "snapshot", None) if telemetry else None
+                activated = list(getattr(snapshot, "skills_activated", [])) if snapshot else []
+                count = sum(1 for s in activated if s == name)
+            return binary_outcome(sev, count > 0, f"activatedSkill({name!r}) -> {count}")
+
+        self._record(f"activatedSkill:{name}", sev, _evaluate)
 
     def usedNoTools(self, *, severity: Severity | None = None) -> None:
         """Assert no tools were called across the whole test (gate by default)."""
@@ -345,6 +413,10 @@ class TestContext:
             telemetry = self._agent.get_telemetry()
             if telemetry:
                 context["telemetry"] = telemetry
+                # R3: surface skill activations for skill_trigger_accuracy scorer.
+                snapshot = getattr(telemetry, "snapshot", None)
+                if snapshot is not None:
+                    context["skills_activated"] = list(getattr(snapshot, "skills_activated", []))
         usage = self.total_token_usage()
         if usage.total_tokens:
             context["token_usage"] = usage

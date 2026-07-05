@@ -90,15 +90,9 @@ def register_default_scorers() -> None:
 
     # Skill-specific scorers
     try:
-        from koboi.eval.scorers.skill_scorer import (
-            SkillTriggerAccuracyScorer,
-            SkillRoutingAccuracyScorer,
-            SkillTokenOverheadScorer,
-        )
+        from koboi.eval.scorers.skill_scorer import SkillTriggerAccuracyScorer
 
         ScorerRegistry.register("skill_trigger_accuracy", lambda: SkillTriggerAccuracyScorer())
-        ScorerRegistry.register("skill_routing_accuracy", lambda: SkillRoutingAccuracyScorer())
-        ScorerRegistry.register("skill_token_overhead", lambda **kw: SkillTokenOverheadScorer(**kw))
     except ImportError:
         pass
 

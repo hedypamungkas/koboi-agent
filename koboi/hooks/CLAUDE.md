@@ -14,7 +14,6 @@ guardrail_hook.py     Input/output guardrail integration
 context_hook.py       Context window management trigger
 read_before_write_reset_hook.py  P3b tool-state preservation (read-before-write reset on compaction)
 rag_hook.py           RAG augmentation trigger
-skill_hook.py         Skill injection into system prompt
 skill_persistence_hook.py  Re-injects activated skills after POST_COMPACT (priority 45)
 policy_hook.py        Policy engine enforcement
 telemetry_hook.py     Telemetry collection

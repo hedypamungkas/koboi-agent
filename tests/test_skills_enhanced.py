@@ -14,11 +14,7 @@ from koboi.skills.registry import (
 from koboi.types import SkillDefinition
 from koboi.hooks.chain import HookContext, HookEvent
 from koboi.hooks.skill_persistence_hook import SkillPersistenceHook
-from koboi.eval.scorers.skill_scorer import (
-    SkillTriggerAccuracyScorer,
-    SkillRoutingAccuracyScorer,
-    SkillTokenOverheadScorer,
-)
+from koboi.eval.scorers.skill_scorer import SkillTriggerAccuracyScorer
 from koboi.types import EvalCase
 
 
@@ -495,64 +491,8 @@ class TestSkillTriggerAccuracyScorer:
         assert score.value == 1.0
 
 
-class TestSkillRoutingAccuracyScorer:
-    async def test_top1_hit(self):
-        """Score 1.0 when expected skill is in top-1."""
-        scorer = SkillRoutingAccuracyScorer()
-        case = EvalCase(name="test", user_message="review code", metadata={"expected_skill": "code-review"})
-        context = {"routed_skills": ["code-review", "bug-hunter"]}
-        score = await scorer.score(case, "output", context)
-        assert score.value == 1.0
-
-    async def test_top3_hit(self):
-        """Score 0.5 when expected skill is in top-3 but not top-1."""
-        scorer = SkillRoutingAccuracyScorer()
-        case = EvalCase(name="test", user_message="review code", metadata={"expected_skill": "code-review"})
-        context = {"routed_skills": ["bug-hunter", "code-review"]}
-        score = await scorer.score(case, "output", context)
-        assert score.value == 0.5
-
-    async def test_miss(self):
-        """Score 0.0 when expected skill is not routed."""
-        scorer = SkillRoutingAccuracyScorer()
-        case = EvalCase(name="test", user_message="review code", metadata={"expected_skill": "code-review"})
-        context = {"routed_skills": ["bug-hunter", "search"]}
-        score = await scorer.score(case, "output", context)
-        assert score.value == 0.0
-
-    async def test_no_routed_skills(self):
-        """Score 0.0 when no skills routed."""
-        scorer = SkillRoutingAccuracyScorer()
-        case = EvalCase(name="test", user_message="review code", metadata={"expected_skill": "code-review"})
-        context = {"routed_skills": []}
-        score = await scorer.score(case, "output", context)
-        assert score.value == 0.0
-
-
-class TestSkillTokenOverheadScorer:
-    async def test_under_budget(self):
-        """Score 1.0 when under budget."""
-        scorer = SkillTokenOverheadScorer(budget_chars=8000)
-        case = EvalCase(name="test", user_message="hello")
-        context = {"skill_description_chars": 4000}
-        score = await scorer.score(case, "output", context)
-        assert score.value == 1.0
-
-    async def test_over_budget(self):
-        """Score < 1.0 when over budget."""
-        scorer = SkillTokenOverheadScorer(budget_chars=8000)
-        case = EvalCase(name="test", user_message="hello")
-        context = {"skill_description_chars": 12000}
-        score = await scorer.score(case, "output", context)
-        assert score.value < 1.0
-
-    async def test_no_skill_chars(self):
-        """Score 1.0 when no skill chars."""
-        scorer = SkillTokenOverheadScorer(budget_chars=8000)
-        case = EvalCase(name="test", user_message="hello")
-        context = {}
-        score = await scorer.score(case, "output", context)
-        assert score.value == 1.0
+# SkillRoutingAccuracyScorer / SkillTokenOverheadScorer tests removed (R3): those
+# scorers were deleted (no population path in the t eval surface).
 
 
 # ---------------------------------------------------------------------------
@@ -567,8 +507,6 @@ class TestScorerRegistration:
 
         available = ScorerRegistry.list_available()
         assert "skill_trigger_accuracy" in available
-        assert "skill_routing_accuracy" in available
-        assert "skill_token_overhead" in available
 
     def test_create_skill_scorers(self):
         """Should be able to create skill scorers from registry."""
@@ -576,9 +514,3 @@ class TestScorerRegistration:
 
         scorer = ScorerRegistry.create("skill_trigger_accuracy")
         assert isinstance(scorer, SkillTriggerAccuracyScorer)
-
-        scorer = ScorerRegistry.create("skill_routing_accuracy")
-        assert isinstance(scorer, SkillRoutingAccuracyScorer)
-
-        scorer = ScorerRegistry.create("skill_token_overhead", budget_chars=5000)
-        assert isinstance(scorer, SkillTokenOverheadScorer)
