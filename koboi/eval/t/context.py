@@ -159,6 +159,50 @@ class TestContext:
 
         self._record(f"calledToolWith:{name}", sev, _evaluate)
 
+    def toolWasBlocked(self, name: str, *, severity: Severity | None = None) -> None:
+        """Assert a tool named ``name`` was blocked/denied/skipped by the pipeline
+        at least once (gate by default).
+
+        Outcome-aware counterpart to :meth:`calledTool`. Reads
+        ``RunResult.pipeline_outcomes`` (populated at koboi/loop.py when the
+        ToolExecutionPipeline returns ``skipped=True`` with a ``skip_reason`` such
+        as ``mode_blocked``/``policy_denied``/``sandbox_refused``). ``calledTool``
+        counts ATTEMPTED calls (preserved for back-compat); ``toolWasBlocked``
+        counts DENIED outcomes.
+        """
+        sev = self._sev(severity)
+
+        def _evaluate() -> AssertionOutcome:
+            count = sum(
+                1
+                for turn in self._turns
+                for o in getattr(turn, "pipeline_outcomes", []) or []
+                if o.get("tool_name") == name and o.get("skipped")
+            )
+            return binary_outcome(sev, count > 0, f"toolWasBlocked({name!r}) -> {count} block(s)")
+
+        self._record(f"toolWasBlocked:{name}", sev, _evaluate)
+
+    def retrievedChunk(self, needle: str, *, severity: Severity | None = None) -> None:
+        """Assert a chunk containing ``needle`` was retrieved this run (gate by default).
+
+        Reads ``RunResult.metadata['rag_results']`` (populated by AgentCore from
+        ``AugmentationStrategy.last_results``, R4). Lets mock-mode evals assert on
+        RETRIEVAL (pre-LLM, deterministic) -- the answer-faithfulness NUMBER still
+        needs a live judge LLM (RAGAS), but retrieval does not.
+        """
+        sev = self._sev(severity)
+
+        def _evaluate() -> AssertionOutcome:
+            count = 0
+            for turn in self._turns:
+                for chunk in (turn.metadata or {}).get("rag_results", []) or []:
+                    if needle.lower() in str(chunk.get("content", "")).lower():
+                        count += 1
+            return binary_outcome(sev, count > 0, f"retrievedChunk({needle!r}) -> {count} match(es)")
+
+        self._record(f"retrievedChunk:{needle}", sev, _evaluate)
+
     def usedNoTools(self, *, severity: Severity | None = None) -> None:
         """Assert no tools were called across the whole test (gate by default)."""
         sev = self._sev(severity)
@@ -278,11 +322,20 @@ class TestContext:
     def _synthetic_case(self, *, expected: list[str] | None = None, expected_answer: str | None = None):
         from koboi.types import EvalCase
 
+        # R4: forward retrieved chunks so RAGAS-style scorers reading
+        # case.context_docs work in live mode. (RAGAS faithfulness itself still
+        # needs a live judge LLM -- this only supplies the context.)
+        context_docs: list[str] = []
+        if self._turns:
+            for chunk in (self._turns[-1].metadata or {}).get("rag_results", []) or []:
+                context_docs.append(str(chunk.get("content", "")))
+
         return EvalCase(
             name="t.judge",
             user_message=self._sent[0] if self._sent else "",
             expected_keywords=list(expected) if expected else [],
             expected_answer=expected_answer,
+            context_docs=context_docs,
         )
 
     def _build_context(self) -> dict:

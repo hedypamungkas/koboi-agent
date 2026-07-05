@@ -239,6 +239,7 @@ class RunResult:
     content: str
     iterations_used: int = 0
     tool_calls_made: list[ToolCall] = field(default_factory=list)
+    pipeline_outcomes: list[dict] = field(default_factory=list)
     token_usage: TokenUsage | None = None
     metadata: dict = field(default_factory=dict)
     success: bool = True
