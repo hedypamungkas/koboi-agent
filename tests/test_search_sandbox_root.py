@@ -71,3 +71,59 @@ class TestSearchSandboxRoot:
         out = grep_search("alpha", ".")
 
         assert "cwd.txt" in out
+
+
+class TestGlobFindSandboxEscape:
+    """Regression: glob_find's ``pattern`` arg is LLM-controlled and must not be
+    able to escape the sandbox workdir -- neither via an absolute pattern
+    (os.path.join discards the validated base) nor via a ".." component (resolves
+    up and out), nor via a symlink inside the workdir pointing outside.
+    """
+
+    def test_absolute_pattern_rejected(self, tmp_path):
+        workdir = tmp_path / "session_A"
+        workdir.mkdir()
+        (workdir / "in_workdir.txt").write_text("x")
+        sb = RestrictedProcessBackend(workdir=str(workdir))
+
+        out = glob_find(pattern="/etc/*", _deps={"sandbox": sb})
+
+        assert out.startswith("Error:")
+        assert "in_workdir" not in out
+
+    def test_dotdot_pattern_rejected_against_sibling(self, tmp_path):
+        workdir = tmp_path / "session_A"
+        workdir.mkdir()
+        sibling = tmp_path / "session_B"  # co-tenant workdir, OUTSIDE ours
+        sibling.mkdir()
+        (sibling / "tenant_secret.txt").write_text("x")
+        (workdir / "mine.txt").write_text("x")
+        sb = RestrictedProcessBackend(workdir=str(workdir))
+
+        out = glob_find(pattern="../session_B/*", _deps={"sandbox": sb})
+
+        assert out.startswith("Error:")
+        assert "tenant_secret" not in out
+
+    def test_symlink_escape_filtered(self, tmp_path):
+        workdir = tmp_path / "session_A"
+        workdir.mkdir()
+        outside = tmp_path / "outside_target"  # sibling of workdir -> outside it
+        outside.mkdir()
+        (outside / "leaked_via_symlink.txt").write_text("x")
+        (workdir / "keep.txt").write_text("x")
+        (workdir / "lnk").symlink_to(outside)  # symlink inside workdir -> outside
+        sb = RestrictedProcessBackend(workdir=str(workdir))
+
+        out = glob_find(pattern="**/*", _deps={"sandbox": sb})
+
+        assert "keep.txt" in out  # benign still found
+        assert "leaked_via_symlink" not in out  # symlink target NOT disclosed
+
+    def test_benign_relative_pattern_still_works(self, tmp_path):
+        sb = RestrictedProcessBackend(workdir=str(tmp_path))
+        (tmp_path / "keep.txt").write_text("x")
+
+        out = glob_find(pattern="**/*.txt", _deps={"sandbox": sb})
+
+        assert "keep.txt" in out

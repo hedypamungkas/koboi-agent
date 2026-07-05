@@ -44,9 +44,20 @@ def play_sound(sound_name: str = "default") -> None:
 
 
 def _notify_macos(title: str, message: str, *, sound: bool = False) -> None:
+    # Pass title/message as argv (data), NEVER interpolated into the AppleScript
+    # source. ``message`` arrives from NotificationHook as the first ~100 chars
+    # of the LLM response (shaped by untrusted prompts / RAG docs), so it must
+    # not enter the script parse -- a ``"`` would break out and ``do shell script
+    # "..."`` would run arbitrary shell. POST_OUTPUT fires in the hook chain,
+    # outside the tool/approval/sandbox pipeline, so argv (a pure string value)
+    # is the only safe channel. (sound_clause is a fixed operator constant.)
     sound_clause = ' sound name "Ping"' if sound else ""
-    script = f'display notification "{message}" with title "{title}"{sound_clause}'
-    subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)  # nosec B607 - intentional PATH-based launch of a user tool/editor
+    script = f"on run(argv)\n display notification (item 1 of argv) with title (item 2 of argv){sound_clause}\n end"
+    subprocess.run(  # nosec B607 - intentional PATH-based launch; title/message are argv (data), not AppleScript source
+        ["osascript", "-e", script, message, title],
+        capture_output=True,
+        timeout=5,
+    )
 
 
 def _notify_linux(title: str, message: str, *, sound: bool = False) -> None:
@@ -67,8 +78,14 @@ def _notify_windows(title: str, message: str) -> None:
 def _play_sound_macos(sound_name: str) -> None:
     if sound_name == "default":
         sound_name = "Ping"
+    # ``play sound`` does not accept an argv-bound value (unlike ``display
+    # notification``), so sound_name cannot ride in via ``on run(argv)``. Escape
+    # ``\`` and ``"`` so a quote can't break out of the AppleScript string.
+    # sound_name is config-only/trusted today -- this is defense-in-depth, not a
+    # known attacker-controlled path.
+    escaped = sound_name.replace("\\", "\\\\").replace('"', '\\"')
     subprocess.run(  # nosec B607 - intentional PATH-based launch of a user tool/editor
-        ["osascript", "-e", f'play sound "{sound_name}"'],
+        ["osascript", "-e", f'play sound "{escaped}"'],
         capture_output=True,
         timeout=5,
     )
