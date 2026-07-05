@@ -6,6 +6,7 @@ import os
 import re
 import glob as _glob
 from fnmatch import fnmatch
+from pathlib import Path
 
 from koboi.tools.registry import tool
 
@@ -45,6 +46,17 @@ def _match_glob(rel_path: str, patterns: list[str]) -> bool:
             if fnmatch(rel_path, pat[3:]):
                 return True
     return False
+
+
+def _within_base(path: str, base_real: str) -> bool:
+    """True if realpath(path) is ``base_real`` itself or a descendant of it.
+
+    Keeps glob results inside the sandbox workdir even when a symlink under it
+    points outside (defense-in-depth; mirrors the containment check in
+    ``sandbox.restricted.RestrictedProcessBackend.validate_path``).
+    """
+    rr = os.path.realpath(path)
+    return rr == base_real or rr.startswith(base_real + os.sep)
 
 
 @tool(
@@ -200,6 +212,15 @@ def glob_find(pattern: str, path: str = "", _tool_config: dict | None = None, _d
     cfg = _tool_config or {}
     max_results = cfg.get("max_results", MAX_RESULTS)
     raw_base = path or "."
+
+    # Security: ``pattern`` is an LLM-controlled tool argument, so it must not be
+    # able to escape the sandbox workdir. Reject absolute patterns (os.path.join
+    # would discard the validated base entirely) and patterns containing a ".."
+    # component (would resolve up and out of the workdir). Results are also
+    # realpath-filtered below as defense-in-depth.
+    if os.path.isabs(pattern) or ".." in Path(pattern).parts:
+        return f"Error: pattern '{pattern}' must be relative and stay within the workdir"
+
     # Anchor the search root through the sandbox (per-session workdir) so
     # glob_find shares the same root as the other fs-tools. See grep_search for
     # rationale. Falls back to the raw base when no sandbox is wired.
@@ -213,9 +234,15 @@ def glob_find(pattern: str, path: str = "", _tool_config: dict | None = None, _d
 
     full_pattern = os.path.join(base, pattern)
     try:
-        results = sorted(_glob.glob(full_pattern, recursive=True))
+        raw_results = _glob.glob(full_pattern, recursive=True)
     except OSError as e:
         return f"Error: invalid pattern: {e}"
+
+    # Defense-in-depth: keep only results whose realpath stays within base -- a
+    # symlink inside the workdir could otherwise point outside. Mirrors the
+    # containment check in sandbox.restricted.RestrictedProcessBackend.validate_path.
+    base_real = os.path.realpath(base)
+    results = sorted(r for r in raw_results if _within_base(r, base_real))
 
     if not results:
         return f"No files matching pattern '{pattern}' in '{base}'"
