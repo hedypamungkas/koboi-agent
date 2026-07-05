@@ -26,7 +26,7 @@ sandbox:
   network_binaries: [curl, wget, nc, ssh, scp]
   # network_isolation: seccomp   # HARD egress deny via seccomp at the syscall layer
                                    # (blocks python3/bash /dev/tcp too). Needs Linux +
-                                   # the [sandbox-seccomp] extra: pip install koboi-agent[sandbox-seccomp]
+                                   # the python3-seccomp system package: apt install python3-seccomp (Debian/Ubuntu)
   env_passthrough: false # strip secret-shaped + proxy env from subprocesses
   rlimits:
     cpu: 30 # RLIMIT_CPU seconds (hard)

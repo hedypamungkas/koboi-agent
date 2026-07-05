@@ -35,7 +35,7 @@ __init__.py    Re-exports register_sandbox, build_sandbox, BaseSandbox; calls re
   - *Hard* (`network_isolation: seccomp`): syscall-layer deny of `connect`/`connectat`/
     `sendto`/`sendmsg` via a seccomp filter applied in the child (preexec_fn) that
     persists across execve. Blocks interpreters + builtins too. Linux-only + requires the
-    `[sandbox-seccomp]` extra (`pip install koboi-agent[sandbox-seccomp]`); gated by
+    `python3-seccomp` system package (`apt install python3-seccomp` (Debian/Ubuntu)); gated by
     `_HAS_SECCOMP` and degrades to soft with a one-time warning if unavailable.
     `server_deploy.yaml` / `e2e_full.yaml` enable this by default.
 - **rlimits**: optional cpu/as_mb/fsize_mb/nofile caps (applied in the child via preexec_fn;

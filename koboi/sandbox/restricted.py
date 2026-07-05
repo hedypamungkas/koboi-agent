@@ -11,7 +11,7 @@ Enforces (best-effort, no root required):
 This is a SOFT boundary by default: it raises the bar for accidental exfiltration
 but cannot stop a determined attacker (e.g. ``python3 -c 'import urllib'`` or
 ``bash -c 'echo > /dev/tcp/...'``). For HARD network isolation on Linux set
-``network_isolation: seccomp`` (requires the ``[sandbox-seccomp]`` extra) -- the
+``network_isolation: seccomp`` (requires the ``python3-seccomp`` system package) -- the
 seccomp filter blocks egress at the syscall layer so interpreters and shell
 builtins cannot connect out. For full OS-level isolation (filesystem too), use
 the Docker backend (P0c).
@@ -91,7 +91,7 @@ except ImportError:  # Windows
 _POSIX = hasattr(os, "setsid")
 
 # seccomp (HARD network isolation): Linux-only + libseccomp binding via the
-# ``seccomp`` package (the ``[sandbox-seccomp]`` extra). When active it blocks
+# ``seccomp`` module (provided by the ``python3-seccomp`` system package). When active it blocks
 # egress at the syscall layer, so interpreters (python3 urllib) and shell
 # builtins (bash /dev/tcp) -- which evade the token-scan soft layer -- cannot
 # connect out. Filter is applied in the child via preexec_fn and persists across
@@ -122,8 +122,8 @@ else:
 # socket() creation itself is allowed (harmless without connect).
 _SECCOMP_EGRESS_SYSCALLS: tuple[str, ...] = ("connect", "connectat", "sendto", "sendmsg")
 
-# One-time warning when seccomp is requested but unavailable (non-Linux / extra
-# not installed) -- degrade to soft deny rather than crash.
+# One-time warning when seccomp is requested but unavailable (non-Linux / system
+# package python3-seccomp not installed) -- degrade to soft deny rather than crash.
 _seccomp_unavailable_warned = False
 
 
@@ -195,7 +195,7 @@ class RestrictedProcessBackend(BaseSandbox):
                 "blocks obvious egress tools but not interpreters (e.g. python3 -c "
                 "'import urllib'). For HARD network isolation set "
                 "sandbox.network_isolation: seccomp on a Linux host with the "
-                "[sandbox-seccomp] extra, or use the Docker backend (P0c)."
+                "python3-seccomp system package, or use the Docker backend (P0c)."
             )
         self._network_binaries = set(network_binaries) if network_binaries else set(DEFAULT_NETWORK_BINARIES)
         self._safe_path = list(safe_path) if safe_path else list(DEFAULT_SAFE_PATH_DIRS)
@@ -284,7 +284,7 @@ class RestrictedProcessBackend(BaseSandbox):
 
         Activated only when ``network == "deny"`` AND
         ``network_isolation == "seccomp"`` AND seccomp is available (Linux host
-        with the ``[sandbox-seccomp]`` extra). When requested but unavailable,
+        with the ``python3-seccomp`` system package). When requested but unavailable,
         logs a one-time warning and returns None so the backend degrades to the
         soft token-deny rather than crashing. The filter blocks
         ``connect``/``connectat``/``sendto``/``sendmsg`` (TCP/UDP egress; v1 does
@@ -299,9 +299,9 @@ class RestrictedProcessBackend(BaseSandbox):
                 _seccomp_unavailable_warned = True
                 _logger.warning(
                     "sandbox.network_isolation='seccomp' requested but unavailable "
-                    "(non-Linux host or [sandbox-seccomp] extra not installed); "
+                    "(non-Linux host or python3-seccomp system package not installed); "
                     "falling back to SOFT network deny. Install on a Linux host with: "
-                    "pip install koboi-agent[sandbox-seccomp]."
+                    "apt install python3-seccomp (Debian/Ubuntu)."
                 )
             return None
         try:
