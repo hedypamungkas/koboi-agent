@@ -1,17 +1,13 @@
-"""Allow running koboi as `python -m koboi`."""
+"""Allow running koboi as `python -m koboi`.
+
+Routes through :func:`koboi.cli.main` so ``python -m koboi`` behaves identically
+to the ``koboi`` console script (and works on a bare install for all no-TUI
+commands).
+"""
 
 from __future__ import annotations
 
-try:
-    from koboi.tui.app import main
-except ImportError:
-    import sys
-
-    print(
-        "Error: TUI dependencies not installed.\nInstall with: pip install koboi-agent[tui]",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+from koboi.cli import main
 
 if __name__ == "__main__":
     main()

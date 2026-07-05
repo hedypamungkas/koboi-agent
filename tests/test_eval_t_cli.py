@@ -1,14 +1,27 @@
-"""Tests for koboi.eval.t.cli -- `koboi eval-test` exit codes."""
+"""Tests for ``koboi eval-test`` exit codes (now via cli_commands.cmd_eval_test).
+
+The click wrapper (:mod:`koboi.eval.t.cli`) was removed when eval-test moved to
+the core argparse dispatcher; these tests drive the core handler directly.
+"""
 
 from __future__ import annotations
 
-from click.testing import CliRunner
+import contextlib
+import io
 
-from koboi.eval.t.cli import eval_test
+from koboi.cli_commands import cmd_eval_test
 
 
 def _write_eval(path, body):
     path.write_text(body)
+
+
+def _run(path, *, strict=False, tags=None):
+    """Invoke cmd_eval_test (mock mode) and return (exit_code, stdout)."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = cmd_eval_test(str(path), None, True, strict, 0.6, False, 5, tags)
+    return code, out.getvalue()
 
 
 class TestEvalTestCli:
@@ -21,8 +34,8 @@ class TestEvalTestCli:
             "    await t.send('q')\n"
             "    t.calledTool('calc')\n",
         )
-        result = CliRunner().invoke(eval_test, [str(tmp_path), "--strict", "--mock"])
-        assert result.exit_code == 0, result.output
+        code, _ = _run(tmp_path, strict=True)
+        assert code == 0
 
     def test_strict_gate_failure_exits_one(self, tmp_path):
         _write_eval(
@@ -33,8 +46,8 @@ class TestEvalTestCli:
             "    await t.send('q')\n"
             "    t.calledTool('missing')\n",
         )
-        result = CliRunner().invoke(eval_test, [str(tmp_path), "--strict", "--mock"])
-        assert result.exit_code == 1
+        code, _ = _run(tmp_path, strict=True)
+        assert code == 1
 
     def test_no_strict_exits_zero_on_failure(self, tmp_path):
         _write_eval(
@@ -45,13 +58,13 @@ class TestEvalTestCli:
             "    await t.send('q')\n"
             "    t.calledTool('missing')\n",
         )
-        result = CliRunner().invoke(eval_test, [str(tmp_path), "--mock"])
-        assert result.exit_code == 0
+        code, _ = _run(tmp_path, strict=False)
+        assert code == 0
 
     def test_no_tests_exits_two(self, tmp_path):
         _write_eval(tmp_path / "t.eval.py", "async def helper(t):\n    pass\n")
-        result = CliRunner().invoke(eval_test, [str(tmp_path), "--mock"])
-        assert result.exit_code == 2
+        code, _ = _run(tmp_path, strict=False)
+        assert code == 2
 
     def test_tags_filter_selects_subset(self, tmp_path):
         _write_eval(
@@ -62,6 +75,6 @@ class TestEvalTestCli:
             "async def test_smoke(t):\n"
             "    await t.send('q')\n",
         )
-        result = CliRunner().invoke(eval_test, [str(tmp_path), "--mock", "--tags", "smoke"])
-        assert result.exit_code == 0
-        assert "test_smoke" in result.output
+        code, out = _run(tmp_path, strict=False, tags="smoke")
+        assert code == 0
+        assert "test_smoke" in out

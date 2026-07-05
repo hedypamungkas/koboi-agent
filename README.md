@@ -23,7 +23,11 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 ### Install
 
 ```bash
-pip install -e ".[dev,tui]"
+pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, eval, eval-test
+# Extras (optional):
+#   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
+#   pip install koboi-agent[api]   # `koboi serve` + `koboi keys` against a running server
+#   pip install koboi-agent[dev,tui,api]  # everything (contributors)
 ```
 
 ### Set your API key
@@ -35,8 +39,20 @@ cp .env.example .env
 
 ### Run the CLI
 
+Most commands work on a bare install (no extras needed):
+
 ```bash
-koboi chat configs/simple_chat.yaml
+koboi validate configs/simple_chat.yaml     # check a config without running the agent
+koboi run configs/simple_chat.yaml -m "What is 2 + 2?"     # one-shot query (plain output)
+koboi run configs/simple_chat.yaml --print  # streaming JSON lines (pipe-friendly)
+koboi keys create                           # mint an API key (for `koboi serve`)
+```
+
+Interactive chat needs the `[tui]` extra:
+
+```bash
+pip install koboi-agent[tui]
+koboi chat configs/simple_chat.yaml         # Textual TUI; or `--print` for JSON lines (no extra)
 ```
 
 ### Run programmatically

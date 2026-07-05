@@ -1,11 +1,17 @@
 # koboi/tui/ -- Terminal UI (Textual)
 
 ## What this is
-Textual-based terminal UI for interactive agent chat. Entry point: `app.py:main`.
+Textual-based terminal UI for interactive agent chat. The console-script
+dispatch lives in `koboi/cli.py`; this package owns only the *interactive*
+surface, exposed via `app.py:run_chat_interactive` (lazy-imported by
+`cli._run_chat` for `koboi chat` without `--print`). `koboi chat --print`
+(JSON-line output) is handled core-only in `koboi/cli_commands.py` and does
+NOT touch this package. Requires the `[tui]` extra (`rich` for the legacy
+`--no-tui` loop, `textual` for the default app).
 
 ## Key files
 ```
-app.py              CLI entry point (click + Textual setup), main() function
+app.py              Interactive chat surface: run_chat_interactive() + _build_welcome_panel() + legacy _run_interactive() Rich loop (no click; dispatch is in cli.py)
 commands.py          Slash-command registry (/help, /reset, /mode, /skills, etc.)
 approval.py          CLI approval handler bridge (guardrails.approval=cli)
 textual_app.py      Textual App subclass, screen management

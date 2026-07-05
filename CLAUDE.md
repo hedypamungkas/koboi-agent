@@ -22,7 +22,8 @@ koboi/              Main package (~185 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
-  cli.py            Console-script entry (`koboi`): chat/run/sessions/eval/eval-test/serve/keys/diagnostics/validate/init-zsh
+  cli.py            Console-script entry (`koboi`): argparse dispatcher routing serve/keys/validate/run/chat/sessions/eval/eval-test/diagnostics/init-zsh; bare-install works for all no-TUI commands (bodies in cli_commands.py; interactive `chat` lazy-imports tui.app)
+  cli_commands.py   Core (no-extra) command bodies for validate/run/chat-print/sessions/eval/eval-test/diagnostics/init-zsh -- stdlib print() output, returns exit codes
   loop.py           AgentCore -- async agent loop, hook integration
   loop_pipeline.py  ToolExecutionPipeline -- 8-step tool execution flow
   client.py         RetryClient -- LLM HTTP transport with exponential backoff
