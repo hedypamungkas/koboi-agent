@@ -26,7 +26,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, eval, eval-test
 # Extras (optional):
 #   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
-#   pip install koboi-agent[api]   # `koboi serve` + `koboi keys` against a running server
+#   pip install koboi-agent[api]   # `koboi serve` (HTTP/SSE server; `koboi keys` works on bare install)
 #   pip install koboi-agent[dev,tui,api]  # everything (contributors)
 ```
 
@@ -206,7 +206,7 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **Guardrails** (`guardrails/`) -- input/output validation
 - **PolicyEngine** (`harness/`) -- rule-based tool filtering
 - **SkillRegistry** (`skills/`) -- skill discovery
-- **ModeManager** (`modes.py`) -- chat/plan/act/auto modes
+- **ModeManager** (`modes.py`) -- chat/plan/act/auto/yolo modes
 - **TrustDatabase** (`trust.py`) -- graduated permissions
 - **Sandbox** (`sandbox/`) -- passthrough/restricted execution backends (per-session workdir, network/rlimit isolation)
 - **StepJournal** (`journal.py`) -- per-iteration step journal for crash/redeploy resume

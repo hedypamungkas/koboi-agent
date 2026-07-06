@@ -21,15 +21,16 @@ ragas_generator.py    RAGAS test case generator
 
 ## Scorers (`scorers/`)
 ```
-base.py               BaseScorer ABC + 7 built-in scorers:
+base.py               BaseScorer ABC + 11 built-in scorers:
                         ToolUsageScorer, KeywordPresenceScorer, OutputLengthScorer,
-                        IterationEfficiencyScorer, HealthScoreScorer, LLMJudgeScorer, CostScorer
+                        IterationEfficiencyScorer, HealthScoreScorer, LLMJudgeScorer, CostScorer,
+                        RAGNoiseScorer, ContextEfficiencyScorer, ToolSelectionScorer, TokenEfficiencyScorer
 bfcl_scorer.py        BFCL function-calling accuracy
 gaia_scorer.py        GAIA exact-match
 swe_bench_scorer.py   SWE-bench patch-apply
 ragas_scorer.py       RAGAS faithfulness/relevancy
 deepeval_scorer.py    DeepEval integration
-skill_scorer.py       Skill scorers: trigger_accuracy, routing_accuracy, token_overhead
+skill_scorer.py       Skill scorer: trigger_accuracy only (routing_accuracy + token_overhead were removed)
 ```
 
 ## How to run evals

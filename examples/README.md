@@ -77,6 +77,17 @@ koboi chat examples/01_simple_chat.yaml
 | 26 | [Task Management](26_task_management.py) | Task tracking, dependencies, structured workflow | `python examples/26_task_management.py` |
 | 27 | [Benchmark Suite](27_benchmark_suite.py) | Performance benchmarking across subsystems | `python examples/27_benchmark_suite.py` |
 | 28 | [Custom RAG Registry](28_custom_rag_registry.py) | Custom chunker/retriever via registry decorators | `python examples/28_custom_rag_registry.py` |
+| 29 | [Skills Enhanced](29_skills_enhanced.py) | Skill discovery + activation, persistence, budget | `python examples/29_skills_enhanced.py` |
+| 30 | [Eval `t` Tests](30_eval_test.py) | eve-style `t` eval authoring (CI-native, mock mode) | `python examples/30_eval_test.py` |
+| 31 | [Tool Selection](31_tool_selection.py) | Tool selection + secret hygiene | `python examples/31_tool_selection.py` |
+| 32 | [Sandbox + Resume](32_sandbox_and_resume.py) | Restricted sandbox (soft + seccomp) + step-journal resume | `python examples/32_sandbox_and_resume.py` |
+
+### Server
+
+| Example | Features | How to Run |
+|---------|----------|------------|
+| [Built-in Server](server_built_in.py) | Run the built-in SSE server (zero code) | `python examples/server_built_in.py` |
+| [Customize Server](server_customize.py) | Extend the server by code (Path B) | `python examples/server_customize.py` |
 
 ## Feature Coverage
 
@@ -104,6 +115,11 @@ koboi chat examples/01_simple_chat.yaml
 | Task management (dependencies, workflow) | 26 |
 | Benchmark suite (performance testing) | 27 |
 | Custom RAG registry (BM25, WordCount) | 28 |
+| Skills (enhanced: activation, persistence, budget) | 29 |
+| Eval `t` authoring (CI-native, mock mode) | 30 |
+| Tool selection + secret hygiene | 31 |
+| Sandbox isolation (soft + seccomp) + step-journal resume | 32 |
+| HTTP/SSE server (built-in + code-customized) | server_built_in, server_customize |
 
 ## Notes
 

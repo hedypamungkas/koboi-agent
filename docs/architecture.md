@@ -36,24 +36,26 @@ KoboiAgent (facade.py)
      Shared: ModeManager (modes.py), TrustDatabase (trust.py)
 ```
 
-`AgentAssembler.build()` runs 14 steps in dependency order:
+`AgentAssembler.build()` runs 16 steps in dependency order:
 
 | Step | Method | Produces |
 |------|--------|----------|
 | 1 | `build_logger()` | `AgentLogger` |
 | 2 | `build_client()` | `RetryClient` (provider, model, API key, retries) |
 | 3 | `build_memory()` | `SQLiteMemory` or `ConversationMemory` |
-| 4 | `build_tools()` | `ToolRegistry` (builtins + custom + MCP) |
-| 5 | `build_mcp()` | `list[MCPClient]` (connects MCP servers, registers tools) |
-| 6 | `build_context()` | `ContextManager` subclass or `None` |
-| 7 | `build_rag()` | `AugmentationStrategy` or `None` |
-| 8 | `build_guardrails()` | `(input_guardrails, output_guardrails, rate_limiter, audit_trail)` |
-| 9 | `build_approval()` | `ApprovalHandler` (CLI, callback, or auto) |
-| 10 | `build_policy()` | `PolicyEngine` (from config rules) |
-| 11 | `build_skills()` | `SkillRegistry` (scans for SKILL.md files) |
-| 12 | `build_mode_manager()` | `ModeManager` (CHAT/PLAN/ACT/AUTO) |
-| 13 | `build_trust_db()` | `TrustDatabase` (if graduated_permissions enabled) |
-| 14 | `build_hooks()` | `HookChain` (LoggingHook + conditional hooks) |
+| 4 | `build_journal()` | `StepJournal` (per-iteration journal for crash/redeploy resume) |
+| 5 | `build_tools()` | `ToolRegistry` (builtins + custom + MCP) |
+| 6 | `build_sandbox()` | `BaseSandbox` (passthrough default; `restricted` = cwd/env/PATH/network/rlimit + seccomp HARD isolation) |
+| 7 | `build_mcp()` | `list[MCPClient]` (connects MCP servers, registers tools) |
+| 8 | `build_context()` | `ContextManager` subclass or `None` |
+| 9 | `build_rag()` | `AugmentationStrategy` or `None` |
+| 10 | `build_guardrails()` | `(input_guardrails, output_guardrails, rate_limiter, audit_trail)` |
+| 11 | `build_trust_db()` | `TrustDatabase` (if graduated_permissions enabled) |
+| 12 | `build_approval()` | `ApprovalHandler` (CLI, callback, or auto) |
+| 13 | `build_policy()` | `PolicyEngine` (from config rules) |
+| 14 | `build_skills()` | `SkillRegistry` (scans for SKILL.md files) |
+| 15 | `build_mode_manager()` | `ModeManager` (CHAT/PLAN/ACT/AUTO/YOLO) |
+| 16 | `build_hooks()` | `HookChain` (LoggingHook + conditional hooks) |
 
 After assembly, `_setup_subagent()` and `_setup_tasks()` wire optional sub-agent and task management tools.
 
@@ -297,13 +299,42 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `mcp` | MCP server connections |
 | `memory` | Backend (sqlite/in_memory), db_path |
 | `orchestration` | Router type, agents, execution mode |
-| `sandbox` | Backend (passthrough/restricted), workdir strategy, network, rlimits |
+| `sandbox` | Backend (passthrough/restricted), workdir strategy, network, network_isolation (seccomp), rlimits |
 | `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume |
 | `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
 | `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup |
 | `keybindings` | TUI key overrides |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
+
+---
+
+## CLI Layer
+
+The `koboi` console script (`koboi.cli:main`) is a single argparse dispatcher. Every no-TUI
+subcommand (`validate`, `run`, `chat --print`, `sessions`, `keys`, `eval`, `eval-test`,
+`diagnostics`, `init-zsh`) routes to a stdlib-only handler in `koboi/cli_commands.py` and
+works on a bare `pip install koboi-agent` (no extras). Only `serve` (lazy-imports
+`koboi.server.app`, needs `[api]`) and interactive `chat` (lazy-imports `koboi.tui.app`,
+needs `[tui]`) require extras; both fail with a clear install hint instead of a traceback.
+`python -m koboi` routes through `cli.main` too.
+
+---
+
+## Sandbox and Network Isolation
+
+`build_sandbox()` wires a `BaseSandbox` used by the subprocess tools (`run_shell`, `git_*`,
+filesystem). Two backends ship: `passthrough` (default, no isolation) and `restricted` (cwd
+containment, PATH allowlist, env hygiene, rlimits, network deny). Network deny is two layers:
+
+- **Soft** (default): token-scan blocks obvious egress binaries (`curl`/`wget`/`nc`/...). Does
+  NOT block interpreters (`python3 -c 'import urllib'`) or shell builtins (`bash /dev/tcp`).
+- **Hard** (`network_isolation: seccomp`): a seccomp filter denies `connect`/`connectat`/
+  `sendto`/`sendmsg` at the syscall layer, applied in the forked child (`preexec_fn`) so it
+  persists across `execve`. Blocks interpreters + builtins too. Linux-only + system package
+  `python3-seccomp` (`apt install python3-seccomp`, NOT a PyPI extra); gated by `_HAS_SECCOMP`
+  and degrades to soft with a one-time warning if unavailable. `server_deploy.yaml` and
+  `e2e_full.yaml` enable seccomp by default. Autonomous jobs require `restricted` (C3).
 
 ---
 
@@ -333,7 +364,7 @@ Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
 
 ## Extension Points
 
-koboi-agent provides 10 extension points, all following a consistent pattern: define a class implementing an ABC, register it with a registry.
+koboi-agent provides 11 extension points, all following a consistent pattern: define a class implementing an ABC, register it with a registry.
 
 | Extension | ABC | Registry | How to Register |
 |-----------|-----|----------|-----------------|
@@ -344,6 +375,7 @@ koboi-agent provides 10 extension points, all following a consistent pattern: de
 | RAG Chunkers | `BaseChunker` | `ComponentRegistry` | `@register_chunker()`, `rag.custom_modules` |
 | RAG Retrievers | `BaseRetriever` | `ComponentRegistry` | `@register_retriever()`, `rag.custom_modules` |
 | RAG Augmentation | `AugmentationStrategy` | `ComponentRegistry` | `@register_augmentation()`, `rag.custom_modules` |
+| Sandbox Backends | `BaseSandbox` | `ComponentRegistry` | `@register_sandbox()` |
 | Guardrails | `BaseGuardrail` | `GuardrailRegistry` | `GuardrailRegistry.register()`, plugin `koboi.guardrails` |
 | Eval Scorers | `BaseScorer` | `ScorerRegistry` | Plugin `koboi.scorers` |
 | Plugins | N/A | `entry_points` | Declare in `pyproject.toml` under `koboi.*` groups |
@@ -424,7 +456,7 @@ The RAG pipeline has three stages: chunking, retrieval, augmentation.
 Documents (files)
      |
      v
-Chunker (fixed / sentence / paragraph)
+Chunker (fixed / sentence / paragraph / semantic)
      |
      v
 Chunks --> Retriever (keyword / semantic / hybrid)
@@ -445,6 +477,7 @@ Chunks --> Retriever (keyword / semantic / hybrid)
 | `FixedSizeChunker` | Fixed-size windows with sentence-boundary snapping |
 | `SentenceChunker` | Split on sentence boundaries |
 | `ParagraphChunker` | Heading-aware paragraph merging |
+| `SemanticChunker` | Embedding-similarity clustering with sentence fallback |
 
 ### Retrievers
 
@@ -698,6 +731,7 @@ When activated, review the provided code for...
 | `PLAN` | Read-only + planning | Auto-approve safe | Planning |
 | `ACT` | All | Approval required | Execution |
 | `AUTO` | All | Configurable | Full autonomy |
+| `YOLO` | All | Bypass (hardcoded safety only) | Unattended batch (jobs reject yolo; opt-in only) |
 
 `ModeHook` enforces restrictions by setting `metadata.mode_blocked` on `PRE_TOOL_USE` events when a tool is not allowed in the current mode.
 
@@ -746,7 +780,7 @@ mcp:
 
 ### Built-in scorers
 
-`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost` -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
+`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost`, `RAGNoise`, `ContextEfficiency`, `ToolSelection`, `TokenEfficiency` -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
 
 ---
 

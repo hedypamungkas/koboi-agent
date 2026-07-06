@@ -44,7 +44,7 @@ koboi/              Main package (~185 .py files)
   notifications.py  Notification system
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + 19 specialized hooks
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + 18 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid), augmentation, registry
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
@@ -55,12 +55,12 @@ koboi/              Main package (~185 .py files)
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
-  tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (13)
-tests/              ~160 test files, asyncio_mode="auto", shared conftest.py with MockClient
+  tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (12)
+tests/              ~170 test files, asyncio_mode="auto", shared conftest.py with MockClient
 configs/            20 YAML agent configs
 examples/           32 numbered example scripts (01-32) + server_built_in/server_customize, with matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
-skills/             2 skill definitions: code_review, search_and_summarize
+skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)
 benchmarks/         BFCL benchmark data (DO NOT read benchmarks/results.json -- 183MB)
@@ -92,7 +92,7 @@ docs/               Architecture overview, TUI design docs
 - `build_discovery_prompt()` accepts `budget_chars` param; `SkillRegistry` defaults to 8000
 - `activate_skill()` preprocesses `` !`command` `` blocks (shell injection); set `run_shell=False` to disable
 - `SkillPersistenceHook` (priority 45) re-injects activated skills after POST_COMPACT
-- Skill scorers: `skill_trigger_accuracy`, `skill_routing_accuracy`, `skill_token_overhead` in eval/
+- Skill scorers: only `skill_trigger_accuracy` in eval/ (`skill_routing_accuracy` + `skill_token_overhead` were removed)
 - The `facade.py` `_build_*` functions are module-level, not class methods
 - TUI entry point: `koboi.tui.app:main` (setuptools script)
 - Tool functions can be sync or async -- sync runs in thread via `asyncio.to_thread`
