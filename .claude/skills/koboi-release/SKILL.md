@@ -4,16 +4,26 @@ description: >-
   This skill should be used when the user asks to "release koboi-agent", "bump version
   and publish", "create a new release", "push to PyPI", "tag and release", "ship version
   vX.Y.Z", or mentions PyPI publishing, GitHub releases, or GHCR container image publishing
-  for the koboi-agent project. Encodes the full release sequence (merge → bump → tag →
-  PyPI + GHCR auto-publish → verify) plus the gotchas learned from releases v0.3.0–v0.4.2.
+  for the koboi-agent project. Encodes the full release sequence (merge → pre-check → bump →
+  tag → PyPI + GHCR auto-publish → verify → GitHub release) plus the gotchas learned from
+  releases v0.3.0–v0.4.3.
 ---
 
 # koboi-release — Publish a new koboi-agent release
 
 ## Overview
-Execute the full release sequence for koboi-agent: ensure code is merged → bump version →
-tag → tag-push triggers auto-publish to PyPI (Trusted Publishing) + GHCR (Docker image) →
-verify. Both workflows are tag-triggered: `release.yml` (PyPI) and `docker.yml` (GHCR).
+Execute the full release sequence for koboi-agent: ensure code is merged → pre-check → bump
+version → tag → tag-push triggers auto-publish to PyPI (Trusted Publishing) + GHCR (Docker
+image) → verify → GitHub release. Both publish workflows are tag-triggered: `release.yml`
+(PyPI) and `docker.yml` (GHCR).
+
+Three scripts (all under `.claude/skills/koboi-release/scripts/`, invoked from the repo root):
+- **`pre-release-check.sh`** — the 6 CI gates locally (Gate 0 refreshes the `.venv` editable
+  install + dev toolchain; Gates 1-5 = ruff/format/mypy/bandit/pytest).
+- **`bump-and-tag.sh [--dry-run] X.Y.Z "msg"`** — mechanical bump + commit + push main + tag +
+  push tag (validates `X.Y.Z`, resumable, `--dry-run` rehearses without pushing).
+- **`verify-release.sh X.Y.Z`** — waits for *this tag's* PyPI+GHCR runs, watches them, verifies
+  PyPI version + GHCR `:vX.Y.Z`/`:latest` + a `/healthz` smoke.
 
 ## When to use
 Triggered by: "release koboi-agent", "bump version and publish", "create release vX.Y.Z",
@@ -26,35 +36,49 @@ changes since the last release. Check `git tag --sort=-creatordate | head` for t
 - **GHCR package** created + public (`ghcr.io/hedypamungkas/koboi-agent`).
 - **Branch protection** on `main`: "PR required" rule. Release version-bump commits bypass it
   (owner override — works, prints a warning).
+- A CI-faithful `.venv` (Python 3.10+) with the dev toolchain. If missing, the scripts will
+  tell you: `python3 -m venv .venv && .venv/bin/pip install -e ".[dev,tui,api]"`.
 
 ## Step 0 — Pre-release validation (BEFORE tagging)
-Run all CI gates locally with CI-faithful tooling:
 ```bash
-scripts/pre-release-check.sh
+.claude/skills/koboi-release/scripts/pre-release-check.sh
 ```
-All 5 must pass: ruff check, ruff format, mypy, bandit 1.9.4, pytest (cov ≥80, e2e self-skips).
-If any fail, FIX before releasing.
-
-**CRITICAL**: Use `.venv/bin/ruff` + `.venv/bin/bandit` (CI-matching versions). Do NOT use
-system ruff/bandit (1.8.6 → false green). mypy: `python -m mypy`. pytest: `.venv/bin/python -m pytest`.
+Gate 0 refreshes the editable install + dev toolchain (mirrors ci.yml), so mypy/bandit are
+present AND `test_version_matches_pyproject` sees the current version (no stale-install
+false-red). Gates 1-5: ruff check, ruff format, mypy (~=1.19.1), bandit (>=1.9), pytest
+(cov ≥ 80; e2e self-skips). If any gate fails, FIX before releasing.
 
 ## Step 1 — Merge PRs + sync main
-Ensure all code is on `main` (merge any open PRs first via `gh pr merge <n> --merge`):
+Ensure all intended code is on `main` (merge any open PRs first via `gh pr merge <n> --merge`):
 ```bash
 git checkout main && git pull origin main
 ```
 
 ## Step 2 — Bump version
-The mechanical bump + commit + push + tag:
+Rehearse first (no commit/tag/push — validates the version + bump mechanism):
 ```bash
-scripts/bump-and-tag.sh X.Y.Z "vX.Y.Z — <one-line summary>"
+.claude/skills/koboi-release/scripts/bump-and-tag.sh --dry-run X.Y.Z "vX.Y.Z — <summary>"
 ```
-This bumps `pyproject.toml`, commits `chore(release): bump version to X.Y.Z`, pushes main
-(may warn "Bypassed rule violations" — expected), tags `vX.Y.Z`, and pushes the tag.
+Then release (bumps `pyproject.toml`, commits `chore(release): bump version to X.Y.Z`, pushes
+main — owner-override bypass warning is expected — tags `vX.Y.Z`, pushes the tag):
+```bash
+.claude/skills/koboi-release/scripts/bump-and-tag.sh X.Y.Z "vX.Y.Z — <summary>"
+```
+The tag push is **irreversible** (triggers PyPI, which is immutable) — that's why `--dry-run`
+exists. The script refuses if the tag already exists, and resumes (skip-bump) if `main` was
+pushed but the tag wasn't.
 
-The tag push triggers BOTH `release.yml` (PyPI) and `docker.yml` (GHCR image) workflows.
+## Step 3 — Verify the publish (PyPI + GHCR + smoke)
+```bash
+.claude/skills/koboi-release/scripts/verify-release.sh X.Y.Z
+```
+This waits for *this tag's* `release.yml` and `docker.yml` runs (filtered by `--branch vX.Y.Z`,
+which kills the "latest-run" race that returned the previous release's run), watches both to
+green, retries PyPI propagation (~90s), pulls `:vX.Y.Z` + `:latest`, and smoke-tests
+`/healthz` with retries + cleanup. **Verification comes before the GitHub release on purpose**
+— don't advertise a version that hasn't reached PyPI.
 
-## Step 3 — GitHub release
+## Step 4 — GitHub release
 ```bash
 gh release create vX.Y.Z --title "vX.Y.Z — <title>" --notes "$(cat <<'EOF'
 <compact notes: reference PR number(s), bullet the key changes, keep to ~10 lines>
@@ -62,55 +86,38 @@ EOF
 )"
 ```
 
-## Step 4 — Watch + verify PyPI (release.yml)
-```bash
-gh run list --workflow=release.yml --limit 1   # get the run ID
-gh run watch <run-id> --exit-status
-```
-Verify (allow ~30s propagation after publish):
-```bash
-python -c "import urllib.request,json; print(json.load(urllib.request.urlopen('https://pypi.org/pypi/koboi-agent/X.Y.Z/json'))['info']['version'])"
-```
-
-## Step 5 — Watch + verify GHCR image (docker.yml)
-```bash
-gh run list --workflow=docker.yml --limit 1    # get the run ID
-gh run watch <run-id> --exit-status
-```
-Verify the image pulls:
-```bash
-docker pull ghcr.io/hedypamungkas/koboi-agent:vX.Y.Z
-```
-**Note**: the image tag is `vX.Y.Z` (WITH the `v` prefix, matching the git tag), NOT `X.Y.Z`
-(the PyPI version). Both `:vX.Y.Z` and `:latest` are pushed.
-
-## Step 6 — (Optional) Smoke-test the published image
-```bash
-docker run --rm -e KOBOI_API_KEYS=koboi_test -p 8080:8080 ghcr.io/hedypamungkas/koboi-agent:vX.Y.Z &
-sleep 5 && curl -sf http://localhost:8080/healthz && kill %1
-```
-
 ## Critical gotchas (inline — see references/gotchas.md for detail)
-- **Bandit version**: CI uses 1.9.4. System ruff/bandit (1.8.6) gives false green. Always `.venv/bin/`.
-- **release.yml test job**: installs `.[dev,tui,api]` — if `[api]` missing, 11 server test modules error on `import fastapi`.
-- **Docker default config**: `server_simple.yaml` (concrete model). NOT `e2e_full.yaml` (env-parameterized → validation crash on bare run).
-- **e2e self-skip**: `tests/e2e/conftest.py` skips when no live server. If removed, CI fails on e2e ConnectError.
-- **Tag naming**: GHCR image = `vX.Y.Z` (with v). PyPI version = `X.Y.Z` (no v). Don't confuse.
-- **PyPI propagation**: `/json` endpoint lags ~30s. Use `/<version>/json` or wait.
-- **Re-tagging**: if a workflow fails, fix root cause first, then delete + recreate tag (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z && git tag -a ... && git push origin vX.Y.Z`). PyPI versions are immutable (cannot re-publish).
+- **Interpreters**: scripts use `.venv/bin/python` or `python3` — never bare `python` (macOS
+  non-interactive bash has no `python`, only a zsh alias → `set -e` abort).
+- **Bandit**: now in the `dev` extra (>=1.9). Always `.venv/bin/bandit` — system bandit
+  (1.8.6) gives a false green.
+- **release.yml test job**: installs `.[dev,tui,api]` — if `[api]` missing, server test
+  modules error on `import fastapi`.
+- **Docker default config**: `server_simple.yaml` (concrete model). NOT `e2e_full.yaml`.
+- **e2e self-skip**: `tests/e2e/conftest.py` skips when no live server.
+- **Tag naming**: GHCR image = `vX.Y.Z` (with v) + `:latest`. PyPI version = `X.Y.Z` (no v).
+- **PyPI is immutable**: a published version CANNOT be re-published. To ship a fix, bump to
+  the next version.
 
 ## Error handling
-- **PyPI publish fails** ("invalid-publisher"): Trusted Publishing mismatch. Check PyPI → koboi-agent → Publishing (repo=`hedypamungkas/koboi-agent`, workflow=`release.yml`, environment=`pypi`).
-- **release.yml test fails**: fix the code, re-tag (delete + recreate). The test job runs full pytest (e2e self-skips).
-- **docker.yml build fails**: check Dockerfile (CMD format, config validity, COPY paths).
+- **A workflow job fails** (release.yml test, docker build, etc.): fix the root cause, then
+  `gh run rerun <run-id> --failed` (re-runs only the failed job). Do NOT re-tag — the tag
+  already exists and PyPI may already have the version.
+- **PyPI publish fails** ("invalid-publisher"): Trusted Publishing mismatch. Check PyPI →
+  koboi-agent → Publishing (repo=`hedypamungkas/koboi-agent`, workflow=`release.yml`,
+  environment=`pypi`). Then `gh run rerun`.
 - **PyPI version already exists**: cannot re-publish. Bump to the next version instead.
+- **Tag pushed but version was wrong** (rare, requires re-tag): only then delete + recreate
+  the tag — `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`, fix, re-bump to a NEW
+  version (PyPI immutability means you can't reuse vX.Y.Z on PyPI even if GHCR can be rebuilt).
 
 ## Additional resources
 
 ### Reference files
-- **`references/gotchas.md`** — Full gotcha catalog from v0.3.0–v0.4.2 (each release's lesson).
+- **`references/gotchas.md`** — Full gotcha catalog from v0.3.0–v0.4.3 (each release's lesson).
 - **`references/workflows.md`** — `release.yml` + `docker.yml` structure, triggers, debugging.
 
-### Scripts
-- **`scripts/pre-release-check.sh`** — Run all 5 CI gates locally (CI-faithful tooling).
-- **`scripts/bump-and-tag.sh`** — Mechanical bump + commit + push + tag + push (args: version + message).
+### Scripts (under `.claude/skills/koboi-release/scripts/`)
+- **`pre-release-check.sh`** — 6 CI gates locally (Gate 0 refreshes `.venv` + toolchain).
+- **`bump-and-tag.sh`** — bump + commit + push main + tag + push tag (`--dry-run` to rehearse).
+- **`verify-release.sh`** — wait/watch this tag's PyPI+GHCR runs + verify artifacts + smoke.
