@@ -345,7 +345,7 @@ class TestSeccompFallback:
     def test_requested_but_unavailable_yields_no_loader(self, tmp_path):
         with patch("koboi.sandbox.restricted._HAS_SECCOMP", False):
             sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
-        assert sb._seccomp_load is None  # graceful fallback, not a crash
+        assert sb._seccomp_preexec is None  # graceful fallback, not a crash
 
     def test_unavailable_keeps_soft_token_deny(self, tmp_path):
         with patch("koboi.sandbox.restricted._HAS_SECCOMP", False):
@@ -357,7 +357,7 @@ class TestSeccompFallback:
 
     def test_not_requested_engages_no_seccomp(self, tmp_path):
         sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny")
-        assert sb._seccomp_load is None
+        assert sb._seccomp_preexec is None
         assert sb.run("echo ok", shell=True).returncode == 0
 
 
@@ -408,7 +408,7 @@ class TestSeccompEgress:
 
     def test_seccomp_active_on_this_host(self, tmp_path):
         sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
-        assert sb._seccomp_load is not None  # sanity: the CI host has [sandbox-seccomp]
+        assert sb._seccomp_preexec is not None  # sanity: the CI host has python3-seccomp
 
     def test_interpreter_socket_blocked(self, tmp_path):
         sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
