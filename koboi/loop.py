@@ -113,6 +113,7 @@ class AgentCore:
         self.output_guardrails = list(output_guardrails) if output_guardrails else []
         if output_guardrail is not None and output_guardrail not in self.output_guardrails:
             self.output_guardrails.insert(0, output_guardrail)
+        self._last_output_guardrail: dict | None = None  # R2: warn outcome -> RunResult.metadata
         self.rate_limiter = rate_limiter
         self.audit_trail = audit_trail
         self.approval_handler = approval_handler
@@ -270,6 +271,11 @@ class AgentCore:
                 if action.lower() in {"block", "deny", "abort"}:
                     self._log(f"Output blocked by {type(grd).__name__}: {out_result.reason}")
                     raise AgentGuardrailError(f"output blocked by {type(grd).__name__}", direction="output")
+                self._last_output_guardrail = {
+                    "guardrail": type(grd).__name__,
+                    "reason": out_result.reason,
+                    "action": "warn",
+                }
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
 
@@ -288,6 +294,11 @@ class AgentCore:
             # H3: model-activated skills never execute `!`cmd`` blocks (supply-chain
             # RCE guard); only explicit user invocation (/skill) may run them.
             body = self.skills.activate(skill_name, run_shell=False)
+            # R3: record activation to telemetry so evals can assert (t.activatedSkill
+            # + skill_trigger_accuracy scorer). No-op when no TelemetryHook is wired.
+            tel_hook = self.hooks.find_hook(lambda h: hasattr(h, "telemetry"))
+            if tel_hook is not None:
+                tel_hook.telemetry.record_skill_activation(skill_name)  # type: ignore[attr-defined]  # TelemetryHook found via hasattr lambda; Hook base has no telemetry attr
             if body:
                 skill = self.skills.get(skill_name)
                 self.memory.add_context_message(
@@ -388,13 +399,30 @@ class AgentCore:
         )
 
     def _run_metadata(self, *, resumed: bool, last_step: int) -> dict:
-        return {
+        meta = {
             "model": self.client.model if hasattr(self.client, "model") else "",
             "session_id": getattr(self.memory, "session_id", None),
             "resumed": resumed,
             "turn_index": self._turn_index,
             "last_step": last_step,
         }
+        # R4: stamp retrieved chunks so evals can assert on retrieval (t.retrievedChunk)
+        # without a live LLM. last_results is overwritten each retrieval (not accumulated).
+        if self.augmentation is not None:
+            results = getattr(self.augmentation, "last_results", None) or []
+            if results:
+                meta["rag_results"] = [
+                    {
+                        "content": r.chunk.content,
+                        "score": r.score,
+                        "source": r.chunk.metadata.get("source", r.chunk.doc_id),
+                    }
+                    for r in results
+                ]
+        # R2: stamp output-guardrail warn outcome so evals can assert (t.warned).
+        if self._last_output_guardrail is not None:
+            meta["guardrail_outcomes"] = [{"direction": "output", **self._last_output_guardrail}]
+        return meta
 
     async def _repair_interrupted_turn(self) -> None:
         """Re-execute tool calls from the last assistant message whose
@@ -444,7 +472,9 @@ class AgentCore:
         is exhausted.
         """
         tool_calls_made: list[ToolCall] = []
+        pipeline_outcomes: list[dict] = []
         total_usage: TokenUsage | None = None
+        self._last_output_guardrail = None  # R2: reset per run
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
@@ -470,6 +500,7 @@ class AgentCore:
                     content=output,
                     iterations_used=i + 1,
                     tool_calls_made=tool_calls_made,
+                    pipeline_outcomes=pipeline_outcomes,
                     token_usage=total_usage,
                     success=True,
                     elapsed_seconds=_time.monotonic() - _start,
@@ -481,7 +512,15 @@ class AgentCore:
                 self._store_tool_response_in_memory(response)
                 for tc in response.tool_calls:
                     tool_calls_made.append(tc)
-                    await self._pipeline.execute_tool_call(tc, iteration=i)
+                    pr = await self._pipeline.execute_tool_call(tc, iteration=i)
+                    pipeline_outcomes.append(
+                        {
+                            "tool_call_id": tc.id,
+                            "tool_name": tc.name,
+                            "skipped": pr.skipped,
+                            "skip_reason": pr.skip_reason,
+                        }
+                    )
                 self._journal_step(i, status="tool_calls", response=response, tool_calls=response.tool_calls)
 
         self._journal_max_iter()

@@ -62,8 +62,11 @@ class EvalRunner:
         hook = self._create_hook()
         harness = self.harness_factory()
 
-        if hook and hasattr(harness, "hook_chain") and harness.hook_chain:
-            harness.hook_chain.add(hook)
+        # KoboiAgent exposes the hook chain as `core.hooks` (loop.py), not
+        # `hook_chain`; fall back so a real agent attaches LangfuseTracingHook.
+        chain = getattr(harness, "hook_chain", None) or getattr(getattr(harness, "core", None), "hooks", None)
+        if hook and chain:
+            chain.add(hook)
 
         # Auto-attach telemetry hook if not present
         self._ensure_telemetry_hook(harness)

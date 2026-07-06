@@ -19,12 +19,15 @@ class TestShippedEvalsGolden:
     async def test_evals_directory_outcomes(self):
         results = await run_tests(EVALS_DIR, threshold=0.6)
 
-        # 4 tests shipped: weather (2) + no_tools (1) + multi_turn (1).
-        assert len(results) == 4
+        # All mock-driven (R4 made RAG retrieval mock-safe via t.retrievedChunk).
+        # weather (2) + no_tools (1) + multi_turn (1) + guardrail_block (2)
+        # + mode_blocked (2) + rag_retrieval (2) + guardrail_output_warn (1)
+        # + skill_activation (1).
+        assert len(results) == 12
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 3
+        assert len(passed) == 11
         assert len(failed) == 1
         # The single failure is the intentional negative sample.
         assert failed[0].case_name.endswith("test_rejects_wrong_arguments")

@@ -21,11 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from koboi.skills.registry import SkillRegistry, build_discovery_prompt
 from koboi.types import SkillDefinition
-from koboi.eval.scorers.skill_scorer import (
-    SkillTriggerAccuracyScorer,
-    SkillRoutingAccuracyScorer,
-    SkillTokenOverheadScorer,
-)
+from koboi.eval.scorers.skill_scorer import SkillTriggerAccuracyScorer
 
 
 def demo_budget_control():
@@ -161,21 +157,8 @@ def demo_scorers():
     score = asyncio.run(scorer.score(case, "output", {"skills_activated": ["search"]}))
     print(f"  Trigger accuracy (wrong):     {score.value:.1f} — {score.reason}")
 
-    # Routing accuracy
-    routing_scorer = SkillRoutingAccuracyScorer()
-    score = asyncio.run(routing_scorer.score(case, "output", {"routed_skills": ["code-review", "bug-hunter"]}))
-    print(f"  Routing accuracy (top-1):     {score.value:.1f} — {score.reason}")
-
-    score = asyncio.run(routing_scorer.score(case, "output", {"routed_skills": ["bug-hunter", "code-review"]}))
-    print(f"  Routing accuracy (top-3):     {score.value:.1f} — {score.reason}")
-
-    # Token overhead
-    token_scorer = SkillTokenOverheadScorer(budget_chars=8000)
-    score = asyncio.run(token_scorer.score(case, "output", {"skill_description_chars": 4000}))
-    print(f"  Token overhead (under budget): {score.value:.1f} — {score.reason}")
-
-    score = asyncio.run(token_scorer.score(case, "output", {"skill_description_chars": 12000}))
-    print(f"  Token overhead (over budget):  {score.value:.1f} — {score.reason}")
+    # (Routing-accuracy and token-overhead demos removed in R3: those scorers were
+    # deleted -- no population path in the t eval surface.)
 
 
 def demo_persistence_hook():

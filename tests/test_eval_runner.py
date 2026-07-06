@@ -177,3 +177,27 @@ class TestEvalRunner:
     def test_extract_telemetry_none(self):
         harness = MagicMock(spec=[])
         assert EvalRunner._extract_telemetry(harness) is None
+
+    def test_hook_chain_fallback_resolves_to_core_hooks(self):
+        """R7 regression: a real KoboiAgent exposes the hook chain as ``core.hooks``
+        (loop.py), not ``hook_chain``. ``EvalRunner.run_case`` must fall back so
+        LangfuseTracingHook can attach (previously ``trace_id`` was always None)."""
+        from koboi.eval.t.mock import ScriptedClient
+        from koboi.facade import KoboiAgent
+        from koboi.hooks.chain import HookChain
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from koboi.tools.registry import ToolRegistry
+
+        core = AgentCore(
+            client=ScriptedClient([]),
+            memory=ConversationMemory(),
+            tools=ToolRegistry(),
+            max_iterations=1,
+        )
+        agent = KoboiAgent(core=core)
+        # Documents the rot the fix addresses: no hook_chain attr on the facade.
+        assert not hasattr(agent, "hook_chain")
+        # The exact fallback expression EvalRunner.run_case now uses (runner.py:65).
+        chain = getattr(agent, "hook_chain", None) or getattr(getattr(agent, "core", None), "hooks", None)
+        assert isinstance(chain, HookChain)

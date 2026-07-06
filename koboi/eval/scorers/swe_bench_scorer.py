@@ -6,13 +6,10 @@ structural similarity and file overlap comparison.
 
 from __future__ import annotations
 
-import logging
 import re
 
 from koboi.types import EvalCase, EvalScore
 from koboi.eval.scorers.base import BaseScorer
-
-_logger = logging.getLogger(__name__)
 
 
 class PatchGenerationScorer(BaseScorer):
@@ -121,45 +118,6 @@ class PatchGenerationScorer(BaseScorer):
             scores.append(line_ratio)
 
         return sum(scores) / len(scores) if scores else 0.0
-
-
-class DockerTestScorer(BaseScorer):
-    """Run SWE-bench test suite in Docker container.
-
-    Heavy-weight scorer: clones repo, applies patch, runs tests.
-    Only use when Docker is available and run_tests=True.
-
-    NOTE: This scorer requires Docker and network access.
-    It is designed for CI/CD environments, not local development.
-    """
-
-    def __init__(self, docker_image: str | None = None, timeout: int = 300):
-        self.docker_image = docker_image
-        self.timeout = timeout
-
-    async def score(self, case: EvalCase, output: str, context: dict) -> EvalScore:
-        import shutil
-
-        if not shutil.which("docker"):
-            return EvalScore("docker_test", 0.0, "Docker not available")
-
-        if not case.metadata.get("repo"):
-            return EvalScore("docker_test", 0.0, "No repo in metadata")
-
-        # Extract patch from output
-        generated_patch = PatchGenerationScorer._extract_patch(output)
-        if not generated_patch:
-            return EvalScore("docker_test", 0.0, "No patch found in output")
-
-        # This is a placeholder for actual Docker-based test execution
-        # In production, this would:
-        # 1. Pull the SWE-bench Docker image for the repo
-        # 2. Clone the repo at base_commit
-        # 3. Apply the generated patch
-        # 4. Run the test commands from metadata
-        # 5. Parse test results
-        _logger.info("DockerTestScorer: Docker test execution not yet implemented")
-        return EvalScore("docker_test", 0.0, "Docker test not yet implemented")
 
 
 def _extract_filenames(patch: str) -> set[str]:

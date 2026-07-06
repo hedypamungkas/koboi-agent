@@ -178,15 +178,24 @@ class TestRunner:
             # only the LLM transport. AgentCore.client is a public attribute
             # (loop.py), so this stays off the hot path and off private API.
             agent = self._build_live_agent(cfg)
-            if agent.core is not None:
-                original = agent.core.client
-                agent.core.client = scripted  # type: ignore[assignment]  # ScriptedClient is an LLMClient test-double injected for deterministic evals
-                # Release the now-unused real transport (httpx) so it does not leak.
-                if original is not None and original is not scripted:
-                    try:
-                        await original.close()
-                    except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
-                        pass
+            if agent.core is None:
+                # Orchestration configs build a KoboiAgent with _core=None
+                # (facade._build_orchestration); the client swap below is then
+                # impossible, so a mock eval would silently run against the live
+                # orchestrator (non-deterministic, may hang). Refuse loudly.
+                raise ValueError(
+                    "mock mode is unsupported for orchestration configs — "
+                    "agent.core is None, cannot swap client. Use live mode "
+                    "or a non-orchestration CONFIG."
+                )
+            original = agent.core.client
+            agent.core.client = scripted  # type: ignore[assignment]  # ScriptedClient is an LLMClient test-double injected for deterministic evals
+            # Release the now-unused real transport (httpx) so it does not leak.
+            if original is not None and original is not scripted:
+                try:
+                    await original.close()
+                except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
+                    pass
             return agent
 
         # Bare core: no tools, just the scripted loop (deterministic, no API key).
