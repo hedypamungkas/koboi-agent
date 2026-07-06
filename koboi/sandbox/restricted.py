@@ -309,16 +309,25 @@ class RestrictedProcessBackend(BaseSandbox):
             # Runs in the forked child (preexec_fn), before exec. Build + load
             # here so no parent-built context crosses the fork. NOTE: python3-seccomp
             # exposes actions as MODULE-LEVEL constants (seccomp.ALLOW / .ERRNO),
-            # NOT under a seccomp.Action namespace.
+            # NOT under a seccomp.Action namespace; and ERRNO must be CONSTRUCTED
+            # with an errno value: seccomp.ERRNO(errno.EPERM) -- the bare seccomp.ERRNO
+            # raises TypeError("an integer is required").
+            import errno as _errno
             import seccomp
 
             f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
-            for sc in egress:
-                try:
-                    f.add_rule(seccomp.ERRNO, sc)
-                except (RuntimeError, ValueError, TypeError):
-                    # Syscall name not recognized on this kernel/arch -- best effort.
-                    pass
+            try:
+                deny = seccomp.ERRNO(_errno.EPERM)
+            except (TypeError, AttributeError):
+                # Older/different bindings -- fall back to KILL (terminate on call).
+                deny = getattr(seccomp, "KILL", None)
+            if deny is not None:
+                for sc in egress:
+                    try:
+                        f.add_rule(deny, sc)
+                    except (RuntimeError, ValueError, TypeError):
+                        # Syscall name not recognized on this kernel/arch -- best effort.
+                        pass
             f.load()
 
         return _install

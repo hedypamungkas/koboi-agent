@@ -114,27 +114,48 @@ jobs:
           /tmp/v/bin/pip install --upgrade pip
           /tmp/v/bin/pip install -e ".[dev]"
 
-      - name: Diagnostic — introspect seccomp API + direct self-test
-        # Prints the python3-seccomp API surface and runs a direct filter self-test
-        # (build+load via preexec_fn in a child that tries to connect). If the
-        # egress tests below fail, this output shows exactly why. Non-fatal.
+      - name: Diagnostic — probe seccomp action API + real-listener self-test
+        # Definitively shows which add_rule(action, "connect") form works on this
+        # python3-seccomp build, then runs a self-test against a REAL listener (so
+        # "blocked" is meaningful, unlike a closed port). Non-fatal.
         continue-on-error: true
         run: |
           /tmp/v/bin/python - <<'PY'
-          import seccomp, subprocess, sys
-          print("seccomp module:", seccomp.__file__)
+          import errno, seccomp, socket, subprocess, sys, threading
           print("dir(seccomp):", [x for x in dir(seccomp) if not x.startswith('_')])
-          # Build a filter that denies connect (actions are MODULE-LEVEL: seccomp.ALLOW/.ERRNO).
+          print("=== action API probes (add_rule(action, 'connect')) ===")
+          for name, factory in [
+              ("seccomp.ERRNO(errno.EPERM)", lambda: seccomp.ERRNO(errno.EPERM)),
+              ("seccomp.ERRNO (bare)",       lambda: seccomp.ERRNO),
+              ("seccomp.KILL",               lambda: seccomp.KILL),
+          ]:
+              try:
+                  act = factory()
+                  f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
+                  f.add_rule(act, "connect")
+                  print(f"  {name}: OK  (act={act!r})")
+              except Exception as e:
+                  print(f"  {name}: {type(e).__name__}: {e}")
+          # Self-test against a REAL listener using ERRNO(errno.EPERM).
+          received, port, ready = [], [0], threading.Event()
+          def _srv():
+              s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+              s.bind(("127.0.0.1", 0)); s.listen(1); port[0] = s.getsockname()[1]; ready.set()
+              s.settimeout(8)
+              try:
+                  c, _ = s.accept(); received.append(c.recv(64)); c.close()
+              except socket.timeout:
+                  received.append(b"<timeout>")
+              s.close()
+          threading.Thread(target=_srv, daemon=True).start(); ready.wait()
           f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
-          try:
-              f.add_rule(seccomp.ERRNO, "connect")
-              print("add_rule(seccomp.ERRNO, connect): OK")
-          except Exception as e:
-              print("add_rule failed:", type(e).__name__, e)
-          code = "import socket; socket.create_connection(('127.0.0.1',1),timeout=2)"
-          r = subprocess.run([sys.executable,"-c",code], preexec_fn=f.load,
+          f.add_rule(seccomp.ERRNO(errno.EPERM), "connect")
+          code = f"import socket; c=socket.create_connection(('127.0.0.1',{port[0]}),timeout=3); c.send(b'X'); c.close()"
+          r = subprocess.run([sys.executable, "-c", code], preexec_fn=f.load,
                              capture_output=True, text=True, timeout=10)
-          print("direct self-test child rc:", r.returncode, "(nonzero => connect BLOCKED)")
+          print("=== ERRNO(errno.EPERM) self-test (real listener) ===")
+          print("  child rc:", r.returncode, "| received:", received[0] if received else b"?")
+          print("  -> egress", "BLOCKED" if not received or b"X" not in received[0] else "ALLOWED")
           print("  stderr:", (r.stderr or "").strip()[:200])
           PY
 
