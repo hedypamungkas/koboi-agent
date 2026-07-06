@@ -124,21 +124,19 @@ jobs:
           import seccomp, subprocess, sys
           print("seccomp module:", seccomp.__file__)
           print("dir(seccomp):", [x for x in dir(seccomp) if not x.startswith('_')])
-          print("has Action:", hasattr(seccomp, "Action"))
-          if hasattr(seccomp, "Action"):
-              print("Action attrs:", [x for x in dir(seccomp.Action) if not x.startswith('_')])
-          # Build a filter that denies connect, load via preexec_fn in a child.
-          f = seccomp.SyscallFilter(defaction=seccomp.Action.ALLOW)
+          # Build a filter that denies connect (actions are MODULE-LEVEL: seccomp.ALLOW/.ERRNO).
+          f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
           try:
-              f.add_rule(seccomp.Action.ERRNO, "connect")
-              print("add_rule(Action.ERRNO, connect): OK")
+              f.add_rule(seccomp.ERRNO, "connect")
+              print("add_rule(seccomp.ERRNO, connect): OK")
           except Exception as e:
               print("add_rule failed:", type(e).__name__, e)
           code = "import socket; socket.create_connection(('127.0.0.1',1),timeout=2)"
           r = subprocess.run([sys.executable,"-c",code], preexec_fn=f.load,
                              capture_output=True, text=True, timeout=10)
           print("direct self-test child rc:", r.returncode, "(nonzero => connect BLOCKED)")
-          print("  stderr:", (r.stderr or "").strip()[:160])
+          print("  stderr:", (r.stderr or "").strip()[:200])
+          PY
 
       - name: Run seccomp egress + fallback tests
         run: |

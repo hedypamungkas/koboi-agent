@@ -306,15 +306,16 @@ class RestrictedProcessBackend(BaseSandbox):
         egress = _SECCOMP_EGRESS_SYSCALLS
 
         def _install() -> None:
-            # Runs in the forked child (preexec_fn), before exec. Resolve the
-            # action enum from the child's seccomp module + build + load here so
-            # there is no parent-built context crossing the fork.
+            # Runs in the forked child (preexec_fn), before exec. Build + load
+            # here so no parent-built context crosses the fork. NOTE: python3-seccomp
+            # exposes actions as MODULE-LEVEL constants (seccomp.ALLOW / .ERRNO),
+            # NOT under a seccomp.Action namespace.
             import seccomp
 
-            f = seccomp.SyscallFilter(defaction=seccomp.Action.ALLOW)
+            f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
             for sc in egress:
                 try:
-                    f.add_rule(seccomp.Action.ERRNO, sc)
+                    f.add_rule(seccomp.ERRNO, sc)
                 except (RuntimeError, ValueError, TypeError):
                     # Syscall name not recognized on this kernel/arch -- best effort.
                     pass
