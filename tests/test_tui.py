@@ -7,10 +7,9 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 import yaml
-from click.testing import CliRunner
 from rich.console import Console
 
-from koboi.tui.app import main, _build_welcome_panel
+from koboi.tui.app import _build_welcome_panel
 from koboi.tui.loop import (
     interactive_loop,
     _stream_response,
@@ -529,104 +528,6 @@ class TestInteractiveLoop:
 
         # Should have called run once
         mock_agent.run.assert_called_once_with("hello")
-
-
-# ============================================================================
-# Tests for CLI commands (app.py)
-# ============================================================================
-
-
-class TestRunCommand:
-    """Tests for 'run' CLI command."""
-
-    def test_run_missing_config_file(self):
-        runner = CliRunner()
-        result = runner.invoke(main, ["run", "nonexistent_config.yaml", "-m", "hi"])
-        assert result.exit_code != 0
-
-    @patch("koboi.facade.KoboiAgent.from_config")
-    def test_run_single_shot_success(self, mock_from_config):
-        mock_from_config.return_value = _make_mock_agent()
-        config = _make_temp_config()
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["run", config, "-m", "Hi"])
-        assert result.exit_code == 0
-        assert "Hello from agent!" in result.output
-
-    @patch("koboi.facade.KoboiAgent.from_config")
-    def test_run_from_config_error(self, mock_from_config):
-        mock_from_config.side_effect = Exception("API key not configured")
-        config = _make_temp_config()
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["run", config, "-m", "Hi"])
-        assert result.exit_code == 1
-        assert "API key not configured" in result.output
-
-    @patch("koboi.facade.KoboiAgent.from_config")
-    def test_run_agent_error(self, mock_from_config):
-        agent = _make_mock_agent()
-        agent.run.side_effect = RuntimeError("LLM timeout")
-        mock_from_config.return_value = agent
-        config = _make_temp_config()
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["run", config, "-m", "Hi"])
-        assert result.exit_code == 1
-        assert "LLM timeout" in result.output
-
-
-class TestChatCommand:
-    """Tests for 'chat' CLI command."""
-
-    @patch("koboi.tui.loop.interactive_loop")
-    @patch("koboi.facade.KoboiAgent.from_config")
-    def test_chat_starts_successfully(self, mock_from_config, mock_loop):
-        mock_from_config.return_value = _make_mock_agent()
-        config = _make_temp_config()
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["chat", "--no-tui", config])
-        assert result.exit_code == 0
-        assert mock_loop.called
-
-    @patch("koboi.facade.KoboiAgent.from_config")
-    def test_chat_from_config_error(self, mock_from_config):
-        mock_from_config.side_effect = Exception("API key missing")
-        config = _make_temp_config()
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["chat", config])
-        assert result.exit_code == 1
-        assert "API key missing" in result.output
-
-
-class TestEvalCommand:
-    """Tests for 'eval' CLI command."""
-
-    def test_eval_no_cases_file(self):
-        config = _make_temp_config()
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["eval", config])
-        assert "No eval cases" in result.output
-
-
-class TestValidateCommand:
-    """Tests for 'validate' CLI command."""
-
-    def test_validate_valid_config(self):
-        config = _make_temp_config()
-
-        runner = CliRunner()
-        result = runner.invoke(main, ["validate", config])
-        assert "valid" in result.output.lower() or result.exit_code == 0
-
-    def test_validate_missing_config_file(self):
-        runner = CliRunner()
-        result = runner.invoke(main, ["validate", "nonexistent.yaml"])
-        assert result.exit_code != 0
 
 
 class TestBuildWelcomePanel:

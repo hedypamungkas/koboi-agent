@@ -57,7 +57,7 @@ t/context.py         TestContext (the `t`) -- send/calledTool/check/judge (recor
 t/mock.py            ScriptedClient + scripted_response/scripted_tool_call builders
 t/loader.py          PythonTestLoader -- discover **/*.eval.py, import, collect test_*(t)
 t/runner.py          TestRunner.run_tests -> list[EvalResult] (drives harness directly)
-t/cli.py             `koboi eval-test` click command (--strict exit code)
+                     (`koboi eval-test` itself lives in cli_commands.cmd_eval_test -- no click)
 ```
 ```
 # evals/weather.eval.py

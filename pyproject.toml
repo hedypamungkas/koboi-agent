@@ -34,6 +34,9 @@ Documentation = "https://github.com/koboi-ai/koboi-agent#readme"
 tracing = ["langfuse>=2.0,<3.0"]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 tui = ["rich>=13.0", "textual>=0.40", "click>=8.0", "prompt_toolkit>=3.0", "rapidfuzz>=3.0"]
+# NOTE: HARD network isolation for the restricted sandbox uses seccomp, which is a
+# SYSTEM package (Debian/Ubuntu: `apt install python3-seccomp`), NOT a PyPI dep --
+# the libseccomp Python bindings are not published on PyPI. See koboi/sandbox/CLAUDE.md.
 eval-ragas = ["ragas>=0.2", "datasets>=2.14"]
 eval-gaia = ["datasets>=2.14", "pandas>=2.0"]
 eval-swe-bench = ["datasets>=2.14", "pandas>=2.0"]

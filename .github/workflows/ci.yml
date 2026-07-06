@@ -89,3 +89,34 @@ jobs:
       - name: Static security analysis
         run: |
           bandit -r koboi/ -c pyproject.toml
+
+  seccomp:
+    # Validates HARD network isolation (sandbox.network_isolation: seccomp). The
+    # libseccomp Python bindings are a SYSTEM package (not on PyPI), so use the
+    # runner's system python3 + apt `python3-seccomp`. A venv with
+    # --system-site-packages inherits the bindings; its interpreter ABI-matches
+    # the system .so (both are the runner's python3).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system python3-seccomp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-seccomp python3-venv
+
+      - name: Verify seccomp importable (guard against a false-green skip)
+        run: python3 -c "import seccomp; print('seccomp module:', seccomp.__file__)"
+
+      - name: Install koboi [dev] in a venv that inherits system site-packages
+        run: |
+          python3 -m venv --system-site-packages /tmp/v
+          /tmp/v/bin/pip install --upgrade pip
+          /tmp/v/bin/pip install -e ".[dev]"
+
+      - name: Run seccomp egress + fallback tests
+        # These prove the HARD filter blocks python3 socket / bash /dev/tcp /
+        # absolute-path interpreter / real outbound TCP at the syscall layer.
+        run: |
+          /tmp/v/bin/python -m pytest tests/test_sandbox.py::TestSeccompEgress tests/test_sandbox.py::TestSeccompFallback -v
+

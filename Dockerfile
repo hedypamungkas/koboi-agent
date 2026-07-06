@@ -1,6 +1,15 @@
 FROM python:3.12-slim AS base
 
 # System deps for sandbox (restricted backend uses subprocess + rlimits).
+#
+# NOTE on HARD network isolation (sandbox.network_isolation: seccomp): the
+# libseccomp Python bindings are NOT on PyPI and apt's `python3-seccomp` targets
+# debian's python3 (3.11), not this image's `/usr/local/bin/python3.12`, so
+# `import seccomp` is not wired up here by default -- the sandbox gracefully
+# falls back to SOFT network deny (one-time warning) in this image. To enable
+# HARD isolation, either build the bindings from libseccomp source for this
+# Python, or derive FROM a debian/ubuntu base where the runtime python3 matches
+# `apt install python3-seccomp`. Tracked as a follow-up.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         git \

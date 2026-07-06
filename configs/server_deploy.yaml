@@ -25,6 +25,7 @@ sandbox:
   workdir: /data/workspace              # Docker volume mount
   workdir_strategy: per_session         # Each session gets its own subdir
   network: deny                         # No outbound network from tools
+  network_isolation: seccomp            # HARD egress deny via seccomp (needs python3-seccomp system package + Linux; falls back to soft otherwise)
   timeout: 30
   max_output: 20000
 

@@ -13,8 +13,8 @@ class TestMainModule:
 
         assert koboi.__main__ is not None
 
-    @patch("koboi.tui.app.main")
+    @patch("koboi.cli.main")
     def test_main_entry_point(self, mock_main):
-        """Running as `python -m koboi` should call tui.app.main()."""
+        """Running as `python -m koboi` should call koboi.cli.main()."""
         runpy.run_module("koboi", run_name="__main__", alter_sys=True)
         mock_main.assert_called_once()

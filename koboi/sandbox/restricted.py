@@ -8,9 +8,13 @@ Enforces (best-effort, no root required):
   - rlimits (RLIMIT_CPU/AS/FSIZE/NOFILE) applied in the *child* via preexec_fn;
   - wall-clock timeout with full process-group kill (``start_new_session``).
 
-This is a SOFT boundary: it raises the bar for accidental exfiltration but
-cannot stop a determined attacker (e.g. ``python3 -c 'import urllib'``). For
-truly untrusted code use the Docker backend (P0c).
+This is a SOFT boundary by default: it raises the bar for accidental exfiltration
+but cannot stop a determined attacker (e.g. ``python3 -c 'import urllib'`` or
+``bash -c 'echo > /dev/tcp/...'``). For HARD network isolation on Linux set
+``network_isolation: seccomp`` (requires the ``python3-seccomp`` system package) -- the
+seccomp filter blocks egress at the syscall layer so interpreters and shell
+builtins cannot connect out. For full OS-level isolation (filesystem too), use
+the Docker backend (P0c).
 
 Rlimit correctness: ``setrlimit`` affects the calling process, so we apply it
 in ``preexec_fn`` (runs in the child between fork and exec), NOT in the worker
@@ -24,6 +28,7 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 
 from koboi.sandbox.base import BaseSandbox, SandboxResult
 from koboi.tools.registry import truncate_text
@@ -85,27 +90,66 @@ except ImportError:  # Windows
 
 _POSIX = hasattr(os, "setsid")
 
+# seccomp (HARD network isolation): Linux-only + libseccomp binding via the
+# ``seccomp`` module (provided by the ``python3-seccomp`` system package). When active it blocks
+# egress at the syscall layer, so interpreters (python3 urllib) and shell
+# builtins (bash /dev/tcp) -- which evade the token-scan soft layer -- cannot
+# connect out. Filter is applied in the child via preexec_fn and persists across
+# execve, so the exec'd binary inherits the deny list.
+try:  # pragma: no cover - platform/dep guard
+    import seccomp as _seccomp  # type: ignore[import-not-found]
 
-def _make_preexec_fn(rlimits: dict):
-    """Return a preexec_fn that applies rlimits in the child only.
+    _HAS_SECCOMP_LIB = True
+except ImportError:
+    _seccomp = None  # type: ignore[assignment]
+    _HAS_SECCOMP_LIB = False
+_HAS_SECCOMP = _HAS_SECCOMP_LIB and sys.platform == "linux"
 
-    Running ``setrlimit`` in preexec_fn (between fork and exec) confines the
-    limits to the subprocess; the host agent keeps its own limits.
+# Egress syscalls blocked under network_isolation="seccomp". Denying connect /
+# connectat / sendto / sendmsg blocks TCP/UDP egress. v1 does NOT arg-filter by
+# socket family, so AF_UNIX connect() is blocked too (over-blocking is safe for
+# network=deny; add family arg-filtering later if local unix-socket IPC must work).
+# socket() creation itself is allowed (harmless without connect). The action enum
+# (seccomp.Action.ALLOW / .ERRNO) is resolved inside the child at install time so
+# we use the canonical names of whatever python3-seccomp version is present (the
+# libseccomp bindings ship as a system package, not on PyPI).
+_SECCOMP_EGRESS_SYSCALLS: tuple[str, ...] = ("connect", "connectat", "sendto", "sendmsg")
+
+# One-time warning when seccomp is requested but unavailable (non-Linux / system
+# package python3-seccomp not installed) -- degrade to soft deny rather than crash.
+_seccomp_unavailable_warned = False
+
+
+def _make_preexec_fn(rlimits: dict, seccomp_preexec=None):
+    """Return a preexec_fn that applies rlimits + seccomp filter in the child only.
+
+    Running ``setrlimit`` / ``seccomp_preexec`` in preexec_fn (between fork and
+    exec) confines the limits + filter to the subprocess; the host agent keeps
+    its own. ``seccomp_preexec`` is a no-arg callable that builds AND loads the
+    filter entirely in the child (canonical seccomp+subprocess pattern: no
+    parent-built filter context crosses the fork, and the filter persists across
+    the subsequent execve). Returns ``None`` when there is nothing to apply
+    (keeps Popen kwargs clean).
     """
-    if not _HAS_RLIMIT or not rlimits:
+    rlimits = rlimits or {}
+    has_rlimits = _HAS_RLIMIT and rlimits
+    if not has_rlimits and seccomp_preexec is None:
         return None
 
     def _apply() -> None:
-        if rlimits.get("cpu"):
-            _resource.setrlimit(_resource.RLIMIT_CPU, (rlimits["cpu"], rlimits["cpu"]))
-        if rlimits.get("as_mb"):
-            bytes_ = int(rlimits["as_mb"]) * 1024 * 1024
-            _resource.setrlimit(_resource.RLIMIT_AS, (bytes_, bytes_))
-        if rlimits.get("fsize_mb"):
-            bytes_ = int(rlimits["fsize_mb"]) * 1024 * 1024
-            _resource.setrlimit(_resource.RLIMIT_FSIZE, (bytes_, bytes_))
-        if rlimits.get("nofile"):
-            _resource.setrlimit(_resource.RLIMIT_NOFILE, (rlimits["nofile"], rlimits["nofile"]))
+        if has_rlimits:
+            if rlimits.get("cpu"):
+                _resource.setrlimit(_resource.RLIMIT_CPU, (rlimits["cpu"], rlimits["cpu"]))
+            if rlimits.get("as_mb"):
+                bytes_ = int(rlimits["as_mb"]) * 1024 * 1024
+                _resource.setrlimit(_resource.RLIMIT_AS, (bytes_, bytes_))
+            if rlimits.get("fsize_mb"):
+                bytes_ = int(rlimits["fsize_mb"]) * 1024 * 1024
+                _resource.setrlimit(_resource.RLIMIT_FSIZE, (bytes_, bytes_))
+            if rlimits.get("nofile"):
+                _resource.setrlimit(_resource.RLIMIT_NOFILE, (rlimits["nofile"], rlimits["nofile"]))
+        if seccomp_preexec is not None:
+            seccomp_preexec()
 
     return _apply
 
@@ -121,6 +165,7 @@ class RestrictedProcessBackend(BaseSandbox):
         workdir: str = ".",
         network: str = "deny",
         network_binaries: list[str] | None = None,
+        network_isolation: str | None = None,
         safe_path: list[str] | None = None,
         env_passthrough: bool = False,
         rlimits: dict | None = None,
@@ -129,14 +174,23 @@ class RestrictedProcessBackend(BaseSandbox):
     ):
         self._workdir = os.path.realpath(workdir)
         self._network = network
-        # M10: one-time warning that restricted network denial is advisory-only.
+        self._network_isolation = network_isolation
+        # HARD network isolation via seccomp when requested + available. Returns a
+        # preexec_fn callable that builds+loads the filter in the forked child, or
+        # None (with a warning) if requested but unavailable.
+        self._seccomp_preexec = self._build_seccomp_preexec()
+        # M10: one-time SOFT-boundary warning -- only when hard isolation is NOT
+        # active (seccomp off/unavailable). When seccomp is active the network
+        # boundary is HARD for the blocked syscall set, so no soft caveat applies.
         global _network_soft_boundary_warned
-        if network == "deny" and not _network_soft_boundary_warned:
+        if network == "deny" and self._seccomp_preexec is None and not _network_soft_boundary_warned:
             _network_soft_boundary_warned = True
             _logger.warning(
                 "sandbox.backend='restricted' network=deny is a SOFT boundary -- it "
                 "blocks obvious egress tools but not interpreters (e.g. python3 -c "
-                "'import urllib'). Use the Docker backend (P0c) for true network isolation."
+                "'import urllib'). For HARD network isolation set "
+                "sandbox.network_isolation: seccomp on a Linux host with the "
+                "python3-seccomp system package, or use the Docker backend (P0c)."
             )
         self._network_binaries = set(network_binaries) if network_binaries else set(DEFAULT_NETWORK_BINARIES)
         self._safe_path = list(safe_path) if safe_path else list(DEFAULT_SAFE_PATH_DIRS)
@@ -220,6 +274,64 @@ class RestrictedProcessBackend(BaseSandbox):
                 return base
         return None
 
+    def _build_seccomp_preexec(self):
+        """Return a preexec_fn callable that builds+loads the egress-deny filter in
+        the forked child, or None when seccomp is off/unavailable.
+
+        Activated only when ``network == "deny"`` AND
+        ``network_isolation == "seccomp"`` AND seccomp is available (Linux host
+        with the ``python3-seccomp`` system package). When requested but unavailable,
+        logs a one-time warning and returns None so the backend degrades to the
+        soft token-deny rather than crashing.
+
+        The filter is built AND loaded entirely inside the child (between fork and
+        exec) -- the canonical seccomp+subprocess pattern: no parent-built filter
+        context crosses the fork, and the filter persists across the subsequent
+        execve so the exec'd binary (python3/bash/curl) inherits the deny list.
+        Blocks ``connect``/``connectat``/``sendto``/``sendmsg`` (TCP/UDP egress).
+        """
+        if not (self._network == "deny" and self._network_isolation == "seccomp"):
+            return None
+        if not _HAS_SECCOMP:
+            global _seccomp_unavailable_warned
+            if not _seccomp_unavailable_warned:
+                _seccomp_unavailable_warned = True
+                _logger.warning(
+                    "sandbox.network_isolation='seccomp' requested but unavailable "
+                    "(non-Linux host or python3-seccomp system package not installed); "
+                    "falling back to SOFT network deny. Install on a Linux host with: "
+                    "apt install python3-seccomp (Debian/Ubuntu)."
+                )
+            return None
+        egress = _SECCOMP_EGRESS_SYSCALLS
+
+        def _install() -> None:
+            # Runs in the forked child (preexec_fn), before exec. Build + load
+            # here so no parent-built context crosses the fork. NOTE: python3-seccomp
+            # exposes actions as MODULE-LEVEL constants (seccomp.ALLOW / .ERRNO),
+            # NOT under a seccomp.Action namespace; and ERRNO must be CONSTRUCTED
+            # with an errno value: seccomp.ERRNO(errno.EPERM) -- the bare seccomp.ERRNO
+            # raises TypeError("an integer is required").
+            import errno as _errno
+            import seccomp
+
+            f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
+            try:
+                deny = seccomp.ERRNO(_errno.EPERM)
+            except (TypeError, AttributeError):
+                # Older/different bindings -- fall back to KILL (terminate on call).
+                deny = getattr(seccomp, "KILL", None)
+            if deny is not None:
+                for sc in egress:
+                    try:
+                        f.add_rule(deny, sc)
+                    except (RuntimeError, ValueError, TypeError):
+                        # Syscall name not recognized on this kernel/arch -- best effort.
+                        pass
+            f.load()
+
+        return _install
+
     def _run_subprocess(self, command, cwd, env, timeout, shell) -> SandboxResult:
         popen_kwargs: dict = {
             "shell": shell,
@@ -233,7 +345,7 @@ class RestrictedProcessBackend(BaseSandbox):
         # can kill piped children (e.g. `sleep 30 | cat`). POSIX only.
         if _POSIX:
             popen_kwargs["start_new_session"] = True
-        preexec = _make_preexec_fn(self._rlimits)
+        preexec = _make_preexec_fn(self._rlimits, self._seccomp_preexec)
         if preexec is not None:
             popen_kwargs["preexec_fn"] = preexec
 
