@@ -329,6 +329,34 @@ class TestConfigSurface:
         assert cfg.sandbox["backend"] == "restricted"
         assert cfg.sandbox["network"] == "deny"
 
+    def test_network_isolation_seccomp_resolves(self):
+        """The network_isolation knob flows YAML -> build_sandbox -> backend (_resolve_kwargs)."""
+        from koboi.config import Config
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "t"},
+                "llm": {"model": "m"},
+                "sandbox": {"backend": "restricted", "network": "deny", "network_isolation": "seccomp"},
+            },
+            validate=True,
+        )
+        sb = build_sandbox(cfg.sandbox)
+        assert isinstance(sb, RestrictedProcessBackend)
+        assert sb._network_isolation == "seccomp"
+
+    def test_server_deploy_yaml_sandbox_resolves(self):
+        """Shipped production config parses and resolves to a restricted backend
+        with HARD (seccomp) network isolation. Guards the shipped YAML against
+        typos / schema rejection of the new field in the fast unit suite."""
+        from koboi.config import Config
+
+        cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs", "server_deploy.yaml")
+        cfg = Config.from_yaml(cfg_path)
+        sb = build_sandbox(cfg.sandbox)
+        assert isinstance(sb, RestrictedProcessBackend)
+        assert sb._network_isolation == "seccomp"
+
 
 # ---------------------------------------------------------------------------
 # seccomp hard network isolation (network_isolation: seccomp)
