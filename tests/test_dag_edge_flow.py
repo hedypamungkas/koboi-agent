@@ -75,3 +75,37 @@ async def test_edge_flow_linear_chain(mock_client):
     assert inputs["a"] == "Q"
     assert "a-output" in inputs["b"]
     assert "b-output" in inputs["c"]
+
+
+class _FixedAgent:
+    """Returns a fixed answer (or empty) and records its input."""
+
+    def __init__(self, name: str, inputs: dict, answer: str):
+        self.name = name
+        self._inputs = inputs
+        self._answer = answer
+        self.memory = SimpleNamespace(get_messages=lambda: [])
+
+    async def run(self, query):
+        self._inputs[self.name] = query
+        return SimpleNamespace(content=self._answer)
+
+
+async def test_edge_flow_empty_upstream_does_not_crash_downstream(mock_client):
+    """N3: a node returning empty output -> downstream still runs (empty context), no crash."""
+    names = ["A", "B"]
+    deps = {"B": ["A"]}
+    inputs: dict = {}
+    agents_map = {"A": _FixedAgent("A", inputs, ""), "B": _FixedAgent("B", inputs, "b-out")}
+    orch = Orchestrator(
+        client=mock_client(responses=[make_mock_response("synthesis")]),
+        router=_AllRouter(names),
+        agents_map=agents_map,
+        dag_scheduler=DagScheduler(deps=deps),
+        default_mode="dag",
+    )
+
+    await orch.run("Q", mode="dag")  # must not raise
+
+    assert set(inputs) == {"A", "B"}  # both ran despite A's empty output
+    assert "Q" in inputs["B"]  # B's input still carries the original query
