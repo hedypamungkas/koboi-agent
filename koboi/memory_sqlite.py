@@ -14,6 +14,46 @@ if TYPE_CHECKING:
     from koboi.logger import AgentLogger
 
 
+def ensure_steps_table(conn: sqlite3.Connection) -> None:
+    """Create the ``steps`` table (P2-A step journal) with graph-durability columns.
+
+    Idempotent: ``CREATE TABLE IF NOT EXISTS`` defines the columns for new DBs;
+    guarded ``ALTER TABLE ADD COLUMN`` adds ``graph_run_id``/``node_id`` to DBs whose
+    ``steps`` table predates #3. Shared by :class:`SQLiteMemory` (per-iteration rows)
+    and :class:`DagScheduler` (graph-plan rows) so graph-level durability data lands
+    in one queryable place (consumed by the Phase-3 graph-cursor resume).
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            turn_index INTEGER NOT NULL,
+            step_index INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            llm_prompt_tokens INTEGER,
+            llm_completion_tokens INTEGER,
+            tool_call_count INTEGER DEFAULT 0,
+            tool_calls_json TEXT,
+            is_terminal INTEGER DEFAULT 0,
+            error TEXT,
+            graph_run_id TEXT,
+            node_id TEXT,
+            created_at REAL DEFAULT (julianday('now'))
+        )
+    """)
+    # Additive columns for pre-existing 'steps' tables (pre-#3); no-op if present.
+    for _stmt in (
+        "ALTER TABLE steps ADD COLUMN graph_run_id TEXT",
+        "ALTER TABLE steps ADD COLUMN node_id TEXT",
+    ):
+        try:
+            conn.execute(_stmt)
+        except sqlite3.OperationalError:
+            pass
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_session ON steps(session_id, turn_index, step_index)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_graph ON steps(graph_run_id, node_id)")
+
+
 class SQLiteMemory(ConversationMemory):
     """ConversationMemory backed by SQLite. Persists sessions across restarts.
 
@@ -78,26 +118,9 @@ class SQLiteMemory(ConversationMemory):
                 tags TEXT
             )
         """)
-        # P2-A: step journal. One row per loop iteration (1 LLM call + its tool
-        # calls). Additive -- CREATE TABLE IF NOT EXISTS is safe on existing DBs
-        # (no migration code, same convention as messages/sessions above).
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS steps (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                turn_index INTEGER NOT NULL,
-                step_index INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                llm_prompt_tokens INTEGER,
-                llm_completion_tokens INTEGER,
-                tool_call_count INTEGER DEFAULT 0,
-                tool_calls_json TEXT,
-                is_terminal INTEGER DEFAULT 0,
-                error TEXT,
-                created_at REAL DEFAULT (julianday('now'))
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_session ON steps(session_id, turn_index, step_index)")
+        # P2-A: step journal (one row per loop iteration). #3 adds graph-durability
+        # columns (graph_run_id, node_id); shared with DagScheduler graph-plan writes.
+        ensure_steps_table(conn)
         conn.commit()
 
     def _load_from_db(self) -> None:

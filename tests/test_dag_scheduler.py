@@ -83,3 +83,46 @@ def test_cycle_is_rejected_not_looped():
     waves = sched.waves(["a", "b"])
     flat = {n for wave in waves for n in wave}
     assert flat == {"a", "b"}
+
+
+def test_graph_run_id_minted_per_call():
+    sched = DagScheduler(deps={})
+    assert sched.graph_run_id is None  # before any waves() call
+    sched.waves(["a"])
+    g1 = sched.graph_run_id
+    sched.waves(["a"])
+    g2 = sched.graph_run_id
+    assert g1 is not None and g2 is not None and g1 != g2
+
+
+def test_persist_plan_writes_graph_rows(tmp_path):
+    """#3: persist_plan writes one durable row per node tagged with graph_run_id + wave."""
+    import sqlite3
+
+    db = str(tmp_path / "graph.db")
+    deps = {"B": ["A"], "C": ["A"], "D": ["B", "C"]}  # diamond A -> {B,C} -> D
+    sched = DagScheduler(deps=deps, db_path=db)
+    sched.waves(["A", "B", "C", "D"])
+    graph_run_id = sched.persist_plan()
+
+    assert graph_run_id is not None
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute(
+            "SELECT node_id, turn_index FROM steps WHERE graph_run_id=? AND status='graph_plan' "
+            "ORDER BY turn_index, step_index",
+            (graph_run_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert len(rows) == 4
+    assert rows[0] == ("A", 0)  # wave 0
+    assert sorted(n for n, w in rows if w == 1) == ["B", "C"]  # wave 1 (parallel)
+    assert rows[-1] == ("D", 2)  # wave 2
+
+
+def test_persist_plan_noop_without_db_path():
+    sched = DagScheduler(deps={"B": ["A"]})
+    sched.waves(["A", "B"])
+    assert sched.persist_plan() is None  # no db_path -> durable capture skipped

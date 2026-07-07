@@ -1322,7 +1322,11 @@ def _build_orchestration(config: Config, verbose: bool = False):
         from koboi.orchestration.dag_scheduler import DagScheduler
 
         deps = {ad.name: list(ad.depends_on) for ad in agent_defs}
-        dag_scheduler = DagScheduler(agents_map=agents_map, deps=deps)
+        # Persist the graph plan when the memory backend is SQLite (durable; #3).
+        dag_db_path = None
+        if config.get("memory", "backend", default="sqlite") == "sqlite":
+            dag_db_path = config.get("memory", "db_path", default="koboi_memory.db")
+        dag_scheduler = DagScheduler(agents_map=agents_map, deps=deps, db_path=dag_db_path)
 
     orchestrator = Orchestrator(
         client=assembler.client,

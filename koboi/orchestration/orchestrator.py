@@ -524,6 +524,7 @@ class Orchestrator:
             # Wave-parallel: each topological level's nodes run concurrently (safe --
             # agents_map gives one distinct AgentCore per node), levels run in order.
             dag_waves = self._dag_scheduler.waves(agent_names)
+            self._dag_scheduler.persist_plan()  # #3: durable graph-plan rows
             _flat = 0
             for _wave in dag_waves:
                 for _name in _wave:
