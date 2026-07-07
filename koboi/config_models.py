@@ -231,6 +231,13 @@ class MCPServerConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     timeout: float = 30.0
     group: str | None = None  # Tool group namespace for filtering
+    # Risk gating for tools exposed by this server. Pre-#5 behavior is SAFE for all
+    # MCP tools. risk_level overrides for every tool from this server; risk_heuristic
+    # infers per-tool risk from the tool name (delete/remove->DESTRUCTIVE, etc.).
+    # NOTE: a non-SAFE risk only gates when guardrails.approval or policy.rules is
+    # configured -- otherwise the level is informational.
+    risk_level: str = "safe"
+    risk_heuristic: bool = False
 
 
 class MCPConfig(BaseModel):

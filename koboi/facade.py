@@ -1084,7 +1084,8 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
     if not servers:
         return []
 
-    from koboi.mcp.base import register_mcp_tools
+    from koboi.mcp.base import default_risk_heuristic, register_mcp_tools
+    from koboi.types import RiskLevel
 
     clients = []
     for server_conf in servers:
@@ -1093,7 +1094,14 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
             mcp_client = _create_mcp_client(server_conf, transport, logger, config)
             mcp_client.connect()
             group = server_conf.get("group")
-            register_mcp_tools(mcp_client, tools, group=group)
+            # #5: MCP risk gating. Default SAFE (pre-#5); risk_level overrides for all
+            # tools from this server, risk_heuristic infers per-tool risk from the name.
+            try:
+                risk_level = RiskLevel(server_conf.get("risk_level", "safe"))
+            except ValueError:
+                risk_level = RiskLevel.SAFE
+            resolver = default_risk_heuristic if server_conf.get("risk_heuristic", False) else None
+            register_mcp_tools(mcp_client, tools, group=group, risk_level=risk_level, risk_resolver=resolver)
             clients.append(mcp_client)
         except Exception as e:
             import logging
