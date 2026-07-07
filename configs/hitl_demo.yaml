@@ -1,0 +1,31 @@
+agent:
+  name: hitl-demo
+  description: "Human-in-the-loop approval demo (delete_file/run_shell trigger approvals)"
+  system_prompt: |
+    You are a HITL demo agent. You have filesystem and shell tools. When the user
+    asks you to delete or modify a file or run a command, use the appropriate tool.
+    Destructive actions require human approval -- this demo shows that flow.
+  max_iterations: 8
+  mode: act
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY:}
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace
+
+tools:
+  builtin: [list_files, read_file, write_file, delete_file, run_shell]
+
+# Loopback dev mode: no Bearer key needed. The interactive SSE path auto-wires an
+# AsyncCallbackApprovalHandler, so destructive tool calls emit PendingApprovalEvent.
+server:
+  auth_required: false
+  allowed_modes: [act]
