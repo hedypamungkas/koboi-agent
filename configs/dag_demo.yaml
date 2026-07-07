@@ -1,0 +1,57 @@
+# Multi-agent DAG (workflow graph) demo -- execution.mode: dag.
+#
+# research -> draft -> review
+#              |        |
+#              +--------+-> publish   (publish depends on both draft and review)
+#
+# Run the graph:   koboi run configs/dag_demo.yaml -m "<task>"
+# Render it:       koboi graph configs/dag_demo.yaml            # Mermaid
+#                  koboi graph configs/dag_demo.yaml --format json
+
+# A top-level agent: is required by config validation even in orchestration mode
+# (fallback/default); the orchestrator runs the agents declared under orchestration.
+agent:
+  name: "dag-orchestrator"
+  description: "Multi-agent DAG workflow (research -> draft -> review -> publish)"
+  system_prompt: "You are a DAG workflow orchestrator."
+  mode: act
+
+orchestration:
+  enabled: true
+  execution:
+    mode: dag
+  router:
+    type: keyword
+  agents:
+    - name: research
+      description: "Gather information for the task"
+      system_prompt: "You are a research agent. Gather the information needed."
+      keywords: [research, gather, investigate]
+    - name: draft
+      description: "Draft an artifact from the research"
+      system_prompt: "You are a drafting agent. Produce a draft from the research."
+      keywords: [draft, write]
+      depends_on: [research]
+    - name: review
+      description: "Review the draft"
+      system_prompt: "You are a reviewer. Critique the draft."
+      keywords: [review, critique]
+      depends_on: [draft]
+    - name: publish
+      description: "Publish the reviewed draft"
+      system_prompt: "You finalize and publish the reviewed draft."
+      keywords: [publish, finalize]
+      depends_on: [review, draft]
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY:}
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace
