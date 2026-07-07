@@ -1385,7 +1385,14 @@ def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None 
     if "task_create" in tools:
         from koboi.task import TaskManager
 
-        mgr = TaskManager()
+        # #6: persist task state to SQLite when backend=sqlite, so it survives --resume.
+        # When a session_id is set (resume), TaskManager rehydrates existing tasks.
+        db_path = None
+        session_id = None
+        if config.get("memory", "backend", default="sqlite") == "sqlite":
+            db_path = config.get("memory", "db_path", default="koboi_memory.db")
+            session_id = config.get("memory", "session_id", default=None) or None
+        mgr = TaskManager(db_path=db_path, session_id=session_id)
         tools.set_dep("task_manager", mgr)
         # Inject manager into TaskHook if present in the chain
         if hook_chain is not None:

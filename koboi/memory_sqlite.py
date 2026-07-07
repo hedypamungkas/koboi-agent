@@ -54,6 +54,28 @@ def ensure_steps_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_graph ON steps(graph_run_id, node_id)")
 
 
+def ensure_tasks_table(conn: sqlite3.Connection) -> None:
+    """Create the session-scoped ``tasks`` table (#6) for durable task state.
+
+    Lets TaskManager state survive ``--resume``: created on first use, additive
+    (CREATE IF NOT EXISTS). Columns mirror the in-memory Task dataclass.
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            subject TEXT,
+            description TEXT,
+            status TEXT,
+            blocked_by_json TEXT,
+            task_order INTEGER,
+            created_at REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)")
+
+
 class SQLiteMemory(ConversationMemory):
     """ConversationMemory backed by SQLite. Persists sessions across restarts.
 
