@@ -153,7 +153,9 @@ class KoboiAgent:
             from koboi.loop import _extract_text
 
             query = message if isinstance(message, str) else _extract_text(message)
-            async for event in self._orchestrator.run_stream(query):
+            async for event in self._orchestrator.run_stream(
+                query, mode=getattr(self._orchestrator, "default_mode", "sequential")
+            ):
                 yield event
         else:
             async for event in self._core.run_stream(message):
@@ -1230,6 +1232,7 @@ def _parse_agent_defs(config: Config) -> list:
                 tools_config=ac.get("tools"),
                 rag_config=ac.get("rag"),
                 llm_config=ac.get("llm"),
+                depends_on=ac.get("depends_on", []),
             )
         )
     return defs
@@ -1310,6 +1313,16 @@ def _build_orchestration(config: Config, verbose: bool = False):
 
     orch_conf = config.orchestration
     exec_conf = orch_conf.get("execution", {})
+    exec_mode = exec_conf.get("mode", "sequential")
+
+    # Build a DagScheduler when execution.mode == "dag", seeded with the per-agent
+    # depends_on edges parsed from config (deterministic, testable).
+    dag_scheduler = None
+    if exec_mode == "dag":
+        from koboi.orchestration.dag_scheduler import DagScheduler
+
+        deps = {ad.name: list(ad.depends_on) for ad in agent_defs}
+        dag_scheduler = DagScheduler(agents_map=agents_map, deps=deps)
 
     orchestrator = Orchestrator(
         client=assembler.client,
@@ -1319,6 +1332,8 @@ def _build_orchestration(config: Config, verbose: bool = False):
         use_revision=exec_conf.get("use_revision", False),
         enable_dynamic=orch_conf.get("router", {}).get("enable_dynamic", False),
         agents_map=agents_map,
+        dag_scheduler=dag_scheduler,
+        default_mode=exec_mode,
     )
 
     return KoboiAgent(
@@ -1388,7 +1403,7 @@ async def _run_orchestrator(orchestrator, message: str | list) -> RunResult:
     query = message if isinstance(message, str) else _extract_text(message)
     start = time.time()
 
-    result = await orchestrator.run(query)
+    result = await orchestrator.run(query, mode=getattr(orchestrator, "default_mode", "sequential"))
     elapsed = time.time() - start
 
     total_tokens = sum(r.tokens_used for r in result.agent_results)

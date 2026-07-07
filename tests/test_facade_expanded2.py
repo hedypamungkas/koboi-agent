@@ -92,7 +92,7 @@ class TestFacadeRunStream:
 
         orchestrator = MagicMock()
 
-        async def mock_orch_stream(msg):
+        async def mock_orch_stream(msg, mode="sequential"):
             yield MagicMock()
 
         orchestrator.run_stream = mock_orch_stream

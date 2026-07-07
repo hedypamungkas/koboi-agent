@@ -37,6 +37,7 @@ from koboi.orchestration.factory import AgentFactory, DynamicAgentBuilder
 if TYPE_CHECKING:
     from koboi.client import Client
     from koboi.logger import AgentLogger
+    from koboi.orchestration.dag_scheduler import DagScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,8 @@ class Orchestrator:
         chunk_size: int = 400,
         chunk_overlap: int = 40,
         agents_map: dict | None = None,
+        dag_scheduler: "DagScheduler | None" = None,
+        default_mode: str = "sequential",
     ):
         self.client = client
         self.router = router
@@ -138,6 +141,8 @@ class Orchestrator:
         self._dynamic_builder = dynamic_builder
         self._dynamic_blueprints: dict[str, AgentBlueprint] = {}
         self._agents_map: dict = agents_map or {}
+        self._dag_scheduler = dag_scheduler
+        self.default_mode = default_mode
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -515,7 +520,31 @@ class Orchestrator:
                     yield _AgentCompletedEvent(agent_result=result)
 
             results.sort(key=lambda r: order.get(r.agent_name, len(order)))
+        elif mode == "dag" and self._dag_scheduler is not None:
+            # Wave-parallel: each topological level's nodes run concurrently (safe --
+            # agents_map gives one distinct AgentCore per node), levels run in order.
+            dag_waves = self._dag_scheduler.waves(agent_names)
+            _flat = 0
+            for _wave in dag_waves:
+                for _name in _wave:
+                    yield AgentDispatchEvent(agent_name=_name, agent_index=_flat, total_agents=total, mode="dag")
+                    _flat += 1
+                _wave_results = await asyncio.gather(*[self._run_single(_n, query) for _n in _wave])
+                for result in _wave_results:
+                    results.append(result)
+                    yield AgentResultEvent(
+                        agent_name=result.agent_name,
+                        answer=result.answer[:200],
+                        elapsed_seconds=result.elapsed_seconds,
+                        tokens_used=result.tokens_used,
+                        is_dynamic=result.is_dynamic,
+                        domain_label=result.domain_label,
+                        failed=result.failed,
+                    )
+                    yield _AgentCompletedEvent(agent_result=result)
         else:
+            if mode == "dag":
+                logger.warning("execution.mode=dag requested but no DagScheduler configured; running sequentially.")
             for i, name in enumerate(agent_names):
                 yield AgentDispatchEvent(
                     agent_name=name,

@@ -110,7 +110,7 @@ class OrchestratorResult:
     agent_results: list[AgentResult] = field(default_factory=list)
     final_answer: str = ""
     total_elapsed_seconds: float = 0.0
-    execution_mode: Literal["sequential", "parallel", "sequential+revision", "parallel+revision"] = "sequential"
+    execution_mode: Literal["sequential", "parallel", "sequential+revision", "parallel+revision", "dag"] = "sequential"
 
 
 @dataclass
@@ -136,6 +136,8 @@ class AgentDef:
     tools_config: dict | None = None
     rag_config: dict | None = None
     llm_config: dict | None = None
+    # DAG edges: agent names this agent depends on (execution.mode: dag).
+    depends_on: list[str] = field(default_factory=list)
 
 
 @dataclass
