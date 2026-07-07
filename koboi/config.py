@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -9,6 +10,9 @@ import yaml
 
 if TYPE_CHECKING:
     from koboi.config_models import KoboiConfig
+
+
+_logger = logging.getLogger(__name__)
 
 
 _ENV_PATTERN = re.compile(r"\$\{(\w+)(?::([^}]*))?\}")
@@ -78,6 +82,31 @@ def extract_extra_params(llm: dict) -> dict | None:
     return picked or None
 
 
+# All recognized ``llm:`` keys = infra/connection keys (each consumed explicitly
+# by a Config accessor or RetryClient) plus the forward-as-is generation keys.
+# Used to warn on typos / unrecognized keys that would otherwise be silently
+# dropped (LLMConfig uses extra="ignore").
+_KNOWN_LLM_KEYS: frozenset[str] = FORWARDABLE_LLM_KEYS | frozenset(
+    {
+        "provider",
+        "model",
+        "api_key",
+        "base_url",
+        "timeout",
+        "max_tokens",
+        "temperature",
+        "max_retries",
+        "retry_backoff_base",
+        "auth_token",
+        "auth_type",
+        "embedding_model",
+        "api_version",
+        "transport_retries",
+        "account_id",  # cloudflare extra_env (registry.py)
+    }
+)
+
+
 def _load_yaml_with_extends(path: Path, _seen: set[Path] | None = None) -> dict:
     if _seen is None:
         _seen = set()
@@ -119,6 +148,22 @@ class Config:
             self._schema = KoboiConfig(**self._data)
         except Exception as exc:
             raise ValueError(f"Config validation failed: {exc}") from exc
+        self._warn_unknown_llm_keys()
+
+    def _warn_unknown_llm_keys(self) -> None:
+        """Warn about ``llm:`` keys that aren't recognized (likely typos).
+
+        Unrecognized keys are silently ignored (LLMConfig uses extra="ignore"
+        and only allowlisted keys are forwarded to the provider), so surface
+        them to the user at config-load time.
+        """
+        for key in self.llm:
+            if key not in _KNOWN_LLM_KEYS:
+                _logger.warning(
+                    "Unknown llm: key %r is not recognized and will be ignored "
+                    "(not forwarded to the provider). Possible typo?",
+                    key,
+                )
 
     @property
     def schema(self):

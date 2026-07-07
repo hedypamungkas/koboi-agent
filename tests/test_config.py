@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -296,3 +297,16 @@ class TestConfigValidation:
     def test_builder_rejects_empty_model(self):
         with pytest.raises(ValueError, match="llm.model is required"):
             Config.builder().agent(name="x").build()
+
+    def test_unknown_llm_key_warns(self, caplog):
+        # Unrecognized llm: keys (typos) must warn instead of being silently dropped.
+        caplog.set_level(logging.WARNING)
+        Config.from_dict({"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "topP": 0.2}})
+        assert any("topP" in r.message for r in caplog.records)
+
+    def test_known_llm_keys_no_warning(self, caplog):
+        caplog.set_level(logging.WARNING)
+        Config.from_dict(
+            {"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "top_p": 0.1, "max_tokens": 100}}
+        )
+        assert not any("not recognized" in r.message for r in caplog.records)
