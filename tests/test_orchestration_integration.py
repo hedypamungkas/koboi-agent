@@ -451,6 +451,45 @@ class TestFacadeOrchestration:
         await agent.close()
         # Should not raise
 
+    def test_orchestration_builds_dedicated_per_agent_client(self):
+        # The real _agent_client_builder closure (facade._build_orchestration) must
+        # build a dedicated client for an agent whose llm_config carries overrides,
+        # apply them, and keep max_context_tokens on the agent (not leak it into the
+        # client). Exercises the true path end-to-end (not a fake builder).
+        from koboi.facade import KoboiAgent
+
+        config_data = {
+            "agent": {"name": "dedicated-orch", "system_prompt": "Orchestrate."},
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "api_key": "test-key",
+                "base_url": "http://localhost:8080/v1",
+                "temperature": 0.9,
+            },
+            "orchestration": {
+                "enabled": True,
+                "router": {"type": "keyword"},
+                "agents": [
+                    {
+                        "name": "worker",
+                        "system_prompt": "x",
+                        "keywords": ["thing"],
+                        "llm": {"temperature": 0.1, "max_tokens": 1234, "max_context_tokens": 4000},
+                    },
+                ],
+            },
+        }
+        agent = KoboiAgent.from_dict(config_data)
+        orch = agent.orchestrator
+        worker = orch._agents_map["worker"]
+        shared = orch.client
+
+        assert worker.client is not shared  # dedicated client built by the real closure
+        assert worker.client._impl._temperature == 0.1  # override applied
+        assert worker.client._impl._max_tokens == 1234  # override applied
+        assert worker.max_context_tokens == 4000  # consumed by agent, not leaked to client
+
 
 # -- End-to-end orchestrated config -------------------------------------------
 
