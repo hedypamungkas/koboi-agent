@@ -1172,12 +1172,18 @@ def _build_policy(config: Config):
         except ValueError:
             action = PolicyAction.ALLOW
 
+        # #4: argument_patterns generalizes the legacy ``pattern`` shorthand (which
+        # only matched an arg literally named "command"). Prefer an explicit
+        # argument_patterns dict; fall back to {"command": pattern} for back-compat
+        # so existing run_shell ``pattern:`` configs keep working unchanged.
+        arg_patterns = rule_conf.get("argument_patterns") or ({"command": pattern} if pattern else None)
+
         engine.add_rule(
             PolicyRule(
                 name=f"config_{tool}_{action_str}",
                 action=action,
                 tool_pattern=tool,
-                argument_patterns={"command": pattern} if pattern else None,
+                argument_patterns=arg_patterns,
                 description=f"From config: {tool} {pattern} -> {action_str}",
             )
         )

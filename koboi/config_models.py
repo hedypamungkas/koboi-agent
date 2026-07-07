@@ -159,6 +159,10 @@ class PolicyRuleConfig(BaseModel):
     tool: str = "*"
     pattern: str = ""
     action: str = "allow"
+    # Per-argument glob patterns {arg_name: glob}. Generalizes the legacy
+    # ``pattern`` shorthand (which only matched an arg literally named "command").
+    # Example: {filename: "*.env"} denies any tool whose ``filename`` arg matches.
+    argument_patterns: dict[str, str] | None = None
 
 
 class PolicyConfig(BaseModel):
