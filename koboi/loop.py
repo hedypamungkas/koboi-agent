@@ -93,6 +93,7 @@ class AgentCore:
         mode_manager: ModeManager | None = None,
         journal: StepJournal | None = None,
         trust_db: TrustStore | None = None,
+        output_schema: dict | None = None,
         # Backward-compatible singular kwargs
         input_guardrail: BaseGuardrail | None = None,
         output_guardrail: BaseGuardrail | None = None,
@@ -122,6 +123,8 @@ class AgentCore:
         self.mode_manager = mode_manager
         self.journal = journal
         self.trust_db = trust_db
+        # JSON Schema dict (provider-agnostic) for structured final output, or None.
+        self.response_schema = output_schema
         # P2-A: turn counter. On a fresh agent this is 0; on resume it inherits
         # the journal's highest recorded turn so numbering stays continuous.
         self._turn_index: int = journal.turn_index if journal else 0
@@ -483,7 +486,12 @@ class AgentCore:
             self._log(f"iteration {i + 1}: {len(messages)} messages, ~{tokens} tokens")
 
             await self._emit(HookEvent.PRE_LLM_CALL, iteration=i, messages=messages)
-            response = await self.client.complete(messages=messages, tools=tool_defs)
+            # Structured output (response_format) is applied only on tool-less
+            # iterations: it shapes the FINAL answer and is undefined mid-tool-chain
+            # (and on Anthropic it is emulated via a forced tool_use, incompatible
+            # with simultaneous real tool calls). Provider-enforced on OpenAI.
+            _rf = self.response_schema if not tool_defs else None
+            response = await self.client.complete(messages=messages, tools=tool_defs, response_format=_rf)
             await self._emit(HookEvent.POST_LLM_CALL, iteration=i, llm_response=response)
 
             total_usage = self._update_usage(response, total_usage)
@@ -578,7 +586,8 @@ class AgentCore:
 
             delta_buffer: list[TextDeltaEvent] = []
             final_response = None
-            async for event in self.client.complete_stream(messages=messages, tools=tool_defs):
+            _rf = self.response_schema if not tool_defs else None
+            async for event in self.client.complete_stream(messages=messages, tools=tool_defs, response_format=_rf):
                 if isinstance(event, TextDeltaEvent):
                     if should_buffer:
                         delta_buffer.append(event)

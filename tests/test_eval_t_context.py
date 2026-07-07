@@ -39,7 +39,7 @@ class _StubScorer(BaseScorer):
 class _AlwaysToolsClient(MockClient):
     """Always requests a tool call so the loop hits max_iterations."""
 
-    async def complete(self, messages, tools=None):
+    async def complete(self, messages, tools=None, response_format=None):
         self.call_count += 1
         return make_mock_response(None, [make_mock_tool_call("get_weather", {"city": "Jakarta"})])
 

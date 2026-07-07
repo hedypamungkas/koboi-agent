@@ -101,7 +101,7 @@ class TestClientCompleteDelegation:
         client = RetryClient(api_key="sk-test", base_url="http://localhost:8080/v1")
         mock_response = type("R", (), {"content": "test", "tool_calls": [], "usage": None})()
 
-        async def _complete(self, m, t):
+        async def _complete(self, m, t, response_format=None):
             return mock_response
 
         async def _get_embeddings(self, t):
@@ -121,7 +121,7 @@ class TestClientCompleteDelegation:
     async def test_get_embeddings_delegates_to_impl(self):
         client = RetryClient(api_key="sk-test", base_url="http://localhost:8080/v1")
 
-        async def _complete(self, m, t):
+        async def _complete(self, m, t, response_format=None):
             return None
 
         async def _get_embeddings(self, t):

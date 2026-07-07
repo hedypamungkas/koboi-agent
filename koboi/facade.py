@@ -1065,6 +1065,7 @@ class AgentAssembler:
             mode_manager=self.mode_manager,
             journal=self.journal,
             trust_db=self.trust_db,
+            output_schema=self.config.get("agent", "output_schema", default=None),
         )
 
         return KoboiAgent(

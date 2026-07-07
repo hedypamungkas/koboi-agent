@@ -123,7 +123,7 @@ class TestPoolRunStream:
         state = {"active": 0, "overlap": False}
 
         class _Detect(MockClient):
-            async def complete_stream(self, messages, tools=None):
+            async def complete_stream(self, messages, tools=None, response_format=None):
                 state["active"] += 1
                 if state["active"] > 1:
                     state["overlap"] = True

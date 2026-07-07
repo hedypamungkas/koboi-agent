@@ -26,6 +26,10 @@ class AgentConfig(BaseModel):
     max_iterations: int = Field(default=10, ge=1)
     mode: str = "chat"
     theme: str = "koboi-dark"
+    # JSON Schema dict; when set, the agent requests provider-enforced structured
+    # output (OpenAI native response_format / Anthropic forced-tool emulation).
+    # Best for final-answer / single-shot structured responses; None = unchanged.
+    output_schema: dict | None = None
 
     @field_validator("name")
     @classmethod

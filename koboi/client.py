@@ -124,11 +124,12 @@ class RetryClient(LLMClient):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AgentResponse:
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                return await self._impl.complete(messages, tools)
+                return await self._impl.complete(messages, tools, response_format=response_format)
             except _RETRYABLE_ERRORS as e:
                 last_error = e
                 if attempt < self.max_retries:
@@ -148,12 +149,13 @@ class RetryClient(LLMClient):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AsyncIterator[StreamEvent]:
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             yielded = False
             try:
-                async for event in self._impl.complete_stream(messages, tools):
+                async for event in self._impl.complete_stream(messages, tools, response_format=response_format):
                     yielded = True
                     yield event
                 return  # stream completed successfully

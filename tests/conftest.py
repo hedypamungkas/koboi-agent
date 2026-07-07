@@ -22,6 +22,7 @@ class MockClient(LLMClient):
         self.call_count = 0
         self.last_messages = None
         self.last_tools = None
+        self.last_response_format = None
         self._model = "mock-model"
 
     @property
@@ -32,20 +33,31 @@ class MockClient(LLMClient):
     def model(self, value: str) -> None:
         self._model = value
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> AgentResponse:
+    async def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+    ) -> AgentResponse:
         self.call_count += 1
         self.last_messages = messages
         self.last_tools = tools
+        self.last_response_format = response_format
         if self._index < len(self.responses):
             resp = self.responses[self._index]
             self._index += 1
             return resp
         return AgentResponse(content="No more responses", tool_calls=[])
 
-    async def complete_stream(self, messages: list[dict], tools: list[dict] | None = None):
+    async def complete_stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+    ):
         from koboi.events import TextDeltaEvent, CompleteEvent
 
-        resp = await self.complete(messages, tools)
+        resp = await self.complete(messages, tools, response_format=response_format)
         if resp.content:
             yield TextDeltaEvent(content=resp.content)
         yield CompleteEvent(response=resp, content=resp.content or "")

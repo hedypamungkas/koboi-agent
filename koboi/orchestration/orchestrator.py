@@ -7,7 +7,6 @@ QualityEvaluator: LLM-based answer quality evaluation with revision support.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -46,6 +45,19 @@ logger = logging.getLogger(__name__)
 # QualityEvaluator
 # ---------------------------------------------------------------------------
 
+# JSON Schema for the evaluator's structured response. Passed as response_format
+# so providers enforce JSON (OpenAI native / Anthropic forced-tool), removing the
+# need for the previous brittle extract_json + broad-except parsing.
+_QUALITY_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "number"},
+        "feedback": {"type": "string"},
+        "needs_revision": {"type": "boolean"},
+    },
+    "required": ["score", "feedback", "needs_revision"],
+}
+
 
 class QualityEvaluator:
     EVAL_PROMPT = (
@@ -71,18 +83,22 @@ class QualityEvaluator:
             resp = await self.client.complete(
                 messages=[{"role": "user", "content": prompt}],
                 tools=None,
+                response_format=_QUALITY_SCHEMA,
             )
             content = resp.content or ""
+            # response_format enforces JSON on capable providers; _extract_json
+            # stays as a tolerant fallback for providers that ignore it.
             data = _extract_json(content)
             if data:
                 score = float(data.get("score", 0.5))
                 feedback = data.get("feedback", "")
                 needs = bool(data.get("needs_revision", score < self.threshold))
                 return score, feedback, needs
-        except (json.JSONDecodeError, KeyError, ValueError, AttributeError) as e:
+        except Exception as e:  # noqa: BLE001 - resilience boundary: the evaluator is
+            # embedded in the orchestration revision loop, so any client/transport/parse
+            # failure must degrade to the fallback rather than crash the orchestration.
+            # JSON reliability comes from response_format; this catch is NOT parsing.
             logger.warning("Quality evaluation failed for query '%s': %s", query[:50], e)
-        except Exception as e:
-            logger.error("Unexpected error in quality evaluation: %s", e, exc_info=True)
         return 0.5, "evaluation failed", True
 
 

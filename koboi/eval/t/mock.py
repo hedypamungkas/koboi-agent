@@ -26,7 +26,12 @@ class ScriptedClient(LLMClient):
     def model(self) -> str:
         return self._model
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> AgentResponse:
+    async def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+    ) -> AgentResponse:
         self.call_count += 1
         if self._index < len(self._responses):
             response = self._responses[self._index]

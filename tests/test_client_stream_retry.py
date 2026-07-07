@@ -29,7 +29,7 @@ class _FakeImpl:
         self.behavior = behavior
         self.calls = 0
 
-    async def complete_stream(self, messages, tools):
+    async def complete_stream(self, messages, tools, response_format=None):
         self.calls += 1
         step = self.behavior[min(self.calls - 1, len(self.behavior) - 1)]
         if step == "conn_err":
