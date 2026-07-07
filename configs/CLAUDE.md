@@ -6,6 +6,7 @@ simple_chat.yaml          Minimal chat agent (no tools)
 sales_agent.yaml          Sales assistant with tools, RAG, guardrails, tracing
 customer_service.yaml     Customer service agent
 coding_agent.yaml         Code-focused agent with filesystem/shell/git tools
+reasoning_model.yaml      OpenAI o-series reasoning model (max_completion_tokens + reasoning_effort; documents all forward-as-is llm: params)
 sandbox_restricted.yaml   Restricted sandbox + SQLite journal/resume demo (P0b + P2-A)
 rag_agent.yaml            RAG with document Q&A
 orchestrated.yaml         Multi-agent orchestrator

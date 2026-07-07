@@ -1,0 +1,48 @@
+# configs/reasoning_model.yaml
+#
+# Demonstrates LLM generation params wired end-to-end to the provider body.
+# Every key under `llm:` below reaches the HTTP request verbatim (verified at
+# the egress point). See .claude/skills/yaml-config.md > "llm" for the full list.
+#
+# Run:    koboi chat configs/reasoning_model.yaml
+# Validate (no keys needed): koboi validate configs/reasoning_model.yaml
+
+agent:
+  name: "reasoning-agent"
+  description: "OpenAI o-series reasoning model with reasoning-budget forwarding"
+  system_prompt: |
+    You are a careful reasoning assistant. Think step by step, then answer concisely.
+  max_iterations: 5
+  mode: "act"
+
+llm:
+  provider: "${LLM_PROVIDER:openai}"
+  model: "${OPENAI_MODEL:o3-mini}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+  temperature: 0.3
+
+  # --- Reasoning models (OpenAI o-series) ----------------------------------
+  # o-series uses max_completion_tokens (NOT max_tokens). When this is set,
+  # max_tokens is dropped automatically -- the OpenAI API rejects the pair.
+  max_completion_tokens: 6000
+  reasoning_effort: "high"          # "low" | "medium" | "high"
+
+  # --- Chat-model alternatives (uncomment for gpt-4o-mini etc.) ------------
+  # max_tokens: 4000                 # Honored by OpenAI/Cloudflare; omitted
+  #                                  #   from the body entirely when unset.
+  # top_p: 0.9                       # Nucleus sampling
+  # frequency_penalty: 0.0           # OpenAI-compatible
+  # presence_penalty: 0.0            # OpenAI-compatible
+  # seed: 42                         # Best-effort determinism
+  # stop: ["\n\n\n"]                 # Stop sequences
+  # response_format: {"type": "json_object"}   # Structured output
+
+  # --- Anthropic extended thinking (set provider: anthropic) --------------
+  # thinking: {"type": "enabled", "budget_tokens": 2000}
+  #   Anthropic requires max_tokens > budget_tokens -- forwarded as-is, so
+  #   satisfy the constraint yourself (the provider rejects it otherwise).
+
+context:
+  strategy: "noop"
