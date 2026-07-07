@@ -50,9 +50,11 @@ class ToolPipelineResult:
 
 
 class ToolExecutionPipeline:
-    """Encapsulates the tool execution flow: rate limit -> risk -> approval -> hooks -> execute -> record.
+    """Encapsulates the tool execution flow: rate limit -> risk -> hooks (policy/mode) -> approval -> execute -> record.
 
-    Used by both run() and run_stream() to avoid duplicating the pipeline.
+    Policy-abort and mode-block run BEFORE approval so an approved tool is never
+    later mode-blocked (wasted prompt) and a trust-DB allow cannot bypass
+    chat/plan mode-blocking. Used by both run() and run_stream().
     """
 
     def __init__(
@@ -240,15 +242,11 @@ class ToolExecutionPipeline:
         # 2. Risk level check
         risk = self.tools.get_risk_level(tc.name) or RiskLevel.SAFE
 
-        # 3. Approval resolution (trust DB fast-path + risk-based handler) -- unified.
+        # 3. PRE_TOOL_USE hook (emit) + policy/mode gates. These run BEFORE approval
+        #    so that: (a) an approved tool is never later mode-blocked (wasted prompt),
+        #    and (b) a trust-DB allow rule cannot bypass chat/plan mode-blocking.
         approval_prompted = False
-        if not is_yolo:
-            outcome = await self._resolve_approval(tc, risk)
-            if not outcome.proceed:
-                return self._deny_tool(tc, risk, "denied", outcome.audit_details or "Denied by human", on_event)
-            approval_prompted = outcome.prompted or outcome.reason == "skipped_via_trust"
-
-        # 4. PRE_TOOL_USE hook
+        pre_ctx = None
         if self.hooks:
             from koboi.hooks.chain import HookContext, HookEvent
 
@@ -263,36 +261,43 @@ class ToolExecutionPipeline:
             for msg in pre_ctx.inject_messages:
                 self.memory.add_context_message(msg, label="hook_inject")
 
-            # 4b. Policy abort check (always enforced, even in YOLO mode)
+            # 3a. Policy abort (always enforced, even in YOLO mode). Runs before
+            #     approval so a policy-denied tool never wastes an approval prompt.
             if pre_ctx.abort:
                 reason = pre_ctx.inject_message or "Blocked by policy"
                 self._log(f"Tool aborted by policy: {tc.name}")
                 self._audit("policy_denied", tool_name=tc.name, arguments=tc.arguments[:200], details=reason)
                 return self._deny_or_skip(tc, f"Error: {reason}", "policy_denied", on_event)
 
-            # 4c. Policy CONFIRM (M0): when policy asks for confirmation, route to
-            # the approval gate -- but only if a handler is configured AND the
-            # risk path (step 3) did not already resolve it. Inert otherwise (Q1).
-            if (
-                not is_yolo
-                and not approval_prompted
-                and self.approval_handler is not None
-                and pre_ctx.metadata.get("policy_needs_confirmation")
-            ):
-                policy_reason = pre_ctx.metadata.get("policy_reason", "Policy requires confirmation")
-                confirm_outcome = await self._resolve_approval(
-                    tc, risk, policy_reason=policy_reason, already_prompted=approval_prompted
-                )
-                if not confirm_outcome.proceed:
-                    return self._deny_tool(
-                        tc, risk, "policy_denied", f"Policy confirm denied: {policy_reason}", on_event
-                    )
-
-            # 5. Mode block check (skipped in YOLO mode)
+            # 3b. Mode block check (must precede approval; skipped in YOLO mode).
             if not is_yolo and pre_ctx.metadata.get("mode_blocked"):
                 reason = pre_ctx.metadata.get("mode_block_reason", "Blocked by current mode")
                 self._log(f"Mode blocked: {tc.name}")
                 return self._deny_or_skip(tc, f"Error: {reason}", "mode_blocked", on_event)
+
+        # 4. Approval resolution (trust DB fast-path + risk-based handler) -- unified.
+        if not is_yolo:
+            outcome = await self._resolve_approval(tc, risk)
+            if not outcome.proceed:
+                return self._deny_tool(tc, risk, "denied", outcome.audit_details or "Denied by human", on_event)
+            approval_prompted = outcome.prompted or outcome.reason == "skipped_via_trust"
+
+        # 4c. Policy CONFIRM (M0): when policy asks for confirmation, route to the
+        #     approval gate -- but only if a handler is configured AND the risk path
+        #     (step 4) did not already resolve it. Inert otherwise (Q1).
+        if (
+            pre_ctx is not None
+            and not is_yolo
+            and not approval_prompted
+            and self.approval_handler is not None
+            and pre_ctx.metadata.get("policy_needs_confirmation")
+        ):
+            policy_reason = pre_ctx.metadata.get("policy_reason", "Policy requires confirmation")
+            confirm_outcome = await self._resolve_approval(
+                tc, risk, policy_reason=policy_reason, already_prompted=approval_prompted
+            )
+            if not confirm_outcome.proceed:
+                return self._deny_tool(tc, risk, "policy_denied", f"Policy confirm denied: {policy_reason}", on_event)
 
         # 6. Execute tool
         tool_result = await self.tools.execute(tc.name, tc.arguments)

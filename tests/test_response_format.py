@@ -100,9 +100,7 @@ async def test_anthropic_adapter_forces_structured_tool_and_collapses():
     }
     transport = _FakeTransport(data)
     adapter = AnthropicAdapter("m", transport)
-    result = await adapter.complete(
-        messages=[{"role": "user", "content": "hi"}], response_format=SCHEMA
-    )
+    result = await adapter.complete(messages=[{"role": "user", "content": "hi"}], response_format=SCHEMA)
 
     # forced tool_choice to the synthetic structured tool
     assert transport.last_body["tool_choice"] == {"type": "tool", "name": _STRUCTURED_TOOL_NAME}
@@ -131,20 +129,12 @@ async def test_retry_client_threads_response_format():
     rc._impl = _Recorder()
     rc.max_retries = 0
     rc.retry_backoff_base = 2.0
-    await rc.complete(
-        messages=[{"role": "user", "content": "hi"}], response_format=SCHEMA
-    )
+    await rc.complete(messages=[{"role": "user", "content": "hi"}], response_format=SCHEMA)
     assert rc._impl.rf is SCHEMA
 
 
 async def test_quality_evaluator_passes_response_format(mock_client):
-    client = mock_client(
-        responses=[
-            AgentResponse(
-                content='{"score": 0.8, "feedback": "ok", "needs_revision": false}'
-            )
-        ]
-    )
+    client = mock_client(responses=[AgentResponse(content='{"score": 0.8, "feedback": "ok", "needs_revision": false}')])
     evaluator = QualityEvaluator(client)
     score, _feedback, _needs = await evaluator.evaluate("q", "a")
     assert client.last_response_format == _QUALITY_SCHEMA
