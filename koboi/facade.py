@@ -1282,38 +1282,61 @@ def _build_orchestration(config: Config, verbose: bool = False):
     assembler.build_hooks()
     assembler.build_sandbox()
 
-    agent_defs = _parse_agent_defs(config)
+    orch_conf = config.orchestration
+    exec_conf = orch_conf.get("execution", {})
+    exec_mode = exec_conf.get("mode", "sequential")
+
+    # Dynamic mode: agents are planned at runtime from the query (no config agents).
+    agent_defs = [] if exec_mode == "dynamic" else _parse_agent_defs(config)
     router = _build_router(config, assembler.client, agent_defs)
 
     parent_rag = config.rag
 
-    # Per-agent LLM client builder. A named ``providers:`` ref (str) FULLY
-    # REPLACES the top-level client; an inline dict MERGES over it (today's
-    # behavior) so temperature/max_tokens/extra params take effect per agent.
-    # Pool specs (W2) raise. Agents without LLM overrides keep sharing
-    # assembler.client (decided inside AgentFactory via _has_client_overrides).
-    def _agent_client_builder(agent_llm: dict | str) -> Client:
-        if isinstance(agent_llm, str):
-            return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
-        if isinstance(agent_llm, dict) and "pool" in agent_llm:
-            return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
-        overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
-        return _build_client(config, assembler.logger, llm_overrides=overrides)
+    if agent_defs:
+        # Per-agent LLM client builder. A named ``providers:`` ref (str) FULLY
+        # REPLACES the top-level client; an inline dict MERGES over it (today's
+        # behavior). Pool specs (W2) raise.
+        def _agent_client_builder(agent_llm: dict | str) -> Client:
+            if isinstance(agent_llm, str):
+                return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
+            if isinstance(agent_llm, dict) and "pool" in agent_llm:
+                return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
+            overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
+            return _build_client(config, assembler.logger, llm_overrides=overrides)
 
-    agents_map = AgentFactory.create_all_configured(
-        agent_defs,
-        assembler.client,
-        assembler.logger,
-        parent_rag_config=parent_rag,
-        hook_chain=assembler.hook_chain,
-        sandbox=assembler.sandbox,
-        embedding_config=config.get("embedding"),
-        client_builder=_agent_client_builder,
-    )
-
-    orch_conf = config.orchestration
+        agents_map = AgentFactory.create_all_configured(
+            agent_defs,
+            assembler.client,
+            assembler.logger,
+            parent_rag_config=parent_rag,
+            hook_chain=assembler.hook_chain,
+            sandbox=assembler.sandbox,
+            embedding_config=config.get("embedding"),
+            client_builder=_agent_client_builder,
+        )
+    else:
+        agents_map = {}
     exec_conf = orch_conf.get("execution", {})
     exec_mode = exec_conf.get("mode", "sequential")
+
+    # Dynamic mode: agents are planned at runtime from the query (no config agents).
+    agent_defs = [] if exec_mode == "dynamic" else _parse_agent_defs(config)
+    router = _build_router(config, assembler.client, agent_defs)
+
+    parent_rag = config.rag
+    agents_map = (
+        AgentFactory.create_all_configured(
+            agent_defs,
+            assembler.client,
+            assembler.logger,
+            parent_rag_config=parent_rag,
+            hook_chain=assembler.hook_chain,
+            sandbox=assembler.sandbox,
+            embedding_config=config.get("embedding"),
+        )
+        if agent_defs
+        else {}
+    )
 
     # Build a DagScheduler when execution.mode == "dag", seeded with the per-agent
     # depends_on edges parsed from config (deterministic, testable).

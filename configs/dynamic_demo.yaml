@@ -1,0 +1,32 @@
+# Dynamic-workflow demo -- execution.mode: dynamic.
+#
+# No pre-defined agents: the LLM PLANS the workflow from the query at runtime
+# (plan-or-skip), then the engine executes the extracted graph with edge data flow.
+# Simple queries skip the planner and answer directly.
+#
+# Run:   koboi run configs/dynamic_demo.yaml -m "Research solid-state batteries, write a summary, translate it to Indonesian, and make a social post."
+
+agent:
+  name: "dynamic-orchestrator"
+  description: "Dynamic workflow -- LLM plans the graph from each query"
+  system_prompt: "You orchestrate dynamic workflows planned from the user's request."
+  mode: act
+
+orchestration:
+  enabled: true
+  execution:
+    mode: dynamic
+
+llm:
+  provider: openai
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace

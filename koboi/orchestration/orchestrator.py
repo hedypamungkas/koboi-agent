@@ -503,6 +503,83 @@ class Orchestrator:
                 parts.append(f"=== Answer from {label} Agent ===\n{r.answer}")
             yield TextDeltaEvent(content="\n\n".join(parts))
 
+    async def _run_dynamic(self, query: str) -> AsyncGenerator:
+        """Dynamic workflow (mode='dynamic'): the LLM plans a graph from the query,
+        then the engine executes it with edge data flow. Simple queries skip the
+        planner and answer directly with one general agent (no workflow overhead)."""
+        from koboi.orchestration.factory import AgentFactory
+        from koboi.orchestration.planner import plan_or_skip
+        from koboi.types import AgentDef
+
+        start = time.time()
+        plan = await plan_or_skip(self.client, query)
+        results: list[AgentResult] = []
+
+        if plan.needs_workflow and plan.steps:
+            step_ids = [s.id for s in plan.steps]
+            yield RoutingDecisionEvent(
+                agents=step_ids,
+                confidence=1.0,
+                method="dynamic",
+                reasoning=plan.reason or "dynamic plan",
+                domain_label=None,
+            )
+            # Build per-node agents from the plan (system_prompt = the step instruction).
+            self._agents_map = {
+                s.id: AgentFactory.create_configured_agent(
+                    AgentDef(name=s.id, system_prompt=s.instruction or s.id), self.client
+                )
+                for s in plan.steps
+            }
+            async for event in self._run_dag_waves_with_flow(step_ids, query, plan.deps):
+                if isinstance(event, _AgentCompletedEvent):
+                    results.append(event.agent_result)
+                yield event
+            routing_agents = step_ids
+        else:
+            # Simple request: answer directly (no workflow). The negative/triage path.
+            yield RoutingDecisionEvent(
+                agents=["assistant"],
+                confidence=1.0,
+                method="dynamic",
+                reasoning=f"direct: {plan.reason}",
+                domain_label=None,
+            )
+            self._agents_map = {
+                "assistant": AgentFactory.create_configured_agent(
+                    AgentDef(name="assistant", system_prompt="You are a helpful assistant."), self.client
+                )
+            }
+            yield AgentDispatchEvent(agent_name="assistant", agent_index=0, total_agents=1, mode="dynamic")
+            result = await self._run_single("assistant", query)
+            results.append(result)
+            yield AgentResultEvent(
+                agent_name=result.agent_name,
+                answer=result.answer[:200],
+                elapsed_seconds=result.elapsed_seconds,
+                tokens_used=result.tokens_used,
+                is_dynamic=result.is_dynamic,
+                domain_label=result.domain_label,
+                failed=result.failed,
+            )
+            yield _AgentCompletedEvent(agent_result=result)
+            routing_agents = ["assistant"]
+
+        # Synthesis + complete (mirrors _execute_pipeline tail).
+        combined_answer = ""
+        async for event in self._combine_results_stream(results, query):
+            if isinstance(event, TextDeltaEvent):
+                combined_answer += event.content
+            yield event
+        yield OrchestrationCompleteEvent(
+            final_answer=combined_answer,
+            elapsed_seconds=time.time() - start,
+            agent_results=results,
+            execution_mode="dynamic",
+            routing_agents=routing_agents,
+            routing_confidence=1.0,
+        )
+
     async def _execute_pipeline(
         self,
         query: str,
@@ -513,6 +590,11 @@ class Orchestrator:
             logger.warning("Revision logic is not supported in streaming mode; falling back to direct execution.")
 
         start = time.time()
+
+        if mode == "dynamic":
+            async for event in self._run_dynamic(query):
+                yield event
+            return
 
         decision = await self.router.route(query)
         if self.logger:
