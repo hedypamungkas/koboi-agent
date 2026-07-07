@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import pytest
 
@@ -351,3 +352,80 @@ class TestOrchestrationClientLifecycle:
 
         dedicated.close.assert_awaited_once()  # per-agent client closed
         shared.close.assert_awaited_once()  # shared closed exactly once (not double-closed)
+
+
+class TestProviderExtraParamFilter:
+    """create_client filters/renames forward-as-is params per provider so the
+    body only carries keys the provider accepts (no silent 400)."""
+
+    def test_openai_keeps_openai_keys(self):
+        client = create_client(
+            provider="openai",
+            model="gpt-4o-mini",
+            api_key="k",
+            extra_params={
+                "max_completion_tokens": 100,
+                "stop": ["\n"],
+                "reasoning_effort": "high",
+                "response_format": {"type": "json_object"},
+            },
+        )
+        assert client._extra_params == {
+            "max_completion_tokens": 100,
+            "stop": ["\n"],
+            "reasoning_effort": "high",
+            "response_format": {"type": "json_object"},
+        }
+
+    def test_anthropic_drops_openai_only_and_renames_stop(self):
+        client = create_client(
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            api_key="k",
+            extra_params={
+                "max_completion_tokens": 100,  # OpenAI-only -> dropped
+                "stop": ["\n"],  # renamed -> stop_sequences
+                "logprobs": True,  # OpenAI-only -> dropped
+                "response_format": {"type": "json_object"},  # OpenAI-only -> dropped
+                "reasoning_effort": "high",  # OpenAI-only -> dropped
+                "top_p": 0.1,
+                "top_k": 40,
+                "thinking": {"type": "enabled", "budget_tokens": 2000},
+            },
+        )
+        assert client._extra_params == {
+            "stop_sequences": ["\n"],
+            "top_p": 0.1,
+            "top_k": 40,
+            "thinking": {"type": "enabled", "budget_tokens": 2000},
+        }
+
+    def test_cloudflare_drops_reasoning_keys(self):
+        client = create_client(
+            provider="cloudflare",
+            model="@cf/meta/llama-3.1-70b-instruct",
+            api_key="k",
+            extra_params={"reasoning_effort": "high", "max_completion_tokens": 100, "top_p": 0.1, "stop": ["\n"]},
+        )
+        assert client._extra_params == {"top_p": 0.1, "stop": ["\n"]}
+
+    def test_dropped_key_warns(self, caplog):
+        caplog.set_level(logging.WARNING)
+        create_client(
+            provider="anthropic",
+            model="m",
+            api_key="k",
+            extra_params={"max_completion_tokens": 100},
+        )
+        assert any("max_completion_tokens" in r.message and "anthropic" in r.message for r in caplog.records)
+
+    def test_unknown_provider_forwards_as_is(self):
+        # A provider with no entry in _PROVIDER_EXTRA_KEYS forwards params verbatim
+        # (don't break newly-registered providers). create_client rejects unknown
+        # providers, so exercise the helper directly.
+        from koboi.llm.factory import _filter_extra_params_for_provider
+
+        assert _filter_extra_params_for_provider("some-future-provider", {"top_p": 0.1, "weird_key": 1}) == {
+            "top_p": 0.1,
+            "weird_key": 1,
+        }
