@@ -68,6 +68,15 @@ class TestLLMRouter:
         assert router._DYNAMIC_LINE in rendered
         assert "{query}" not in rendered
 
+    async def test_route_falls_back_when_prompt_format_breaks(self):
+        # An agent description containing braces must not crash routing; with
+        # .format() inside try it falls back to the keyword router (and logs).
+        ads = [AgentDef(name="hr", description='HR stuff {"example": true}', keywords=["leave"])]
+        resp = make_mock_response(json.dumps({"agents": ["hr"], "confidence": 0.9, "reasoning": ""}))
+        router = LLMRouter(client=MockClient([resp]), agent_defs=ads)
+        result = await router.route("How much annual leave do I get?")
+        assert result.method == "keyword"  # fell back instead of raising
+
 
 class TestOrchestrator:
     async def test_sequential_execution(self):

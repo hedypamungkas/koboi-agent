@@ -1,8 +1,10 @@
 # configs/reasoning_model.yaml
 #
 # Demonstrates LLM generation params wired end-to-end to the provider body.
-# Every key under `llm:` below reaches the HTTP request verbatim (verified at
-# the egress point). See .claude/skills/yaml-config.md > "llm" for the full list.
+# Forward-as-is generation keys under `llm:` below (max_completion_tokens,
+# reasoning_effort, and the commented alternatives) reach the request body
+# verbatim. Infra keys (provider/model/api_key/base_url) are consumed separately
+# for routing/auth, not sent in the body. See .claude/skills/yaml-config.md.
 #
 # Run:    koboi chat configs/reasoning_model.yaml
 # Validate (no keys needed): koboi validate configs/reasoning_model.yaml

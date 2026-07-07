@@ -310,3 +310,25 @@ class TestConfigValidation:
             {"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "top_p": 0.1, "max_tokens": 100}}
         )
         assert not any("not recognized" in r.message for r in caplog.records)
+
+    def test_unknown_orchestration_agent_llm_key_warns(self, caplog):
+        # A typo in an orchestration agent's llm_config must warn too -- the exact
+        # path the per-agent llm_config feature resurrected. max_context_tokens is
+        # valid for agents (tunes the context window), so it must NOT warn.
+        caplog.set_level(logging.WARNING)
+        Config.from_dict(
+            {
+                "agent": {"name": "x"},
+                "llm": {"provider": "openai", "model": "m"},
+                "orchestration": {
+                    "enabled": True,
+                    "agents": [
+                        {"name": "worker", "llm": {"temperature": 0.1, "to_p": 0.9, "max_context_tokens": 4000}}
+                    ],
+                },
+            }
+        )
+        msgs = [r.message for r in caplog.records]
+        assert any("to_p" in m and "worker" in m for m in msgs)  # typo -> warn
+        assert not any("max_context_tokens" in m for m in msgs)  # valid agent key -> no warn
+        assert not any('"temperature"' in m for m in msgs)  # known key -> no warn

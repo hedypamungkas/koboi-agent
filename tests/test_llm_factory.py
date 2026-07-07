@@ -226,20 +226,28 @@ class TestLLMParamForwarding:
 
     def test_build_client_applies_llm_overrides(self):
         # Per-agent overrides (orchestration llm_config) merge over the top-level
-        # llm: block via _build_client(llm_overrides=...).
+        # llm: block via _build_client(llm_overrides=...). Asserts the full seam,
+        # including forwardable extra_params (top_p base + seed override merged).
         from koboi.config import Config
         from koboi.facade import _build_client
 
         config = Config.from_dict(
-            {"agent": {"name": "t"}, "llm": {"provider": "openai", "model": "m", "api_key": "k", "temperature": 0.9}}
+            {
+                "agent": {"name": "t"},
+                "llm": {"provider": "openai", "model": "m", "api_key": "k", "temperature": 0.9, "top_p": 0.5},
+            }
         )
         base = _build_client(config, logger=None)
         assert base._impl._temperature == 0.9
         assert base._impl._max_tokens is None
+        assert base._impl._extra_params == {"top_p": 0.5}
 
-        overridden = _build_client(config, logger=None, llm_overrides={"temperature": 0.1, "max_tokens": 1234})
+        overridden = _build_client(
+            config, logger=None, llm_overrides={"temperature": 0.1, "max_tokens": 1234, "seed": 42}
+        )
         assert overridden._impl._temperature == 0.1
         assert overridden._impl._max_tokens == 1234
+        assert overridden._impl._extra_params == {"top_p": 0.5, "seed": 42}
 
     def test_cloudflare_forwards_params_reach_body(self):
         # Cloudflare inherits the OpenAI adapter via _create_openai (registry.py);

@@ -151,7 +151,8 @@ class Config:
         self._warn_unknown_llm_keys()
 
     def _warn_unknown_llm_keys(self) -> None:
-        """Warn about ``llm:`` keys that aren't recognized (likely typos).
+        """Warn about unrecognized keys (likely typos) in ``llm:`` and each
+        orchestration agent's ``llm_config``.
 
         Unrecognized keys are silently ignored (LLMConfig uses extra="ignore"
         and only allowlisted keys are forwarded to the provider), so surface
@@ -164,6 +165,25 @@ class Config:
                     "(not forwarded to the provider). Possible typo?",
                     key,
                 )
+        # Per-agent llm_config under orchestration.agents[*].llm. max_context_tokens
+        # is valid here (it tunes the agent's context window, not the LLM body), so
+        # it is excluded from the unknown check for agents -- but not for top-level llm:.
+        agent_known = _KNOWN_LLM_KEYS | {"max_context_tokens"}
+        for agent in self.get("orchestration", "agents", default=[]):
+            if not isinstance(agent, dict):
+                continue
+            agent_llm = agent.get("llm")
+            if not isinstance(agent_llm, dict):
+                continue
+            name = agent.get("name", "<unnamed>")
+            for key in agent_llm:
+                if key not in agent_known:
+                    _logger.warning(
+                        "Unknown orchestration.agents[%s].llm key %r is not recognized "
+                        "and will be ignored (not forwarded to the provider). Possible typo?",
+                        name,
+                        key,
+                    )
 
     @property
     def schema(self):
@@ -333,15 +353,6 @@ class Config:
     @property
     def temperature(self) -> float | None:
         return self.llm.get("temperature", None)
-
-    @property
-    def llm_extra_params(self) -> dict:
-        """Forward-as-is generation params (sampling + reasoning) under ``llm:``.
-
-        These reach the provider HTTP body verbatim (top_p, stop, seed,
-        response_format, reasoning_effort, thinking, ...). Empty when unset.
-        """
-        return extract_extra_params(self.llm) or {}
 
     @property
     def max_retries(self) -> int:
