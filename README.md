@@ -194,9 +194,11 @@ pytest --cov=koboi            # with coverage
 Examples use `click` + `rich` (in the `[tui]` extra), so install that first:
 
 ```bash
-pip install koboi-agent[tui]                    # examples need click + rich
+pip install -e ".[tui]"                        # examples need click + rich
 python examples/01_simple_chat.py              # automatic mode
 python examples/01_simple_chat.py -m interactive  # interactive mode
+# Server examples need [api]: pip install -e ".[api]"
+# Bare-install-safe (no extras): 27, 29, 31, 32, hitl_client.py
 ```
 
 ## Architecture
