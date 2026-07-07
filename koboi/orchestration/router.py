@@ -10,6 +10,7 @@ Provides:
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,9 @@ from koboi.orchestration._utils import extract_json as _extract_json
 
 if TYPE_CHECKING:
     from koboi.client import Client
+
+
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -184,22 +188,30 @@ class LLMRouter(BaseRouter):
             "You are a router. Determine which agent should handle the question.\n\n"
             "Available agents:\n"
             f"{agent_lines}\n"
-            "{{dynamic_line}}\n"
-            "Question: {{query}}\n\n"
+            "{dynamic_line}\n"
+            "Question: {query}\n\n"
             'Answer ONLY JSON: {{"agents": ["agent_name"], "confidence": 0.9, "reasoning": "..."}}'
         )
 
     async def route(self, query: str) -> RoutingDecision:
         dynamic_line = self._DYNAMIC_LINE if self.enable_dynamic else ""
-        prompt = self.routing_prompt.format(query=query, dynamic_line=dynamic_line)
         try:
+            # .format() is inside the try because the template embeds agent
+            # descriptions (f-string-interpolated at build time); a description
+            # containing braces would otherwise raise and crash routing instead
+            # of falling back to the keyword router.
+            prompt = self.routing_prompt.format(query=query, dynamic_line=dynamic_line)
             resp = await self.client.complete(
                 messages=[{"role": "user", "content": prompt}],
                 tools=None,
             )
             content = resp.content or ""
             return await self._parse_response(query, content)
-        except Exception:
+        except Exception as e:
+            # Never swallow silently: a brace-bearing description, a transient
+            # LLM/network failure, or a parse miss all route to the keyword
+            # fallback -- log so the operator knows the LLM router was bypassed.
+            _logger.warning("LLM router failed (%s: %s); falling back to keyword router", type(e).__name__, e)
             return await self.fallback.route(query)
 
     async def _parse_response(self, query: str, content: str) -> RoutingDecision:

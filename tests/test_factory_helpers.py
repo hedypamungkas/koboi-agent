@@ -12,6 +12,7 @@ from koboi.orchestration.factory import (
     _get_hr_chunks,
     _get_sales_chunks,
     _get_finance_chunks,
+    _has_client_overrides,
     AgentFactory,
     DynamicAgentBuilder,
 )
@@ -178,6 +179,59 @@ class TestAgentFactory:
         agents = AgentFactory.create_all_configured(defs, client)
         assert "a" in agents
         assert "b" in agents
+
+    def test_llm_config_without_overrides_shares_client(self):
+        # max_context_tokens only tunes the context window -> shared client.
+        shared = MagicMock()
+        called = {"n": 0}
+
+        def builder(agent_llm):
+            called["n"] += 1
+            return MagicMock()
+
+        ad = AgentDef(name="t", system_prompt="x", llm_config={"max_context_tokens": 4000})
+        agent = AgentFactory.create_configured_agent(ad, shared, client_builder=builder)
+        assert agent.client is shared
+        assert called["n"] == 0
+        assert agent.max_context_tokens == 4000
+
+    def test_llm_config_with_overrides_uses_builder(self):
+        shared = MagicMock()
+        built = MagicMock()
+        captured = {}
+
+        def builder(agent_llm):
+            captured["cfg"] = agent_llm
+            return built
+
+        ad = AgentDef(name="t", system_prompt="x", llm_config={"temperature": 0.1, "max_tokens": 1234})
+        agent = AgentFactory.create_configured_agent(ad, shared, client_builder=builder)
+        assert agent.client is built  # dedicated client, NOT the shared one
+        assert captured["cfg"] == {"temperature": 0.1, "max_tokens": 1234}
+
+    def test_no_client_builder_shares_client_even_with_overrides(self):
+        # Backward compat: without a builder the shared client is always used.
+        shared = MagicMock()
+        ad = AgentDef(name="t", system_prompt="x", llm_config={"temperature": 0.1})
+        agent = AgentFactory.create_configured_agent(ad, shared)
+        assert agent.client is shared
+
+
+class TestHasClientOverrides:
+    def test_none(self):
+        assert _has_client_overrides(None) is False
+
+    def test_empty(self):
+        assert _has_client_overrides({}) is False
+
+    def test_only_max_context_tokens(self):
+        assert _has_client_overrides({"max_context_tokens": 4000}) is False
+
+    def test_temperature_is_an_override(self):
+        assert _has_client_overrides({"temperature": 0.1}) is True
+
+    def test_model_is_an_override(self):
+        assert _has_client_overrides({"model": "gpt-4o"}) is True
 
 
 class TestDynamicAgentBuilder:

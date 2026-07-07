@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -86,7 +87,7 @@ class TestConfig:
         assert config.rag_enabled is False
         assert config.provider == "openai"
         assert config.llm_timeout == 120.0
-        assert config.llm_max_tokens == 4096
+        assert config.llm_max_tokens is None  # unset -> omitted from OpenAI body
         assert config.llm_auth_token == ""
 
     def test_provider_property(self):
@@ -296,3 +297,38 @@ class TestConfigValidation:
     def test_builder_rejects_empty_model(self):
         with pytest.raises(ValueError, match="llm.model is required"):
             Config.builder().agent(name="x").build()
+
+    def test_unknown_llm_key_warns(self, caplog):
+        # Unrecognized llm: keys (typos) must warn instead of being silently dropped.
+        caplog.set_level(logging.WARNING)
+        Config.from_dict({"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "topP": 0.2}})
+        assert any("topP" in r.message for r in caplog.records)
+
+    def test_known_llm_keys_no_warning(self, caplog):
+        caplog.set_level(logging.WARNING)
+        Config.from_dict(
+            {"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "top_p": 0.1, "max_tokens": 100}}
+        )
+        assert not any("not recognized" in r.message for r in caplog.records)
+
+    def test_unknown_orchestration_agent_llm_key_warns(self, caplog):
+        # A typo in an orchestration agent's llm_config must warn too -- the exact
+        # path the per-agent llm_config feature resurrected. max_context_tokens is
+        # valid for agents (tunes the context window), so it must NOT warn.
+        caplog.set_level(logging.WARNING)
+        Config.from_dict(
+            {
+                "agent": {"name": "x"},
+                "llm": {"provider": "openai", "model": "m"},
+                "orchestration": {
+                    "enabled": True,
+                    "agents": [
+                        {"name": "worker", "llm": {"temperature": 0.1, "to_p": 0.9, "max_context_tokens": 4000}}
+                    ],
+                },
+            }
+        )
+        msgs = [r.message for r in caplog.records]
+        assert any("to_p" in m and "worker" in m for m in msgs)  # typo -> warn
+        assert not any("max_context_tokens" in m for m in msgs)  # valid agent key -> no warn
+        assert not any('"temperature"' in m for m in msgs)  # known key -> no warn

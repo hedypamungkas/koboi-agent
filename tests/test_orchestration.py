@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from koboi.orchestration.router import KeywordRouter, LLMRouter
+from koboi.types import AgentDef
 from tests.conftest import MockClient, make_mock_response
 
 
@@ -53,6 +54,28 @@ class TestLLMRouter:
         router = LLMRouter(client=client)
         result = await router.route("What is the price of the Enterprise package?")
         assert "sales" in result.agents
+
+    def test_custom_prompt_inserts_query(self):
+        # Regression: _build_prompt must substitute {query}/{dynamic_line}.
+        # Double-brace {{...}} would leak the literal token and drop the question,
+        # collapsing every custom-agent config's router to the catch-all.
+        ads = [AgentDef(name="hr", description="HR and leave policy", keywords=["leave"])]
+        router = LLMRouter(client=MockClient([]), agent_defs=ads)
+        rendered = router.routing_prompt.format(
+            query="How much annual leave do I get?", dynamic_line=router._DYNAMIC_LINE
+        )
+        assert "How much annual leave do I get?" in rendered
+        assert router._DYNAMIC_LINE in rendered
+        assert "{query}" not in rendered
+
+    async def test_route_falls_back_when_prompt_format_breaks(self):
+        # An agent description containing braces must not crash routing; with
+        # .format() inside try it falls back to the keyword router (and logs).
+        ads = [AgentDef(name="hr", description='HR stuff {"example": true}', keywords=["leave"])]
+        resp = make_mock_response(json.dumps({"agents": ["hr"], "confidence": 0.9, "reasoning": ""}))
+        router = LLMRouter(client=MockClient([resp]), agent_defs=ads)
+        result = await router.route("How much annual leave do I get?")
+        assert result.method == "keyword"  # fell back instead of raising
 
 
 class TestOrchestrator:

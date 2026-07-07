@@ -13,7 +13,7 @@ from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Awaitable
 
-from koboi.config import Config
+from koboi.config import Config, extract_extra_params
 from koboi.client import RetryClient
 from koboi.memory import ConversationMemory
 from koboi.modes import AgentMode, ModeManager
@@ -215,11 +215,17 @@ class KoboiAgent:
             except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
         if self._orchestrator is not None:
-            # Clean up orchestrator's sub-agent memories
+            shared_client = self._orchestrator.client
+            # Clean up orchestrator's sub-agent memories + their dedicated LLM
+            # clients. Per-agent llm_config overrides build a separate RetryClient
+            # per agent; those connection pools must be closed, not just the shared one.
             for agent in getattr(self._orchestrator, "_agents_map", {}).values():
                 if hasattr(agent, "memory") and hasattr(agent.memory, "close"):
                     agent.memory.close()
-            await self._orchestrator.client.close()
+                agent_client = getattr(agent, "client", None)
+                if agent_client is not None and agent_client is not shared_client and hasattr(agent_client, "close"):
+                    await agent_client.close()
+            await shared_client.close()
         elif self._core is not None:
             if hasattr(self._core.memory, "close"):
                 self._core.memory.close()
@@ -439,20 +445,38 @@ class KoboiAgent:
         return self._trust_db
 
 
-def _build_client(config: Config, logger: AgentLogger) -> RetryClient:
+def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | None = None) -> RetryClient:
+    # Merge per-agent overrides (orchestration ``llm_config``) over the top-level
+    # ``llm:`` block and read from the merged dict so every knob -- temperature,
+    # max_tokens, and the forward-as-is extra params -- flows through one path.
+    base_llm = config.llm
+    if llm_overrides:
+        llm = {**base_llm, **llm_overrides}
+        # If the override switches provider, don't inherit the parent's
+        # connection credentials -- an OpenAI key must not be sent to Anthropic
+        # (opaque 401), etc. Blank the inherited value so ProviderRegistry
+        # resolves the NEW provider's env (or raises a clear "key not
+        # configured"), unless the override specifies it explicitly.
+        if llm.get("provider", "openai") != base_llm.get("provider", "openai"):
+            for _conn_key in ("api_key", "auth_token", "base_url"):
+                if _conn_key not in llm_overrides:
+                    llm[_conn_key] = ""
+    else:
+        llm = base_llm
     return RetryClient(
-        provider=config.provider,
-        model=config.model,
-        api_key=config.api_key,
-        base_url=config.base_url,
+        provider=llm.get("provider", "openai"),
+        model=llm.get("model", "gpt-4o-mini"),
+        api_key=llm.get("api_key", ""),
+        base_url=llm.get("base_url", ""),
         logger=logger,
-        timeout=config.llm_timeout,
-        max_tokens=config.llm_max_tokens,
-        auth_token=config.llm_auth_token,
-        auth_type=config.auth_type,
-        max_retries=config.max_retries,
-        retry_backoff_base=config.retry_backoff_base,
-        temperature=config.temperature,
+        timeout=llm.get("timeout", 120.0),
+        max_tokens=llm.get("max_tokens"),
+        auth_token=llm.get("auth_token", ""),
+        auth_type=llm.get("auth_type", "api_key"),
+        max_retries=llm.get("max_retries", 3),
+        retry_backoff_base=llm.get("retry_backoff_base", 2.0),
+        temperature=llm.get("temperature"),
+        extra_params=extract_extra_params(llm),
     )
 
 
@@ -1156,6 +1180,16 @@ def _build_orchestration(config: Config, verbose: bool = False):
     router = _build_router(config, assembler.client, agent_defs)
 
     parent_rag = config.rag
+
+    # Per-agent LLM client builder: merges an agent's llm_config (orchestration
+    # ``llm:`` block) over the top-level ``llm:`` and builds a dedicated client,
+    # so temperature/max_tokens/extra params (and provider/model overrides) take
+    # effect per agent. Agents without LLM overrides keep sharing assembler.client
+    # (decided inside AgentFactory via _has_client_overrides).
+    def _agent_client_builder(agent_llm: dict) -> RetryClient:
+        overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
+        return _build_client(config, assembler.logger, llm_overrides=overrides)
+
     agents_map = AgentFactory.create_all_configured(
         agent_defs,
         assembler.client,
@@ -1164,6 +1198,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         hook_chain=assembler.hook_chain,
         sandbox=assembler.sandbox,
         embedding_config=config.get("embedding"),
+        client_builder=_agent_client_builder,
     )
 
     orch_conf = config.orchestration

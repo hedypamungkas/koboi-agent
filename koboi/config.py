@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -9,6 +10,9 @@ import yaml
 
 if TYPE_CHECKING:
     from koboi.config_models import KoboiConfig
+
+
+_logger = logging.getLogger(__name__)
 
 
 _ENV_PATTERN = re.compile(r"\$\{(\w+)(?::([^}]*))?\}")
@@ -41,6 +45,66 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+# Generation-shape keys forwarded verbatim into the provider request body when
+# present under ``llm:``. Covers sampling (top_p/top_k/penalties/stop/seed),
+# response shaping (response_format/logit_bias/logprobs), and reasoning budgets
+# (reasoning_effort/thinking/max_completion_tokens). Kept as an allowlist so
+# infra keys (provider/model/api_key/base_url/temperature/max_tokens/timeout/
+# retries/auth_*) are never leaked into the body.
+FORWARDABLE_LLM_KEYS: frozenset[str] = frozenset(
+    {
+        "top_p",
+        "top_k",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "seed",
+        "response_format",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+        "max_completion_tokens",
+        "reasoning_effort",
+        "thinking",
+        "verbosity",
+    }
+)
+
+
+def extract_extra_params(llm: dict) -> dict | None:
+    """Pick the forward-as-is generation params out of an ``llm:`` config dict.
+
+    Returns ``None`` when none are set so callers can skip the body merge.
+    """
+    picked = {k: v for k, v in llm.items() if k in FORWARDABLE_LLM_KEYS and v is not None}
+    return picked or None
+
+
+# All recognized ``llm:`` keys = infra/connection keys (each consumed explicitly
+# by a Config accessor or RetryClient) plus the forward-as-is generation keys.
+# Used to warn on typos / unrecognized keys that would otherwise be silently
+# dropped (LLMConfig uses extra="ignore").
+_KNOWN_LLM_KEYS: frozenset[str] = FORWARDABLE_LLM_KEYS | frozenset(
+    {
+        "provider",
+        "model",
+        "api_key",
+        "base_url",
+        "timeout",
+        "max_tokens",
+        "temperature",
+        "max_retries",
+        "retry_backoff_base",
+        "auth_token",
+        "auth_type",
+        "embedding_model",
+        "api_version",
+        "transport_retries",
+        "account_id",  # cloudflare extra_env (registry.py)
+    }
+)
 
 
 def _load_yaml_with_extends(path: Path, _seen: set[Path] | None = None) -> dict:
@@ -84,6 +148,42 @@ class Config:
             self._schema = KoboiConfig(**self._data)
         except Exception as exc:
             raise ValueError(f"Config validation failed: {exc}") from exc
+        self._warn_unknown_llm_keys()
+
+    def _warn_unknown_llm_keys(self) -> None:
+        """Warn about unrecognized keys (likely typos) in ``llm:`` and each
+        orchestration agent's ``llm_config``.
+
+        Unrecognized keys are silently ignored (LLMConfig uses extra="ignore"
+        and only allowlisted keys are forwarded to the provider), so surface
+        them to the user at config-load time.
+        """
+        for key in self.llm:
+            if key not in _KNOWN_LLM_KEYS:
+                _logger.warning(
+                    "Unknown llm: key %r is not recognized and will be ignored "
+                    "(not forwarded to the provider). Possible typo?",
+                    key,
+                )
+        # Per-agent llm_config under orchestration.agents[*].llm. max_context_tokens
+        # is valid here (it tunes the agent's context window, not the LLM body), so
+        # it is excluded from the unknown check for agents -- but not for top-level llm:.
+        agent_known = _KNOWN_LLM_KEYS | {"max_context_tokens"}
+        for agent in self.get("orchestration", "agents", default=[]):
+            if not isinstance(agent, dict):
+                continue
+            agent_llm = agent.get("llm")
+            if not isinstance(agent_llm, dict):
+                continue
+            name = agent.get("name", "<unnamed>")
+            for key in agent_llm:
+                if key not in agent_known:
+                    _logger.warning(
+                        "Unknown orchestration.agents[%s].llm key %r is not recognized "
+                        "and will be ignored (not forwarded to the provider). Possible typo?",
+                        name,
+                        key,
+                    )
 
     @property
     def schema(self):
@@ -236,8 +336,11 @@ class Config:
         return self.llm.get("timeout", 120.0)
 
     @property
-    def llm_max_tokens(self) -> int:
-        return self.llm.get("max_tokens", 4096)
+    def llm_max_tokens(self) -> int | None:
+        # None = "user did not configure it": OpenAI/Cloudflare then omit
+        # max_tokens (no force-cap at a default); Anthropic supplies its own
+        # 4096 fallback (its API requires the field).
+        return self.llm.get("max_tokens", None)
 
     @property
     def llm_auth_token(self) -> str:

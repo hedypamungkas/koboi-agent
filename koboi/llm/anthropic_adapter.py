@@ -22,15 +22,26 @@ class AnthropicAdapter(LLMClient):
         self,
         model: str,
         transport: HttpTransport,
-        max_tokens: int = _DEFAULT_MAX_TOKENS,
+        max_tokens: int | None = None,
         logger: AgentLogger | None = None,
         temperature: float | None = None,
+        extra_params: dict | None = None,
     ):
         self._model = model
         self._transport = transport
-        self._max_tokens = max_tokens
+        # Anthropic's API requires max_tokens; fall back to the default when the
+        # caller (e.g. an unset ``llm.max_tokens``) passes None.
+        self._max_tokens = max_tokens if max_tokens is not None else _DEFAULT_MAX_TOKENS
         self._logger = logger
         self._temperature = temperature
+        # Forward-as-is generation params (top_p/top_k/stop/thinking/...),
+        # merged verbatim into the request body.
+        self._extra_params = extra_params
+
+    def _apply_extra_params(self, body: dict) -> None:
+        """Merge forward-as-is generation params into the request body."""
+        if self._extra_params:
+            body.update(self._extra_params)
 
     async def complete(
         self,
@@ -56,6 +67,7 @@ class AnthropicAdapter(LLMClient):
         if self._logger:
             self._logger.log_llm_request(messages, tools)
 
+        self._apply_extra_params(body)
         data = await self._transport.post("/messages", body)
         result = self._parse_response(data)
 
@@ -89,6 +101,7 @@ class AnthropicAdapter(LLMClient):
         if self._logger:
             self._logger.log_llm_request(messages, tools)
 
+        self._apply_extra_params(body)
         content_parts: list[str] = []
         tool_calls_acc: dict[int, dict] = {}
         usage_input = 0

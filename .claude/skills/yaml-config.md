@@ -24,7 +24,9 @@ llm:
   api_key: str           # Supports ${ENV_VAR} interpolation
   base_url: str          # Provider base URL override
   timeout: float         # HTTP timeout in seconds (default: 120.0)
-  max_tokens: int        # Max generation tokens (default: 4096)
+  max_tokens: int        # Max generation tokens. Optional -- omitted from the
+                         #   request when unset (OpenAI/Cloudflare send no cap);
+                         #   Anthropic falls back to 4096 (its API requires it).
   temperature: float     # Optional temperature override
   max_retries: int       # LLM-level retries (default: 3)
   retry_backoff_base: float  # Backoff base (default: 2.0)
@@ -32,7 +34,31 @@ llm:
   auth_type: str         # Auth type (default: "api_key")
   embedding_model: str   # For semantic RAG (default: "text-embedding-3-small")
   api_version: str       # API version (e.g. "2023-06-01" for Anthropic)
+
+  # --- Forward-as-is generation params (optional) ---------------------------
+  # Any of these, when present, are merged verbatim into the provider request
+  # body. Sampling + response shaping:
+  top_p: float                  # Nucleus sampling
+  top_k: int                    # (Anthropic / some gateways)
+  frequency_penalty: float      # OpenAI-compatible
+  presence_penalty: float       # OpenAI-compatible
+  stop: [str]                   # Stop sequences
+  seed: int                     # Best-effort determinism (OpenAI-compatible)
+  response_format: dict         # e.g. {"type": "json_object"}
+  logit_bias: dict              # Token bias
+  logprobs: bool                # Return logprobs
+  top_logprobs: int             # How many logprobs to return
+  verbosity: int                # OpenAI-compatible
+  # Reasoning models:
+  reasoning_effort: str         # "low" | "medium" | "high" (OpenAI o-series)
+  max_completion_tokens: int    # OpenAI o-series cap (suppresses max_tokens)
+  thinking: dict                # Anthropic: {"type":"enabled","budget_tokens":N}
 ```
+- Only the allowlisted keys above are forwarded; infra keys (`provider`/`model`/`api_key`/`base_url`/`temperature`/`max_tokens`/`timeout`/retries/`auth_*`) are handled separately and never leak into the body.
+- **OpenAI o-series:** set `max_completion_tokens` (not `max_tokens`); when both are present, `max_tokens` is dropped automatically (the API rejects the pair). Set `reasoning_effort` to control thinking depth.
+- **Anthropic `thinking`:** requires `max_tokens` > `budget_tokens` -- forwarded as-is, so satisfy the constraint yourself (the provider rejects it otherwise).
+
+**Per-agent overrides (orchestration):** under `orchestration.agents[*].llm`, any key above (plus `provider`/`model`/`api_key`/`base_url` to route an agent to a different model) overrides the top-level `llm:` block for that agent only; `max_context_tokens` tunes that agent's context window. Agents without an `llm:` block share the orchestrator's single client. See `configs/reasoning_model.yaml` for a worked example.
 
 ## tools
 ```yaml
