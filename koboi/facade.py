@@ -16,6 +16,7 @@ from collections.abc import Awaitable
 
 from koboi.config import Config, extract_extra_params
 from koboi.client import RetryClient
+from koboi.llm.resolve import resolve_llm_spec
 from koboi.memory import ConversationMemory
 from koboi.modes import AgentMode, ModeManager
 from koboi.tools.registry import ToolRegistry, register_decorated
@@ -446,24 +447,13 @@ class KoboiAgent:
         return self._trust_db
 
 
-def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | None = None) -> RetryClient:
-    # Merge per-agent overrides (orchestration ``llm_config``) over the top-level
-    # ``llm:`` block and read from the merged dict so every knob -- temperature,
-    # max_tokens, and the forward-as-is extra params -- flows through one path.
-    base_llm = config.llm
-    if llm_overrides:
-        llm = {**base_llm, **llm_overrides}
-        # If the override switches provider, don't inherit the parent's
-        # connection credentials -- an OpenAI key must not be sent to Anthropic
-        # (opaque 401), etc. Blank the inherited value so ProviderRegistry
-        # resolves the NEW provider's env (or raises a clear "key not
-        # configured"), unless the override specifies it explicitly.
-        if llm.get("provider", "openai") != base_llm.get("provider", "openai"):
-            for _conn_key in ("api_key", "auth_token", "base_url"):
-                if _conn_key not in llm_overrides:
-                    llm[_conn_key] = ""
-    else:
-        llm = base_llm
+def _build_client_from_dict(llm: dict, logger: AgentLogger) -> RetryClient:
+    """Build a ``RetryClient`` from a resolved inline llm dict.
+
+    Shared by the top-level client build (Tier 0/1) and the per-agent full-replace
+    path (a named ``providers:`` ref). All generation knobs -- temperature,
+    max_tokens, and the forward-as-is extra params -- are read here.
+    """
     return RetryClient(
         provider=llm.get("provider", "openai"),
         model=llm.get("model", "gpt-4o-mini"),
@@ -479,6 +469,33 @@ def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | Non
         temperature=llm.get("temperature"),
         extra_params=extract_extra_params(llm),
     )
+
+
+def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | None = None) -> RetryClient:
+    # Resolve the top-level ``llm:`` spec (inline / named ``providers:`` ref) and
+    # merge per-agent overrides over it. If the override switches provider, don't
+    # inherit the parent's connection credentials -- an OpenAI key must not be
+    # sent to Anthropic (opaque 401). Blank them so ProviderRegistry resolves the
+    # new provider's env (or raises a clear "key not configured").
+    base = resolve_llm_spec(config.llm, config) or {}
+    if llm_overrides:
+        llm = {**base, **llm_overrides}
+        if llm.get("provider", "openai") != base.get("provider", "openai"):
+            for _conn_key in ("api_key", "auth_token", "base_url"):
+                if _conn_key not in llm_overrides:
+                    llm[_conn_key] = ""
+    else:
+        llm = base
+    return _build_client_from_dict(llm, logger)
+
+
+def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | None = None) -> RetryClient:
+    # Resolve the top-level ``llm:`` spec -- an inline dict (Tier 0, today), a
+    # named ``providers:`` ref (Tier 1), or a ``{pool: name}`` (Tier 2, W2) --
+    # then merge per-agent overrides over it so every knob flows through one path.
+    base = resolve_llm_spec(config.llm, config) or {}
+    llm = {**base, **llm_overrides} if llm_overrides else base
+    return _build_client_from_dict(llm, logger)
 
 
 def _build_tools(config: Config) -> ToolRegistry:
@@ -549,10 +566,14 @@ def _build_embedding_client(config: Config, logger: AgentLogger):
     section (decoupled from chat). Delegates to the shared
     ``koboi.llm.factory.build_embedding_client``; returns ``None`` when no usable
     section is configured so callers fall back to the chat client.
+
+    The ``embedding:`` spec may be an inline dict (today) or a named
+    ``providers:`` ref (Tier 1); both normalize to a dict before construction.
     """
     from koboi.llm.factory import build_embedding_client
 
-    return build_embedding_client(config.get("embedding"), logger)
+    emb = resolve_llm_spec(config.get("embedding"), config)
+    return build_embedding_client(emb, logger)
 
 
 def _build_rag(config: Config, client: RetryClient, logger: AgentLogger):
@@ -1182,12 +1203,16 @@ def _build_orchestration(config: Config, verbose: bool = False):
 
     parent_rag = config.rag
 
-    # Per-agent LLM client builder: merges an agent's llm_config (orchestration
-    # ``llm:`` block) over the top-level ``llm:`` and builds a dedicated client,
-    # so temperature/max_tokens/extra params (and provider/model overrides) take
-    # effect per agent. Agents without LLM overrides keep sharing assembler.client
-    # (decided inside AgentFactory via _has_client_overrides).
-    def _agent_client_builder(agent_llm: dict) -> RetryClient:
+    # Per-agent LLM client builder. A named ``providers:`` ref (str) FULLY
+    # REPLACES the top-level client; an inline dict MERGES over it (today's
+    # behavior) so temperature/max_tokens/extra params take effect per agent.
+    # Pool specs (W2) raise. Agents without LLM overrides keep sharing
+    # assembler.client (decided inside AgentFactory via _has_client_overrides).
+    def _agent_client_builder(agent_llm: dict | str) -> RetryClient:
+        if isinstance(agent_llm, str):
+            return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
+        if isinstance(agent_llm, dict) and "pool" in agent_llm:
+            raise NotImplementedError("Per-agent provider pools arrive in W2; use a named ref or inline dict.")
         overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
         return _build_client(config, assembler.logger, llm_overrides=overrides)
 

@@ -37,6 +37,36 @@ def _walk_resolve(obj: Any) -> Any:
     return obj
 
 
+def _expand_provider_refs(data: dict) -> None:
+    """Expand string provider refs (Tier 1) to inline dicts, in place.
+
+    Runs after env interpolation, before Pydantic validation. ``llm:`` /
+    ``embedding:`` / each orchestration agent's ``llm:`` may be a string naming
+    an entry in the top-level ``providers:`` map; expand it to that entry's dict
+    so strict validation (which requires ``llm.model``) sees a complete inline
+    spec. Unknown refs are left untouched and surface as a clear validation
+    error. Pool specs (``{pool: name}``, Tier 2/W2) are left as-is.
+    """
+    providers = data.get("providers")
+    if not isinstance(providers, dict) or not providers:
+        return
+
+    def _expand(spec):
+        if isinstance(spec, str) and spec in providers:
+            return dict(providers[spec])
+        return spec  # inline dict, {pool: ...}, or unknown ref (validated later)
+
+    if isinstance(data.get("llm"), str):
+        data["llm"] = _expand(data["llm"])
+    if isinstance(data.get("embedding"), str):
+        data["embedding"] = _expand(data["embedding"])
+    orch = data.get("orchestration")
+    if isinstance(orch, dict):
+        for agent in orch.get("agents") or []:
+            if isinstance(agent, dict) and isinstance(agent.get("llm"), str):
+                agent["llm"] = _expand(agent["llm"])
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     result = dict(base)
     for key, value in override.items():
@@ -137,6 +167,10 @@ def _load_yaml_with_extends(path: Path, _seen: set[Path] | None = None) -> dict:
 class Config:
     def __init__(self, data: dict, validate: bool = False):
         self._data = _walk_resolve(data)
+        # Expand Tier-1 provider refs (llm:/embedding:/agent llm: as a string)
+        # to inline dicts before validation + build, so strict validation sees a
+        # complete spec and downstream code always reads inline dicts.
+        _expand_provider_refs(self._data)
         self._schema: KoboiConfig | None = None
         if validate:
             self._validate()
@@ -238,6 +272,21 @@ class Config:
     @property
     def llm(self) -> dict:
         return self.get("llm", default={})
+
+    @property
+    def providers(self) -> dict:
+        """Named provider specs for multi-provider config (Tier 1/2).
+
+        Each entry is an inline provider dict (``{provider, model, api_key,
+        base_url, ...}``) referenced by name from ``llm:`` / ``embedding:`` / an
+        agent's ``llm:`` or a ``pools:`` member. See ``koboi/llm/resolve.py``.
+        """
+        return self.get("providers", default={})
+
+    @property
+    def pools(self) -> dict:
+        """Named provider pools with a selection policy (Tier 2, W2)."""
+        return self.get("pools", default={})
 
     @property
     def tools(self) -> dict:
