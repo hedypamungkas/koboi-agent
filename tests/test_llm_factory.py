@@ -276,3 +276,70 @@ class TestLLMParamForwarding:
         asyncio.run(drain())
         assert spy.body["max_tokens"] == 8192
         assert spy.body["top_p"] == 0.1
+
+    def test_build_client_provider_switch_uses_override_key(self):
+        # An agent that switches provider must use its OWN key, not inherit the
+        # parent's wrong-provider key (which would cause an opaque 401).
+        from koboi.config import Config
+        from koboi.facade import _build_client
+        from koboi.llm.anthropic_adapter import AnthropicAdapter
+
+        config = Config.from_dict(
+            {"agent": {"name": "t"}, "llm": {"provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-openai-X"}}
+        )
+        client = _build_client(
+            config,
+            logger=None,
+            llm_overrides={"provider": "anthropic", "model": "claude-sonnet-4-20250514", "api_key": "sk-ant-Y"},
+        )
+        assert isinstance(client._impl, AnthropicAdapter)
+        headers = client._impl._transport._auth.apply({})
+        assert headers.get("x-api-key") == "sk-ant-Y"  # NOT the inherited "sk-openai-X"
+
+    def test_build_client_provider_switch_without_key_does_not_inherit_parent(self, monkeypatch):
+        # Switching provider with no key must NOT silently reuse the parent key;
+        # it raises a clear "key not configured for <new provider>" instead.
+        from koboi.client import RetryClientError
+        from koboi.config import Config
+        from koboi.facade import _build_client
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+        config = Config.from_dict(
+            {"agent": {"name": "t"}, "llm": {"provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-openai-X"}}
+        )
+        with pytest.raises(RetryClientError, match="ANTHROPIC_API_KEY"):
+            _build_client(
+                config, logger=None, llm_overrides={"provider": "anthropic", "model": "claude-sonnet-4-20250514"}
+            )
+
+
+class TestOrchestrationClientLifecycle:
+    def test_close_closes_dedicated_per_agent_clients(self):
+        # KoboiAgent.close() must close each agent's dedicated client (built when
+        # llm_config has overrides), not just the shared orchestrator client.
+        from unittest.mock import AsyncMock, MagicMock
+
+        from koboi.facade import KoboiAgent
+
+        shared = MagicMock()
+        shared.close = AsyncMock()
+        dedicated = MagicMock()
+        dedicated.close = AsyncMock()
+
+        agent_shared = MagicMock()
+        agent_shared.client = shared
+        agent_shared.memory.close = MagicMock()
+        agent_dedicated = MagicMock()
+        agent_dedicated.client = dedicated
+        agent_dedicated.memory.close = MagicMock()
+
+        orch = MagicMock()
+        orch._agents_map = {"a": agent_shared, "b": agent_dedicated}
+        orch.client = shared
+
+        agent = KoboiAgent(orchestrator=orch)
+        asyncio.run(agent.close())
+
+        dedicated.close.assert_awaited_once()  # per-agent client closed
+        shared.close.assert_awaited_once()  # shared closed exactly once (not double-closed)

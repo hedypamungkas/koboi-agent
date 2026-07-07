@@ -215,11 +215,17 @@ class KoboiAgent:
             except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
                 pass
         if self._orchestrator is not None:
-            # Clean up orchestrator's sub-agent memories
+            shared_client = self._orchestrator.client
+            # Clean up orchestrator's sub-agent memories + their dedicated LLM
+            # clients. Per-agent llm_config overrides build a separate RetryClient
+            # per agent; those connection pools must be closed, not just the shared one.
             for agent in getattr(self._orchestrator, "_agents_map", {}).values():
                 if hasattr(agent, "memory") and hasattr(agent.memory, "close"):
                     agent.memory.close()
-            await self._orchestrator.client.close()
+                agent_client = getattr(agent, "client", None)
+                if agent_client is not None and agent_client is not shared_client and hasattr(agent_client, "close"):
+                    await agent_client.close()
+            await shared_client.close()
         elif self._core is not None:
             if hasattr(self._core.memory, "close"):
                 self._core.memory.close()
@@ -443,7 +449,20 @@ def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | Non
     # Merge per-agent overrides (orchestration ``llm_config``) over the top-level
     # ``llm:`` block and read from the merged dict so every knob -- temperature,
     # max_tokens, and the forward-as-is extra params -- flows through one path.
-    llm = {**config.llm, **llm_overrides} if llm_overrides else config.llm
+    base_llm = config.llm
+    if llm_overrides:
+        llm = {**base_llm, **llm_overrides}
+        # If the override switches provider, don't inherit the parent's
+        # connection credentials -- an OpenAI key must not be sent to Anthropic
+        # (opaque 401), etc. Blank the inherited value so ProviderRegistry
+        # resolves the NEW provider's env (or raises a clear "key not
+        # configured"), unless the override specifies it explicitly.
+        if llm.get("provider", "openai") != base_llm.get("provider", "openai"):
+            for _conn_key in ("api_key", "auth_token", "base_url"):
+                if _conn_key not in llm_overrides:
+                    llm[_conn_key] = ""
+    else:
+        llm = base_llm
     return RetryClient(
         provider=llm.get("provider", "openai"),
         model=llm.get("model", "gpt-4o-mini"),
