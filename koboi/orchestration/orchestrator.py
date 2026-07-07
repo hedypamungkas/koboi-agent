@@ -380,6 +380,57 @@ class Orchestrator:
             domain_label=domain_label,
         )
 
+    async def _run_dag_waves_with_flow(
+        self,
+        agent_names: list[str],
+        query: str,
+        deps: dict[str, list[str]],
+    ) -> AsyncGenerator:
+        """Run ``agent_names`` as a dependency graph in topological waves WITH EDGE DATA FLOW.
+
+        Each node's input = the original query + its dependencies' outputs (from prior
+        waves), so downstream nodes actually consume upstream results (closes the
+        no-data-flow gap). Wave-parallel within a level (each node is a distinct
+        AgentCore -> safe), sequential across levels. Yields the
+        AgentDispatch/AgentResult/_AgentCompleted event trio per node so the orchestrator
+        event stream + downstream synthesis are unchanged. Shared by the static ``dag``
+        branch and the ``dynamic`` mode.
+        """
+        from koboi.orchestration.dag_scheduler import DagScheduler
+
+        total = len(agent_names)
+        waves = DagScheduler(deps=deps).waves(agent_names)
+        outputs: dict[str, str] = {}
+
+        def _input_for(name: str) -> str:
+            node_deps = deps.get(name, [])
+            upstream = "\n".join(f"[{d}]: {outputs.get(d, '')}" for d in node_deps if d in outputs)
+            if not upstream:
+                return query
+            return (
+                f"Original request:\n{query}\n\nUpstream results:\n{upstream}\n\n"
+                "Continue from the upstream results above."
+            )
+
+        flat = 0
+        for wave in waves:
+            for name in wave:
+                yield AgentDispatchEvent(agent_name=name, agent_index=flat, total_agents=total, mode="dag")
+                flat += 1
+            wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in wave])
+            for result in wave_results:
+                outputs[result.agent_name] = result.answer
+                yield AgentResultEvent(
+                    agent_name=result.agent_name,
+                    answer=result.answer[:200],
+                    elapsed_seconds=result.elapsed_seconds,
+                    tokens_used=result.tokens_used,
+                    is_dynamic=result.is_dynamic,
+                    domain_label=result.domain_label,
+                    failed=result.failed,
+                )
+                yield _AgentCompletedEvent(agent_result=result)
+
     async def _combine_results(self, results: list[AgentResult], query: str) -> str:
         if not results:
             return "No agent available to answer this question."
@@ -521,28 +572,15 @@ class Orchestrator:
 
             results.sort(key=lambda r: order.get(r.agent_name, len(order)))
         elif mode == "dag" and self._dag_scheduler is not None:
-            # Wave-parallel: each topological level's nodes run concurrently (safe --
-            # agents_map gives one distinct AgentCore per node), levels run in order.
-            dag_waves = self._dag_scheduler.waves(agent_names)
-            self._dag_scheduler.persist_plan()  # #3: durable graph-plan rows
-            _flat = 0
-            for _wave in dag_waves:
-                for _name in _wave:
-                    yield AgentDispatchEvent(agent_name=_name, agent_index=_flat, total_agents=total, mode="dag")
-                    _flat += 1
-                _wave_results = await asyncio.gather(*[self._run_single(_n, query) for _n in _wave])
-                for result in _wave_results:
-                    results.append(result)
-                    yield AgentResultEvent(
-                        agent_name=result.agent_name,
-                        answer=result.answer[:200],
-                        elapsed_seconds=result.elapsed_seconds,
-                        tokens_used=result.tokens_used,
-                        is_dynamic=result.is_dynamic,
-                        domain_label=result.domain_label,
-                        failed=result.failed,
-                    )
-                    yield _AgentCompletedEvent(agent_result=result)
+            # Edge-data-flow wave execution: each node's input = query + its deps'
+            # outputs, so downstream nodes consume upstream results (closes the
+            # no-data-flow gap). persist_plan keeps the durable graph-plan rows (#3).
+            self._dag_scheduler.waves(agent_names)  # populate _last_waves for persist
+            self._dag_scheduler.persist_plan()
+            async for event in self._run_dag_waves_with_flow(agent_names, query, self._dag_scheduler.deps):
+                if isinstance(event, _AgentCompletedEvent):
+                    results.append(event.agent_result)
+                yield event
         else:
             if mode == "dag":
                 logger.warning("execution.mode=dag requested but no DagScheduler configured; running sequentially.")
