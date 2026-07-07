@@ -369,7 +369,11 @@ class KoboiConfig(BaseModel):
         elif agent is None:
             errors.append("agent.name is required")
         llm = data.get("llm")
-        if llm is not None and isinstance(llm, dict) and not llm.get("model"):
+        # Tier 2: ``llm: {pool: name}`` resolves its model at runtime from the
+        # pool's members, so the static ``llm.model`` requirement doesn't apply.
+        if isinstance(llm, dict) and "pool" in llm:
+            pass
+        elif llm is not None and isinstance(llm, dict) and not llm.get("model"):
             errors.append("llm.model is required")
         elif llm is None:
             errors.append("llm.model is required")

@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING
 from collections.abc import Awaitable
 
 from koboi.config import Config, extract_extra_params
-from koboi.client import RetryClient
+from koboi.client import Client, RetryClient
+from koboi.llm.pool import CircuitBreaker, FailoverPolicy, ProviderPool
 from koboi.llm.resolve import resolve_llm_spec
 from koboi.memory import ConversationMemory
 from koboi.modes import AgentMode, ModeManager
@@ -471,12 +472,13 @@ def _build_client_from_dict(llm: dict, logger: AgentLogger) -> RetryClient:
     )
 
 
-def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | None = None) -> RetryClient:
-    # Resolve the top-level ``llm:`` spec (inline / named ``providers:`` ref) and
-    # merge per-agent overrides over it. If the override switches provider, don't
-    # inherit the parent's connection credentials -- an OpenAI key must not be
-    # sent to Anthropic (opaque 401). Blank them so ProviderRegistry resolves the
-    # new provider's env (or raises a clear "key not configured").
+def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | None = None) -> Client:
+    # Resolve the top-level ``llm:`` spec (inline / named ``providers:`` ref /
+    # ``{pool: name}``) and merge per-agent overrides over it. If the override
+    # switches provider, don't inherit the parent's connection credentials -- an
+    # OpenAI key must not be sent to Anthropic (opaque 401). Blank them so
+    # ProviderRegistry resolves the new provider's env (or raises a clear "key
+    # not configured").
     base = resolve_llm_spec(config.llm, config) or {}
     if llm_overrides:
         llm = {**base, **llm_overrides}
@@ -489,13 +491,53 @@ def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | Non
     return _build_client_from_dict(llm, logger)
 
 
-def _build_client(config: Config, logger: AgentLogger, llm_overrides: dict | None = None) -> RetryClient:
-    # Resolve the top-level ``llm:`` spec -- an inline dict (Tier 0, today), a
-    # named ``providers:`` ref (Tier 1), or a ``{pool: name}`` (Tier 2, W2) --
-    # then merge per-agent overrides over it so every knob flows through one path.
-    base = resolve_llm_spec(config.llm, config) or {}
-    llm = {**base, **llm_overrides} if llm_overrides else base
-    return _build_client_from_dict(llm, logger)
+def _build_pool_from_spec(
+    pool_name: str,
+    config: Config,
+    logger: AgentLogger | None,
+    member_builder=None,
+) -> ProviderPool:
+    """Build a ``ProviderPool`` from a named ``pools:`` entry (Tier 2).
+
+    ``member_builder(inline_dict, logger)`` constructs each member; it defaults
+    to ``_build_client_from_dict`` (chat). Embeddings pass a dedicated builder.
+    Each member ref resolves through ``providers:`` (inline or named). The
+    ``failover`` policy + circuit breaker are wired from the pool spec.
+    """
+    pools = config.pools
+    if pool_name not in pools:
+        raise ValueError(
+            f"Unknown pool reference {pool_name!r}. Define it under `pools:`. "
+            f"Available: {sorted(pools) or '(none)'}"
+        )
+    spec = pools[pool_name] or {}
+    refs = spec.get("providers") or []
+    if not refs:
+        raise ValueError(f"Pool {pool_name!r} has no `providers:` members")
+    build = member_builder or _build_client_from_dict
+    members: list[Client] = []
+    for ref in refs:
+        inline = resolve_llm_spec(ref, config)
+        if not inline:
+            raise ValueError(f"Pool {pool_name!r} member {ref!r} did not resolve to a provider spec")
+        members.append(build(inline, logger))
+    policy_name = (spec.get("policy") or "failover").lower()
+    if policy_name != "failover":
+        raise NotImplementedError(f"Pool policy {policy_name!r} not implemented (W2 ships failover).")
+    cb_cfg = spec.get("circuit_breaker") or {}
+    breaker = CircuitBreaker(
+        failure_threshold=cb_cfg.get("failures", cb_cfg.get("failure_threshold", 3)),
+        cooldown_s=cb_cfg.get("cooldown_s", 30.0),
+    )
+    return ProviderPool(members, FailoverPolicy(), breaker)
+
+
+def _resolve_chat_client(config: Config, logger: AgentLogger | None) -> Client:
+    """Top-level chat client: inline dict / named ref (Tier 0/1) or pool (Tier 2)."""
+    spec = config.llm
+    if isinstance(spec, dict) and "pool" in spec:
+        return _build_pool_from_spec(spec["pool"], config, logger)
+    return _build_client(config, logger)
 
 
 def _build_tools(config: Config) -> ToolRegistry:
@@ -536,7 +578,7 @@ def _build_tools(config: Config) -> ToolRegistry:
     return registry
 
 
-def _build_context(config: Config, logger: AgentLogger, client: RetryClient | None = None):
+def _build_context(config: Config, logger: AgentLogger, client: Client | None = None):
     strategy = config.get("context", "strategy", default="noop")
     if strategy == "noop":
         return None
@@ -561,22 +603,47 @@ def _build_context(config: Config, logger: AgentLogger, client: RetryClient | No
     return build_context(strategy, logger=logger, client=client, **kwargs)
 
 
+def _embedding_member_from_dict(inline: dict, logger: AgentLogger | None) -> Client:
+    """Build one embedding-pool member from a resolved inline provider dict.
+
+    Uses ``create_client`` (bare ``LLMClient``, like ``build_embedding_client``)
+    so ``embedding_model`` is honored; pool members must carry ``api_key``.
+    """
+    from koboi.llm.factory import create_client
+
+    if not inline.get("api_key"):
+        raise ValueError("Embedding pool member requires api_key")
+    model = inline.get("model") or "text-embedding-3-small"
+    return create_client(
+        provider=inline.get("provider", "openai"),
+        model=model,
+        api_key=inline.get("api_key", ""),
+        base_url=inline.get("base_url", ""),
+        embedding_model=model,
+        logger=logger,
+    )
+
+
 def _build_embedding_client(config: Config, logger: AgentLogger):
     """Build a dedicated embedding client from an optional ``embedding:`` config
     section (decoupled from chat). Delegates to the shared
     ``koboi.llm.factory.build_embedding_client``; returns ``None`` when no usable
     section is configured so callers fall back to the chat client.
 
-    The ``embedding:`` spec may be an inline dict (today) or a named
-    ``providers:`` ref (Tier 1); both normalize to a dict before construction.
+    The ``embedding:`` spec may be an inline dict (today), a named ``providers:``
+    ref (Tier 1), or a ``{pool: name}`` (Tier 2 -- an embedding pool for RAG
+    resilience). Inline/named normalize to a dict; pool builds a ProviderPool.
     """
     from koboi.llm.factory import build_embedding_client
 
-    emb = resolve_llm_spec(config.get("embedding"), config)
+    emb_spec = config.get("embedding")
+    if isinstance(emb_spec, dict) and "pool" in emb_spec:
+        return _build_pool_from_spec(emb_spec["pool"], config, logger, member_builder=_embedding_member_from_dict)
+    emb = resolve_llm_spec(emb_spec, config)
     return build_embedding_client(emb, logger)
 
 
-def _build_rag(config: Config, client: RetryClient, logger: AgentLogger):
+def _build_rag(config: Config, client: Client, logger: AgentLogger):
     if not config.rag_enabled:
         return None
 
@@ -783,7 +850,7 @@ class AgentAssembler:
         self.verbose = verbose
         # Intermediate state -- populated by build steps
         self.logger: AgentLogger | None = None
-        self.client: RetryClient | None = None
+        self.client: Client | None = None
         self.memory: ConversationMemory | None = None
         self.tools: ToolRegistry | None = None
         self.mcp_clients: list | None = None
@@ -806,8 +873,9 @@ class AgentAssembler:
         self.logger = AgentLogger(session_id=self.config.agent_name)
         return self.logger
 
-    def build_client(self) -> RetryClient:
-        self.client = _build_client(self.config, self.logger)
+    def build_client(self) -> Client:
+        self.client = _resolve_chat_client(self.config, self.logger)
+        return self.client
         return self.client
 
     def build_memory(self) -> object:
@@ -1154,7 +1222,7 @@ def _parse_agent_defs(config: Config) -> list:
     return defs
 
 
-def _build_router(config: Config, client: RetryClient, agent_defs: list):
+def _build_router(config: Config, client: Client, agent_defs: list):
     """Build a router from orchestration config."""
     from koboi.orchestration.router import KeywordRouter, LLMRouter, HybridRouter
 
@@ -1208,11 +1276,11 @@ def _build_orchestration(config: Config, verbose: bool = False):
     # behavior) so temperature/max_tokens/extra params take effect per agent.
     # Pool specs (W2) raise. Agents without LLM overrides keep sharing
     # assembler.client (decided inside AgentFactory via _has_client_overrides).
-    def _agent_client_builder(agent_llm: dict | str) -> RetryClient:
+    def _agent_client_builder(agent_llm: dict | str) -> Client:
         if isinstance(agent_llm, str):
             return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
         if isinstance(agent_llm, dict) and "pool" in agent_llm:
-            raise NotImplementedError("Per-agent provider pools arrive in W2; use a named ref or inline dict.")
+            return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
         overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
         return _build_client(config, assembler.logger, llm_overrides=overrides)
 
@@ -1252,8 +1320,8 @@ def _build_orchestration(config: Config, verbose: bool = False):
 
 def _setup_subagent(
     tools: ToolRegistry,
-    client: RetryClient,
-    hook_chain: HookChain,
+    client: Client,
+    hook_chain: "HookChain",
     logger: AgentLogger,
     memory: ConversationMemory | None = None,
     config: Config | None = None,

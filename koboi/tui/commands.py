@@ -333,12 +333,18 @@ async def _cmd_model(ctx: CommandContext) -> CommandResult:
         ctx.output("No agent core or orchestrator available.")
         return CommandResult()
     if not ctx.args:
-        ctx.output(f"Current model: {client.provider}/{client.model}")
+        ctx.output(f"Current model: {getattr(client, 'provider', '(pool)')}/{client.model}")
         return CommandResult()
     raw = ctx.args.strip()
     try:
-        from koboi.client import Client
+        from koboi.client import RetryClient
 
+        # Model switching requires a concrete RetryClient (reads provider/api_key/
+        # base_url). A ProviderPool backs multiple providers, so a single model
+        # switch isn't meaningful -- disable it.
+        if not isinstance(client, RetryClient):
+            ctx.output("Model switching is disabled for provider pools.")
+            return CommandResult()
         old_client = client
         # Parse "provider/model" format
         if "/" in raw:
@@ -347,15 +353,15 @@ async def _cmd_model(ctx: CommandContext) -> CommandResult:
             new_provider = old_client.provider
             new_model = raw
         if new_provider != old_client.provider:
-            # Provider changed — let Client re-resolve api_key/base_url for new provider
-            new_client = Client(
+            # Provider changed — let RetryClient re-resolve api_key/base_url for new provider
+            new_client = RetryClient(
                 model=new_model,
                 logger=old_client.logger,
                 provider=new_provider,
                 temperature=old_client.temperature,
             )
         else:
-            new_client = Client(
+            new_client = RetryClient(
                 api_key=old_client.api_key,
                 base_url=old_client.base_url,
                 model=new_model,
