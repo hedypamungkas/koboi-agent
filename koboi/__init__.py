@@ -13,6 +13,7 @@ from __future__ import annotations
 # any custom_modules/tools.custom load. No-op when unset (see koboi/_extensions_path.py).
 from koboi import _extensions_path  # noqa: F401
 
+
 def _resolve_version() -> str:
     """Resolve the package version.
 
@@ -31,7 +32,7 @@ def _resolve_version() -> str:
                 stripped = line.strip()
                 if stripped.startswith("version"):
                     return stripped.split("=", 1)[1].strip().strip('"').strip("'")
-    except Exception:
+    except Exception:  # nosec B110 - best-effort version probe; fall through to metadata/constant
         pass
     try:
         from importlib.metadata import version as _get_version

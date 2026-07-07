@@ -507,8 +507,7 @@ def _build_pool_from_spec(
     pools = config.pools
     if pool_name not in pools:
         raise ValueError(
-            f"Unknown pool reference {pool_name!r}. Define it under `pools:`. "
-            f"Available: {sorted(pools) or '(none)'}"
+            f"Unknown pool reference {pool_name!r}. Define it under `pools:`. Available: {sorted(pools) or '(none)'}"
         )
     spec = pools[pool_name] or {}
     refs = spec.get("providers") or []

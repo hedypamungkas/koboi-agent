@@ -162,7 +162,8 @@ class ProviderPool(LLMClient):
                 continue
             self._breaker.record_success(client)
             return resp
-        assert last_err is not None  # pool had >=1 client, so a failure path set this
+        if last_err is None:  # unreachable: pool has >=1 client so a failure path set this
+            raise RuntimeError("ProviderPool exhausted with no captured error")
         raise last_err
 
     async def complete_stream(
@@ -216,5 +217,5 @@ class ProviderPool(LLMClient):
         for c in self._clients:
             try:
                 await c.close()
-            except Exception:
+            except Exception:  # nosec B110 - best-effort close; one member's failure must not abort the others
                 pass
