@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -139,10 +140,10 @@ class _SpyTransport:
         self.body = body
         return self.canned
 
-    async def post_stream(self, path: str, body: dict):  # pragma: no cover - unused here
-        self.body = body
-        if False:
-            yield b""
+    async def post_stream(self, path: str, body: dict):
+        self.body = json.loads(json.dumps(body))
+        yield 'data: {"choices":[{"delta":{"content":"ok"}}]}'.encode()
+        yield b"data: [DONE]"
 
     async def close(self) -> None:
         pass
@@ -239,3 +240,39 @@ class TestLLMParamForwarding:
         overridden = _build_client(config, logger=None, llm_overrides={"temperature": 0.1, "max_tokens": 1234})
         assert overridden._impl._temperature == 0.1
         assert overridden._impl._max_tokens == 1234
+
+    def test_cloudflare_forwards_params_reach_body(self):
+        # Cloudflare inherits the OpenAI adapter via _create_openai (registry.py);
+        # prove its body actually carries max_tokens + extra params (not just by
+        # construction).
+        cf = create_client(
+            provider="cloudflare",
+            model="@cf/meta/llama-3.1-70b-instruct",
+            api_key="k",
+            max_tokens=512,
+            extra_params={"top_p": 0.1},
+        )
+        captured: dict = {}
+
+        async def spy(path: str, body: dict) -> dict:
+            captured["body"] = json.loads(json.dumps(body))
+            return _OPENAI_CANNED
+
+        cf._transport.post = spy  # create_client returns the OpenAIAdapter directly
+        asyncio.run(cf.complete([{"role": "user", "content": "hi"}]))
+        assert captured["body"]["max_tokens"] == 512
+        assert captured["body"]["top_p"] == 0.1
+
+    def test_openai_params_reach_streamed_body(self):
+        # The SSE server is streaming-only; prove complete_stream forwards
+        # max_tokens + extra params into the streamed request body.
+        spy = _SpyTransport(_OPENAI_CANNED)
+        adapter = OpenAIAdapter(model="gpt-4o-mini", transport=spy, max_tokens=8192, extra_params={"top_p": 0.1})
+
+        async def drain() -> None:
+            async for _ev in adapter.complete_stream([{"role": "user", "content": "hi"}]):
+                pass
+
+        asyncio.run(drain())
+        assert spy.body["max_tokens"] == 8192
+        assert spy.body["top_p"] == 0.1
