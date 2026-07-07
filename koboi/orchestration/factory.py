@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from koboi.rag.chunker import ParagraphChunker
 from koboi.rag.types import Chunk, Document
@@ -123,6 +123,20 @@ GENERAL_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
+def _has_client_overrides(llm_config: dict | None) -> bool:
+    """True if an agent ``llm_config`` carries knobs beyond max_context_tokens.
+
+    ``max_context_tokens`` only tunes the agent's context window (already
+    consumed directly); any other key (temperature, max_tokens, extra sampling/
+    reasoning params, or provider/model/api_key/base_url overrides) means a
+    dedicated LLM client should be built for this agent instead of sharing the
+    orchestrator's single client.
+    """
+    if not llm_config:
+        return False
+    return any(k != "max_context_tokens" for k in llm_config)
+
+
 class AgentFactory:
     _defaults = {
         "top_k": 3,
@@ -188,8 +202,14 @@ class AgentFactory:
         hook_chain: HookChain | None = None,
         sandbox: object | None = None,
         embedding_config: dict | None = None,
+        client_builder: Callable[[dict], Client] | None = None,
     ) -> Agent:
-        """Build an AgentCore from an AgentDef (config-driven)."""
+        """Build an AgentCore from an AgentDef (config-driven).
+
+        When ``client_builder`` is supplied and ``agent_def.llm_config`` carries
+        LLM knobs beyond ``max_context_tokens``, a dedicated client is built from
+        that config; otherwise the shared ``client`` is reused.
+        """
         from koboi.loop import AgentCore as Agent
 
         augmentation = cls.build_rag_from_config(
@@ -204,10 +224,16 @@ class AgentFactory:
         if agent_def.llm_config and "max_context_tokens" in agent_def.llm_config:
             max_ctx = agent_def.llm_config["max_context_tokens"]
 
+        # Per-agent LLM client when llm_config carries real knobs (temperature,
+        # max_tokens, extra params, or provider/model overrides); else share.
+        agent_client = client
+        if client_builder and _has_client_overrides(agent_def.llm_config):
+            agent_client = client_builder(agent_def.llm_config or {})
+
         tools = cls._build_tools_from_config(agent_def.tools_config, sandbox=sandbox)
 
         return Agent(
-            client=client,
+            client=agent_client,
             system_prompt=agent_def.system_prompt,
             augmentation=augmentation,
             max_context_tokens=max_ctx,
@@ -227,6 +253,7 @@ class AgentFactory:
         hook_chain: HookChain | None = None,
         sandbox: object | None = None,
         embedding_config: dict | None = None,
+        client_builder: Callable[[dict], Client] | None = None,
     ) -> dict[str, Agent]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -247,6 +274,7 @@ class AgentFactory:
                 hook_chain=hook_chain,
                 sandbox=sandbox,
                 embedding_config=embedding_config,
+                client_builder=client_builder,
             )
         return agents
 

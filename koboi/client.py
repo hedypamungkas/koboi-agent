@@ -46,12 +46,13 @@ class RetryClient(LLMClient):
         logger: AgentLogger | None = None,
         provider: str = "openai",
         timeout: float = 120.0,
-        max_tokens: int = 4096,
+        max_tokens: int | None = None,
         auth_token: str = "",
         auth_type: str = "api_key",
         max_retries: int = _MAX_CLIENT_RETRIES,
         retry_backoff_base: float = 2.0,
         temperature: float | None = None,
+        extra_params: dict | None = None,
     ):
         from koboi.llm.registry import ProviderRegistry
 
@@ -95,6 +96,7 @@ class RetryClient(LLMClient):
             max_tokens=max_tokens,
             auth_token=self._raw_auth_token,
             temperature=temperature,
+            extra_params=extra_params,
         )
 
     @property

@@ -25,12 +25,13 @@ def create_client(
     base_url: str = "",
     logger: AgentLogger | None = None,
     timeout: float = 120.0,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
     auth_token: str = "",
     temperature: float | None = None,
     embedding_model: str = "text-embedding-3-small",
     api_version: str = "2023-06-01",
     transport_retries: int = 2,
+    extra_params: dict | None = None,
 ) -> LLMClient:
     """Create an LLM client for the given provider.
 
@@ -41,7 +42,8 @@ def create_client(
         base_url: Provider base URL override.
         logger: Optional agent logger.
         timeout: HTTP request timeout in seconds.
-        max_tokens: Max tokens for generation (required by Anthropic).
+        max_tokens: Max generation tokens. None = unset (OpenAI/Cloudflare omit it;
+            Anthropic falls back to its 4096 default, which its API requires).
         auth_token: Optional secondary Bearer token (e.g. Anthropic OAuth).
         temperature: Optional temperature override. None = use provider default.
         embedding_model: Model name for embedding requests.
@@ -69,6 +71,7 @@ def create_client(
         embedding_model=embedding_model,
         api_version=api_version,
         transport_retries=transport_retries,
+        extra_params=extra_params,
     )
 
 
@@ -104,12 +107,13 @@ def _create_openai(
     base_url: str,
     logger: AgentLogger | None,
     timeout: float,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
     auth_token: str = "",
     temperature: float | None = None,
     embedding_model: str = "text-embedding-3-small",
     api_version: str = "2023-06-01",
     transport_retries: int = 2,
+    extra_params: dict | None = None,
 ) -> LLMClient:
     from koboi.llm.openai_adapter import OpenAIAdapter
 
@@ -125,6 +129,8 @@ def _create_openai(
         logger=logger,
         embedding_model=embedding_model,
         temperature=temperature,
+        max_tokens=max_tokens,
+        extra_params=extra_params,
     )
 
 
@@ -134,12 +140,13 @@ def _create_anthropic(
     base_url: str,
     logger: AgentLogger | None,
     timeout: float,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
     auth_token: str = "",
     temperature: float | None = None,
     embedding_model: str = "text-embedding-3-small",
     api_version: str = "2023-06-01",
     transport_retries: int = 2,
+    extra_params: dict | None = None,
 ) -> LLMClient:
     from koboi.llm.anthropic_adapter import AnthropicAdapter
 
@@ -165,4 +172,5 @@ def _create_anthropic(
         max_tokens=max_tokens,
         logger=logger,
         temperature=temperature,
+        extra_params=extra_params,
     )

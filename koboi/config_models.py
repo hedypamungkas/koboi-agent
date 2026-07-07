@@ -43,7 +43,7 @@ class LLMConfig(BaseModel):
     api_key: str = ""
     base_url: str = ""
     temperature: float | None = None
-    max_tokens: int = Field(default=4096, ge=1)
+    max_tokens: int | None = Field(default=None, ge=1)
     timeout: float = Field(default=120.0, gt=0)
     max_retries: int = Field(default=3, ge=0)
     retry_backoff_base: float = Field(default=2.0, gt=0)

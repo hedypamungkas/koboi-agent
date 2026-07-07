@@ -43,6 +43,41 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+# Generation-shape keys forwarded verbatim into the provider request body when
+# present under ``llm:``. Covers sampling (top_p/top_k/penalties/stop/seed),
+# response shaping (response_format/logit_bias/logprobs), and reasoning budgets
+# (reasoning_effort/thinking/max_completion_tokens). Kept as an allowlist so
+# infra keys (provider/model/api_key/base_url/temperature/max_tokens/timeout/
+# retries/auth_*) are never leaked into the body.
+FORWARDABLE_LLM_KEYS: frozenset[str] = frozenset(
+    {
+        "top_p",
+        "top_k",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "seed",
+        "response_format",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+        "max_completion_tokens",
+        "reasoning_effort",
+        "thinking",
+        "verbosity",
+    }
+)
+
+
+def extract_extra_params(llm: dict) -> dict | None:
+    """Pick the forward-as-is generation params out of an ``llm:`` config dict.
+
+    Returns ``None`` when none are set so callers can skip the body merge.
+    """
+    picked = {k: v for k, v in llm.items() if k in FORWARDABLE_LLM_KEYS and v is not None}
+    return picked or None
+
+
 def _load_yaml_with_extends(path: Path, _seen: set[Path] | None = None) -> dict:
     if _seen is None:
         _seen = set()
@@ -236,8 +271,11 @@ class Config:
         return self.llm.get("timeout", 120.0)
 
     @property
-    def llm_max_tokens(self) -> int:
-        return self.llm.get("max_tokens", 4096)
+    def llm_max_tokens(self) -> int | None:
+        # None = "user did not configure it": OpenAI/Cloudflare then omit
+        # max_tokens (no force-cap at a default); Anthropic supplies its own
+        # 4096 fallback (its API requires the field).
+        return self.llm.get("max_tokens", None)
 
     @property
     def llm_auth_token(self) -> str:
@@ -250,6 +288,15 @@ class Config:
     @property
     def temperature(self) -> float | None:
         return self.llm.get("temperature", None)
+
+    @property
+    def llm_extra_params(self) -> dict:
+        """Forward-as-is generation params (sampling + reasoning) under ``llm:``.
+
+        These reach the provider HTTP body verbatim (top_p, stop, seed,
+        response_format, reasoning_effort, thinking, ...). Empty when unset.
+        """
+        return extract_extra_params(self.llm) or {}
 
     @property
     def max_retries(self) -> int:

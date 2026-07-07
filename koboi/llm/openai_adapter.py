@@ -26,12 +26,33 @@ class OpenAIAdapter(LLMClient):
         embedding_model: str = "text-embedding-3-small",
         logger: AgentLogger | None = None,
         temperature: float | None = None,
+        max_tokens: int | None = None,
+        extra_params: dict | None = None,
     ):
         self._model = model
         self._transport = transport
         self._embedding_model = embedding_model
         self._logger = logger
         self._temperature = temperature
+        # None = unset -> omitted from the body (don't force-cap at a default).
+        self._max_tokens = max_tokens
+        # Forward-as-is generation params (top_p/stop/seed/response_format/
+        # reasoning_effort/thinking/max_completion_tokens/...), merged verbatim
+        # into the request body by _apply_generation_params.
+        self._extra_params = extra_params
+
+    def _apply_generation_params(self, body: dict) -> None:
+        """Inject max_tokens + forward-as-is extra params into the request body.
+
+        Drops ``max_tokens`` when ``max_completion_tokens`` is forwarded --
+        OpenAI o-series rejects the two together.
+        """
+        if self._max_tokens is not None:
+            body["max_tokens"] = self._max_tokens
+        if self._extra_params:
+            body.update(self._extra_params)
+            if "max_completion_tokens" in self._extra_params:
+                body.pop("max_tokens", None)
 
     async def complete(
         self,
@@ -48,6 +69,7 @@ class OpenAIAdapter(LLMClient):
         if self._logger:
             self._logger.log_llm_request(messages, tools)
 
+        self._apply_generation_params(body)
         data = await self._transport.post("/chat/completions", body)
 
         try:
@@ -91,6 +113,7 @@ class OpenAIAdapter(LLMClient):
         if self._logger:
             self._logger.log_llm_request(messages, tools)
 
+        self._apply_generation_params(body)
         content_parts: list[str] = []
         tool_calls_acc: dict[int, dict] = {}
         usage = None

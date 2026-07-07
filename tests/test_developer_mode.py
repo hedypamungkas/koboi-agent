@@ -164,7 +164,7 @@ class TestConfigBuilder:
         assert config.provider == "openai"
         assert config.max_iterations == 10
         assert config.llm_timeout == 120.0
-        assert config.llm_max_tokens == 4096
+        assert config.llm_max_tokens is None  # unset -> omitted from OpenAI body
         assert config.max_retries == 3
         assert config.rag_enabled is False
 
