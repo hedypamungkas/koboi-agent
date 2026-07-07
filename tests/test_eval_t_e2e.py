@@ -27,10 +27,11 @@ class TestShippedEvalsGolden:
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 11
-        assert len(failed) == 1
-        # The single failure is the intentional negative sample.
-        assert failed[0].case_name.endswith("test_rejects_wrong_arguments")
+        assert len(passed) == 12
+        assert len(failed) == 0
+        # All shipped sample evals pass. The weather file's second case demonstrates
+        # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing
+        # the gate (so `koboi eval-test --strict` stays green).
 
     async def test_multi_turn_sample_recorded_two_turns(self):
         results = await run_tests(EVALS_DIR, threshold=0.6)
