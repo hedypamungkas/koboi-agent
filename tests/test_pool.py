@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from koboi.llm.base import LLMAuthenticationError, LLMClient
-from koboi.llm.pool import CircuitBreaker, FailoverPolicy, ProviderPool
+from koboi.llm.pool import (
+    CircuitBreaker,
+    FailoverPolicy,
+    ProviderPool,
+    ProviderPoolExhausted,
+)
 from koboi.types import AgentResponse
 
 
@@ -145,11 +150,15 @@ class TestProviderPoolComplete:
         assert resp.content == "b-answer"
         assert a.calls == 1 and b2.calls == 1
 
-    async def test_raises_last_when_all_fail(self):
-        a, b2 = FakeClient("a", mode="fail"), FakeClient("b", mode="fail")
+    async def test_raises_exhausted_with_chain_when_all_fail(self):
+        a = FakeClient("a", mode="fail", model="model-a")
+        b2 = FakeClient("b", mode="fail", model="model-b")
         pool = ProviderPool([a, b2])
-        with pytest.raises(LLMAuthenticationError):
+        with pytest.raises(ProviderPoolExhausted, match="2 member") as exc_info:
             await pool.complete([{"role": "user", "content": "q"}])
+        # The chain names BOTH failed members (not just the last); last err chained.
+        assert "model-a" in str(exc_info.value) and "model-b" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, LLMAuthenticationError)
         assert a.calls == 1 and b2.calls == 1
 
     async def test_breaker_trips_after_repeated_failures(self):
@@ -190,6 +199,15 @@ class TestProviderPoolStream:
         # b must NOT be tried (mid-stream error -> re-raise, no failover)
         assert b2.calls == 0
 
+    async def test_stream_exhaustion_raises_pre_first_byte(self):
+        a = FakeClient("a", mode="fail", model="model-a")
+        b2 = FakeClient("b", mode="fail", model="model-b")
+        pool = ProviderPool([a, b2])
+        with pytest.raises(ProviderPoolExhausted, match="2 member"):
+            async for _e in pool.complete_stream([{"role": "user", "content": "q"}]):
+                pass
+        assert a.calls == 1 and b2.calls == 1
+
 
 class TestProviderPoolEmbeddings:
     async def test_embedding_failover(self):
@@ -200,8 +218,24 @@ class TestProviderPoolEmbeddings:
         assert emb == [1.0, 2.0, 3.0]
         assert a.calls == 1 and b2.calls == 1
 
+    async def test_embedding_exhaustion_raises_not_none(self):
+        a = FakeClient("a", mode="fail", model="model-a")
+        b2 = FakeClient("b", mode="fail", model="model-b")
+        pool = ProviderPool([a, b2])
+        # Must RAISE (not silently return None) on total embedding outage.
+        with pytest.raises(ProviderPoolExhausted, match="2 member"):
+            await pool.get_embeddings("text")
+        assert a.calls == 1 and b2.calls == 1
+
 
 class TestProviderPoolModel:
     def test_model_is_first_member(self):
         pool = ProviderPool([FakeClient("a", model="gpt-x"), FakeClient("b", model="claude-y")])
         assert pool.model == "gpt-x"
+
+    async def test_last_served_model_tracks_actual_member(self):
+        a = FakeClient("a", model="model-a")
+        pool = ProviderPool([a])
+        assert pool.last_served_model is None  # nothing served yet
+        await pool.complete([{"role": "user", "content": "q"}])
+        assert pool.last_served_model == "model-a"  # the member that actually answered

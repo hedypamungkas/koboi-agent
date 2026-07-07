@@ -875,7 +875,6 @@ class AgentAssembler:
     def build_client(self) -> Client:
         self.client = _resolve_chat_client(self.config, self.logger)
         return self.client
-        return self.client
 
     def build_memory(self) -> object:
         memory_conf = self.config.get("memory", default={})
