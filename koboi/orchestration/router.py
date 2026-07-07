@@ -184,8 +184,8 @@ class LLMRouter(BaseRouter):
             "You are a router. Determine which agent should handle the question.\n\n"
             "Available agents:\n"
             f"{agent_lines}\n"
-            "{{dynamic_line}}\n"
-            "Question: {{query}}\n\n"
+            "{dynamic_line}\n"
+            "Question: {query}\n\n"
             'Answer ONLY JSON: {{"agents": ["agent_name"], "confidence": 0.9, "reasoning": "..."}}'
         )
 
