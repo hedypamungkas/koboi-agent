@@ -1,5 +1,10 @@
 name: CI
 
+# Least-privilege default for every job; widen only where a job needs more
+# (e.g. the `security` job writes SARIF to the Security tab).
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -10,44 +15,46 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,tui,api]"
-          pip install ruff "mypy~=1.19.1"
 
       - name: Ruff lint
-        run: |
-          ruff check koboi/ --select E,F,W --ignore E501,E402
+        # Rule set lives in [tool.ruff.lint] of pyproject.toml (E,F,W + B,UP,C4).
+        run: ruff check koboi/
 
       - name: Ruff format check
-        run: |
-          ruff format --check koboi/
+        run: ruff format --check koboi/
 
       - name: Type check with mypy
-        run: |
-          mypy koboi/ --ignore-missing-imports --no-strict-optional
+        run: mypy koboi/
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
-
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -55,25 +62,41 @@ jobs:
           pip install -e ".[dev,tui,api]"
 
       - name: Run tests with coverage
-        run: |
-          pytest --tb=short -q --cov=koboi --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+        # The 80% floor is enforced on Linux only: macOS skips the seccomp-only
+        # tests (Linux system package), so its measured coverage is slightly
+        # lower and should not gate the build. All platforms still run the tests.
+        run: pytest --tb=short -q --cov=koboi --cov-report=term-missing --cov-report=xml ${{ matrix.os == 'ubuntu-latest' && '--cov-fail-under=80' || '' }}
 
-      - name: Upload coverage
-        if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v7
+      - name: Upload coverage artifact
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-report
           path: coverage.xml
 
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ./coverage.xml
+          # Tokenless upload for public repos; never let an external upload
+          # outage turn the quality gate red.
+          fail_ci_if_error: false
+
   security:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # upload-sarif writes to the Security tab
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -81,14 +104,21 @@ jobs:
           pip install -e ".[dev,tui,api]"
           pip install pip-audit bandit
 
-      - name: Dependency audit
-        run: |
-          pip-audit
-        continue-on-error: true
+      - name: Static security analysis (bandit)
+        run: bandit -r koboi/ -c pyproject.toml
 
-      - name: Static security analysis
-        run: |
-          bandit -r koboi/ -c pyproject.toml
+      - name: Dependency audit (pip-audit; fails on known vulnerabilities)
+        # --strict: exit non-zero on vulns found OR audit errors. SARIF is
+        # uploaded below regardless of pass/fail so results always reach the
+        # Security tab.
+        run: pip-audit --strict -f sarif -o pip-audit.sarif
+
+      - name: Upload pip-audit SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
+        with:
+          sarif_file: pip-audit.sarif
+          category: pip-audit
 
   seccomp:
     # Validates HARD network isolation (sandbox.network_isolation: seccomp). The
@@ -98,7 +128,7 @@ jobs:
     # the system .so (both are the runner's python3).
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Install system python3-seccomp
         run: |
@@ -119,4 +149,3 @@ jobs:
         # absolute-path interpreter / real outbound TCP at the syscall layer.
         run: |
           /tmp/v/bin/python -m pytest tests/test_sandbox.py::TestSeccompEgress tests/test_sandbox.py::TestSeccompFallback -v
-
