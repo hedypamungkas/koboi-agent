@@ -39,7 +39,7 @@ BASELINE_DIR = Path(__file__).parent / "baselines"
 NFR_THRESHOLDS = {
     # --- core ---
     "test_config_loading": 3,
-    "test_facade_creation": 12,
+    "test_facade_creation": 50,  # CI min ~19ms (5x dev -- I/O/alloc heavy); recalibrated from CI run #1
     "test_tool_registration": 1,
     "test_memory_add": 1,
     "test_memory_get": 1,
@@ -89,8 +89,8 @@ NFR_THRESHOLDS = {
     "test_export_markdown_50": 1,
     "test_export_markdown_500": 1,
     "test_export_markdown_2000": 2,
-    "test_export_json_500": 2,
-    "test_export_json_2000": 6,
+    "test_export_json_500": 6,  # CI min ~2.3ms; recalibrated from CI run #1
+    "test_export_json_2000": 25,  # CI min ~9.3ms; recalibrated from CI run #1
     "test_export_html_500": 1,
     "test_export_html_2000": 4,
     "test_is_diff_content_positive": 1,
