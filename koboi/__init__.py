@@ -13,12 +13,36 @@ from __future__ import annotations
 # any custom_modules/tools.custom load. No-op when unset (see koboi/_extensions_path.py).
 from koboi import _extensions_path  # noqa: F401
 
-try:
-    from importlib.metadata import version as _get_version
 
-    __version__ = _get_version("koboi-agent")
-except Exception:
-    __version__ = "0.2.0"
+def _resolve_version() -> str:
+    """Resolve the package version.
+
+    Source-of-truth is ``pyproject.toml`` next to this package, so dev/source
+    worktrees report the declared version even when a stale ``koboi-agent`` is
+    pip-installed (e.g. an older editable install shadowing the current
+    checkout). Falls back to installed metadata (pure installs ship no
+    pyproject), then a constant.
+    """
+    try:
+        from pathlib import Path
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        if pyproject.exists():
+            for line in pyproject.read_text().splitlines():
+                stripped = line.strip()
+                if stripped.startswith("version"):
+                    return stripped.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:  # nosec B110 - best-effort version probe; fall through to metadata/constant
+        pass
+    try:
+        from importlib.metadata import version as _get_version
+
+        return _get_version("koboi-agent")
+    except Exception:
+        return "0.6.0"
+
+
+__version__ = _resolve_version()
 
 # --- Eager imports: lightweight, always needed ---
 from koboi.config import Config, ConfigBuilder

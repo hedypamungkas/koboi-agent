@@ -183,5 +183,8 @@ class RetryClient(LLMClient):
         await self._impl.close()
 
 
-# Backward-compatible alias
-Client = RetryClient
+# A "client" is anything implementing the LLMClient interface. RetryClient is the
+# default (single-provider, retrying) impl; ProviderPool (koboi/llm/pool.py) is a
+# multi-provider impl. Widened from RetryClient so a pool flows through the
+# orchestration/server/subagent paths unchanged.
+Client = LLMClient

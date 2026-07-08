@@ -24,7 +24,7 @@ from koboi.guardrails.base import BaseGuardrail
 from koboi.loop_pipeline import ToolExecutionPipeline
 from koboi.memory import ConversationMemory
 from koboi.tools.registry import ToolRegistry
-from koboi.client import RetryClient
+from koboi.client import Client
 from koboi.tokens import estimate_tokens
 from koboi.hooks.chain import HookEvent, HookChain, HookContext, AgentInfo
 from koboi.types import AgentResponse, AuditEntry, RunResult, TokenUsage, ToolCall
@@ -73,7 +73,7 @@ class AgentCore:
 
     def __init__(
         self,
-        client: RetryClient,
+        client: Client,
         memory: ConversationMemory | None = None,
         tools: ToolRegistry | None = None,
         max_iterations: int = 10,

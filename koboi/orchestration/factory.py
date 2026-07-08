@@ -124,17 +124,20 @@ GENERAL_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
-def _has_client_overrides(llm_config: dict | None) -> bool:
+def _has_client_overrides(llm_config: dict | str | None) -> bool:
     """True if an agent ``llm_config`` carries knobs beyond max_context_tokens.
 
     ``max_context_tokens`` only tunes the agent's context window (already
     consumed directly); any other key (temperature, max_tokens, extra sampling/
     reasoning params, or provider/model/api_key/base_url overrides) means a
     dedicated LLM client should be built for this agent instead of sharing the
-    orchestrator's single client.
+    orchestrator's single client. A **string** value is a named ``providers:``
+    ref (Tier 1) and always means a dedicated client.
     """
     if not llm_config:
         return False
+    if isinstance(llm_config, str):
+        return True
     return any(k != "max_context_tokens" for k in llm_config)
 
 

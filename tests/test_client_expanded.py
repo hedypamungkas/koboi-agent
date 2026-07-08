@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from koboi.client import Client, ClientError, PLACEHOLDER_KEYS
+from koboi.client import RetryClient, ClientError, PLACEHOLDER_KEYS
 from koboi.llm.registry import ProviderRegistry
 from koboi.llm.base import LLMServerError, LLMError
 from koboi.types import AgentResponse
@@ -15,21 +15,21 @@ from koboi.types import AgentResponse
 class TestClientValidation:
     def test_rejects_placeholder_key(self):
         with pytest.raises(ClientError, match="API key not configured"):
-            Client(api_key="your-api-key-here", provider="openai", base_url="http://test/v1")
+            RetryClient(api_key="your-api-key-here", provider="openai", base_url="http://test/v1")
 
     def test_rejects_empty_key(self):
         with pytest.raises(ClientError, match="API key not configured"):
-            Client(api_key="", provider="openai", base_url="http://test/v1")
+            RetryClient(api_key="", provider="openai", base_url="http://test/v1")
 
     def test_rejects_unresolved_env(self):
         with pytest.raises(ClientError, match="API key not configured"):
-            Client(api_key="${OPENAI_API_KEY}", provider="openai", base_url="http://test/v1")
+            RetryClient(api_key="${OPENAI_API_KEY}", provider="openai", base_url="http://test/v1")
 
     def test_oauth_token_rejects_placeholder(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(ClientError, match="OAuth token not configured"):
-            Client(provider="anthropic", auth_token="", auth_type="oauth_token", base_url="http://test/v1")
+            RetryClient(provider="anthropic", auth_token="", auth_type="oauth_token", base_url="http://test/v1")
 
 
 class TestClientRetry:
@@ -48,7 +48,7 @@ class TestClientRetry:
         mock_impl._transport = MagicMock()
 
         with patch("koboi.client.create_client", return_value=mock_impl):
-            client = Client(api_key="sk-test", provider="openai", base_url="http://test/v1", max_retries=3)
+            client = RetryClient(api_key="sk-test", provider="openai", base_url="http://test/v1", max_retries=3)
             result = await client.complete([{"role": "user", "content": "hi"}])
             assert result.content == "ok"
             assert call_count == 3
@@ -63,7 +63,7 @@ class TestClientRetry:
         mock_impl._transport = MagicMock()
 
         with patch("koboi.client.create_client", return_value=mock_impl):
-            client = Client(api_key="sk-test", provider="openai", base_url="http://test/v1", max_retries=1)
+            client = RetryClient(api_key="sk-test", provider="openai", base_url="http://test/v1", max_retries=1)
             with pytest.raises(LLMServerError):
                 await client.complete([{"role": "user", "content": "hi"}])
 
@@ -77,7 +77,7 @@ class TestClientRetry:
         mock_impl._transport = MagicMock()
 
         with patch("koboi.client.create_client", return_value=mock_impl):
-            client = Client(api_key="sk-test", provider="openai", base_url="http://test/v1")
+            client = RetryClient(api_key="sk-test", provider="openai", base_url="http://test/v1")
             with pytest.raises(LLMError):
                 await client.complete([{"role": "user", "content": "hi"}])
 
@@ -91,7 +91,7 @@ class TestClientRetry:
         mock_impl._transport = MagicMock()
 
         with patch("koboi.client.create_client", return_value=mock_impl):
-            client = Client(api_key="sk-test", provider="openai", base_url="http://test/v1")
+            client = RetryClient(api_key="sk-test", provider="openai", base_url="http://test/v1")
             with pytest.raises(ClientError, match="Unexpected error"):
                 await client.complete([{"role": "user", "content": "hi"}])
 
