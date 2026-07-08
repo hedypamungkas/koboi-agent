@@ -40,12 +40,19 @@ class DagScheduler:
         agents_map: dict | None = None,
         deps: dict[str, list[str]] | None = None,
         db_path: str | None = None,
+        conditionals: dict[str, list[dict]] | None = None,
     ) -> None:
         self._agents_map = agents_map or {}
         self._deps = deps or {}
         self._db_path = db_path
         self._graph_run_id: str | None = None
         self._last_waves: list[list[str]] | None = None
+        # #1: conditional edges {source: [{to, when}]} for runtime branching.
+        self._conditionals = conditionals or {}
+
+    @property
+    def conditionals(self) -> dict[str, list[dict]]:
+        return self._conditionals
 
     @property
     def deps(self) -> dict[str, list[str]]:

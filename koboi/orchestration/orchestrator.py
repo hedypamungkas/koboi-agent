@@ -439,6 +439,113 @@ class Orchestrator:
                 )
                 yield _AgentCompletedEvent(agent_result=result)
 
+    @staticmethod
+    def _eval_conditional(when: dict, output: str) -> bool:
+        """Evaluate a conditional predicate on a node's output (#1).
+
+        Supports: {contains: "str"}, {regex: "pattern"}, {field, op, value} on JSON.
+        """
+        import json as _json
+        import re as _re
+
+        text = output or ""
+        if "contains" in when:
+            return str(when["contains"]).lower() in text.lower()
+        if "regex" in when:
+            return _re.search(str(when["regex"]), text) is not None
+        if "field" in when:
+            try:
+                data = _json.loads(text)
+                val = data.get(when["field"])
+                op, target = when.get("op"), when.get("value")
+                if op == ">":
+                    return val is not None and val > target
+                if op == ">=":
+                    return val is not None and val >= target
+                if op == "<":
+                    return val is not None and val < target
+                if op == "<=":
+                    return val is not None and val <= target
+                if op in ("==", "="):
+                    return val == target
+                if op == "!=":
+                    return val != target
+            except (ValueError, TypeError):
+                return False
+        return False
+
+    async def _run_conditional_graph(
+        self,
+        agent_names: list[str],
+        query: str,
+        deps: dict[str, list[str]],
+        conditionals: dict[str, list[dict]],
+    ) -> AsyncGenerator:
+        """Runtime scheduler for conditional edges (#1).
+
+        Unlike the static wave scheduler (which pre-computes all waves), this evaluates
+        predicates on each node's output AS IT COMPLETES -> enables/disables branches.
+        A node is READY when its static deps are all completed AND (if it has incoming
+        conditionals) at least one source's predicate fired. Wave-parallel within the
+        ready set; edge data flow preserved (downstream gets upstream outputs).
+        """
+        total = len(agent_names)
+        node_set = set(agent_names)
+        outputs: dict[str, str] = {}
+        completed: set[str] = set()
+        enabled: set[str] = set()  # nodes enabled by a fired conditional
+        remaining = set(agent_names)
+
+        # incoming conditionals: {target: [(source, predicate), ...]}
+        incoming: dict[str, list[tuple[str, dict]]] = {}
+        for src, conds in conditionals.items():
+            for c in conds:
+                if c.get("to") in node_set:
+                    incoming.setdefault(c["to"], []).append((src, c.get("when", {})))
+
+        def _ready(node: str) -> bool:
+            if not all(d in completed for d in deps.get(node, []) if d in node_set):
+                return False
+            if node in incoming:
+                return node in enabled  # must be enabled by a fired conditional
+            return True
+
+        def _input_for(name: str) -> str:
+            node_deps = deps.get(name, [])
+            upstream = "\n".join(f"[{d}]: {outputs.get(d, '')}" for d in node_deps if d in outputs)
+            if not upstream:
+                return query
+            return f"Original request:\n{query}\n\nUpstream results:\n{upstream}\n\nContinue from the upstream results above."
+
+        flat = 0
+        while remaining:
+            ready = [n for n in sorted(remaining) if _ready(n)]
+            if not ready:
+                logger.warning("conditional graph: %d nodes could not be reached (no predicate fired)", len(remaining))
+                break
+            for n in ready:
+                yield AgentDispatchEvent(agent_name=n, agent_index=flat, total_agents=total, mode="dag")
+                flat += 1
+            wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in ready])
+            for result in wave_results:
+                outputs[result.agent_name] = result.answer
+                completed.add(result.agent_name)
+                remaining.discard(result.agent_name)
+                yield AgentResultEvent(
+                    agent_name=result.agent_name,
+                    answer=result.answer[:200],
+                    elapsed_seconds=result.elapsed_seconds,
+                    tokens_used=result.tokens_used,
+                    is_dynamic=result.is_dynamic,
+                    domain_label=result.domain_label,
+                    failed=result.failed,
+                )
+                yield _AgentCompletedEvent(agent_result=result)
+                # Evaluate this node's outgoing conditionals -> enable targets.
+                for cond in conditionals.get(result.agent_name, []):
+                    if cond.get("to") in node_set and self._eval_conditional(cond.get("when", {}), result.answer):
+                        enabled.add(cond["to"])
+
     async def _combine_results(self, results: list[AgentResult], query: str) -> str:
         if not results:
             return "No agent available to answer this question."
@@ -669,15 +776,23 @@ class Orchestrator:
         elif mode == "dag" and self._dag_scheduler is not None:
             # #4: full_graph runs the entire configured graph (bypasses the routed subset).
             _dag_names = list(self._agents_map.keys()) if self._full_graph else agent_names
-            # Edge-data-flow wave execution: each node's input = query + its deps'
-            # outputs, so downstream nodes consume upstream results (closes the
-            # no-data-flow gap). persist_plan keeps the durable graph-plan rows (#3).
             self._dag_scheduler.waves(_dag_names)  # populate _last_waves for persist
             self._dag_scheduler.persist_plan()
-            async for event in self._run_dag_waves_with_flow(_dag_names, query, self._dag_scheduler.deps):
-                if isinstance(event, _AgentCompletedEvent):
-                    results.append(event.agent_result)
-                yield event
+            # #1: if any conditional edges are configured, use the runtime scheduler
+            # (evaluates predicates on node outputs to enable/disable branches).
+            # Otherwise, the faster pre-computed wave scheduler.
+            if self._dag_scheduler.conditionals:
+                async for event in self._run_conditional_graph(
+                    _dag_names, query, self._dag_scheduler.deps, self._dag_scheduler.conditionals
+                ):
+                    if isinstance(event, _AgentCompletedEvent):
+                        results.append(event.agent_result)
+                    yield event
+            else:
+                async for event in self._run_dag_waves_with_flow(_dag_names, query, self._dag_scheduler.deps):
+                    if isinstance(event, _AgentCompletedEvent):
+                        results.append(event.agent_result)
+                    yield event
         else:
             if mode == "dag":
                 logger.warning("execution.mode=dag requested but no DagScheduler configured; running sequentially.")

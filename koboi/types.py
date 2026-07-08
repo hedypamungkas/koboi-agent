@@ -138,6 +138,10 @@ class AgentDef:
     llm_config: dict | None = None
     # DAG edges: agent names this agent depends on (execution.mode: dag).
     depends_on: list[str] = field(default_factory=list)
+    # Conditional edges (#1): [{to: <node>, when: <predicate>}]. The predicate `when`
+    # is evaluated on THIS node's output; if it matches, `to` is enabled.
+    # Predicates: {contains: "str"} | {regex: "pattern"} | {field, op, value} on JSON.
+    conditionals: list[dict] = field(default_factory=list)
 
 
 @dataclass

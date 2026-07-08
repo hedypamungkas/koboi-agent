@@ -1233,6 +1233,7 @@ def _parse_agent_defs(config: Config) -> list:
                 rag_config=ac.get("rag"),
                 llm_config=ac.get("llm"),
                 depends_on=ac.get("depends_on", []),
+                conditionals=ac.get("conditionals", []),
             )
         )
     return defs
@@ -1345,11 +1346,12 @@ def _build_orchestration(config: Config, verbose: bool = False):
         from koboi.orchestration.dag_scheduler import DagScheduler
 
         deps = {ad.name: list(ad.depends_on) for ad in agent_defs}
+        conds = {ad.name: list(ad.conditionals) for ad in agent_defs if ad.conditionals}
         # Persist the graph plan when the memory backend is SQLite (durable; #3).
         dag_db_path = None
         if config.get("memory", "backend", default="sqlite") == "sqlite":
             dag_db_path = config.get("memory", "db_path", default="koboi_memory.db")
-        dag_scheduler = DagScheduler(agents_map=agents_map, deps=deps, db_path=dag_db_path)
+        dag_scheduler = DagScheduler(agents_map=agents_map, deps=deps, db_path=dag_db_path, conditionals=conds)
 
     orchestrator = Orchestrator(
         client=assembler.client,
