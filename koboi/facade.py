@@ -1234,6 +1234,7 @@ def _parse_agent_defs(config: Config) -> list:
                 llm_config=ac.get("llm"),
                 depends_on=ac.get("depends_on", []),
                 conditionals=ac.get("conditionals", []),
+                interrupt_after=ac.get("interrupt_after", False),
             )
         )
     return defs
@@ -1351,7 +1352,10 @@ def _build_orchestration(config: Config, verbose: bool = False):
         dag_db_path = None
         if config.get("memory", "backend", default="sqlite") == "sqlite":
             dag_db_path = config.get("memory", "db_path", default="koboi_memory.db")
-        dag_scheduler = DagScheduler(agents_map=agents_map, deps=deps, db_path=dag_db_path, conditionals=conds)
+        interrupt_nodes = {ad.name for ad in agent_defs if ad.interrupt_after}
+        dag_scheduler = DagScheduler(
+            agents_map=agents_map, deps=deps, db_path=dag_db_path, conditionals=conds, interrupt_nodes=interrupt_nodes
+        )
 
     orchestrator = Orchestrator(
         client=assembler.client,

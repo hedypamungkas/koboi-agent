@@ -441,6 +441,11 @@ class Orchestrator:
                     failed=result.failed,
                 )
                 yield _AgentCompletedEvent(agent_result=result)
+                # #6: surface a [NODE_INTERRUPT] marker after an interrupt-flagged node.
+                if self._dag_scheduler and result.agent_name in self._dag_scheduler.interrupt_nodes:
+                    yield TextDeltaEvent(
+                        content=f"[NODE_INTERRUPT] {result.agent_name} completed — awaiting human review"
+                    )
 
     @staticmethod
     def _eval_conditional(when: dict, output: str) -> bool:
@@ -547,6 +552,11 @@ class Orchestrator:
                     failed=result.failed,
                 )
                 yield _AgentCompletedEvent(agent_result=result)
+                # #6: surface a [NODE_INTERRUPT] marker after an interrupt-flagged node.
+                if self._dag_scheduler and result.agent_name in self._dag_scheduler.interrupt_nodes:
+                    yield TextDeltaEvent(
+                        content=f"[NODE_INTERRUPT] {result.agent_name} completed — awaiting human review"
+                    )
                 # Evaluate this node's outgoing conditionals -> enable targets.
                 for cond in conditionals.get(result.agent_name, []):
                     if cond.get("to") in node_set and self._eval_conditional(cond.get("when", {}), result.answer):

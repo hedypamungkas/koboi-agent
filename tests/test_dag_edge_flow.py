@@ -109,3 +109,28 @@ async def test_edge_flow_empty_upstream_does_not_crash_downstream(mock_client):
 
     assert set(inputs) == {"A", "B"}  # both ran despite A's empty output
     assert "Q" in inputs["B"]  # B's input still carries the original query
+
+
+async def test_interrupt_after_surfaces_marker(mock_client):
+    """#6: a node with interrupt_after yields a [NODE_INTERRUPT] TextDelta marker."""
+    inputs2: dict = {}
+    agents_map = {
+        "A": _FixedAgent("A", inputs2, "A-output"),
+        "B": _FixedAgent("B", inputs2, "B-output"),
+    }
+    orch = Orchestrator(
+        client=mock_client(responses=[make_mock_response("syn")]),
+        router=_AllRouter(["A", "B"]),
+        agents_map=agents_map,
+        dag_scheduler=DagScheduler(deps={"B": ["A"]}, interrupt_nodes={"A"}),
+        default_mode="dag",
+    )
+
+    markers: list[str] = []
+    async for event in orch.run_stream("Q", mode="dag"):
+        content = getattr(event, "content", "") or ""
+        if "[NODE_INTERRUPT]" in content:
+            markers.append(content)
+
+    assert len(markers) == 1
+    assert "A" in markers[0]

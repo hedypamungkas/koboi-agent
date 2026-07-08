@@ -142,6 +142,9 @@ class AgentDef:
     # is evaluated on THIS node's output; if it matches, `to` is enabled.
     # Predicates: {contains: "str"} | {regex: "pattern"} | {field, op, value} on JSON.
     conditionals: list[dict] = field(default_factory=list)
+    # #6: if True, the scheduler surfaces a [NODE_INTERRUPT] marker after this node
+    # completes (for human review / HITL at the node boundary).
+    interrupt_after: bool = False
 
 
 @dataclass

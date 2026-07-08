@@ -41,6 +41,7 @@ class DagScheduler:
         deps: dict[str, list[str]] | None = None,
         db_path: str | None = None,
         conditionals: dict[str, list[dict]] | None = None,
+        interrupt_nodes: set[str] | None = None,
     ) -> None:
         self._agents_map = agents_map or {}
         self._deps = deps or {}
@@ -49,10 +50,16 @@ class DagScheduler:
         self._last_waves: list[list[str]] | None = None
         # #1: conditional edges {source: [{to, when}]} for runtime branching.
         self._conditionals = conditionals or {}
+        # #6: nodes that trigger a [NODE_INTERRUPT] marker after completion (HITL).
+        self._interrupt_nodes = interrupt_nodes or set()
 
     @property
     def conditionals(self) -> dict[str, list[dict]]:
         return self._conditionals
+
+    @property
+    def interrupt_nodes(self) -> set[str]:
+        return self._interrupt_nodes
 
     @property
     def deps(self) -> dict[str, list[str]]:
