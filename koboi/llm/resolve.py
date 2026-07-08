@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from koboi.config import Config
 
 
-def resolve_llm_spec(spec, config: "Config") -> dict | None:
+def resolve_llm_spec(spec, config: Config) -> dict | None:
     """Resolve a provider spec to an inline dict.
 
     Returns ``None`` for an empty/missing spec so callers can fall back to a

@@ -1319,7 +1319,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
 def _setup_subagent(
     tools: ToolRegistry,
     client: Client,
-    hook_chain: "HookChain",
+    hook_chain: HookChain,
     logger: AgentLogger,
     memory: ConversationMemory | None = None,
     config: Config | None = None,

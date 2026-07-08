@@ -230,7 +230,7 @@ class ProviderPool(LLMClient):
 
     async def complete_stream(
         self, messages: list[dict], tools: list[dict] | None = None
-    ) -> AsyncIterator["StreamEvent"]:
+    ) -> AsyncIterator[StreamEvent]:
         """Fail over only BEFORE the first byte; once yielding, errors re-raise.
         Pre-first-byte exhaustion raises ``ProviderPoolExhausted``."""
         exclude: list[LLMClient] = []
