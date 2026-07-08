@@ -120,3 +120,50 @@ async def test_conditional_json_field_predicate(mock_client):
     await orch.run("go", mode="dag")
 
     assert "B" in ran  # score 0.9 > 0.8 -> B enabled
+
+
+async def test_conditional_with_edge_flow_combined(mock_client):
+    """Conditional branching + edge data flow TOGETHER: the fired branch's node
+    receives the upstream output via edge flow, AND only the matching branch runs."""
+    ran: set = set()
+    inputs: dict = {}
+
+    class _FlowAgent:
+        def __init__(self, name: str, answer: str):
+            self.name = name
+            self._answer = answer
+            self.memory = SimpleNamespace(get_messages=lambda: [])
+
+        async def run(self, query):
+            ran.add(self.name)
+            inputs[self.name] = query
+            return SimpleNamespace(content=self._answer)
+
+    agents_map = {
+        "classify": _FlowAgent("classify", "POSITIVE great product"),
+        "praise": _FlowAgent("praise", "praised!"),
+        "critique": _FlowAgent("critique", "critiqued!"),
+    }
+    deps = {"praise": ["classify"], "critique": ["classify"]}
+    conditionals = {
+        "classify": [
+            {"to": "praise", "when": {"contains": "POSITIVE"}},
+            {"to": "critique", "when": {"contains": "NEGATIVE"}},
+        ]
+    }
+    orch = Orchestrator(
+        client=mock_client(responses=[make_mock_response("syn")]),
+        router=_AllRouter(["classify", "praise", "critique"]),
+        agents_map=agents_map,
+        dag_scheduler=DagScheduler(deps=deps, conditionals=conditionals),
+        default_mode="dag",
+        full_graph=True,
+    )
+
+    await orch.run("review", mode="dag")
+
+    # Conditional branching: praise fired, critique skipped.
+    assert "praise" in ran
+    assert "critique" not in ran
+    # Edge flow: praise's input contains classify's output.
+    assert "POSITIVE" in inputs.get("praise", "")

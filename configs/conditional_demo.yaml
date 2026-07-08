@@ -1,0 +1,61 @@
+# Conditional workflow demo -- branching via output predicates (#1).
+#
+# classify -> if output contains "POSITIVE" then praise
+#          -> if output contains "NEGATIVE" then critique
+#
+# Only the matching branch runs; the other is skipped.
+#
+# Run:   koboi run configs/conditional_demo.yaml -m "Review: 'This product is amazing!'"
+#        koboi run configs/conditional_demo.yaml -m "Review: 'Terrible, broke after one day.'"
+# Graph: koboi graph configs/conditional_demo.yaml
+
+agent:
+  name: "conditional-orchestrator"
+  description: "Conditional branching workflow -- sentiment routes to the right handler"
+  system_prompt: "You orchestrate a conditional workflow."
+  mode: act
+
+orchestration:
+  enabled: true
+  execution:
+    mode: dag
+    full_graph: true
+  router:
+    type: keyword
+  agents:
+    - name: classify
+      description: "Classify the sentiment"
+      system_prompt: "Classify the sentiment as POSITIVE or NEGATIVE. Reply with one word only."
+      keywords: [classify, sentiment, review]
+      # Conditional edges: classify's output determines which branch fires.
+      conditionals:
+        - to: praise
+          when: {contains: "POSITIVE"}
+        - to: critique
+          when: {contains: "NEGATIVE"}
+
+    - name: praise
+      description: "Handle positive reviews"
+      system_prompt: "In one sentence, explain why this is a great review."
+      keywords: [praise, positive]
+      depends_on: [classify]
+
+    - name: critique
+      description: "Handle negative reviews"
+      system_prompt: "In one sentence, explain why this is a critical review."
+      keywords: [critique, negative]
+      depends_on: [classify]
+
+llm:
+  provider: openai
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace

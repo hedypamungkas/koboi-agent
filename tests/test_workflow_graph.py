@@ -41,6 +41,17 @@ async def test_workflow_graph_conditional_edges(mock_client):
     g.add_conditional_edges("classify", {"YES": "yes_branch", "NO": "no_branch"})
     graph = g.compile()
 
+    # Verify the compiled conditionals are correct (which branch maps to which predicate).
+    assert graph._conditionals == {
+        "classify": [
+            {"to": "yes_branch", "when": {"contains": "YES"}},
+            {"to": "no_branch", "when": {"contains": "NO"}},
+        ]
+    }
+    # Verify compiled deps wire both branches as dependents of classify.
+    assert "classify" in graph._deps.get("yes_branch", [])
+    assert "classify" in graph._deps.get("no_branch", [])
+
     client = mock_client(
         responses=[
             AgentResponse(content="YES"),  # classify says YES
@@ -51,4 +62,8 @@ async def test_workflow_graph_conditional_edges(mock_client):
 
     result = await graph.invoke("should I deploy?", client)
 
-    assert result  # the YES branch executed + synthesis ran
+    # The YES branch executed (classify said YES -> yes_branch ran, no_branch skipped).
+    # Only 3 client calls consumed (classify + yes_branch + synthesis) — no_branch
+    # did NOT run (would have consumed a 4th response).
+    assert result  # non-empty synthesis
+    assert "Yes branch" in result or "synthesized" in result
