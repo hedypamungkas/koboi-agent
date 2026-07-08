@@ -167,3 +167,26 @@ async def test_conditional_with_edge_flow_combined(mock_client):
     assert "critique" not in ran
     # Edge flow: praise's input contains classify's output.
     assert "POSITIVE" in inputs.get("praise", "")
+
+
+async def test_conditional_regex_predicate(mock_client):
+    """Edge: regex predicate — {regex: '^POS'} matches output starting with 'POS'."""
+    ran: set = set()
+    orch = Orchestrator(
+        client=mock_client(responses=[make_mock_response("syn")]),
+        router=_AllRouter(["classify", "match_branch"]),
+        agents_map={
+            "classify": _Agent("classify", ran, "POSITIVE output"),
+            "match_branch": _Agent("match_branch", ran, "matched"),
+        },
+        dag_scheduler=DagScheduler(
+            deps={"match_branch": ["classify"]},
+            conditionals={"classify": [{"to": "match_branch", "when": {"regex": "^POS"}}]},
+        ),
+        default_mode="dag",
+        full_graph=True,
+    )
+
+    await orch.run("go", mode="dag")
+
+    assert "match_branch" in ran  # output starts with "POS" -> regex matched

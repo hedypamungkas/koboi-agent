@@ -163,3 +163,41 @@ async def test_dynamic_replans_on_node_failure(mock_client, monkeypatch):
 
     assert plan_calls["n"] == 2  # initial plan + replan on failure
     assert len(result.agent_results) == 1  # fell back to direct after replan
+
+
+async def test_dynamic_no_replan_when_max_is_zero(mock_client, monkeypatch):
+    """Edge: max_replans=0 (default) -> node fails but NO replan (called once)."""
+    from koboi.orchestration import planner
+    from koboi.orchestration.planner import PlanResult, PlanStep
+    from koboi.types import AgentResult
+
+    plan_calls = {"n": 0}
+
+    async def counting_plan(client, instruction, **kw):
+        plan_calls["n"] += 1
+        return PlanResult(needs_workflow=True, steps=[PlanStep(id="x", instruction="do x")], reason="multi")
+
+    monkeypatch.setattr(planner, "plan_or_skip", counting_plan)
+
+    client = mock_client(responses=[make_mock_response("recovered")])
+    orch = Orchestrator(
+        client=client,
+        router=_AllRouter([]),
+        agents_map={},
+        default_mode="dynamic",
+        max_replans=0,  # default — no replanning
+    )
+
+    single_calls = {"n": 0}
+    orig = orch._run_single
+
+    async def failing_single(name, query_input):
+        single_calls["n"] += 1
+        if single_calls["n"] == 1:
+            return AgentResult(agent_name=name, answer="Error", elapsed_seconds=0, tokens_used=0, failed=True)
+        return await orig(name, query_input)
+
+    orch._run_single = failing_single
+    result = await orch.run("task", mode="dynamic")
+
+    assert plan_calls["n"] == 1  # NO replan (max_replans=0)

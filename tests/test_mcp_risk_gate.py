@@ -78,3 +78,27 @@ async def test_destructive_mcp_tool_hits_approval_gate():
 
     assert handler.called is True  # DESTRUCTIVE -> approval prompted
     assert not result.skipped  # approved -> executed
+
+
+def test_heuristic_no_false_positive_on_substring_match():
+    """#1 fix: token-boundary matching prevents false positives.
+
+    'get_deleted_items' should be SAFE (the token is 'deleted', not 'delete'),
+    not DESTRUCTIVE (which the old substring match incorrectly returned).
+    """
+    client = _FakeMCPClient([_info("get_deleted_items")])
+    registry = ToolRegistry()
+    register_mcp_tools(client, registry, risk_resolver=default_risk_heuristic)
+    assert registry.get_risk_level("get_deleted_items") == RiskLevel.SAFE
+
+    # 'undelete_file' — token 'undelete' is NOT 'delete' -> SAFE.
+    client2 = _FakeMCPClient([_info("undelete_file")])
+    registry2 = ToolRegistry()
+    register_mcp_tools(client2, registry2, risk_resolver=default_risk_heuristic)
+    assert registry2.get_risk_level("undelete_file") == RiskLevel.SAFE
+
+    # Correct positive still works: 'delete_record' -> token 'delete' IS destructive.
+    client3 = _FakeMCPClient([_info("delete_record")])
+    registry3 = ToolRegistry()
+    register_mcp_tools(client3, registry3, risk_resolver=default_risk_heuristic)
+    assert registry3.get_risk_level("delete_record") == RiskLevel.DESTRUCTIVE

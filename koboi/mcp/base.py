@@ -57,12 +57,18 @@ def default_risk_heuristic(info: MCPToolInfo) -> RiskLevel:
     """Infer a RiskLevel from an MCP tool's name (opt-in).
 
     delete/remove/exec-style names -> DESTRUCTIVE; write/update/send-style -> MODERATE;
-    otherwise SAFE.
+    otherwise SAFE. Uses token-boundary matching (not substring) to avoid false
+    positives like ``get_deleted_items`` (SAFE, not DESTRUCTIVE).
     """
+    import re
+
     name = (info.name or "").lower()
-    if any(h in name for h in _DESTRUCTIVE_NAME_HINTS):
+    # Tokenize on word boundaries (_, ., -, /) so "delete" matches "delete_record"
+    # but NOT "get_deleted_items" (where the token is "deleted", not "delete").
+    tokens = set(re.split(r"[_.\-/]", name))
+    if tokens & set(_DESTRUCTIVE_NAME_HINTS):
         return RiskLevel.DESTRUCTIVE
-    if any(h in name for h in _MODERATE_NAME_HINTS):
+    if tokens & set(_MODERATE_NAME_HINTS):
         return RiskLevel.MODERATE
     return RiskLevel.SAFE
 

@@ -67,3 +67,16 @@ async def test_workflow_graph_conditional_edges(mock_client):
     # did NOT run (would have consumed a 4th response).
     assert result  # non-empty synthesis
     assert "Yes branch" in result or "synthesized" in result
+
+
+async def test_workflow_graph_empty_does_not_crash(mock_client):
+    """Edge: empty graph (no nodes) -> compile + invoke handles gracefully."""
+    g = WorkflowGraph()
+    graph = g.compile()
+
+    client = mock_client(responses=[make_mock_response("fallback")])
+    result = await graph.invoke("anything", client)
+
+    # Should not crash; returns whatever the orchestrator produces with 0 agents
+    # (likely an empty/synthesis-fallback string).
+    assert result is not None

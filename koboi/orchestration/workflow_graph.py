@@ -94,6 +94,8 @@ class CompiledGraph:
 
     async def invoke(self, query: str, client: Client) -> str:
         """Run the graph + return the final synthesized answer."""
+        if not self._node_defs:
+            return "No nodes in graph."
         names = [d.name for d in self._node_defs]
         agents_map = AgentFactory.create_all_configured(self._node_defs, client)
         sched = DagScheduler(agents_map=agents_map, deps=self._deps, conditionals=self._conditionals)
