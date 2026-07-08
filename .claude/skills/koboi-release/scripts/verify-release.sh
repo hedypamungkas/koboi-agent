@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify a just-published release: wait for THIS tag's release.yml (PyPI) + docker.yml (GHCR)
-# runs, watch them, then confirm PyPI version, GHCR image (:vX.Y.Z + :latest), and a /healthz
+# runs, watch them, then confirm PyPI version, GHCR image (:X.Y.Z + :latest), and a /healthz
 # smoke test.
 #
 # Why this exists (replaces the fragile inline commands that used to live in SKILL.md):
@@ -15,7 +15,10 @@ set -euo pipefail
 
 VERSION="${1:?usage: $0 X.Y.Z}"
 VERSION="${VERSION#v}"
-TAG="v${VERSION}"
+# GHCR image tag has NO "v" prefix since PR #13 rewrote docker.yml: the metadata
+# action's `type=semver,pattern={{version}}` yields e.g. 0.8.0, not v0.8.0.
+# (Releases <= v0.7.0 used the old v6 workflow and DO carry a v prefix — :v0.7.0.)
+TAG="${VERSION}"
 IMG="ghcr.io/hedypamungkas/koboi-agent"
 
 # Wait until a run of <workflow> triggered by <tag> appears, then watch it to completion.

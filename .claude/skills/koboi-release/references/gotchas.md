@@ -91,3 +91,22 @@ fixed (python3/venv interpreters, Gate 0 venv refresh, `--dry-run`, `verify-rele
 - **Root cause**: CI installs latest bandit (1.9.4+); local system might have 1.8.6 (fewer rules). 1.9.4 added B105 on `ANTHROPIC_AUTH_TOKEN` env-var name (false positive, needs nosec).
 - **Fix**: Always use `.venv/bin/bandit` (matches CI version). If a new CI-only bandit rule fires, add a `# nosec BXXX` with justification (like `nosec B105` on env-var names).
 - **Lesson**: Local validation tooling MUST match CI versions. Use `.venv` (Python 3.13 + current ruff/bandit), not system Python 3.9 + stale tools.
+
+## v0.8.0 — First release on the rewritten docker.yml (supply-chain hardening, #13)
+
+### Gotcha: Trivy scan failed on the OCI scan-target tar
+- **Symptom**: `build-and-push` job fails at "Trivy vulnerability scan" with `FATAL ... unable to initialize archive image: * manifest.json not found in tar * index.json: not a directory` — NOT a vulnerability finding.
+- **Root cause**: the rewritten docker.yml built the scan target with `outputs: type=oci,dest=/tmp/image.tar`. build-push-action v7 defaults `provenance: true`, so the OCI tar is a manifest-list/index artifact that Trivy `--input` cannot parse.
+- **Fix**: scan target must be `outputs: type=docker,dest=/tmp/image.tar` + `provenance: false` + `attestation: false` (a classic docker tar with `manifest.json`, which Trivy reads reliably). Committed as `b7b30cb`.
+- **Lesson**: the `Trivy vulnerability scan` step failing on "initialize artifact / manifest.json not found" is a FORMAT error, not a CVE — distinguish them before hunting vulns. Prefer `type=docker` for any Trivy `--input` scan target.
+
+### Gotcha: GHCR image tags dropped the `v` prefix
+- **Symptom**: `docker pull ghcr.io/hedypamungkas/koboi-agent:v0.8.0` → "not found", but `:0.8.0` exists. (This INVERTS the v0.4.1 convention above.)
+- **Root cause**: the rewritten docker.yml switched the metadata action from `type=ref,event=tag` (mirrors git tag → `vX.Y.Z`) to `type=semver,pattern={{version}}` (PyPI-style → `X.Y.Z`, no `v`).
+- **Fix**: pull/inspect `:0.8.0` (and `:0.8`, `:latest`), not `:v0.8.0`. `verify-release.sh` updated: `TAG="${VERSION}"` (no `v`). Releases ≤ v0.7.0 keep the old `:vX.Y.Z` tags; v0.8.0+ use no-`v`.
+- **Lesson**: when a CI workflow rewrite changes the metadata-action tag pattern, the image-tag convention changes too — audit the skill's verify step + gotchas against the actual pushed tags (check `DOCKER_METADATA_OUTPUT_TAGS` in the run env).
+
+### Recovery: re-pointing a just-cut tag whose image failed
+- **Symptom**: PyPI publish SUCCEEDED (immutable), but the GHCR image failed deterministically; a plain `gh run rerun --failed` can't help because it reuses the workflow at the tag commit.
+- **Fix**: land the docker.yml fix on `main`, then move the tag: `git tag -f -a vX.Y.Z -m "..." <fix-commit> && git push -f origin vX.Y.Z`. This re-triggers BOTH workflows; release.yml's publish reds harmlessly ("File already exists" — the artifact is already live), docker.yml rebuilds a scanned+attested image. PyPI is untouched. Acceptable when the tag is minutes old with no consumers and the workflow fix lives in-repo at the tag.
+- **Lesson**: a moved tag is reversible (move it back); only PyPI is immutable, and re-pointing does NOT re-publish to PyPI (it just fails the redundant publish job). Re-tag to recover a broken image, never to overwrite a broken PyPI artifact (bump instead).

@@ -23,7 +23,7 @@ Three scripts (all under `.claude/skills/koboi-release/scripts/`, invoked from t
 - **`bump-and-tag.sh [--dry-run] X.Y.Z "msg"`** — mechanical bump + commit + push main + tag +
   push tag (validates `X.Y.Z`, resumable, `--dry-run` rehearses without pushing).
 - **`verify-release.sh X.Y.Z`** — waits for *this tag's* PyPI+GHCR runs, watches them, verifies
-  PyPI version + GHCR `:vX.Y.Z`/`:latest` + a `/healthz` smoke.
+  PyPI version + GHCR `:X.Y.Z`/`:latest` + a `/healthz` smoke.
 
 ## When to use
 Triggered by: "release koboi-agent", "bump version and publish", "create release vX.Y.Z",
@@ -74,7 +74,7 @@ pushed but the tag wasn't.
 ```
 This waits for *this tag's* `release.yml` and `docker.yml` runs (filtered by `--branch vX.Y.Z`,
 which kills the "latest-run" race that returned the previous release's run), watches both to
-green, retries PyPI propagation (~90s), pulls `:vX.Y.Z` + `:latest`, and smoke-tests
+green, retries PyPI propagation (~90s), pulls `:X.Y.Z` + `:latest`, and smoke-tests
 `/healthz` with retries + cleanup. **Verification comes before the GitHub release on purpose**
 — don't advertise a version that hasn't reached PyPI.
 
@@ -95,7 +95,7 @@ EOF
   modules error on `import fastapi`.
 - **Docker default config**: `server_simple.yaml` (concrete model). NOT `e2e_full.yaml`.
 - **e2e self-skip**: `tests/e2e/conftest.py` skips when no live server.
-- **Tag naming**: GHCR image = `vX.Y.Z` (with v) + `:latest`. PyPI version = `X.Y.Z` (no v).
+- **Tag naming**: git tag = `vX.Y.Z` (with v); PyPI version = `X.Y.Z` (no v); **GHCR image tag = `X.Y.Z` (no `v`) + `:latest`** — since #13 rewrote docker.yml (`type=semver,{{version}}`). Releases ≤ v0.7.0 used the old `:vX.Y.Z` convention.
 - **PyPI is immutable**: a published version CANNOT be re-published. To ship a fix, bump to
   the next version.
 
