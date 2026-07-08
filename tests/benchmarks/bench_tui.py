@@ -672,4 +672,7 @@ def test_hook_chain_emit_6_events_per_iteration(benchmark):
             ctx = HookContext(event=event, messages=[], metadata={})
             await chain.emit(ctx)
 
-    benchmark(lambda: asyncio.get_event_loop().run_until_complete(emit_all()))
+    # asyncio.run() (not the deprecated get_event_loop().run_until_complete):
+    # the latter breaks when a prior async test left no current event loop
+    # (test-isolation flake under the full suite).
+    benchmark(lambda: asyncio.run(emit_all()))
