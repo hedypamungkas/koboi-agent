@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from koboi.llm.auth import (
@@ -16,6 +17,79 @@ from koboi.llm.http_transport import HttpTransport
 
 if TYPE_CHECKING:
     from koboi.logger import AgentLogger
+
+
+_logger = logging.getLogger(__name__)
+
+# Per-provider accepted generation keys (a subset of FORWARDABLE_LLM_KEYS in
+# koboi/config.py). Providers do not agree on field names, so the shared
+# allowlist alone would forward keys a provider rejects (Anthropic has no
+# max_completion_tokens/logprobs/response_format/reasoning_effort; OpenAI has no
+# top_k). Filtering here -- in create_client, the one place that knows the
+# resolved provider -- turns a silent runtime 400 into a build-time drop + warn.
+_PROVIDER_EXTRA_KEYS: dict[str, frozenset[str]] = {
+    "openai": frozenset(
+        {
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+            "seed",
+            "response_format",
+            "logit_bias",
+            "logprobs",
+            "top_logprobs",
+            "max_completion_tokens",
+            "reasoning_effort",
+            "verbosity",
+        }
+    ),
+    "cloudflare": frozenset(
+        {  # Workers AI: OpenAI-compatible subset, no o-series reasoning
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+            "seed",
+            "response_format",
+        }
+    ),
+    "anthropic": frozenset({"top_p", "top_k", "thinking", "stop_sequences"}),
+}
+
+# 1:1 field renames so a user's key maps to the provider's equivalent instead of
+# being dropped (OpenAI "stop" -> Anthropic "stop_sequences").
+_PROVIDER_PARAM_RENAMES: dict[str, dict[str, str]] = {
+    "anthropic": {"stop": "stop_sequences"},
+}
+
+
+def _filter_extra_params_for_provider(provider: str, extra_params: dict | None) -> dict | None:
+    """Drop/translate forward-as-is generation keys the provider doesn't accept.
+
+    Unknown/future providers (no entry in ``_PROVIDER_EXTRA_KEYS``) get the params
+    forwarded as-is so newly-registered providers aren't broken. Returns ``None``
+    when nothing remains so callers skip the body merge.
+    """
+    if not extra_params:
+        return None
+    allowed = _PROVIDER_EXTRA_KEYS.get(provider)
+    if allowed is None:
+        return extra_params
+    renames = _PROVIDER_PARAM_RENAMES.get(provider, {})
+    kept: dict = {}
+    for key, value in extra_params.items():
+        dest = renames.get(key, key)
+        if dest in allowed:
+            kept[dest] = value
+        else:
+            _logger.warning(
+                "llm extra param %r is not supported by provider %r; dropping "
+                "(not forwarded). See the provider's API docs.",
+                key,
+                provider,
+            )
+    return kept or None
 
 
 def create_client(
@@ -58,6 +132,8 @@ def create_client(
     desc = ProviderRegistry.get(normalized)
     if desc is None:
         raise LLMInvalidRequestError(f"Unknown provider: '{provider}'. Available: {ProviderRegistry.list_available()}")
+
+    extra_params = _filter_extra_params_for_provider(normalized, extra_params)
 
     return desc.factory(
         model=model,
