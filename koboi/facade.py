@@ -1318,27 +1318,6 @@ def _build_orchestration(config: Config, verbose: bool = False):
         )
     else:
         agents_map = {}
-    exec_conf = orch_conf.get("execution", {})
-    exec_mode = exec_conf.get("mode", "sequential")
-
-    # Dynamic mode: agents are planned at runtime from the query (no config agents).
-    agent_defs = [] if exec_mode == "dynamic" else _parse_agent_defs(config)
-    router = _build_router(config, assembler.client, agent_defs)
-
-    parent_rag = config.rag
-    agents_map = (
-        AgentFactory.create_all_configured(
-            agent_defs,
-            assembler.client,
-            assembler.logger,
-            parent_rag_config=parent_rag,
-            hook_chain=assembler.hook_chain,
-            sandbox=assembler.sandbox,
-            embedding_config=config.get("embedding"),
-        )
-        if agent_defs
-        else {}
-    )
 
     # Build a DagScheduler when execution.mode == "dag", seeded with the per-agent
     # depends_on edges parsed from config (deterministic, testable).
