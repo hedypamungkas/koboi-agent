@@ -1,0 +1,88 @@
+name: Benchmark
+
+# Performance-regression micro-benchmark gate (Wave 1).
+#
+# Runs the 76 pytest-benchmark cases under tests/benchmarks/ and checks each
+# against an absolute NFR threshold (gated on the outlier-resistant `min`).
+# The collection gap that previously hid these benchmarks (filenames are
+# bench_*.py, not the default test_*.py) is closed by the -o python_files
+# override BELOW, scoped to this job only -- the normal test gate is untouched.
+#
+# Wave 1 status: SOFT gate (the --check step uses continue-on-error, so an NFR
+# breach warns but does NOT fail the PR). This is intentional: thresholds are
+# provisional dev-measured values that must be re-tuned on this CI runner over a
+# ~2-week calibration window. Promote to a hard gate (remove continue-on-error,
+# add to required checks) once flake rate is characterized. See
+# docs/performance-benchmarking.md.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Allow manual runs to (re)capture a clean baseline on main.
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # fail-fast if a bench hangs (e.g. accidental O(N) per-round state accumulation); default is 6h
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        # [api] needed by bench_server.py (fastapi/httpx); [tui] by bench_tui.py.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,tui,api]"
+
+      - name: Run micro-benchmarks
+        # Single matrix cell (ubuntu/3.12) on purpose: benchmarks must run on a
+        # fixed, controlled environment. min-rounds=50 stabilizes the noisy
+        # low-round benches; disable-gc measures pure compute (hides GC-spike
+        # regressions by design -- the relative-compare layer added in Wave 2
+        # covers that axis).
+        run: |
+          pytest tests/benchmarks/ -o python_files="bench_*.py" \
+            --benchmark-only \
+            --benchmark-min-rounds=50 \
+            --benchmark-warmup=on --benchmark-warmup-iterations=5 \
+            --benchmark-disable-gc \
+            --benchmark-json=bench-results.json
+
+      - name: NFR report + gate (soft / non-blocking in Wave 1)
+        # bench_report.py --check exits 1 on any NFR breach AND prints the
+        # summary first. continue-on-error keeps the PR green (Wave 1 = warn);
+        # the breach is still visible in the step log + the job summary below.
+        continue-on-error: true
+        run: |
+          set +e
+          python tests/benchmarks/bench_report.py bench-results.json --check --no-save > /tmp/nfr_report.txt
+          code=$?
+          {
+            echo "## Benchmark NFR Report"
+            echo ""
+            cat /tmp/nfr_report.txt
+            if [ "$code" -ne 0 ]; then
+              echo ""
+              echo "> ⚠️ NFR gate reported regressions. **Wave 1 = non-blocking** (soft gate during CI calibration). See docs/performance-benchmarking.md."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bench-results
+          path: bench-results.json
