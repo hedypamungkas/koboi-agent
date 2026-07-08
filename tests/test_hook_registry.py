@@ -68,6 +68,19 @@ class TestRegistry:
         assert "NotificationHook" in names
         assert "LangfuseTracingHook" in names
 
+    def test_opt_in_hooks_are_not_auto_wired(self):
+        """Guard: hooks that are deliberately NOT auto-wired must stay out of _REGISTRY.
+
+        - RAGHook was removed (dead code; the live RAG pipeline runs via _build_rag).
+        - GuardrailHook / ContextHook are opt-in alternatives the loop supersedes (the
+          loop checks guardrails directly with G8 buffering and uses ContextManager
+          directly). They remain usable via agent.add_hook(), but must NEVER silently
+          become default-on -- that would double-evaluate / diverge from the loop.
+        """
+        names = [e.name for e in _REGISTRY]
+        for opt_in in ("RAGHook", "GuardrailHook", "ContextHook"):
+            assert opt_in not in names, f"{opt_in} must stay opt-in (not auto-wired)"
+
     def test_list_entries_returns_copy(self):
         entries = list_entries()
         assert len(entries) >= 8

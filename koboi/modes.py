@@ -94,6 +94,45 @@ _MODE_CONFIGS: dict[AgentMode, ModeConfig] = {
 
 _MODE_CYCLE = [AgentMode.CHAT, AgentMode.PLAN, AgentMode.ACT, AgentMode.AUTO, AgentMode.YOLO]
 
+# Tools always treated as read-only (permitted in CHAT/PLAN). Single source of truth
+# shared by ModeManager.is_tool_allowed and ModeHook so the pipeline's pre-approval
+# mode gate and the hook's metadata flag can never disagree.
+_READ_ONLY_TOOLS: set[str] = {
+    "read",
+    "search",
+    "grep",
+    "find",
+    "list",
+    "glob",
+    "web_search",
+    "web_fetch",
+    "calculator",
+    "delegate_tasks",
+}
+
+
+def is_read_only_tool(tool_name: str) -> bool:
+    """Check if a tool is read-only (safe for CHAT/PLAN modes).
+
+    Exact match, or prefix match for namespaced tools (e.g. ``filesystem.read``).
+    """
+    name_lower = tool_name.lower()
+    if name_lower in _READ_ONLY_TOOLS:
+        return True
+    for prefix in _READ_ONLY_TOOLS:
+        if name_lower.startswith(prefix + "."):
+            return True
+    return False
+
+
+def _mode_block_reason(mode: AgentMode, tool_name: str) -> str:
+    """Human-readable reason for why ``tool_name`` is blocked in ``mode``."""
+    if mode == AgentMode.CHAT:
+        return (
+            f"CHAT mode: tool '{tool_name}' is not allowed. Switch to ACT or AUTO mode to execute state-changing tools."
+        )
+    return f"PLAN mode: tool '{tool_name}' is not allowed. Only read-only tools are permitted in PLAN mode."
+
 
 class ModeManager:
     """Manages the current agent mode and mode switching."""
@@ -109,6 +148,18 @@ class ModeManager:
     @property
     def config(self) -> ModeConfig:
         return _MODE_CONFIGS[self._mode]
+
+    def is_tool_allowed(self, tool_name: str) -> tuple[bool, str]:
+        """Whether ``tool_name`` may run in the current mode.
+
+        Returns ``(allowed, reason)`` -- ``reason`` is ``""`` when allowed. CHAT/PLAN
+        permit only read-only tools; ACT/AUTO/YOLO permit all. This is the single
+        source of truth consulted BOTH by the pipeline (pre-approval mode gate, so a
+        blocked tool never prompts the user) and by ModeHook (metadata flag for audit).
+        """
+        if self._mode in (AgentMode.CHAT, AgentMode.PLAN) and not is_read_only_tool(tool_name):
+            return False, _mode_block_reason(self._mode, tool_name)
+        return True, ""
 
     def switch_mode(self, mode: AgentMode) -> None:
         """Switch to a specific mode."""
