@@ -1361,6 +1361,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         agents_map=agents_map,
         dag_scheduler=dag_scheduler,
         default_mode=exec_mode,
+        hook_chain=assembler.hook_chain,
     )
 
     return KoboiAgent(

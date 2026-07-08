@@ -36,6 +36,7 @@ from koboi.orchestration.factory import AgentFactory, DynamicAgentBuilder
 
 if TYPE_CHECKING:
     from koboi.client import Client
+    from koboi.hooks.chain import HookChain
     from koboi.logger import AgentLogger
     from koboi.orchestration.dag_scheduler import DagScheduler
 
@@ -126,6 +127,7 @@ class Orchestrator:
         agents_map: dict | None = None,
         dag_scheduler: "DagScheduler | None" = None,
         default_mode: str = "sequential",
+        hook_chain: "HookChain | None" = None,
     ):
         self.client = client
         self.router = router
@@ -143,6 +145,9 @@ class Orchestrator:
         self._agents_map: dict = agents_map or {}
         self._dag_scheduler = dag_scheduler
         self.default_mode = default_mode
+        # #5: hook chain for dynamic-mode agents (so they get logging/policy/guardrails/
+        # telemetry -- restores what WS4 omitted). Facade passes assembler.hook_chain.
+        self._hook_chain = hook_chain
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -525,9 +530,12 @@ class Orchestrator:
                 domain_label=None,
             )
             # Build per-node agents from the plan (system_prompt = the step instruction).
+            # #5: pass the parent hook_chain so dynamic nodes get logging/policy/guardrails.
             self._agents_map = {
                 s.id: AgentFactory.create_configured_agent(
-                    AgentDef(name=s.id, system_prompt=s.instruction or s.id), self.client
+                    AgentDef(name=s.id, system_prompt=s.instruction or s.id),
+                    self.client,
+                    hook_chain=self._hook_chain,
                 )
                 for s in plan.steps
             }
@@ -547,7 +555,9 @@ class Orchestrator:
             )
             self._agents_map = {
                 "assistant": AgentFactory.create_configured_agent(
-                    AgentDef(name="assistant", system_prompt="You are a helpful assistant."), self.client
+                    AgentDef(name="assistant", system_prompt="You are a helpful assistant."),
+                    self.client,
+                    hook_chain=self._hook_chain,
                 )
             }
             yield AgentDispatchEvent(agent_name="assistant", agent_index=0, total_agents=1, mode="dynamic")

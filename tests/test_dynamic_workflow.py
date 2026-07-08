@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 
+from koboi.hooks.chain import Hook, HookChain, HookEvent
 from koboi.orchestration.orchestrator import Orchestrator
 from koboi.types import AgentResponse, RoutingDecision
 from tests.conftest import make_mock_response
@@ -86,3 +87,37 @@ async def test_dynamic_planner_fallback_answers_directly(mock_client):
 
     assert result.execution_mode == "dynamic"
     assert len(result.agent_results) == 1  # fell back to a single direct agent
+
+
+async def test_dynamic_agents_receive_hook_chain(mock_client):
+    """#5: dynamic-mode agents get the parent hook_chain (was missing in WS4)."""
+    fired: list = []
+
+    class _RecordingHook(Hook):
+        def handles(self):
+            return [HookEvent.PRE_LLM_CALL]
+
+        async def execute(self, ctx):
+            fired.append(ctx.event)
+            return ctx
+
+    chain = HookChain([_RecordingHook()])
+    client = mock_client(
+        responses=[
+            AgentResponse(content=PLAN_SIMPLE),  # planner -> simple
+            make_mock_response("direct-answer"),  # assistant run
+        ]
+    )
+    orch = Orchestrator(
+        client=client,
+        router=_AllRouter([]),
+        agents_map={},
+        default_mode="dynamic",
+        hook_chain=chain,
+    )
+
+    await orch.run("hi", mode="dynamic")
+
+    # The hook fired -> the dynamic "assistant" agent received + used the hook_chain.
+    # Without the #5 fix (empty HookChain), fired would be empty.
+    assert len(fired) > 0
