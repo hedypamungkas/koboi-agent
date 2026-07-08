@@ -159,7 +159,7 @@ class DoomLoopDetector:
 
         # Count how many times each (tool, args) pair appears with errors
         error_counts: dict[tuple[str, str], int] = {}
-        for i, (call, is_err) in enumerate(zip(self._history, self._error_flags)):
+        for _i, (call, is_err) in enumerate(zip(self._history, self._error_flags, strict=False)):
             if is_err:
                 error_counts[call] = error_counts.get(call, 0) + 1
 

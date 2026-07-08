@@ -71,5 +71,5 @@ class LLMClient(ABC):
             yield TextDeltaEvent(content=response.content)
         yield CompleteEvent(response=response)
 
-    async def close(self) -> None:
+    async def close(self) -> None:  # noqa: B027 - optional override hook; default no-op for stateless clients
         """Release underlying resources (HTTP transport, etc). Default no-op."""

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from textual.app import ComposeResult
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList
 from textual.containers import Vertical
 
 
-class HistorySearchScreen(ModalScreen[Optional[str]]):
+class HistorySearchScreen(ModalScreen[str | None]):
     """Modal history search with substring filter."""
 
     CSS = """

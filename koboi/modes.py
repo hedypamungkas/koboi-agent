@@ -142,4 +142,4 @@ class ModeManager:
             return AgentMode(value.lower())
         except ValueError:
             valid = [m.value for m in AgentMode]
-            raise ValueError(f"Unknown mode '{value}'. Valid modes: {valid}")
+            raise ValueError(f"Unknown mode '{value}'. Valid modes: {valid}") from None

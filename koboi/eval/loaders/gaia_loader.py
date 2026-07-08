@@ -77,7 +77,7 @@ class GAIALoader(DatasetLoader):
                     # Try without level-specific split
                     try:
                         ds = hf_load_dataset(source, split=split)  # nosec B615 - trusted public benchmark dataset
-                        ds = ds.filter(lambda x: x.get("Level") == level)
+                        ds = ds.filter(lambda x, level=level: x.get("Level") == level)
                     except Exception as e:
                         _logger.warning("Could not load GAIA level %d: %s", level, e)
                         continue

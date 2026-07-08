@@ -271,7 +271,7 @@ def cmd_eval(config_path: str, cases: str | None) -> int:
             return KoboiAgent.from_config(config_path)
         except Exception as e:
             print(f"Error creating agent for eval: {e}", file=sys.stderr)
-            raise SystemExit(1)
+            raise SystemExit(1) from None
 
     try:
         runner = EvalRunner(harness_factory=factory, scorers=scorers, console=None)

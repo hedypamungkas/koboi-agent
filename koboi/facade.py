@@ -11,7 +11,8 @@ import importlib
 import os
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable
+from typing import TYPE_CHECKING
+from collections.abc import Awaitable
 
 from koboi.config import Config, extract_extra_params
 from koboi.client import RetryClient
@@ -308,7 +309,7 @@ class KoboiAgent:
                     events.append(HookEvent(e))
                 except ValueError:
                     valid = [ev.value for ev in HookEvent]
-                    raise ValueError(f"Unknown event '{e}'. Valid events: {valid}")
+                    raise ValueError(f"Unknown event '{e}'. Valid events: {valid}") from None
         from koboi.hooks.callback_hook import CallbackHook
 
         if self._core is not None:
@@ -1227,9 +1228,9 @@ def _build_orchestration(config: Config, verbose: bool = False):
 def _setup_subagent(
     tools: ToolRegistry,
     client: RetryClient,
-    hook_chain: "HookChain",
+    hook_chain: HookChain,
     logger: AgentLogger,
-    memory: "ConversationMemory | None" = None,
+    memory: ConversationMemory | None = None,
     config: Config | None = None,
 ) -> None:
     """Initialize the subagent system if delegate_tasks tool is registered."""

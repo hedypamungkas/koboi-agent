@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Union
-
 from koboi.types import AgentResponse
 
 
@@ -110,19 +108,19 @@ class OrchestrationCompleteEvent:
     routing_confidence: float
 
 
-StreamEvent = Union[
-    TextDeltaEvent,
-    ToolCallEvent,
-    ToolResultEvent,
-    IterationEvent,
-    CompleteEvent,
-    ErrorEvent,
-    PendingApprovalEvent,
-    RoutingDecisionEvent,
-    AgentDispatchEvent,
-    AgentResultEvent,
-    OrchestrationCompleteEvent,
-]
+StreamEvent = (
+    TextDeltaEvent
+    | ToolCallEvent
+    | ToolResultEvent
+    | IterationEvent
+    | CompleteEvent
+    | ErrorEvent
+    | PendingApprovalEvent
+    | RoutingDecisionEvent
+    | AgentDispatchEvent
+    | AgentResultEvent
+    | OrchestrationCompleteEvent
+)
 
 
 _EVENT_TYPE_MAP: dict[type, str] = {

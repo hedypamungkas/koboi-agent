@@ -14,7 +14,8 @@ the contract is cheap to import and stable across milestones.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Coroutine, Literal
+from typing import Any, Literal
+from collections.abc import Callable, Coroutine
 
 from koboi.types import RiskLevel
 

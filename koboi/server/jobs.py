@@ -147,7 +147,7 @@ class JobStore:
                 (job_id, session_id, owner, message, idempotency_key, mode, max_iterations, now, now),
             )
             self._conn.commit()
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as err:
             # M1: a concurrent same-key insert won the race. Roll back the failed
             # statement so the shared connection is reusable, then surface the
             # canonical job. (Without rollback the next SELECT raises
@@ -155,7 +155,7 @@ class JobStore:
             self._conn.rollback()
             existing = self.find_by_idempotency_key(idempotency_key) if idempotency_key else None
             if existing:
-                raise DuplicateIdempotencyKey(existing["job_id"])
+                raise DuplicateIdempotencyKey(existing["job_id"]) from err
             raise
 
     def get(self, job_id: str) -> dict | None:

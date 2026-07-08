@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from textual.app import ComposeResult
 from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList
 from textual.containers import Vertical
 
 
-class CommandPaletteScreen(ModalScreen[Optional[str]]):
+class CommandPaletteScreen(ModalScreen[str | None]):
     """Modal command palette with search and option list."""
 
     CSS = """

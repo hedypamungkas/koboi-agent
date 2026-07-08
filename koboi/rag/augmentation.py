@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from koboi.rag.retriever import BaseRetriever
 
 
-class AugmentationStrategy(ABC):
+class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods have default no-op impls
     def __init__(
         self,
         retriever: BaseRetriever,

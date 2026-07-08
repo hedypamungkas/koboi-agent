@@ -86,8 +86,21 @@ line-length = 120
 extend-exclude = ["examples/data/buggy_code"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+# E/F/W: base pycodestyle + pyflakes.
+# B:  bugbear -- real bug patterns (e.g. zip-without-strict, raise-without-from,
+#     loop-variable-closure). Correctness fixes, not style.
+# UP: pyupgrade -- modernize to py310+ (e.g. Optional[X] -> X | None, already
+#     mandated by CLAUDE.md; UP catches stragglers).
+# C4: comprehension cleanup.
+# I (isort) and SIM are intentionally deferred: enabling I would reformat ~94
+# files and SIM ~33, both high-churn and likely to conflict with in-flight
+# feature branches. Revisit after worktree-multi-provider-modes merges.
+select = ["E", "F", "W", "B", "UP", "C4"]
 ignore = ["E501", "E402"]
+
+[tool.ruff.lint.isort]
+# Forward-prep for when `I` is enabled: keep stdlib -> third-party -> koboi grouping.
+known-first-party = ["koboi"]
 
 [tool.mypy]
 python_version = "3.10"

@@ -36,7 +36,7 @@ class TestRunner:
         *,
         threshold: float = 0.6,
         default_severity: Severity = Severity.GATE,
-        console: "Console | None" = None,
+        console: Console | None = None,
     ):
         self.threshold = threshold
         self.default_severity = default_severity
@@ -142,7 +142,7 @@ class TestRunner:
         config: str | dict | None,
         mock: bool | None,
         mock_responses: list | None,
-    ) -> "KoboiAgent":
+    ) -> KoboiAgent:
         use_mock = mock if mock is not None else (bool(test.mock_responses) or test.use_mock)
         responses = mock_responses if mock_responses is not None else test.mock_responses
 
@@ -157,7 +157,7 @@ class TestRunner:
             )
         return self._build_live_agent(cfg)
 
-    def _build_live_agent(self, cfg: str | dict) -> "KoboiAgent":
+    def _build_live_agent(self, cfg: str | dict) -> KoboiAgent:
         from koboi.facade import KoboiAgent
 
         agent = KoboiAgent.from_config(cfg) if isinstance(cfg, (str, Path)) else KoboiAgent.from_dict(cfg)
@@ -170,7 +170,7 @@ class TestRunner:
         *,
         responses: list | None,
         config: str | dict | None,
-    ) -> "KoboiAgent":
+    ) -> KoboiAgent:
         scripted = ScriptedClient(responses or [])
         cfg = config or test.config
         if cfg is not None:
@@ -213,7 +213,7 @@ class TestRunner:
         )
         return KoboiAgent(core=core)
 
-    async def _close(self, agent: "KoboiAgent") -> None:
+    async def _close(self, agent: KoboiAgent) -> None:
         try:
             await agent.close()
         except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)

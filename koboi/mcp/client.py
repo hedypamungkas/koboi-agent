@@ -189,7 +189,7 @@ class MCPClient(BaseMCPClient):
         if not self._process or not self._process.stderr:
             return
         try:
-            for line in self._process.stderr:
+            for _line in self._process.stderr:
                 pass
         except (ValueError, OSError):
             pass

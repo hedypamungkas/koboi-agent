@@ -12,7 +12,8 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from koboi.types import EvalCase, EvalScore, EvalResult
 from koboi.eval.scorers.base import BaseScorer

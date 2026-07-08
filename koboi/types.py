@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
+from collections.abc import Callable
 
 if TYPE_CHECKING:
     from koboi.exceptions import AgentError
