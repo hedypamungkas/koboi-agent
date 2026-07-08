@@ -15,6 +15,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 - API keys:    `koboi keys create`                       (Bearer auth; `koboi keys list|revoke|rotate`)
 - Resume:      `koboi run --resume <session>`            (`koboi sessions <config>` lists persisted sessions)
 - Eval (eve):  `koboi eval-test evals/ --mock --strict`
+- Benchmarks:  `pytest tests/benchmarks/ -o python_files="bench_*.py" --benchmark-only`  (perf regression gate; see docs/performance-benchmarking.md)
 
 ## Directory map
 ```

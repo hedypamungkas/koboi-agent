@@ -40,9 +40,10 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
+        # [api] needed by bench_server.py (fastapi/httpx); [tui] by bench_tui.py.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,tui]"
+          pip install -e ".[dev,tui,api]"
 
       - name: Run micro-benchmarks
         # Single matrix cell (ubuntu/3.12) on purpose: benchmarks must run on a
