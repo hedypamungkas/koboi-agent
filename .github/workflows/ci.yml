@@ -85,9 +85,6 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write   # upload-sarif writes to the Security tab
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
@@ -108,17 +105,11 @@ jobs:
         run: bandit -r koboi/ -c pyproject.toml
 
       - name: Dependency audit (pip-audit; fails on known vulnerabilities)
-        # --strict: exit non-zero on vulns found OR audit errors. SARIF is
-        # uploaded below regardless of pass/fail so results always reach the
-        # Security tab.
-        run: pip-audit --strict -f sarif -o pip-audit.sarif
-
-      - name: Upload pip-audit SARIF to Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@411c4c9a36b3fca4d674f06b6396b2c6d23522c6 # v3
-        with:
-          sarif_file: pip-audit.sarif
-          category: pip-audit
+        # --strict: exit non-zero on known vulns OR audit errors — this is the
+        # merge gate; vulns print to the job log. pip-audit has no native SARIF
+        # format, so Security-tab alerting comes from Dependabot instead
+        # (see .github/dependabot.yml — covers both pip + github-actions).
+        run: pip-audit --strict
 
   seccomp:
     # Validates HARD network isolation (sandbox.network_isolation: seccomp). The
