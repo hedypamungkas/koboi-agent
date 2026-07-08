@@ -129,6 +129,7 @@ class Orchestrator:
         default_mode: str = "sequential",
         hook_chain: "HookChain | None" = None,
         full_graph: bool = False,
+        max_replans: int = 0,
     ):
         self.client = client
         self.router = router
@@ -151,6 +152,8 @@ class Orchestrator:
         self._hook_chain = hook_chain
         # #4: full_graph -> dag mode runs the entire configured graph, not the routed subset.
         self._full_graph = full_graph
+        # #3: max re-plans on node failure in dynamic mode.
+        self._max_replans = max_replans
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -670,6 +673,30 @@ class Orchestrator:
                     results.append(event.agent_result)
                 yield event
             routing_agents = step_ids
+            # #3: re-plan on node failure (bounded by max_replans).
+            replans_left = self._max_replans
+            while replans_left > 0 and any(r.failed for r in results):
+                replans_left -= 1
+                failed_names = [r.agent_name for r in results if r.failed]
+                retry_query = f"{query}\n\nNote: steps {failed_names} failed previously. Adjust the plan."
+                plan = await plan_or_skip(self.client, retry_query)
+                if not plan.needs_workflow or not plan.steps:
+                    break
+                results = []
+                step_ids = [s.id for s in plan.steps]
+                self._agents_map = {
+                    s.id: AgentFactory.create_configured_agent(
+                        AgentDef(name=s.id, system_prompt=s.instruction or s.id),
+                        self.client,
+                        hook_chain=self._hook_chain,
+                    )
+                    for s in plan.steps
+                }
+                async for event in self._run_dag_waves_with_flow(step_ids, query, plan.deps):
+                    if isinstance(event, _AgentCompletedEvent):
+                        results.append(event.agent_result)
+                    yield event
+                routing_agents = step_ids
         else:
             # Simple request: answer directly (no workflow). The negative/triage path.
             yield RoutingDecisionEvent(

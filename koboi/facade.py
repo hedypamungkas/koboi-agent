@@ -1369,6 +1369,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         default_mode=exec_mode,
         hook_chain=assembler.hook_chain,
         full_graph=exec_conf.get("full_graph", False),
+        max_replans=exec_conf.get("max_replans", 0),
     )
 
     return KoboiAgent(
