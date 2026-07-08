@@ -1,5 +1,7 @@
 # koboi-agent
 
+[![codecov](https://codecov.io/gh/hedypamungkas/koboi-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/hedypamungkas/koboi-agent)
+
 Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-provider LLM (OpenAI, Anthropic, Cloudflare).
 
 ## Features
