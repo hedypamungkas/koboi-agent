@@ -126,3 +126,33 @@ def test_persist_plan_noop_without_db_path():
     sched = DagScheduler(deps={"B": ["A"]})
     sched.waves(["A", "B"])
     assert sched.persist_plan() is None  # no db_path -> durable capture skipped
+
+
+def test_graph_cursor_resume_round_trip(tmp_path):
+    """#2: persist plan + record completions + list completed nodes for resume."""
+    db = str(tmp_path / "resume.db")
+    deps = {"B": ["A"], "C": ["A"]}
+    sched = DagScheduler(deps=deps, db_path=db)
+    names = ["A", "B", "C"]
+    sched.waves(names)
+    sched.persist_plan()
+    grid = sched.graph_run_id
+    assert grid is not None
+    # A + B completed before crash; C did not.
+    sched.record_node_completion("A", "A-output")
+    sched.record_node_completion("B", "B-output")
+    completed = DagScheduler.list_completed_nodes(db, grid)
+    assert completed == {"A": "A-output", "B": "B-output"}
+    assert "C" not in completed  # incomplete -> needs re-run on resume
+
+
+def test_record_node_completion_noop_without_db():
+    sched = DagScheduler(deps={})
+    sched.waves(["x"])
+    sched.record_node_completion("x", "output")  # must not crash (no db_path)
+
+
+def test_list_completed_nodes_empty_for_unknown_graph(tmp_path):
+    db = str(tmp_path / "empty.db")
+    result = DagScheduler.list_completed_nodes(db, "nonexistent-graph-id")
+    assert result == {}

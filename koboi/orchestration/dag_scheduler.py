@@ -125,3 +125,41 @@ class DagScheduler:
         finally:
             conn.close()
         return self._graph_run_id
+
+    def record_node_completion(self, node_id: str, output: str) -> None:
+        """Record that a node completed (#2: graph-cursor resume). Durable.
+
+        Called by the orchestrator after each node finishes so a crashed DAG can be
+        resumed at the incomplete node (not from turn 0). No-op without db_path.
+        """
+        if not self._db_path or not self._graph_run_id:
+            return
+        conn = sqlite3.connect(self._db_path)
+        try:
+            ensure_steps_table(conn)
+            conn.execute(
+                "INSERT INTO steps (session_id, turn_index, step_index, status, "
+                "node_id, graph_run_id, tool_calls_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (self._graph_run_id, 0, 0, "graph_node_complete", node_id, self._graph_run_id, output[:500]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @classmethod
+    def list_completed_nodes(cls, db_path: str, graph_run_id: str) -> dict[str, str]:
+        """Read completed nodes for a graph run (for graph-cursor resume, #2).
+
+        Returns ``{node_id: output}`` for nodes that completed before the crash.
+        Incomplete nodes (planned but not completed) are absent -> they need re-running.
+        """
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_steps_table(conn)
+            rows = conn.execute(
+                "SELECT node_id, tool_calls_json FROM steps WHERE graph_run_id=? AND status='graph_node_complete'",
+                (graph_run_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return {row[0]: row[1] for row in rows if row[0]}

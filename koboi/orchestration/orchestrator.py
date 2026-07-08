@@ -428,6 +428,9 @@ class Orchestrator:
             wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in wave])
             for result in wave_results:
                 outputs[result.agent_name] = result.answer
+                # #2: record durable per-node completion for graph-cursor resume.
+                if self._dag_scheduler:
+                    self._dag_scheduler.record_node_completion(result.agent_name, result.answer)
                 yield AgentResultEvent(
                     agent_name=result.agent_name,
                     answer=result.answer[:200],
@@ -531,6 +534,9 @@ class Orchestrator:
                 outputs[result.agent_name] = result.answer
                 completed.add(result.agent_name)
                 remaining.discard(result.agent_name)
+                # #2: record durable per-node completion for graph-cursor resume.
+                if self._dag_scheduler:
+                    self._dag_scheduler.record_node_completion(result.agent_name, result.answer)
                 yield AgentResultEvent(
                     agent_name=result.agent_name,
                     answer=result.answer[:200],
