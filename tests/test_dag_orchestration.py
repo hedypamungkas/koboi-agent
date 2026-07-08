@@ -110,3 +110,32 @@ async def test_dag_without_scheduler_falls_back_to_sequential(mock_client):
     # Still runs all agents (sequential fallback), execution_mode reported as dag.
     assert set(order) == {"A", "B"}
     assert len(result.agent_results) == 2
+
+
+class _SubsetRouter:
+    """Routes to a single agent (subset) -- to test that full_graph overrides routing."""
+
+    async def route(self, query: str) -> RoutingDecision:
+        return RoutingDecision(query=query, agents=["A"], confidence=1.0, method="keyword", reasoning="subset")
+
+
+async def test_dag_full_graph_runs_all_nodes_despite_subset_routing(mock_client):
+    """#4: full_graph=True -> dag runs the ENTIRE configured graph, ignoring the routed subset."""
+    names = ["A", "B", "C", "D"]
+    order: list[str] = []
+    agents_map = {n: _OrderAgent(n, order) for n in names}
+    deps = {"B": ["A"], "C": ["A"], "D": ["B", "C"]}
+
+    orchestrator = Orchestrator(
+        client=mock_client(responses=[make_mock_response("combined")]),
+        router=_SubsetRouter(),  # routes to only "A"
+        agents_map=agents_map,
+        dag_scheduler=DagScheduler(deps=deps),
+        default_mode="dag",
+        full_graph=True,
+    )
+
+    await orchestrator.run("go", mode="dag")
+
+    # full_graph overrides routing -> ALL 4 nodes ran (not just the routed "A").
+    assert set(order) == {"A", "B", "C", "D"}

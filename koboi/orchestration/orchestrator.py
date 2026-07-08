@@ -128,6 +128,7 @@ class Orchestrator:
         dag_scheduler: "DagScheduler | None" = None,
         default_mode: str = "sequential",
         hook_chain: "HookChain | None" = None,
+        full_graph: bool = False,
     ):
         self.client = client
         self.router = router
@@ -148,6 +149,8 @@ class Orchestrator:
         # #5: hook chain for dynamic-mode agents (so they get logging/policy/guardrails/
         # telemetry -- restores what WS4 omitted). Facade passes assembler.hook_chain.
         self._hook_chain = hook_chain
+        # #4: full_graph -> dag mode runs the entire configured graph, not the routed subset.
+        self._full_graph = full_graph
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -664,12 +667,14 @@ class Orchestrator:
 
             results.sort(key=lambda r: order.get(r.agent_name, len(order)))
         elif mode == "dag" and self._dag_scheduler is not None:
+            # #4: full_graph runs the entire configured graph (bypasses the routed subset).
+            _dag_names = list(self._agents_map.keys()) if self._full_graph else agent_names
             # Edge-data-flow wave execution: each node's input = query + its deps'
             # outputs, so downstream nodes consume upstream results (closes the
             # no-data-flow gap). persist_plan keeps the durable graph-plan rows (#3).
-            self._dag_scheduler.waves(agent_names)  # populate _last_waves for persist
+            self._dag_scheduler.waves(_dag_names)  # populate _last_waves for persist
             self._dag_scheduler.persist_plan()
-            async for event in self._run_dag_waves_with_flow(agent_names, query, self._dag_scheduler.deps):
+            async for event in self._run_dag_waves_with_flow(_dag_names, query, self._dag_scheduler.deps):
                 if isinstance(event, _AgentCompletedEvent):
                     results.append(event.agent_result)
                 yield event
