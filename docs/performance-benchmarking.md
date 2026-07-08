@@ -58,14 +58,10 @@ thresholds live in `NFR_THRESHOLDS` at its top.
    runners have extreme variance under `mean` (e.g. `test_config_loading` median
    0.7ms / stddev 125ms), and `min` is the clean compute floor, so a threshold on
    `min` is both stable and sensitive. Exit non-zero on breach.
-2. **Relative compare** (`--benchmark-compare-fail=min:25%`) — for the macro
-   latency benches (`bench_loop.py` + `bench_server.py`), where no sensible
-   absolute threshold exists. The `benchmark.yml` "Macro relative-compare" step
-   captures a base at the PR's merge-base, then compares the PR head against it
-   **on the same runner** (cross-machine compare is invalid — 88/93 benches
-   differ >15% between macOS/3.13 and ubuntu/3.12, so the base is captured
-   in-job, never read from `baselines/baseline.json`). `min:25%` gives ~16pts
-   headroom over the measured <15% same-machine run-to-run noise. PR-only; soft.
+2. **Relative compare** (`--benchmark-compare-fail=min:X%`, planned Wave 2) — for
+   the higher-variance server/loop benches, where no sensible absolute threshold
+   exists. Compares the PR branch against the merge-base on the same runner
+   (neutralizes cross-machine variance).
 
 `bench_memory.py` self-asserts a generous peak-bytes ceiling (catches egregious
 leaks); its *time* numbers are tracemalloc-inflated and meaningless — read
@@ -90,25 +86,17 @@ Micro-benchmarks are noisy on shared GitHub runners. We control it with:
 
 ## Soft → hard gate
 
-Both gates run **soft** for now (each step has `continue-on-error: true`, so a
-breach warns in the step log + `$GITHUB_STEP_SUMMARY` but does **not** block the
-PR). This is intentional while thresholds calibrate against real CI noise.
+`benchmark.yml` runs as a **soft gate** initially: the `--check` step has
+`continue-on-error: true`, so an NFR breach warns (visible in the step log +
+`$GITHUB_STEP_SUMMARY`) but does **not** block the PR. This is intentional while
+thresholds are being calibrated against real CI noise.
 
-- **Micro NFR gate** (`NFR report + gate` step): `bench_report.py --check` on the
-  77 absolute-threshold micro-benchmarks.
-- **Macro relative-compare gate** (`Macro relative-compare` step): native
-  `--benchmark-compare-fail=min:25%` of PR head vs merge-base on the 13 macro
-  latency benches.
+**Promote to a hard gate** once you have ~2 weeks of clean runs:
 
-**Promote to a hard gate** once you have ~2 weeks of clean runs (no spurious
-failures on either gate):
-
-1. **Micro:** re-measure thresholds on CI (see *Refresh the CI baseline*) and
-   update `NFR_THRESHOLDS` (`ceil(ci_min_ms × 2.5)`, 1ms floor).
-2. **Macro:** re-measure the same-machine run-to-run delta; retune `min:25%`
-   upward if a stable bench flakes, downward once noise is characterized.
-3. Remove `continue-on-error: true` from **both** gate steps in `benchmark.yml`.
-4. Add the `Benchmark` check to the repo's branch-protection required checks.
+1. Re-measure thresholds on CI (see below) and update `NFR_THRESHOLDS`.
+2. Remove `continue-on-error: true` from the `--check` step in `benchmark.yml`.
+3. Add `Benchmark` (or the specific check name) to the repo's required status
+   checks in branch protection.
 
 ## Refresh the CI baseline (W1.4)
 

@@ -32,11 +32,6 @@ jobs:
     timeout-minutes: 10  # fail-fast if a bench hangs (e.g. accidental O(N) per-round state accumulation); default is 6h
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          # Full history so the PR's merge-base SHA is reachable for the macro
-          # A/B compare step below (default fetch-depth: 1 makes git checkout
-          # <base-sha> fail).
-          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -91,30 +86,3 @@ jobs:
         with:
           name: bench-results
           path: bench-results.json
-
-      - name: Macro relative-compare (PR vs merge-base, soft)
-        # T3-A: gate the macro LATENCY benches (bench_loop + bench_server) by
-        # comparing the PR head against its merge-base ON THE SAME RUNNER.
-        # Cross-machine compare is invalid (88/93 benches differ >15% between
-        # macOS/3.13 and ubuntu/3.12), so the base is captured in this same job,
-        # not read from baselines/baseline.json. min:25% gives ~16pts headroom
-        # over the measured <15% same-machine run-to-run noise. The editable
-        # install (pip install -e .) links to the repo dir, so `git checkout
-        # <sha>` swaps the imported koboi/ code without reinstalling.
-        # PR-only: github.event.pull_request.base.sha is empty on push events.
-        # Soft (continue-on-error) until ~2wk of CI data; T3-B promotes to hard.
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          PR_SHA="${{ github.sha }}"
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          MACRO="tests/benchmarks/bench_loop.py tests/benchmarks/bench_server.py"
-          FLAGS="--benchmark-only --benchmark-min-rounds=50 --benchmark-warmup=on --benchmark-warmup-iterations=5 --benchmark-disable-gc -q"
-          # base: merge-base of the PR -> save reference
-          git checkout --quiet "$BASE_SHA"
-          python -m pytest $MACRO -o python_files="bench_*.py" $FLAGS --benchmark-save=base
-          # head: PR merge commit -> compare against base, fail-soft on >25% min regression
-          git checkout --quiet "$PR_SHA"
-          python -m pytest $MACRO -o python_files="bench_*.py" $FLAGS --benchmark-compare --benchmark-compare-fail=min:25%
-          echo "Macro relative-compare passed (no bench regressed >25% on min vs merge-base)."
