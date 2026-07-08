@@ -127,3 +127,14 @@ To refresh it from a clean `main` run on the CI runner:
 3. If it's high-variance (server/loop), leave it ungated (report-only) until the
    relative-compare layer lands.
 4. Run locally to capture the `min`, then set the threshold.
+5. **Avoid per-round state accumulation.** A bench that grows a shared structure
+   every round (e.g. an idempotency registry's `_seen`, a list) is O(N) per call;
+   pytest-benchmark auto-runs ~10^5 rounds for a microsecond op, so total work
+   becomes O(N^2) and the bench never finishes (it spins until the job's
+   `timeout-minutes`). Rebuild fresh state per round, or reuse a fixed key so the
+   structure stays O(1). (This exact bug hung a CI run for 70 min once.)
+6. **Don't benchmark HTTP paths that spawn background work.** `/v1/jobs` admits
+   (202) then kicks off an autonomous background job whose execution outlives a
+   per-round `asyncio.run` loop and then blocks on `per_tenant_max`. Measure the
+   admission write directly (`JobStore.insert`) instead, and leave full HTTP
+   throughput to the relative-compare layer.
