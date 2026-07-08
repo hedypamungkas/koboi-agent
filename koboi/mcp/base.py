@@ -169,12 +169,12 @@ def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry, group: str
 
             return handler
 
-        handler = make_handler(info.name, client)
+        tool_fn = make_handler(info.name, client)
         registry.register(
             name=info.name,
             description=info.description,
             parameters=info.input_schema,
-            fn=handler,
+            fn=tool_fn,
             risk_level=RiskLevel.SAFE,
             group=group,
         )

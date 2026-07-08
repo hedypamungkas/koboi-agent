@@ -161,7 +161,7 @@ class StepJournal:
             (self._session_id,),
         ).fetchall()
         cols = ["id", "turn_index", "step_index", "status", "created_at"]
-        return [dict(zip(cols, r)) for r in rows]
+        return [dict(zip(cols, r, strict=False)) for r in rows]
 
     def get_last_terminal_step(self) -> dict | None:
         """The most recent terminal step (complete/max_iter/error), or None."""
@@ -173,7 +173,7 @@ class StepJournal:
         if not rows:
             return None
         cols = ["id", "turn_index", "step_index", "status", "is_terminal", "error", "created_at"]
-        return dict(zip(cols, rows[0]))
+        return dict(zip(cols, rows[0], strict=False))
 
     def list_steps(self, turn_index: int | None = None) -> list[dict]:
         """List steps for this session (optionally one turn), oldest first."""
@@ -203,4 +203,4 @@ class StepJournal:
             "error",
             "created_at",
         ]
-        return [dict(zip(cols, r)) for r in rows]
+        return [dict(zip(cols, r, strict=False)) for r in rows]

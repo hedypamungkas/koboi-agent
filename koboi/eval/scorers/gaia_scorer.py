@@ -7,7 +7,7 @@ numeric tolerance, unit stripping, and custom verification functions.
 from __future__ import annotations
 
 import re
-from typing import Callable
+from collections.abc import Callable
 
 from koboi.types import EvalCase, EvalScore
 from koboi.eval.scorers.base import BaseScorer

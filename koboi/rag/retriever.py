@@ -216,7 +216,7 @@ class SemanticRetriever(BaseRetriever):
 
     @staticmethod
     def _cosine_similarity(a: list[float], b: list[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         norm_a = sum(x * x for x in a) ** 0.5
         norm_b = sum(x * x for x in b) ** 0.5
         return dot / (norm_a * norm_b + 1e-10)
@@ -278,6 +278,7 @@ class SemanticRetriever(BaseRetriever):
             for chunk, emb in zip(
                 self._chunks,
                 [self._chunk_embeddings.get(c.id, []) for c in self._chunks],
+                strict=False,
             )
             if emb
         ]

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -14,7 +12,7 @@ from textual.widgets.option_list import Option
 from koboi.memory_sqlite import SQLiteMemory
 
 
-class SessionManagerScreen(ModalScreen[Optional[str]]):
+class SessionManagerScreen(ModalScreen[str | None]):
     """Modal screen for browsing, resuming, and deleting sessions.
 
     Returns: selected session_id to resume, or None to dismiss.

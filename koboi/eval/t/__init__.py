@@ -86,7 +86,7 @@ async def run_tests(
     mock: bool | None = None,
     mock_responses: list | None = None,
     console=None,
-) -> list["EvalResult"]:
+) -> list[EvalResult]:
     """Discover and run all ``async def test_*`` in ``*.eval.py`` files under ``path``.
 
     Returns real :class:`~koboi.types.EvalResult` objects so
@@ -105,6 +105,6 @@ async def run_tests(
     )
 
 
-def run_tests_sync(*args, **kwargs) -> list["EvalResult"]:
+def run_tests_sync(*args, **kwargs) -> list[EvalResult]:
     """Blocking wrapper around :func:`run_tests` for CLI / sync callers."""
     return asyncio.run(run_tests(*args, **kwargs))

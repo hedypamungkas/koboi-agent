@@ -7,7 +7,8 @@ by name, then creating them with keyword arguments from YAML config.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
 
 if TYPE_CHECKING:
     from koboi.eval.scorers.base import BaseScorer

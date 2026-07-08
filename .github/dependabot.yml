@@ -1,0 +1,34 @@
+# Dependabot keeps dependencies and GitHub Actions current.
+# - github-actions: bumps the SHA-pinned actions (see `# <ver>` comments in the
+#   workflows). Pinning to a commit SHA is the supply-chain best practice; this
+#   ecosystem entry is what keeps those SHAs from going stale.
+# - pip: bumps Python dependencies declared in pyproject.toml (incl. extras).
+# Weekly cadence, grouped per ecosystem to keep PR noise low. Security advisories
+# still open immediately, regardless of schedule.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      python-deps:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps"
+      include: "scope"

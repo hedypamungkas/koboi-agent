@@ -50,7 +50,7 @@ class _MemoryStore:
             tmp.close()
             os.replace(tmp.name, self.filepath)
             return True
-        except (OSError, PermissionError, IOError) as e:
+        except (OSError, PermissionError) as e:
             _logger.error("Memory save failed: %s", e)
             return False
 
@@ -63,7 +63,7 @@ class _MemoryStore:
                 fd = open(lock_path, "w")
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return fd
-            except (IOError, OSError):
+            except OSError:
                 try:
                     fd.close()
                 except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)

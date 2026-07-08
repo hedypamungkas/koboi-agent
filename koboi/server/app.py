@@ -14,7 +14,8 @@ import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
+from collections.abc import Callable, Sequence
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse

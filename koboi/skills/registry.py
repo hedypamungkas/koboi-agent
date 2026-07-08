@@ -78,7 +78,7 @@ def parse_frontmatter(content: str) -> dict:
             result[key] = value
 
     if metadata_lines:
-        result["metadata"] = {k: v for k, v in metadata_lines}
+        result["metadata"] = dict(metadata_lines)
 
     if "allowed-tools" in result:
         result["allowed-tools"] = result["allowed-tools"].split()

@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable
-from typing import Callable
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 from uuid import uuid4
 

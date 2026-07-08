@@ -374,7 +374,7 @@ class SubAgentManager:
     async def cancel_all(self) -> int:
         """Cancel all running subagents. Returns count cancelled."""
         count = 0
-        for label, task in list(self._running_tasks.items()):
+        for _label, task in list(self._running_tasks.items()):
             if not task.done():
                 task.cancel()
                 count += 1

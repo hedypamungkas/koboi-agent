@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from koboi.rag.chunker import ParagraphChunker
 from koboi.rag.types import Chunk, Document

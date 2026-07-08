@@ -55,7 +55,7 @@ class TestContext:
     # Not a pytest test class despite the ``Test`` prefix (the `t` test context).
     __test__ = False
 
-    def __init__(self, agent: "KoboiAgent", *, default_severity: Severity = Severity.GATE):
+    def __init__(self, agent: KoboiAgent, *, default_severity: Severity = Severity.GATE):
         self._agent = agent
         self._default = default_severity
         self._turns: list[RunResult] = []
@@ -63,7 +63,7 @@ class TestContext:
         self._recorded: list[RecordedAssertion] = []
 
     # ------------------------------------------------------------------ drive
-    async def send(self, message: str | list) -> "RunResult":
+    async def send(self, message: str | list) -> RunResult:
         """Drive the agent one turn and record the :class:`~koboi.types.RunResult`."""
         from koboi.types import RunResult
 
@@ -91,11 +91,11 @@ class TestContext:
 
     # ------------------------------------------------------------ introspection
     @property
-    def turns(self) -> list["RunResult"]:
+    def turns(self) -> list[RunResult]:
         return list(self._turns)
 
     @property
-    def last(self) -> "RunResult":
+    def last(self) -> RunResult:
         if not self._turns:
             raise RuntimeError("t.last / t.reply called before t.send()")
         return self._turns[-1]
@@ -113,7 +113,7 @@ class TestContext:
         return self.reply
 
     @property
-    def all_tool_calls(self) -> list["ToolCall"]:
+    def all_tool_calls(self) -> list[ToolCall]:
         """Every tool call across all turns (preserves order and duplicates)."""
         return [tc for result in self._turns for tc in result.tool_calls_made]
 
@@ -323,7 +323,7 @@ class TestContext:
 
     async def judge(
         self,
-        scorer: "str | type | BaseScorer",
+        scorer: str | type | BaseScorer,
         *,
         severity: Severity = Severity.SOFT,
         min_score: float = 0.7,
@@ -375,7 +375,7 @@ class TestContext:
         """Return the recorded assertions (evaluated later by the runner)."""
         return list(self._recorded)
 
-    def _resolve_scorer(self, scorer: Any, **kwargs: Any) -> "BaseScorer":
+    def _resolve_scorer(self, scorer: Any, **kwargs: Any) -> BaseScorer:
         from koboi.eval.registry import ScorerRegistry
         from koboi.eval.scorers.base import BaseScorer
 

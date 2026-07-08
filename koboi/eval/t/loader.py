@@ -7,7 +7,8 @@ import importlib.util
 import inspect
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
+from collections.abc import Awaitable, Callable
 
 if TYPE_CHECKING:
     from koboi.eval.t.context import TestContext
@@ -26,7 +27,7 @@ class LoadedTest:
     func_name: str
     func: TestFunc
     config: str | dict | None = None
-    mock_responses: list["AgentResponse"] | None = None
+    mock_responses: list[AgentResponse] | None = None
     use_mock: bool = False
     tags: list[str] = field(default_factory=list)
     timeout: float | None = None
