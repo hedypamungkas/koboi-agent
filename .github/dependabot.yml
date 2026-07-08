@@ -32,3 +32,10 @@ updates:
     commit-message:
       prefix: "deps"
       include: "scope"
+    ignore:
+      - dependency-name: "langfuse"
+        # koboi's LangfuseTracingHook targets the Langfuse SDK v2 API
+        # (client.trace().span().generation() fluent chain + Langfuse(publicKey=,
+        # host=) constructor), which langfuse v3 removed. Ignore major bumps
+        # until the hook is migrated to the v3/v4 SDK.
+        update-types: ["version-update:semver-major"]

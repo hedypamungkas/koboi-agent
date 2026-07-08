@@ -42,13 +42,13 @@ eval-gaia = ["datasets>=2.14", "pandas>=2.0"]
 eval-swe-bench = ["datasets>=2.14", "pandas>=2.0"]
 eval-deepeval = ["deepeval>=0.20"]
 eval-all = ["ragas>=0.2", "datasets>=2.14", "pandas>=2.0", "deepeval>=0.20"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy~=1.19.1", "bandit>=1.9", "types-PyYAML"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.19.1,<2.3.0", "bandit>=1.9", "types-PyYAML"]
 all = [
     "langfuse>=2.0,<3.0",
     "fastapi>=0.110", "uvicorn[standard]>=0.27",
     "rich>=13.0", "textual>=0.40", "click>=8.0", "prompt_toolkit>=3.0", "rapidfuzz>=3.0",
     "ragas>=0.2", "datasets>=2.14", "pandas>=2.0", "deepeval>=0.20",
-    "pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy~=1.19.1", "bandit>=1.9", "types-PyYAML",
+    "pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.19.1,<2.3.0", "bandit>=1.9", "types-PyYAML",
 ]
 
 [project.scripts]
