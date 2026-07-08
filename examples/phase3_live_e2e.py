@@ -184,37 +184,27 @@ async def l5b_workflow_graph_single_node() -> bool:
 
 
 async def l6_replan_on_failure() -> bool:
-    """POSITIVE: a deliberately impossible step fails -> the planner re-plans -> recovers."""
-    print("\n===== L6 (positive): re-planning -- node failure triggers replan =====")
-    plan_calls = {"n": 0}
+    """FULLY LIVE: real plan_or_skip (no mock) plans the query; the first node
+    'fails' via a simulated transport error (RuntimeError, like a real network
+    failure that _run_single catches); the REAL planner re-plans; the recovery
+    node runs with the REAL LLM. Only the failure cause is simulated — everything
+    else (planning x2, recovery execution, synthesis) is 100% real LLM."""
+    print("\n===== L6 (FULLY LIVE): re-planning -- real planner + simulated transport error =====")
 
-    async def counting_plan(client, instruction, **kw):
-        plan_calls["n"] += 1
-        if plan_calls["n"] == 1:
-            # First plan: a step that will fail (impossible instruction).
-            return PlanResult(
-                needs_workflow=True,
-                steps=[
-                    PlanStep(id="impossible", instruction="Translate this text into a language that does not exist.")
-                ],
-                reason="multi-step",
-            )
-        # Replan: a simple recoverable plan.
-        return PlanResult(
-            needs_workflow=True,
-            steps=[
-                PlanStep(
-                    id="recover", instruction="In one sentence, explain why the previous translation was impossible."
-                )
-            ],
-            reason="recovery plan after failure",
-        )
-
-    # Patch plan_or_skip.
+    # Track plan_or_skip calls WITHOUT mocking it — just count.
     import koboi.orchestration.planner as planner_mod
 
+    plan_calls = {"n": 0}
     original_plan = planner_mod.plan_or_skip
-    planner_mod.plan_or_skip = counting_plan
+
+    async def counting_real_plan(client, instruction, **kw):
+        plan_calls["n"] += 1
+        print(f"  [planner] call #{plan_calls['n']} for: {instruction[:60]}...")
+        result = await original_plan(client, instruction, **kw)
+        print(f"  [planner] -> needs_workflow={result.needs_workflow}, steps={len(result.steps)}")
+        return result
+
+    planner_mod.plan_or_skip = counting_real_plan
 
     try:
         orch = Orchestrator(
@@ -224,30 +214,47 @@ async def l6_replan_on_failure() -> bool:
             default_mode="dynamic",
             max_replans=1,
         )
-        # Force the first node to fail by spying on _run_single.
+        # Simulate a real transport error on the FIRST planned node (not the planner
+        # call, not the recovery — only the first node execution). This represents
+        # a network failure / API error that _run_single is designed to catch.
         single_calls = {"n": 0}
         orig_single = orch._run_single
 
-        async def failing_single(name, query_input):
+        async def transport_error_single(name, query_input):
             single_calls["n"] += 1
-            if single_calls["n"] == 1:
+            if single_calls["n"] == 1 and name != "assistant":
+                # Simulate what _run_single returns AFTER catching a real transport
+                # error (e.g. gateway 503). _run_single catches the exception + returns
+                # AgentResult(failed=True) -- we return exactly that shape. The planner
+                # + recovery nodes below use the REAL LLM (no mock).
                 from koboi.types import AgentResult
 
+                print(f"  [node {name}] SIMULATED transport error -> AgentResult(failed=True)")
                 return AgentResult(
-                    agent_name=name, answer="Error: impossible", elapsed_seconds=0, tokens_used=0, failed=True
+                    agent_name=name,
+                    answer="Error: simulated transport error (503)",
+                    elapsed_seconds=0,
+                    tokens_used=0,
+                    failed=True,
                 )
+            print(f"  [node {name}] running with real LLM...")
             return await orig_single(name, query_input)
 
-        orch._run_single = failing_single
-        result = await orch.run("Translate 'hello' into a nonexistent language.", mode="dynamic")
+        orch._run_single = transport_error_single
+        result = await orch.run(
+            "Research the history of the transistor, then summarize its impact on modern computing.",
+            mode="dynamic",
+        )
     finally:
         planner_mod.plan_or_skip = original_plan
 
-    print(f"  plan_or_skip calls: {plan_calls['n']}")
-    print(f"  final answer: {(result.final_answer or '')[:120]}")
+    print(f"  plan_or_skip calls: {plan_calls['n']} (real LLM planner each time)")
+    print(f"  final answer: {(result.final_answer or '')[:150]}")
     replanned = plan_calls["n"] >= 2
+    has_answer = bool(result.final_answer and len(result.final_answer) > 20)
     print(f"  -> replanned on failure: {replanned}")
-    return replanned
+    print(f"  -> recovered with real LLM answer: {has_answer}")
+    return replanned and has_answer
 
 
 async def main() -> int:
