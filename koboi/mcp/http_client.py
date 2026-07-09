@@ -30,6 +30,16 @@ class StreamableHTTPMCPClient(BaseMCPClient):
     - Auth via Bearer token (configurable)
     """
 
+    TRANSPORT = "streamable-http"
+
+    def is_connected(self) -> bool:
+        """Live iff the httpx client has been created (not closed)."""
+        return self._client is not None
+
+    @property
+    def endpoint(self) -> str:
+        return self._url
+
     def __init__(
         self,
         url: str,
