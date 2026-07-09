@@ -113,6 +113,10 @@ class RagConfig(BaseModel):
     top_k: int = Field(default=3, ge=1)
     augmentation: str = "on_the_fly"
     documents: list[str | dict] = Field(default_factory=list)
+    # #11a: wrap the chosen retriever in the lightweight RerankerRetriever.
+    rerank: bool = False
+    # #5: opt-in on-disk embedding cache (JSON) so restarts don't re-embed the corpus.
+    embedding_cache_path: str | None = None
 
 
 class InputGuardrailConfig(BaseModel):

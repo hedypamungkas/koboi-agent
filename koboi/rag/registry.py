@@ -278,27 +278,47 @@ def _load_documents(
 ) -> tuple[BaseChunker, list[Chunk]]:
     """Load and chunk documents from RAG config.
 
-    Returns (chunker, chunks) so callers can reuse the chunker if needed.
+    Returns (chunker, chunks) so callers can reuse the chunker if needed. Each
+    ``documents[]`` entry accepts ``{path: ...}`` (or a bare string); the path may
+    be a file, a glob pattern (``*.md`` / ``**/*.txt``), or a directory (recursed).
+    Unreadable/binary files are skipped (format parsing is a separate gap).
     """
+    import glob as _glob
+    from pathlib import Path as PathlibPath
+
     from koboi.rag.types import Document
 
     chunker = _build_chunker(rag_conf)
     doc_paths = rag_conf.get("documents", [])
     all_chunks: list[Chunk] = []
 
-    for doc_conf in doc_paths:
-        path = doc_conf.get("path", "")
-        if path:
-            from pathlib import Path as PathlibPath
+    def _resolve_files(path: str) -> list[PathlibPath]:
+        # #3: expand glob patterns and directories into a concrete file list.
+        if any(ch in path for ch in "*?["):
+            return sorted(PathlibPath(p) for p in _glob.glob(path, recursive=True) if PathlibPath(p).is_file())
+        p = PathlibPath(path)
+        if p.is_dir():
+            return sorted(f for f in p.rglob("*") if f.is_file())
+        return [p] if p.is_file() else []
 
-            p = PathlibPath(path)
-            if p.exists():
-                content = p.read_text()
-                doc = Document(id=p.stem, title=p.stem, content=content)
-                chunks = chunker.chunk(doc)
-                for chunk in chunks:
-                    chunk.metadata["source"] = doc.title
-                all_chunks.extend(chunks)
+    for doc_conf in doc_paths:
+        if isinstance(doc_conf, str):
+            path = doc_conf
+        elif isinstance(doc_conf, dict):
+            path = doc_conf.get("path", "")
+        else:
+            path = ""
+        if not path:
+            continue
+        for fp in _resolve_files(path):
+            try:
+                content = fp.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue  # skip unreadable/binary files
+            doc = Document(id=fp.stem, title=fp.stem, content=content)
+            for chunk in chunker.chunk(doc):
+                chunk.metadata["source"] = doc.title
+                all_chunks.append(chunk)
 
     return chunker, all_chunks
 
@@ -330,12 +350,26 @@ def build_rag(
     if not rag_conf or not rag_conf.get("enabled"):
         return None
 
+    # #5: opt-in on-disk embedding cache -> avoid re-embedding the corpus on restart.
+    cache_path = rag_conf.get("embedding_cache_path")
+    if cache_path:
+        from koboi.rag.retriever import set_embedding_cache_path
+
+        set_embedding_cache_path(cache_path)
+
     _, all_chunks = _load_documents(rag_conf)
     if not all_chunks:
         _logger.warning("RAG enabled but no documents loaded")
         return None
 
     retriever = _build_retriever(all_chunks, rag_conf, client=client)
+
+    # #11a: opt-in reranker -- wrap the chosen retriever (RerankerRetriever is a
+    # wrapper, so it is enabled via a flag rather than selected by name).
+    if rag_conf.get("rerank"):
+        from koboi.rag.augmentation import RerankerRetriever
+
+        retriever = RerankerRetriever(retriever)
 
     aug_name = rag_conf.get("augmentation", "in_memory")
     entry = augmentation_registry.get(aug_name)
