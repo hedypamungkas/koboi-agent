@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from koboi.hooks.chain import Hook, HookContext, HookEvent
 
 if TYPE_CHECKING:
-    from koboi.sandbox.base import BaseSandbox
+    from koboi.sandbox.base import BaseSandbox, SandboxResult
 
 _logger = logging.getLogger("koboi.command_hook")
 
@@ -144,33 +144,11 @@ class CommandHook(Hook):
 
     # -- execution ------------------------------------------------------------
 
-    async def execute(self, ctx: HookContext) -> HookContext:
-        payload = self._build_payload(ctx)
-        env = self._sandbox.build_env({"env_passthrough": self._env_passthrough})
-        shell = isinstance(self._command, str)
-        stdin_data = json.dumps(payload)
-
-        if self._fire_and_forget:
-            # Spawn off-loop, do NOT wait -- observe/side-effect only. Mutations
-            # are impossible (we never read stdout). Zero latency in the hot path.
-            task = asyncio.create_task(
-                asyncio.to_thread(
-                    self._sandbox.run,
-                    self._command,
-                    cwd=self._cwd,
-                    env=env,
-                    timeout=self._timeout,
-                    shell=shell,
-                    input=stdin_data,
-                )
-            )
-            self._bg_tasks.add(task)
-            task.add_done_callback(self._on_bg_done)
-            return ctx  # unchanged, immediately
-
-        # Awaited branch: full control (abort / inject / modified_tool_result).
+    async def _invoke(self, shell: bool, env: dict, stdin_data: str) -> SandboxResult | None:
+        """Run the command off-loop; return the result, or ``None`` if ``sandbox.run``
+        itself raised (already logged). Centralizes the offload so both branches share it."""
         try:
-            result = await asyncio.to_thread(
+            return await asyncio.to_thread(
                 self._sandbox.run,
                 self._command,
                 cwd=self._cwd,
@@ -180,22 +158,70 @@ class CommandHook(Hook):
                 input=stdin_data,
             )
         except Exception as exc:  # asyncio.to_thread propagates worker/sandbox crash
-            self._logger.error("command hook %r crashed: %s", self._name, exc)
+            self._logger.error("command hook %r crashed: %s", self._name, exc, exc_info=True)
+            return None
+
+    async def _run_and_log(self, shell: bool, env: dict, stdin_data: str) -> None:
+        """Fire-and-forget delivery: run + surface subprocess-level failures.
+
+        A broken forwarder returns a non-zero / timed-out ``SandboxResult`` -- it does
+        NOT raise -- so without inspecting the result the failure would vanish silently
+        (task.exception() is None). This is the default mode, so logging here is the only
+        signal an operator gets that their WhatsApp/Telegram hook is dead.
+        """
+        result = await self._invoke(shell, env, stdin_data)
+        if result is None:
+            return  # crash already logged in _invoke
+        if result.timed_out:
+            self._logger.warning("fire_and_forget command hook %r timed out (%ss)", self._name, self._timeout)
+        elif result.returncode != 0:
+            self._logger.warning(
+                "fire_and_forget command hook %r exit=%s stderr=%r",
+                self._name,
+                result.returncode,
+                (result.stderr or "")[:500],
+            )
+        # exit 0: success (stdout intentionally unread in fire-and-forget)
+
+    async def execute(self, ctx: HookContext) -> HookContext:
+        # Prep must fail safe: a payload/env/serialize error (e.g. pass_messages=True
+        # with a non-serializable message) must NOT abort. Otherwise HookChain.emit's
+        # fail-closed behavior would turn a prep error into an unintended abort,
+        # breaking the "fire-and-forget hooks can't abort" contract.
+        try:
+            payload = self._build_payload(ctx)
+            env = self._sandbox.build_env({"env_passthrough": self._env_passthrough})
+            shell = isinstance(self._command, str)
+            stdin_data = json.dumps(payload)
+        except Exception as exc:
+            self._logger.error("command hook %r prep failed: %s", self._name, exc, exc_info=True)
+            return ctx  # fail-safe: do NOT abort
+
+        if self._fire_and_forget:
+            # Spawn off-loop, do NOT wait -- observe/side-effect only. Mutations are
+            # impossible (we never read stdout). Zero latency in the hot path.
+            task = asyncio.create_task(self._run_and_log(shell, env, stdin_data))
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._on_bg_done)
+            return ctx  # unchanged, immediately
+
+        # Awaited branch: full control (abort / inject / modified_tool_result).
+        result = await self._invoke(shell, env, stdin_data)
+        if result is None:  # sandbox.run crashed (logged in _invoke)
             if self._abort_on_error:
                 ctx.abort = True
             return ctx
-
         if result.timed_out:
             self._logger.warning("command hook %r timed out (%ss)", self._name, self._timeout)
             if self._abort_on_error:
                 ctx.abort = True
             return ctx
-
         if result.returncode == 2:
-            # Explicit abort (Claude-Code convention). Optionally read a reason.
-            self._apply_json(ctx, result.stdout, abort_default=True)
+            # Exit 2 ALWAYS aborts (Claude-Code convention), regardless of stdout.
+            # JSON is applied only for side-effects (inject message / reason).
+            ctx.abort = True
+            self._apply_json(ctx, result.stdout)
             return ctx
-
         if result.returncode != 0:
             self._logger.warning(
                 "command hook %r exit=%s stderr=%r",
@@ -208,27 +234,24 @@ class CommandHook(Hook):
             return ctx
 
         # exit 0: apply any returned JSON mutations.
-        self._apply_json(ctx, result.stdout, abort_default=False)
+        self._apply_json(ctx, result.stdout)
         return ctx
 
-    def _apply_json(self, ctx: HookContext, stdout: str, *, abort_default: bool) -> None:
-        """Parse the hook's stdout JSON and mutate ``ctx``. ``abort_default`` applies
-        when there's no usable JSON (e.g. exit-2 with empty/garbage stdout)."""
+    def _apply_json(self, ctx: HookContext, stdout: str) -> None:
+        """Apply side-effect mutations from the hook's stdout JSON.
+
+        ``{"abort": true}`` is honored (the JSON-driven abort path for exit 0). Exit-2
+        abort is handled by the caller (unconditional), not here.
+        """
         if not stdout or not stdout.strip():
-            if abort_default:
-                ctx.abort = True
             return
         text = stdout[:_STDOUT_CAP]
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
             self._logger.warning("command hook %r stdout not JSON: %r", self._name, text[:500])
-            if abort_default:
-                ctx.abort = True
             return
         if not isinstance(data, dict):
-            if abort_default:
-                ctx.abort = True
             return
         if data.get("abort") is True:
             ctx.abort = True
@@ -243,9 +266,11 @@ class CommandHook(Hook):
             ctx.tool_result = str(modified)
 
     def _on_bg_done(self, task: asyncio.Task) -> None:
+        # Strong-ref bookkeeping + backstop logger (the result-level logging lives in
+        # _run_and_log; this only fires if _run_and_log itself raised unexpectedly).
         self._bg_tasks.discard(task)
         if task.cancelled():
             return
         exc = task.exception()
         if exc:
-            self._logger.error("fire_and_forget command hook %r failed: %s", self._name, exc)
+            self._logger.error("fire_and_forget command hook %r task failed: %s", self._name, exc, exc_info=True)

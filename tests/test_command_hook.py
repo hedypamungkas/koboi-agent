@@ -257,3 +257,108 @@ class TestEndToEndForwarding:
         if hook._bg_tasks:
             await asyncio.wait_for(asyncio.gather(*hook._bg_tasks, return_exceptions=True), timeout=5)
         assert "Hello from LLM" in outfile.read_text()
+
+
+class _CrashingSandbox:
+    """Sandbox whose run() raises, to exercise the fail-safe crash path."""
+
+    name = "crash"
+
+    def run(self, *a, **kw):
+        raise PermissionError("sandbox boom")
+
+    def build_env(self, tool_config=None):
+        return {}
+
+
+class TestReviewFixes:
+    """Regression tests for the PR-review fixes (exit-2 abort, ff logging, prep fail-safe,
+    sandbox-crash handling)."""
+
+    async def test_exit_2_aborts_even_without_abort_key(self):
+        # Exit 2 must ALWAYS abort (Claude-Code convention), even when the JSON lacks
+        # "abort": true. Previously a dict without abort:true did NOT abort.
+        h = _make_hook(_responder('{"inject_message": "blocked"}', 2), fire_and_forget=False)
+        ctx = await h.execute(HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="t"))
+        assert ctx.abort is True
+        assert "blocked" in ctx.inject_messages
+
+    async def test_exit_2_empty_stdout_aborts(self):
+        h = _make_hook(_responder("", 2), fire_and_forget=False)
+        ctx = await h.execute(HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="t"))
+        assert ctx.abort is True
+
+    async def test_fire_and_forget_logs_nonzero_exit(self, caplog):
+        # The default mode must surface a broken forwarder (non-zero exit) -- it returns
+        # a SandboxResult, not an exception, so the result must be inspected explicitly.
+        h = _make_hook(_responder("", 1), events=[HookEvent.POST_OUTPUT], fire_and_forget=True)
+        with caplog.at_level(logging.WARNING):
+            await h.execute(HookContext(event=HookEvent.POST_OUTPUT))
+            if h._bg_tasks:
+                await asyncio.wait_for(asyncio.gather(*h._bg_tasks, return_exceptions=True), timeout=5)
+        assert any("exit=1" in r.message for r in caplog.records)
+
+    async def test_prep_failure_does_not_abort(self):
+        # pass_messages=True + a non-serializable message must fail safe (no abort),
+        # not bubble into HookChain's fail-closed abort.
+        h = _make_hook(
+            _responder(""),
+            events=[HookEvent.POST_OUTPUT],
+            fire_and_forget=False,
+            pass_messages=True,
+        )
+        ctx = HookContext(event=HookEvent.POST_OUTPUT, messages=[{"bad": object()}])
+        out = await h.execute(ctx)
+        assert out is ctx
+        assert out.abort is False
+
+    async def test_sandbox_crash_aborts_only_when_abort_on_error(self):
+        # sandbox.run raising -> fail-safe; abort iff abort_on_error.
+        h_abort = CommandHook(
+            command=_responder(""),
+            events=[HookEvent.PRE_TOOL_USE],
+            sandbox=_CrashingSandbox(),
+            fire_and_forget=False,
+            abort_on_error=True,
+        )
+        ctx = await h_abort.execute(HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="t"))
+        assert ctx.abort is True
+
+        h_cont = CommandHook(
+            command=_responder(""),
+            events=[HookEvent.PRE_TOOL_USE],
+            sandbox=_CrashingSandbox(),
+            fire_and_forget=False,
+            abort_on_error=False,
+        )
+        ctx2 = await h_cont.execute(HookContext(event=HookEvent.PRE_TOOL_USE, tool_name="t"))
+        assert ctx2.abort is False
+
+    async def test_pass_messages_and_filtered_metadata_in_payload(self, tmp_path):
+        # pass_messages includes ctx.messages; pass_metadata filters non-serializable values.
+        forwarder = tmp_path / "fwd.py"
+        forwarder.write_text(
+            "import sys, json\n"
+            "p = json.load(sys.stdin)\n"
+            "with open(sys.argv[1], 'w') as f:\n"
+            "    json.dump({'has_messages': 'messages' in p, 'meta_ok': p.get('metadata')}, f)\n"
+        )
+        outfile = tmp_path / "out.json"
+        h = CommandHook(
+            command=[sys.executable, str(forwarder), str(outfile)],
+            events=[HookEvent.POST_OUTPUT],
+            sandbox=_SB,
+            fire_and_forget=False,
+            pass_messages=True,
+            pass_metadata=True,
+        )
+        ctx = HookContext(
+            event=HookEvent.POST_OUTPUT,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        ctx.metadata["serializable"] = {"a": 1}
+        ctx.metadata["non_serializable"] = object()  # must be dropped by _safe_dict
+        await h.execute(ctx)
+        result = json.loads(outfile.read_text())
+        assert result["has_messages"] is True
+        assert result["meta_ok"] == {"serializable": {"a": 1}}  # non_serializable dropped
