@@ -10,23 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent
+from koboi.modes import is_read_only_tool
 
 if TYPE_CHECKING:
     from koboi.modes import ModeManager
-
-# Tools that are always read-only (allowed in CHAT/PLAN)
-_READ_ONLY_TOOLS = {
-    "read",
-    "search",
-    "grep",
-    "find",
-    "list",
-    "glob",
-    "web_search",
-    "web_fetch",
-    "calculator",
-    "delegate_tasks",
-}
 
 
 class ModeHook(Hook):
@@ -59,48 +46,26 @@ class ModeHook(Hook):
     def _on_pre_tool_use(self, ctx: HookContext) -> HookContext:
         """Flag tools that are not allowed in the current mode.
 
-        Sets metadata flags instead of aborting, so other hooks (callbacks)
-        still fire. The agent loop enforces the actual blocking.
+        Delegates to ``ModeManager.is_tool_allowed`` (single source of truth, shared
+        with the pipeline's pre-approval mode gate). Sets metadata flags instead of
+        aborting so other hooks still fire; the pipeline enforces the actual block
+        before approval, so a blocked tool normally never reaches PRE_TOOL_USE. This
+        hook remains as defense-in-depth + audit signal when it does.
         """
         if not ctx.tool_name:
             return ctx
 
-        mode = self._mode_manager.current_mode
-
-        # In CHAT mode: only read-only tools allowed
-        if mode.value == "chat":
-            if not self._is_read_only(ctx.tool_name):
-                ctx.metadata["mode_blocked"] = True
-                ctx.metadata["mode_block_reason"] = (
-                    f"CHAT mode: tool '{ctx.tool_name}' is not allowed. "
-                    "Switch to ACT or AUTO mode to execute state-changing tools."
-                )
-                return ctx
-
-        # In PLAN mode: only read-only tools allowed
-        if mode.value == "plan":
-            if not self._is_read_only(ctx.tool_name):
-                ctx.metadata["mode_blocked"] = True
-                ctx.metadata["mode_block_reason"] = (
-                    f"PLAN mode: tool '{ctx.tool_name}' is not allowed. "
-                    "Only read-only tools are permitted in PLAN mode."
-                )
-                return ctx
-
-        # In ACT mode: allow all tools (permission dialog handles approval)
-        # In AUTO mode: allow all tools (trust DB handles auto-approval)
-        # In YOLO mode: allow all tools (pipeline skips rate limit and approval)
+        allowed, reason = self._mode_manager.is_tool_allowed(ctx.tool_name)
+        if not allowed:
+            ctx.metadata["mode_blocked"] = True
+            ctx.metadata["mode_block_reason"] = reason
         return ctx
 
     @staticmethod
     def _is_read_only(tool_name: str) -> bool:
-        """Check if a tool is read-only (safe for CHAT/PLAN modes)."""
-        name_lower = tool_name.lower()
-        # Exact match
-        if name_lower in _READ_ONLY_TOOLS:
-            return True
-        # Prefix match for namespaced tools (e.g., "filesystem.read")
-        for prefix in _READ_ONLY_TOOLS:
-            if name_lower.startswith(prefix + "."):
-                return True
-        return False
+        """Check if a tool is read-only (safe for CHAT/PLAN modes).
+
+        Thin delegator to ``koboi.modes.is_read_only_tool``; kept for backward
+        compatibility (exercised directly by tests).
+        """
+        return is_read_only_tool(tool_name)

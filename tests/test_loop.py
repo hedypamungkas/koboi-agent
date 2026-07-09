@@ -261,3 +261,50 @@ class TestRunResultDirect:
 
         r = RunResult(content="hello world")
         assert str(r) == "hello world"
+
+
+class TestToolCallsMadeAccuracy:
+    """A skipped/blocked tool must NOT be counted in tool_calls_made or tools_used.
+
+    Regression for the false-positive where loop.append() ran before the pipeline,
+    so rate-limited/denied/policy/mode-blocked tools were still reported as "called".
+    """
+
+    async def test_mode_blocked_tool_not_counted(self):
+        from koboi.loop import AgentCore
+        from koboi.modes import AgentMode, ModeManager
+        from koboi.hooks.mode_hook import ModeHook
+        from koboi.hooks.chain import HookChain
+
+        tools = ToolRegistry()
+        tools.register(
+            name="custom_action",
+            description="non-read-only tool",
+            parameters={"type": "object", "properties": {}, "required": []},
+            fn=lambda: "executed",
+        )
+        mm = ModeManager(initial_mode=AgentMode.CHAT)
+        tc = make_mock_tool_call("custom_action", {})
+        client = MockClient(
+            [
+                make_mock_response(None, [tc]),
+                make_mock_response("done"),
+            ]
+        )
+        agent = AgentCore(
+            client=client,
+            memory=ConversationMemory(),
+            tools=tools,
+            max_iterations=5,
+            mode_manager=mm,
+            hook_chain=HookChain([ModeHook(mm)]),
+        )
+        result = await agent.run("please run custom_action")
+
+        made_names = [t.name for t in result.tool_calls_made]
+        assert "custom_action" not in made_names  # blocked -> not counted
+        assert "custom_action" not in result.tools_used
+        # ...but it IS truthfully recorded as skipped in pipeline_outcomes:
+        outcomes = [o for o in result.pipeline_outcomes if o["tool_name"] == "custom_action"]
+        assert outcomes and outcomes[0]["skipped"] is True
+        assert outcomes[0]["skip_reason"] == "mode_blocked"

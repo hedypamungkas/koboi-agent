@@ -9,6 +9,8 @@ from __future__ import annotations
 import pytest
 
 from koboi.guardrails.approval import ApprovalHandler
+from koboi.hooks.chain import HookChain
+from koboi.hooks.mode_hook import ModeHook
 from koboi.loop_pipeline import ToolExecutionPipeline
 from koboi.memory import ConversationMemory
 from koboi.modes import AgentMode, ModeManager
@@ -129,3 +131,42 @@ class TestResolveApprovalOutcomes:
         assert outcome.proceed is True
         assert outcome.reason == "approved"
         assert outcome.prompted is True
+
+
+class _RecordingApprove(ApprovalHandler):
+    """Always approves but records each consultation (to prove it was/wasn't asked)."""
+
+    def __init__(self):
+        self.asked: list[str] = []
+
+    def should_approve(self, tool_name, arguments, risk_level):
+        self.asked.append(tool_name)
+        return True
+
+
+class TestModeGateBeforeApproval:
+    """Issue 2: a CHAT/PLAN-blocked tool must be denied BEFORE the approval handler
+    runs, so the user is never prompted for a tool that cannot execute."""
+
+    async def test_chat_mode_blocks_without_prompting(self, registry, memory):
+        mgr = ModeManager(AgentMode.CHAT)
+        approval = _RecordingApprove()
+        chain = HookChain([ModeHook(mgr)])
+        pipeline = ToolExecutionPipeline(
+            tools=registry, memory=memory, approval_handler=approval, mode_manager=mgr, hook_chain=chain
+        )
+        result = await pipeline.execute_tool_call(_tc(), iteration=0)
+        assert result.skipped
+        assert result.skip_reason == "mode_blocked"
+        assert approval.asked == []  # handler NEVER consulted (the fix)
+
+    async def test_act_mode_still_prompts_no_regression(self, registry, memory):
+        mgr = ModeManager(AgentMode.ACT)
+        approval = _RecordingApprove()
+        chain = HookChain([ModeHook(mgr)])
+        pipeline = ToolExecutionPipeline(
+            tools=registry, memory=memory, approval_handler=approval, mode_manager=mgr, hook_chain=chain
+        )
+        result = await pipeline.execute_tool_call(_tc(), iteration=0)
+        assert not result.skipped
+        assert approval.asked == ["test_tool"]  # approval still runs in ACT

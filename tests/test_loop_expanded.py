@@ -646,3 +646,9 @@ class TestAgentCoreRunStreamModeBlocked:
         async for event in core.run_stream("test"):
             collected.append(event)
         assert any(isinstance(e, (CompleteEvent, ToolResultEvent)) for e in collected)
+
+        # Regression: the blocked tool must NOT appear in tools_used (the streaming
+        # sibling of the tool_calls_made fix -- _stream_tools_used is gated on
+        # `not pipeline_result.skipped` in loop.py's run_stream).
+        complete = next(e for e in collected if isinstance(e, CompleteEvent))
+        assert "get_weather" not in complete.tools_used

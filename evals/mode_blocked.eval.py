@@ -6,10 +6,12 @@ write_file, ModeHook flags it (koboi/hooks/mode_hook.py), the pipeline denies wi
 ``skip_reason='mode_blocked'`` (koboi/loop_pipeline.py), and the deny string lands in
 memory (koboi/loop_pipeline.py:_deny_or_skip).
 
-ILLUSTRATES the t.calledTool false-positive (fixed by R1): koboi/loop.py appends the
-ToolCall to ``tool_calls_made`` BEFORE the pipeline runs, so ``t.calledTool('write_file')``
-would PASS even though the tool was blocked. The correct assertion scans ``t.messages``
-for the deny string; once R1's ``t.toolWasBlocked`` lands, switch to that.
+R1 shipped: ``koboi/loop.py`` now appends to ``tool_calls_made`` only for tools that
+actually executed (gated on ``not pr.skipped``), so ``t.calledTool('write_file')`` is
+correctly outcome-aware -- it returns False for a blocked tool. The placeholder case
+``test_calledTool_false_positive_documented`` (which locked the old buggy semantic) has
+been removed; ``test_write_tool_is_mode_blocked`` is now the sole assertion via
+``t.toolWasBlocked('write_file')``.
 
 Run:  koboi eval-test evals/mode_blocked.eval.py --mock --strict
 """
@@ -72,15 +74,3 @@ async def test_write_tool_is_mode_blocked(t):
     # The agent must still complete (the blocked turn is non-fatal).
     t.completed()
 
-
-async def test_calledTool_false_positive_documented(t):
-    """KNOWN GOTCHA (fixed by R1): ``t.calledTool('write_file')`` PASSES even though
-    the tool was mode-blocked, because loop.py appends the ToolCall to
-    ``tool_calls_made`` BEFORE the pipeline denies it. We assert the false positive
-    HERE solely to lock the known semantic; if this test starts FAILING, calledTool
-    was made outcome-aware (good -- delete this test and switch the assertion above
-    to ``t.toolWasBlocked('write_file')``).
-    """
-    await t.send("Please write 'hi' to /tmp/x.txt.")
-    t.calledTool("write_file")  # GATE -> currently PASSES (the bug)
-    t.completed()

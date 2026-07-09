@@ -519,8 +519,12 @@ class AgentCore:
                 self._log(f"LLM requested {len(response.tool_calls)} tool call(s)")
                 self._store_tool_response_in_memory(response)
                 for tc in response.tool_calls:
-                    tool_calls_made.append(tc)
                     pr = await self._pipeline.execute_tool_call(tc, iteration=i)
+                    # Only count tools that actually executed -- skipped/denied/blocked
+                    # tools (rate-limit, approval, policy, mode) must NOT pollute
+                    # tool_calls_made (and the derived tools_used) -- eval false positive.
+                    if not pr.skipped:
+                        tool_calls_made.append(tc)
                     pipeline_outcomes.append(
                         {
                             "tool_call_id": tc.id,
@@ -648,10 +652,12 @@ class AgentCore:
                     yield d
                 self._store_tool_response_in_memory(final_response)
                 for tc in final_response.tool_calls:
-                    _stream_tools_used.append(tc.name)
                     yield ToolCallEvent(tool_name=tc.name, tool_call_id=tc.id, arguments=tc.arguments)
 
                     pipeline_result = await self._pipeline.execute_tool_call(tc, iteration=i)
+                    # Mirror the non-streaming path: a skipped tool is not "used".
+                    if not pipeline_result.skipped:
+                        _stream_tools_used.append(tc.name)
                     yield ToolResultEvent(
                         tool_name=tc.name,
                         tool_call_id=tc.id,

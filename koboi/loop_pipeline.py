@@ -318,6 +318,24 @@ class ToolExecutionPipeline:
             for msg in post_ctx.inject_messages:
                 self.memory.add_context_message(msg, label="hook_inject")
 
+            # DoomLoopHook detects the pattern during POST_TOOL_USE and sets a
+            # metadata flag, but it cannot re-emit DOOM_LOOP_DETECTED itself (hooks
+            # react; the emitter emits). Fan it out here so subscribers that listen
+            # on DOOM_LOOP_DETECTED -- AuditHook, TelemetryHook, LangfuseTracingHook,
+            # NotificationHook -- actually fire. Without this, doom-loop side-channel
+            # observability is silently inert even though recovery injection works.
+            if post_ctx.metadata.get("doom_loop_detected"):
+                doom_ctx = HookContext(
+                    event=HookEvent.DOOM_LOOP_DETECTED,
+                    agent=None,
+                    iteration=iteration,
+                    tool_name=tc.name,
+                    tool_arguments=tc.arguments,
+                    tool_result=tool_result,
+                    metadata=post_ctx.metadata,
+                )
+                await self.hooks.emit(doom_ctx)
+
         # 8. Record result
         self._log(f"tool result: {tool_result[:200]}")
         self.memory.add_tool_result(tc.id, tool_result)
