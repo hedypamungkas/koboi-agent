@@ -349,6 +349,51 @@ class JobsConfig(BaseModel):
     ttl_seconds: float = Field(default=86400.0, gt=0)
 
 
+class CommandHookConfig(BaseModel):
+    """One external executable hook entry under ``hooks.on_event``.
+
+    Spawns ``command`` as a subprocess per ``events`` lifecycle event, passing a
+    JSON HookContext on stdin and (when awaited) reading JSON mutations back.
+    See ``docs/custom-hooks.md`` for the protocol + security model.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    command: list[str] | str  # list -> shell=False; str -> shell=True
+    events: list[str] = Field(default_factory=list)  # HookEvent names; validated at build time
+    fire_and_forget: bool = True  # True: observe/side-effect, not awaited (zero latency); False: full control
+    timeout: float | None = None  # per-hook override; else hooks.command_timeout
+    priority: int = 50
+    abort_on_error: bool = False  # crash/timeout/non-2 -> abort? default False (fail-safe continue)
+    pass_messages: bool = False  # include ctx.messages (can be MB-scale) in stdin payload
+    pass_metadata: bool = False  # include ctx.metadata (may be non-serializable) in stdin payload
+    env_passthrough: bool = False  # forwarded into build_env
+    name: str | None = None
+
+    @field_validator("events")
+    @classmethod
+    def _events_nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("command hook must declare at least one event in `events`")
+        return v
+
+
+class HooksConfig(BaseModel):
+    """Top-level ``hooks:`` section -- declarative external command hooks.
+
+    SECURITY: command execution is opt-in. ``allow_exec`` MUST be true for any
+    command hook to run; otherwise entries are ignored with a warning. Commands
+    run via the sandbox backend (``build_env`` secret hygiene + timeout); see
+    ``docs/custom-hooks.md`` for the layered security model + known gaps.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    allow_exec: bool = False  # default-DENY gate
+    command_timeout: float = Field(default=10.0, gt=0)  # default per-invocation seconds
+    on_event: list[CommandHookConfig] = Field(default_factory=list)
+
+
 class KoboiConfig(BaseModel):
     """Top-level config schema for koboi-agent."""
 
@@ -372,6 +417,7 @@ class KoboiConfig(BaseModel):
     journal: JournalConfig = Field(default_factory=JournalConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     jobs: JobsConfig = Field(default_factory=JobsConfig)
+    hooks: HooksConfig = Field(default_factory=HooksConfig)
 
     @model_validator(mode="before")
     @classmethod

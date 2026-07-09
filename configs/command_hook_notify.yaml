@@ -1,0 +1,32 @@
+# Illustrative config for YAML-driven command hooks.
+# See examples/33_command_hook_messaging.py for a runnable, self-contained demo,
+# and docs/custom-hooks.md for the protocol + security model.
+agent:
+  name: "command-hook-notify"
+  description: "Forwards every LLM response to a messaging channel via an external script"
+  system_prompt: "You are a helpful assistant."
+  max_iterations: 5
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL:gpt-4o-mini}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+# External command hooks -- NO Python in the agent. The command runs per event,
+# receives a JSON HookContext on stdin, and (when fire_and_forget: false) can
+# return JSON mutations. SECURITY: allow_exec defaults to false (default-deny);
+# set it true to enable. Commands run under the sandbox backend.
+hooks:
+  allow_exec: true                   # REQUIRED gate (default false = default-deny)
+  command_timeout: 10                # default per-invocation seconds (sandbox kills on exceed)
+  on_event:
+    - name: forward-to-whatsapp
+      # `uvx` for a published tool (zero-install) or `uv run script.py` for a local
+      # file. List form -> shell=False (recommended; avoids shell injection).
+      command: ["uvx", "my-wa-forwarder"]
+      events: ["post_output", "session_end"]
+      fire_and_forget: true          # observe/side-effect, not awaited -> zero SSE latency
+      priority: 60
+      timeout: 15                    # override per hook (else command_timeout)
+      abort_on_error: false          # a flaky webhook must not break the agent loop

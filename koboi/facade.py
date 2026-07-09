@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 import os
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
@@ -1020,6 +1021,11 @@ class AgentAssembler:
         self.build_mode_manager()
         self.build_hooks()
 
+        # YAML-driven external command hooks (hooks: section). Gated by
+        # hooks.allow_exec (default-deny); each command runs under self.sandbox.
+        if self.hook_chain:
+            _build_command_hooks(self.config, self.sandbox, self.hook_chain)
+
         _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
 
@@ -1203,6 +1209,77 @@ def _build_sandbox(config: Config, logger: AgentLogger):
     from koboi.sandbox import build_sandbox
 
     return build_sandbox(config.sandbox, logger=logger)
+
+
+def _build_command_hooks(config: Config, sandbox: BaseSandbox, hook_chain) -> None:
+    """Read the ``hooks:`` section, enforce the ``allow_exec`` gate, and wire
+    :class:`~koboi.hooks.command_hook.CommandHook` entries into ``hook_chain``.
+
+    No-op when no ``hooks.on_event`` entries are declared. Security is layered:
+    ``allow_exec`` defaults to false (default-deny) -- declared hooks are skipped
+    with a warning until the operator opts in. Each command runs through ``sandbox``
+    (isolation + secret-hygiened env) and is offloaded off-loop inside CommandHook.
+    """
+    from koboi.hooks.chain import HookEvent
+    from koboi.hooks.command_hook import CommandHook
+
+    log = logging.getLogger("koboi.hooks")
+    hooks_conf = config.get("hooks", default={}) or {}
+    entries = hooks_conf.get("on_event", []) or []
+    if not entries:
+        return
+
+    if not hooks_conf.get("allow_exec", False):
+        log.warning(
+            "hooks.on_event declares %d command hook(s) but hooks.allow_exec is false "
+            "(default-deny); they will NOT run. Set hooks.allow_exec: true to enable.",
+            len(entries),
+        )
+        return
+
+    # R4: seccomp hard-blocks all egress -> messaging/forwarding hooks (uvx /
+    # WhatsApp / Telegram) would fail. Warn (don't hard-fail) so non-network hooks
+    # remain usable.
+    if config.get("sandbox", "network_isolation", default=None) == "seccomp":
+        log.warning(
+            "hooks: command hooks are configured with sandbox.network_isolation='seccomp', "
+            "which hard-blocks all network egress -- messaging/forwarding hooks will fail. "
+            "Drop seccomp or run those hooks out-of-band."
+        )
+
+    default_timeout = hooks_conf.get("command_timeout", 10.0)
+    for entry in entries:
+        resolved: list[HookEvent] = []
+        for ev in entry.get("events", []):
+            try:
+                resolved.append(HookEvent(ev))
+            except ValueError:
+                valid = [e.value for e in HookEvent]
+                raise ValueError(
+                    f"hooks.on_event: unknown event {ev!r} for hook "
+                    f"{entry.get('name') or entry.get('command')!r}. Valid events: {valid}"
+                ) from None
+        hook = CommandHook(
+            command=entry["command"],
+            events=resolved,
+            sandbox=sandbox,
+            logger=log,
+            name=entry.get("name"),
+            fire_and_forget=entry.get("fire_and_forget", True),
+            timeout=entry.get("timeout") or default_timeout,
+            priority=entry.get("priority", 50),
+            abort_on_error=entry.get("abort_on_error", False),
+            pass_messages=entry.get("pass_messages", False),
+            pass_metadata=entry.get("pass_metadata", False),
+            env_passthrough=entry.get("env_passthrough", False),
+            cwd=entry.get("cwd"),
+        )
+        hook_chain.add(hook)
+        log.info(
+            "hooks: enabled command hook %r on events %s",
+            hook.name,
+            [e.value for e in resolved],
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ class PassthroughBackend(BaseSandbox):
         env=None,
         timeout=None,
         shell=False,
+        input=None,
     ) -> SandboxResult:
         try:
             result = subprocess.run(
@@ -40,6 +41,7 @@ class PassthroughBackend(BaseSandbox):
                 timeout=timeout,
                 cwd=cwd or None,
                 env=env,
+                input=input,
             )
         except subprocess.TimeoutExpired:
             return SandboxResult(returncode=-1, stdout="", stderr="", timed_out=True)

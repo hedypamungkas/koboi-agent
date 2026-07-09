@@ -201,7 +201,7 @@ class RestrictedProcessBackend(BaseSandbox):
 
     # -- public API --------------------------------------------------------
 
-    def run(self, command, *, cwd=None, env=None, timeout=None, shell=False) -> SandboxResult:
+    def run(self, command, *, cwd=None, env=None, timeout=None, shell=False, input=None) -> SandboxResult:
         effective_timeout = timeout if timeout is not None else self._timeout
 
         # 1. Resolve cwd with containment (caller's cwd or the workdir root).
@@ -223,7 +223,7 @@ class RestrictedProcessBackend(BaseSandbox):
                 timed_out=False,
             )
 
-        return self._run_subprocess(command, resolved_cwd, run_env, effective_timeout, shell)
+        return self._run_subprocess(command, resolved_cwd, run_env, effective_timeout, shell, input)
 
     def validate_path(self, path: str) -> str:
         # Anchor RELATIVE paths to the workdir before resolving. A tool passing
@@ -332,7 +332,7 @@ class RestrictedProcessBackend(BaseSandbox):
 
         return _install
 
-    def _run_subprocess(self, command, cwd, env, timeout, shell) -> SandboxResult:
+    def _run_subprocess(self, command, cwd, env, timeout, shell, input=None) -> SandboxResult:
         popen_kwargs: dict = {
             "shell": shell,
             "cwd": cwd,
@@ -341,6 +341,10 @@ class RestrictedProcessBackend(BaseSandbox):
             "stderr": subprocess.PIPE,
             "text": True,
         }
+        # stdin=PIPE only when feeding a payload; otherwise inherit the parent's
+        # stdin (preserves the pre-existing tool behavior for run_shell/git).
+        if input is not None:
+            popen_kwargs["stdin"] = subprocess.PIPE
         # start_new_session puts the child in its own process group so a timeout
         # can kill piped children (e.g. `sleep 30 | cat`). POSIX only.
         if _POSIX:
@@ -351,7 +355,7 @@ class RestrictedProcessBackend(BaseSandbox):
 
         proc = subprocess.Popen(command, **popen_kwargs)
         try:
-            stdout, stderr = proc.communicate(timeout=timeout)
+            stdout, stderr = proc.communicate(input=input, timeout=timeout)
         except subprocess.TimeoutExpired:
             self._kill_group(proc)
             try:
