@@ -18,12 +18,16 @@ class TestMakeTokenizer:
         assert make_tokenizer(None, None) is None
 
     def test_openai_returns_callable(self):
+        # tiktoken is an optional extra (CI installs .[dev,tui,api], not tokenizer).
+        pytest.importorskip("tiktoken")
         tok = make_tokenizer("openai", "gpt-4o")
         assert callable(tok)
         n = tok([{"role": "user", "content": "hello world"}])
         assert n > 0
 
     def test_openai_cjk_more_accurate_than_heuristic(self):
+        # tiktoken is an optional extra; skip when absent (CI without tokenizer extra).
+        pytest.importorskip("tiktoken")
         # chars/3 badly undercounts CJK; the BPE counter should be larger.
         msgs = [{"role": "user", "content": "你好世界，今天天气很好"}]
         heur = estimate_tokens(msgs)
