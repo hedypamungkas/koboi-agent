@@ -459,11 +459,32 @@ class AgentCore:
         self._log(f"Resume: re-executing {len(missing)} missing tool call(s)")
         for tc_dict in missing:
             fn = tc_dict.get("function", {}) if isinstance(tc_dict, dict) else {}
+            name = fn.get("name", "") if isinstance(fn, dict) else ""
             tc = ToolCall(
                 id=tc_dict.get("id", "") if isinstance(tc_dict, dict) else "",
-                name=fn.get("name", ""),
-                arguments=fn.get("arguments", "{}"),
+                name=name,
+                arguments=fn.get("arguments", "{}") if isinstance(fn, dict) else "{}",
             )
+            # Issue #8b: skip non-idempotent tools on resume so side-effecting
+            # tools (charge_card, send_email, ...) cannot silently double-fire.
+            # Record a synthetic result so the turn still has a tool message and
+            # the loop can continue. Default ToolDefinition.idempotent=True means
+            # existing tools keep re-running as before.
+            tool_def = (
+                self._pipeline.tools.get_definition(name)
+                if getattr(self._pipeline, "tools", None) is not None
+                else None
+            )
+            if tool_def is not None and not tool_def.idempotent:
+                self._log(
+                    f"Resume: skipping non-idempotent tool '{name}' re-execution "
+                    f"(marked idempotent=False); recording synthetic result"
+                )
+                self.memory.add_tool_result(
+                    tc.id,
+                    f"[skipped on resume: non-idempotent tool '{name}'; re-invoke explicitly if needed]",
+                )
+                continue
             await self._pipeline.execute_tool_call(tc, iteration=0)
 
     async def _run_loop(self, tool_defs: list[dict] | None, _start: float, *, resumed: bool) -> RunResult:

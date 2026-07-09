@@ -89,13 +89,23 @@ class SQLiteMemory(ConversationMemory):
         session_id: str | None = None,
         logger: AgentLogger | None = None,
         system_prompt: str | None = None,
+        retention_cap: int | None = None,
+        owner: str | None = None,
     ):
         super().__init__(logger=logger, system_prompt=system_prompt)
         self._db_path = db_path
         self._session_id = session_id or uuid4().hex
         self._conn: sqlite3.Connection | None = None
+        # Issue #4b: optional cap on stored message rows (oldest pruned). None =
+        # unbounded (default). Set via memory.retention.max_messages.
+        self._retention_cap = retention_cap
+        # Issue #2: optional tenant/owner tag on stored rows (schema prep for
+        # multi-tenancy; real isolation lands with externalized state). None =
+        # no tagging (today's behavior).
+        self._owner = owner
         self._init_db()
         self._load_from_db()
+        self._apply_retention()
 
     def _ensure_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -124,6 +134,7 @@ class SQLiteMemory(ConversationMemory):
                 tool_calls_json TEXT,
                 tool_call_id TEXT,
                 label TEXT,
+                owner TEXT,
                 created_at REAL DEFAULT (julianday('now'))
             )
         """)
@@ -132,6 +143,7 @@ class SQLiteMemory(ConversationMemory):
             CREATE TABLE IF NOT EXISTS sessions (
                 session_id TEXT PRIMARY KEY,
                 title TEXT,
+                owner TEXT,
                 created_at REAL DEFAULT (julianday('now')),
                 updated_at REAL DEFAULT (julianday('now')),
                 message_count INTEGER DEFAULT 0,
@@ -143,6 +155,30 @@ class SQLiteMemory(ConversationMemory):
         # P2-A: step journal (one row per loop iteration). #3 adds graph-durability
         # columns (graph_run_id, node_id); shared with DagScheduler graph-plan writes.
         ensure_steps_table(conn)
+        # Issue #4a: generic per-session key/value store for cross-restart state
+        # (e.g. the sliding_window summary). Additive -- safe on existing DBs.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_meta (
+                session_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                PRIMARY KEY (session_id, key)
+            )
+        """
+        )
+        # Issue #2: add `owner` column to pre-existing DBs (additive; new DBs get
+        # it from the CREATE above). NULL default = today's global behavior.
+        self._migrate_add_owner(conn)
+
+    @staticmethod
+    def _migrate_add_owner(conn: sqlite3.Connection) -> None:
+        msg_cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        if "owner" not in msg_cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN owner TEXT")
+        sess_cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "owner" not in sess_cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN owner TEXT")
         conn.commit()
 
     def _load_from_db(self) -> None:
@@ -186,8 +222,8 @@ class SQLiteMemory(ConversationMemory):
         # Serialize list content (multimodal) as JSON for SQLite storage
         stored_content = json.dumps(content) if isinstance(content, list) else content
         conn.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls_json, tool_call_id, label) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO messages (session_id, role, content, tool_calls_json, tool_call_id, label, owner) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 self._session_id,
                 role,
@@ -195,6 +231,7 @@ class SQLiteMemory(ConversationMemory):
                 json.dumps(kwargs.get("tool_calls")) if kwargs.get("tool_calls") else None,
                 kwargs.get("tool_call_id"),
                 kwargs.get("label", ""),
+                self._owner,
             ),
         )
         conn.execute(
@@ -204,6 +241,31 @@ class SQLiteMemory(ConversationMemory):
             (self._session_id, self._session_id),
         )
         conn.commit()
+        self._apply_retention()
+
+    def _apply_retention(self) -> None:
+        """Issue #4b: prune oldest message rows beyond the retention cap.
+
+        Keeps the in-memory list and the DB rows in lockstep (both ordered by
+        insertion). No-op when no cap is set.
+        """
+        cap = self._retention_cap
+        if not cap or cap <= 0:
+            return
+        conn = self._ensure_conn()
+        row = conn.execute("SELECT COUNT(*) FROM messages WHERE session_id = ?", (self._session_id,)).fetchone()
+        count = int(row[0]) if row and row[0] is not None else 0
+        if count <= cap:
+            return
+        excess = count - cap
+        conn.execute(
+            "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE session_id = ? ORDER BY id LIMIT ?)",
+            (self._session_id, excess),
+        )
+        conn.commit()
+        # Drop the same count from the in-memory head (matches DB insertion order).
+        if 0 < excess <= len(self._messages):
+            del self._messages[:excess]
 
     def add_user_message(self, content: str | list) -> None:
         super().add_user_message(content)
@@ -227,6 +289,27 @@ class SQLiteMemory(ConversationMemory):
         conn.commit()
         super().clear()
 
+    # -- Per-session metadata (issue #4a) -------------------------------------
+
+    def get_meta(self, key: str) -> str | None:
+        """Read a per-session metadata value, or None if unset."""
+        conn = self._ensure_conn()
+        row = conn.execute(
+            "SELECT value FROM session_meta WHERE session_id = ? AND key = ?",
+            (self._session_id, key),
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Write (upsert) a per-session metadata value."""
+        conn = self._ensure_conn()
+        conn.execute(
+            "INSERT INTO session_meta (session_id, key, value) VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id, key) DO UPDATE SET value = excluded.value",
+            (self._session_id, key, value),
+        )
+        conn.commit()
+
     def close(self) -> None:
         if self._conn:
             self._conn.close()
@@ -236,6 +319,11 @@ class SQLiteMemory(ConversationMemory):
     def session_id(self) -> str:
         """Current session ID."""
         return self._session_id
+
+    @property
+    def owner(self) -> str | None:
+        """Tenant/owner tag stamped on this session's rows (None = untagged)."""
+        return self._owner
 
     @property
     def db_path(self) -> str:
@@ -265,13 +353,15 @@ class SQLiteMemory(ConversationMemory):
     def ensure_session_record(self, agent_name: str = "", model: str = "") -> None:
         """Create or update the sessions metadata row."""
         conn = self._ensure_conn()
+        # Issue #2: stamp owner on INSERT only (a resumed session keeps its
+        # original owner; the ON CONFLICT branch does not overwrite it).
         conn.execute(
-            "INSERT INTO sessions (session_id, agent_name, model, updated_at) "
-            "VALUES (?, ?, ?, julianday('now')) "
+            "INSERT INTO sessions (session_id, agent_name, model, owner, updated_at) "
+            "VALUES (?, ?, ?, ?, julianday('now')) "
             "ON CONFLICT(session_id) DO UPDATE SET "
             "updated_at = julianday('now'), "
             "message_count = (SELECT COUNT(*) FROM messages WHERE session_id = ?)",
-            (self._session_id, agent_name, model, self._session_id),
+            (self._session_id, agent_name, model, self._owner, self._session_id),
         )
         conn.commit()
 
@@ -285,26 +375,37 @@ class SQLiteMemory(ConversationMemory):
         conn.commit()
 
     @staticmethod
-    def list_sessions(db_path: str, limit: int = 50) -> list[dict]:
-        """List all sessions with metadata, most recent first."""
+    def list_sessions(db_path: str, limit: int = 50, owner: str | None = None) -> list[dict]:
+        """List sessions with metadata, most recent first. Optional owner filter (issue #2)."""
         conn = SQLiteMemory._open_conn(db_path)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
+        select = (
             "SELECT s.session_id, s.title, s.created_at, s.updated_at, "
-            "s.message_count, s.model, s.agent_name, s.tags, "
+            "s.message_count, s.model, s.agent_name, s.tags, s.owner, "
             "(SELECT content FROM messages WHERE session_id = s.session_id "
             "AND role = 'user' ORDER BY id LIMIT 1) as first_message "
-            "FROM sessions s ORDER BY s.updated_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+            "FROM sessions s"
+        )
+        if owner is not None:
+            rows = conn.execute(
+                select + " WHERE s.owner = ? ORDER BY s.updated_at DESC LIMIT ?",
+                (owner, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                select + " ORDER BY s.updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
 
     @staticmethod
     def delete_session(db_path: str, session_id: str) -> bool:
-        """Delete a session and all its messages."""
+        """Delete a session and all its rows (messages, steps, session_meta, sessions)."""
         conn = SQLiteMemory._open_conn(db_path)
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM steps WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM session_meta WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         conn.commit()
         deleted = conn.total_changes > 0

@@ -101,6 +101,10 @@ class ContextConfig(BaseModel):
     keep_last: int | None = None
     summarization_truncation: bool | int | None = None
     custom_modules: list[str] = Field(default_factory=list)
+    # Issue #5: tokens of headroom reserved inside manage() so a single large
+    # response/tool result can't push an over-budget payload before the next
+    # iteration trims. Default 0 preserves prior behavior.
+    safety_margin: int = Field(default=0, ge=0)
 
 
 class RagConfig(BaseModel):
@@ -171,12 +175,24 @@ class PolicyConfig(BaseModel):
     rules: list[PolicyRuleConfig] = Field(default_factory=list)
 
 
+class MemoryRetentionConfig(BaseModel):
+    model_config = {"extra": "ignore"}
+
+    # Issue #4b: cap the stored message rows per session (oldest pruned). None =
+    # unbounded (default, preserves full-transcript durability).
+    max_messages: int | None = None
+
+
 class MemoryConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     backend: str = "sqlite"
     db_path: str = "koboi_memory.db"
     session_id: str | None = None
+    retention: MemoryRetentionConfig = Field(default_factory=MemoryRetentionConfig)
+    # Issue #2: optional tenant/owner tag stamped on stored rows (schema prep for
+    # multi-tenancy). None = untagged (today's behavior).
+    owner: str | None = None
 
 
 class HarnessConfig(BaseModel):

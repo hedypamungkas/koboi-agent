@@ -178,7 +178,16 @@ class KoboiAgent:
         from koboi.exceptions import AgentError
 
         if self._orchestrator is not None:
-            raise AgentError("Resume is not supported in orchestration mode (v1)")
+            # Issue #10b: clearer message. Orchestration mode runs N per-agent
+            # memories with no single shared conversation/journal to resume; full
+            # resume support requires orchestration-mode redesign (deferred).
+            raise AgentError(
+                "Resume is not supported in orchestration mode (v1): the "
+                "orchestrator runs multiple per-agent memories with no single "
+                "shared conversation or step-journal to rehydrate. To resume a "
+                "specific agent, run its config directly with `koboi run "
+                "<single-agent-config> --resume <session-id>`."
+            )
         if self._core is None:
             raise AgentError("No core agent to resume")
         return await self._core.resume()
@@ -343,10 +352,16 @@ class KoboiAgent:
         description: str,
         parameters: dict,
         risk_level: RiskLevel = RiskLevel.SAFE,
+        idempotent: bool = True,
     ) -> None:
-        """Register a tool on the agent."""
+        """Register a tool on the agent.
+
+        ``idempotent=False`` marks a side-effecting tool that must not silently
+        double-fire on crash-resume (issue #8b); the resume path skips its
+        re-execution and records a synthetic result.
+        """
         if self._core is not None:
-            self._core.tools.register(name, description, parameters, fn, risk_level=risk_level)
+            self._core.tools.register(name, description, parameters, fn, risk_level=risk_level, idempotent=idempotent)
 
     def inject_tool_definitions(self, tool_definitions: list[dict]) -> None:
         """Register external tool definitions (e.g., from eval cases)."""
@@ -602,7 +617,20 @@ def _build_context(config: Config, logger: AgentLogger, client: Client | None = 
     if summarization_truncation is not None:
         kwargs["summarization_truncation"] = summarization_truncation
 
-    return build_context(strategy, logger=logger, client=client, **kwargs)
+    mgr = build_context(strategy, logger=logger, client=client, **kwargs)
+    if mgr is not None:
+        # Issue #5: optional safety margin (reserves headroom for the response).
+        safety_margin = config.get("context", "safety_margin", default=0)
+        if isinstance(safety_margin, int) and not isinstance(safety_margin, bool) and safety_margin > 0:
+            mgr.safety_margin = safety_margin
+        # Issue #3: optional real tokenizer (OpenAI + tiktoken only; else heuristic).
+        if client is not None:
+            from koboi.tokens import make_tokenizer
+
+            tok = make_tokenizer(getattr(client, "provider", None), getattr(client, "model", None))
+            if tok is not None:
+                mgr.tokenizer = tok
+    return mgr
 
 
 def _embedding_member_from_dict(inline: dict, logger: AgentLogger | None) -> Client:
@@ -885,11 +913,20 @@ class AgentAssembler:
         if memory_backend == "sqlite":
             from koboi.memory_sqlite import SQLiteMemory
 
+            # Issue #4b: optional per-session message retention cap (default None
+            # = unbounded, preserves full-transcript durability).
+            retention_cap = self.config.get("memory", "retention", "max_messages", default=None)
+            if isinstance(retention_cap, bool):  # guard: bool is an int subclass
+                retention_cap = None
+            # Issue #2: optional tenant/owner tag (schema prep for multi-tenancy).
+            owner = self.config.get("memory", "owner", default=None)
             self.memory = SQLiteMemory(
                 db_path=memory_conf.get("db_path", "koboi_memory.db"),
                 session_id=memory_conf.get("session_id"),
                 logger=self.logger,
                 system_prompt=self.config.system_prompt or None,
+                retention_cap=retention_cap,
+                owner=owner,
             )
             # Record the session row so `koboi sessions` lists it (and resume can
             # target it). Upsert -- safe on resume (re-hydrated session_id).
@@ -958,6 +995,14 @@ class AgentAssembler:
 
     def build_context(self) -> object:
         self.context_manager = _build_context(self.config, self.logger, client=self.client)
+        # Issue #4a: give the context manager a per-session metadata handle so it
+        # can persist cross-restart state (e.g. sliding_window summary). Only
+        # SQLiteMemory exposes get_meta/set_meta today.
+        if self.context_manager is not None and self.memory is not None:
+            from koboi.memory_sqlite import SQLiteMemory
+
+            if isinstance(self.memory, SQLiteMemory):
+                self.context_manager.meta_store = self.memory
         return self.context_manager
 
     def build_rag(self) -> object:

@@ -53,6 +53,9 @@ from koboi.server.schema import (
     ReadyzCheck,
     ReadyzResponse,
     SessionDeletedResponse,
+    SessionForkResponse,
+    SessionListItem,
+    SessionListResponse,
     SessionResponse,
 )
 from koboi.server.sse import sse_stream
@@ -154,22 +157,39 @@ def create_app(
     cap: int = 100,
     enable_cors: bool = True,
     api_keys: list[str] | None = None,
+    # Issue #1: externalized-state injection seam. Each defaults to None -> the
+    # current in-process/SQLite impl is constructed (today's behavior, so serve_app
+    # and all examples are unaffected). Pass a compatible store to swap state out
+    # of process (e.g. a future Redis backend). The injected object must currently
+    # satisfy the concrete surface the routes use (AgentPool/JobStore/JobRegistry/
+    # IdempotencyRegistry/OwnershipStore/ApprovalRegistry); the Protocols in
+    # ``protocols.py`` capture the minimal contract a full backend should meet.
+    session_store: Any | None = None,
+    job_store: Any | None = None,
+    event_buffer: Any | None = None,
+    idempotency_store: Any | None = None,
+    ownership_store: Any | None = None,
+    approval_registry: Any | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
 
     ``api_keys`` (test seam): when provided, enables auth with those plaintext
     keys. When ``None`` (default), keys are loaded from file + env + config.
     """
-    pool = AgentPool(
-        config,
-        client_factory=client_factory,
-        workspace_root=workspace_root,
-        cap=cap,
-        extra_tools=tuple(extra_tools),
-        extra_hooks=tuple(extra_hooks),
-        approval_handler=approval_handler,
+    pool = (
+        session_store
+        if session_store is not None
+        else AgentPool(
+            config,
+            client_factory=client_factory,
+            workspace_root=workspace_root,
+            cap=cap,
+            extra_tools=tuple(extra_tools),
+            extra_hooks=tuple(extra_hooks),
+            approval_handler=approval_handler,
+        )
     )
-    approvals = ApprovalRegistry()
+    approvals = approval_registry if approval_registry is not None else ApprovalRegistry()
 
     # M3: API-key auth (keys file + env back-compat; dev-allow when empty).
     key_store = _build_key_store(config, api_keys)
@@ -183,8 +203,9 @@ def create_app(
     # so ``resume_on_startup`` works; see ``_sidecar_db_path`` for the resolution rules.
     memory_backend = config.get("memory", "backend", default="sqlite")
     shared_db = _sidecar_db_path(memory_backend, config.get("memory", "db_path"))
-    ownership = OwnershipStore(db_path=shared_db)
-    job_store = JobStore(db_path=shared_db)
+    ownership = ownership_store if ownership_store is not None else OwnershipStore(db_path=shared_db)
+    if job_store is None:
+        job_store = JobStore(db_path=shared_db)
 
     # 16.16: warn only in the genuinely-bad case — ephemeral sidecar can't resume.
     if shared_db == ":memory:":
@@ -206,11 +227,15 @@ def create_app(
     job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
     job_webhooks = config.get("jobs", "webhooks", default=[]) or []
     job_resume = config.get("jobs", "resume_on_startup", default=True)
-    job_registry = JobRegistry(max_events=job_max_events)
+    job_registry = event_buffer if event_buffer is not None else JobRegistry(max_events=job_max_events)
     # G6: /chat/stream Idempotency-Key (409-reject, in-memory TTL).
     chat_idem_ttl = config.get("server", "idempotency", "chat_ttl_seconds", default=600.0) or 600.0
     chat_idem_max = config.get("server", "idempotency", "max_entries", default=10000)  # H6
-    chat_idem = IdempotencyRegistry(ttl_seconds=chat_idem_ttl, max_entries=chat_idem_max)
+    chat_idem = (
+        idempotency_store
+        if idempotency_store is not None
+        else IdempotencyRegistry(ttl_seconds=chat_idem_ttl, max_entries=chat_idem_max)
+    )
     chat_queue_maxsize = config.get("server", "limits", "chat_queue_maxsize", default=1000)  # H6
     job_streams_per_owner = config.get("server", "limits", "job_streams_per_owner", default=4)  # M3
     # G2: per-request mode/iteration knobs -- operator policy boundary. unset
@@ -347,6 +372,8 @@ def create_app(
         max_iter_cap,
         stream_tasks,
         job_webhooks,
+        memory_backend,
+        shared_db,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -406,6 +433,8 @@ def _register_routes(
     max_iter_cap: int,
     stream_tasks: set[asyncio.Task],
     job_webhooks: list[dict] | None = None,
+    memory_backend: str,
+    shared_db: str,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -452,10 +481,70 @@ def _register_routes(
         if err:
             return err
         evicted = await pool.evict(session_id)
-        if not evicted:
-            raise HTTPException(status_code=404, detail="session not found")
+        # Issue #10a: also clear persisted DB rows (messages/steps/session_meta/
+        # sessions) so DELETE isn't pool-only. No-op for non-sqlite backends.
+        db_cleared = False
+        if memory_backend == "sqlite":
+            from koboi.memory_sqlite import SQLiteMemory
+
+            db_cleared = SQLiteMemory.delete_session(shared_db, session_id)
         ownership.delete(session_id)
+        if not evicted and not db_cleared:
+            raise HTTPException(status_code=404, detail="session not found")
         return SessionDeletedResponse(session_id=session_id, evicted=True)  # type: ignore[return-value]
+
+    @app.get("/v1/sessions", response_model=SessionListResponse)
+    async def list_sessions_route(request: Request) -> Response:
+        """List sessions, owner-scoped when auth is enabled (issue #10a)."""
+        if memory_backend != "sqlite":
+            return SessionListResponse(sessions=[])  # type: ignore[return-value]
+        from koboi.memory_sqlite import SQLiteMemory
+
+        rows = SQLiteMemory.list_sessions(shared_db)
+        # Owner-scope: filter to the caller's sessions via the ownership sidecar.
+        if auth_enabled:
+            owner = getattr(request.state, "api_key_id", "dev")
+            owned = set(ownership.list_owned_sessions(owner))
+            rows = [r for r in rows if r.get("session_id") in owned]
+        items = [
+            SessionListItem(
+                session_id=r["session_id"],
+                title=r.get("title"),
+                owner=r.get("owner"),
+                message_count=r.get("message_count") or 0,
+                model=r.get("model"),
+                agent_name=r.get("agent_name"),
+                first_message=r.get("first_message"),
+                updated_at=r.get("updated_at"),
+            )
+            for r in rows
+        ]
+        return SessionListResponse(sessions=items)  # type: ignore[return-value]
+
+    @app.post("/v1/sessions/{session_id}/fork", response_model=SessionForkResponse, status_code=201)
+    async def fork_session_route(session_id: str, request: Request, response: Response) -> Response:
+        """Fork a session's persisted messages into a new session (issue #10a)."""
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        if pool.get(session_id) is None and not ownership.get_owner(session_id):
+            raise HTTPException(status_code=404, detail="session not found")
+        if memory_backend != "sqlite":
+            return _error_response(409, "not_persisted", "fork requires memory.backend=sqlite", request)
+        from koboi.memory_sqlite import SQLiteMemory
+
+        new_sid = pool.new_session_id()
+        SQLiteMemory.fork_session(shared_db, session_id, new_sid)
+        owner = getattr(request.state, "api_key_id", "dev")
+        ownership.set_owner(new_sid, owner)
+        try:
+            await pool.get_or_create(new_sid)
+        except PoolFull as exc:
+            return _error_response(429, "pool_full", str(exc), request)
+        response.headers["X-Session-Id"] = new_sid
+        return SessionForkResponse(session_id=new_sid, source_session_id=session_id)  # type: ignore[return-value]
 
     @app.post("/v1/sessions/{session_id}/resume")
     async def resume_session(session_id: str, request: Request) -> Response:
@@ -813,8 +902,11 @@ def _register_routes(
             try:
                 while True:
                     if record:
-                        events = record.events[last_index:]
-                        last_index = len(record.events)
+                        # Issue #1: read via the EventBuffer surface (get_events)
+                        # so a future Redis EventBuffer swaps in transparently.
+                        all_events = job_registry.get_events(job_id)
+                        events = all_events[last_index:]
+                        last_index = len(all_events)
                         for ev in events:
                             yield ev
                         if record.terminal.is_set():

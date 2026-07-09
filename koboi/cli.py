@@ -145,6 +145,7 @@ def _build_parser():
     p = sub.add_parser("sessions", help="List persisted sessions for an agent's database")
     p.add_argument("config_path")
     p.add_argument("--limit", type=int, default=50, help="Max sessions to list")
+    p.add_argument("--delete", default=None, metavar="SESSION_ID", help="Delete a session's persisted rows")
 
     # eval (core)
     p = sub.add_parser("eval", help="Run evaluation suite against an agent config")
@@ -225,7 +226,7 @@ def main() -> None:
             cli_commands.cmd_run(args.config_path, args.message, args.verbose, args.print_mode, args.resume_session)
         )
     if args.command == "sessions":
-        sys.exit(cli_commands.cmd_sessions(args.config_path, args.limit))
+        sys.exit(cli_commands.cmd_sessions(args.config_path, args.limit, delete=args.delete))
     if args.command == "eval":
         sys.exit(cli_commands.cmd_eval(args.config_path, args.cases))
     if args.command == "eval-test":

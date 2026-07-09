@@ -56,6 +56,26 @@ class SessionDeletedResponse(BaseModel):
     evicted: bool
 
 
+class SessionListItem(BaseModel):
+    session_id: str
+    title: str | None = None
+    owner: str | None = None
+    message_count: int = 0
+    model: str | None = None
+    agent_name: str | None = None
+    first_message: str | None = None
+    updated_at: float | None = None
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionListItem]
+
+
+class SessionForkResponse(BaseModel):
+    session_id: str
+    source_session_id: str
+
+
 class ErrorDetail(BaseModel):
     code: str
     message: str

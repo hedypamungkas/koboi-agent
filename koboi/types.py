@@ -25,6 +25,11 @@ class ToolDefinition:
     risk_level: RiskLevel = RiskLevel.SAFE
     timeout: float | None = None
     group: str | None = None
+    # Issue #8b: whether re-running this tool on resume is safe. Default True
+    # (most tools are pure/idempotent). Set False for side-effecting tools that
+    # must not silently double-fire on crash-resume (e.g. charge_card, send_email);
+    # the resume path then skips re-execution and records a synthetic result.
+    idempotent: bool = True
 
     def __post_init__(self):
         if not self.name or not self.name.strip():

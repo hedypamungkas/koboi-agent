@@ -41,13 +41,20 @@ class LockProvider(Protocol):
 class EventBuffer(Protocol):
     """Capped event buffer for SSE replay.
 
-    NOTE: ``JobRegistry`` (the current in-memory impl) exposes events via
-    ``get(job_id).events`` rather than this exact surface. A future Redis
-    EventBuffer must implement this Protocol; route handlers will be updated
-    to call ``append_event``/``get_events`` instead of reading ``record.events``
-    directly when the SaaS swap happens.
+    ``JobRegistry`` (the current in-memory impl) now implements this surface
+    directly (``append_event``/``get_events``); route handlers read via
+    ``get_events`` so a future Redis EventBuffer swaps in transparently.
     """
 
     def append_event(self, key: str, event: Any) -> None: ...
 
     def get_events(self, key: str) -> list[Any]: ...
+
+
+@runtime_checkable
+class IdempotencyStore(Protocol):
+    """TTL dedup for the /chat/stream Idempotency-Key (currently ``IdempotencyRegistry``)."""
+
+    def check_and_record(self, key: str) -> bool: ...
+
+    def __len__(self) -> int: ...
