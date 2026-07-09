@@ -10,6 +10,9 @@ reasoning_model.yaml      OpenAI o-series reasoning model (max_completion_tokens
 sandbox_restricted.yaml   Restricted sandbox + SQLite journal/resume demo (P0b + P2-A)
 rag_agent.yaml            RAG with document Q&A
 orchestrated.yaml         Multi-agent orchestrator
+dag_demo.yaml             Multi-agent DAG workflow (research -> draft -> review -> publish)
+conditional_demo.yaml     Conditional workflow (sentiment routes POSITIVE/NEGATIVE to a branch)
+dynamic_demo.yaml         Dynamic workflow (LLM plans the graph per query; plan-or-skip)
 advanced_full.yaml        Comprehensive config exercising most subsystems
 advanced_orchestrated.yaml Advanced multi-agent orchestration with sub-agents
 anthropic_chat.yaml       Anthropic provider example
@@ -21,6 +24,7 @@ swe_bench.yaml            SWE-bench evaluation
 benchmark_baseline.yaml   Retrieval baseline benchmark
 benchmark_eval.yaml       Benchmark evaluation config
 e2e_full.yaml             Full end-to-end (server + RAG + skills + tools)
+hitl_demo.yaml            Human-in-the-loop approval demo (loopback; delete_file/run_shell trigger approvals)
 server_simple.yaml        Minimal HTTP/SSE server (passthrough sandbox)
 server_deploy.yaml        Production server (restricted sandbox, per-session workdir, server:/jobs:/tracing:)
 ```

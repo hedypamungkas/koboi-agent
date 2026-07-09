@@ -19,12 +19,12 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (~188 .py files)
+koboi/              Main package (191 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
-  cli.py            Console-script entry (`koboi`): argparse dispatcher routing serve/keys/validate/run/chat/sessions/eval/eval-test/diagnostics/init-zsh; bare-install works for all no-TUI commands (bodies in cli_commands.py; interactive `chat` lazy-imports tui.app)
-  cli_commands.py   Core (no-extra) command bodies for validate/run/chat-print/sessions/eval/eval-test/diagnostics/init-zsh -- stdlib print() output, returns exit codes
+  cli.py            Console-script entry (`koboi`): argparse dispatcher routing serve/keys/validate/run/chat/sessions/eval/eval-test/graph/diagnostics/init-zsh; bare-install works for all no-TUI commands (bodies in cli_commands.py; interactive `chat` lazy-imports tui.app)
+  cli_commands.py   Core (no-extra) command bodies for validate/run/chat-print/sessions/eval/eval-test/graph/diagnostics/init-zsh -- stdlib print() output, returns exit codes
   loop.py           AgentCore -- async agent loop, hook integration
   loop_pipeline.py  ToolExecutionPipeline -- 8-step tool execution flow
   client.py         RetryClient -- LLM HTTP transport with exponential backoff
@@ -52,20 +52,20 @@ koboi/              Main package (~188 .py files)
   harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
   sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry
   server/           FastAPI HTTP/SSE serving layer: app, jobs, pool, auth, ownership, idempotency, approvals, keys_cli, schema, sse, health, middleware, protocols
-  orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator, factory, dynamic agent builder
+  orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator (sequential/parallel/dag/conditional/dynamic), factory, dynamic agent builder, dag_scheduler (wave-parallel DAG), planner (LLM plan-or-skip), workflow_graph (programmatic builder)
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (12)
-tests/              ~170 test files, asyncio_mode="auto", shared conftest.py with MockClient
-configs/            21 YAML agent configs
-examples/           32 numbered example scripts (01-32) + server_built_in/server_customize, with matching YAMLs
+tests/              ~186 test files, asyncio_mode="auto", shared conftest.py with MockClient
+configs/            25 YAML agent configs
+examples/           32 numbered example scripts (01-32) + server_built_in/server_customize, hitl_client, and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)
 benchmarks/         BFCL benchmark data (DO NOT read benchmarks/results.json -- 183MB)
-docs/               Architecture overview, REST/SSE requirements, performance benchmarking, skills/eve research, strategy audits
+docs/               Architecture overview, REST/SSE requirements, performance benchmarking, trustworthy-unattended-autonomy positioning, one-pager, skills/eve research, strategy audits
 ```
 
 ## Code conventions
@@ -84,7 +84,7 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - `koboi_memory.db` is SQLite WAL-mode, 3 files (.db, .db-shm, .db-wal); it also holds a `steps` table (P2-A journal, additive via `CREATE TABLE IF NOT EXISTS`)
 - `sandbox:` YAML section drives `koboi/sandbox/`; default `passthrough` preserves pre-P0b behavior, opt into `restricted` for cwd/env/PATH/network/rlimit isolation. `restricted` network is SOFT by default (token-scan blocks curl/wget/nc but NOT interpreters like `python3 -c 'import urllib'` or `bash /dev/tcp`); set `sandbox.network_isolation: seccomp` for HARD syscall-layer egress deny (Linux + `python3-seccomp` system package; `_HAS_SECCOMP` gate; falls back to soft with a warning). `server_deploy.yaml`/`e2e_full.yaml` enable seccomp by default. `KOBOI_SANDBOX_DIR` is still honored as a back-compat fallback. Subprocess tools (`run_shell`, `git_*`, filesystem) declare `deps=["sandbox"]` and read `_deps["sandbox"]`; the facade always wires a (passthrough-or-better) sandbox
 - `journal:` YAML section (default `enabled: true`) drives `koboi/journal.py`; auto-disabled when `memory.backend != sqlite` (it borrows the SQLite connection). Loop writes are native (not hooks) so durability can't be bypassed
-- `koboi run --resume <session>` rehydrates-and-continues an interrupted session; `koboi sessions <config>` lists persisted sessions. Resume is unsupported in orchestration mode (v1)
+- `koboi run --resume <session>` rehydrates-and-continues an interrupted session; `koboi sessions <config>` lists persisted sessions. Plain sequential/parallel orchestration resume is unsupported; DAG mode persists a durable graph plan + per-node completion records (`dag_scheduler.py` graph-cursor-resume primitives to the `steps` table)
 - `.agent_memory.json` is a runtime artifact at project root
 - `Config.from_yaml()` raises `FileNotFoundError`, not a generic error
 - `AgentCore` is in `loop.py`, not `core.py`

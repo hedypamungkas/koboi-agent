@@ -9,9 +9,9 @@ Examples for trying out all koboi-agent features. From the simplest to productio
 cp .env.example .env
 
 # 2. Install dependencies
-#    Numbered examples (01-28, 30) use the Rich UI + Click via examples/conftest.py,
-#    so they need the [tui] extra (rich + click). The koboi package itself does NOT
-#    need these -- its CLI is argparse-based.
+#    Most numbered examples use the Rich UI + Click via examples/conftest.py, so they need
+#    the [tui] extra (rich + click). The koboi package itself does NOT need these -- its CLI
+#    is argparse-based. Bare-install-safe examples (no extras) are listed below.
 pip install -e ".[tui]"
 #    Server examples (server_built_in.py, server_customize.py) additionally need [api]:
 pip install -e ".[api]"
@@ -77,7 +77,7 @@ koboi chat examples/01_simple_chat.yaml
 | 18 | [Harness Telemetry](18_harness_telemetry.py) | Metrics & health score | `python examples/18_harness_telemetry.py` |
 | 19 | [Doom Loop Detection](19_doom_loop_detection.py) | Unproductive loop detection | `python examples/19_doom_loop_detection.py` |
 | 20 | [Carryover State](20_carryover_state.py) | State persistence across compaction | `python examples/20_carryover_state.py` |
-| 21 | [Eval Suite](21_eval_suite.py) | Evaluation with 6 scorers | `python examples/21_eval_suite.py` |
+| 21 | [Eval Suite](21_eval_suite.py) | Evaluation suite (12 default scorers) | `python examples/21_eval_suite.py` |
 | 22 | [Full Production](22_full_production.py) | All features + custom ProfilingHook | `python examples/22_full_production.py` |
 | 23 | [SWE Bug Hunter](23_swe_bug_hunter.py) | Complex multi-feature: RAG + tools + skills + hooks | `python examples/23_swe_bug_hunter.py` |
 | 24 | [Config-driven Orchestration](24_config_driven_orchestration.py) | YAML-based multi-agent with specialist routing | `python examples/24_config_driven_orchestration.py` |
@@ -96,6 +96,10 @@ koboi chat examples/01_simple_chat.yaml
 |---------|----------|------------|
 | [Built-in Server](server_built_in.py) | Run the built-in SSE server (zero code) | `python examples/server_built_in.py` |
 | [Customize Server](server_customize.py) | Extend the server by code (Path B) | `python examples/server_customize.py` |
+| [HITL Client](hitl_client.py) | httpx-only HITL approval client (bare install) | `python examples/hitl_client.py` |
+| [Workflow Graph Demo](workflow_graph_demo.py) | Programmatic DAG builder (no YAML, no planner) | `python examples/workflow_graph_demo.py` |
+| [Dynamic Workflow Live](dynamic_workflow_live.py) | Live-LLM dynamic + DAG workflow e2e | `python examples/dynamic_workflow_live.py` |
+| [Phase 3 Live E2E](phase3_live_e2e.py) | Live-LLM validation of Phase 3 capabilities | `python examples/phase3_live_e2e.py` |
 
 ## Feature Coverage
 
@@ -114,6 +118,9 @@ koboi chat examples/01_simple_chat.yaml
 | Custom tools | 14 |
 | Multi-agent orchestration | 15, 16, 24 |
 | Config-driven orchestration | 24 |
+| Workflow graph (programmatic DAG builder) | workflow_graph_demo |
+| Dynamic workflow (live LLM planning) | dynamic_workflow_live, phase3_live_e2e |
+| DAG / conditional orchestration (configs) | dag_demo, conditional_demo, dynamic_demo |
 | Multi-provider LLM | 17 |
 | Harness (telemetry, doom loop, carryover) | 18, 19, 20 |
 | Evaluation suite | 21 |

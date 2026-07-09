@@ -31,6 +31,8 @@ KoboiAgent (facade.py)
      +---> Orchestrator (orchestration/)   [multi-agent mode]
              |--- BaseRouter (keyword / LLM / hybrid)
              |--- AgentFactory / DynamicAgentBuilder
+             |--- DagScheduler (dag/conditional modes) + planner (dynamic mode)
+             |--- WorkflowGraph (programmatic graph builder)
              +--- QualityEvaluator
 
      Shared: ModeManager (modes.py), TrustDatabase (trust.py)
@@ -315,7 +317,7 @@ For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 ## CLI Layer
 
 The `koboi` console script (`koboi.cli:main`) is a single argparse dispatcher. Every no-TUI
-subcommand (`validate`, `run`, `chat --print`, `sessions`, `keys`, `eval`, `eval-test`,
+subcommand (`validate`, `run`, `chat --print`, `sessions`, `keys`, `eval`, `eval-test`, `graph`,
 `diagnostics`, `init-zsh`) routes to a stdlib-only handler in `koboi/cli_commands.py` and
 works on a bare `pip install koboi-agent` (no extras). Only `serve` (lazy-imports
 `koboi.server.app`, needs `[api]`) and interactive `chat` (lazy-imports `koboi.tui.app`,
@@ -596,7 +598,7 @@ When `orchestration.enabled: true` in YAML, `KoboiAgent` bypasses `AgentCore` an
 User query
      |
      v
-Router (keyword / LLM / hybrid)
+Router (keyword / LLM / hybrid)  -- or, in dynamic mode, planner.plan_or_skip()
      |
      v
 RoutingDecision (selected agents, confidence, method)
@@ -604,14 +606,20 @@ RoutingDecision (selected agents, confidence, method)
      +---> AgentFactory.create agents from config
      |
      v
-Orchestrator.run()
+Orchestrator.run(mode=...)
      |
-     +-- [sequential] --> Agent1 --> Agent2 --> Agent3
+     +-- [sequential]  --> Agent1 --> Agent2 --> Agent3
      |
-     +-- [parallel]   --> Agent1 + Agent2 + Agent3 (asyncio.gather)
+     +-- [parallel]    --> Agent1 + Agent2 + Agent3 (asyncio.gather)
+     |
+     +-- [dag]         --> DagScheduler.waves() -> wave-0 (parallel) -> wave-1 -> ... (edges: AgentDef.depends_on)
+     |
+     +-- [conditional] --> dag + output-predicate branching ({to, when:{contains|regex}})
+     |
+     +-- [dynamic]     --> planner extracts step graph -> run as dag waves (plan-or-skip)
      |
      v
-[optional] QualityEvaluator --> revision loop (max_revisions)
+[optional] QualityEvaluator --> revision loop (max_revisions)   (sequential/parallel only)
      |
      v
 OrchestratorResult (final_answer, agent_results)
@@ -633,6 +641,23 @@ OrchestratorResult (final_answer, agent_results)
 ### Quality evaluation
 
 `QualityEvaluator` scores agent answers via LLM. If score falls below threshold, the orchestrator triggers a revision loop (up to `max_revisions`).
+
+### Execution modes
+
+| Mode | Behavior |
+|------|----------|
+| `sequential` | Routed agents run one after another |
+| `parallel` | Routed agents run via `asyncio.gather` |
+| `dag` | `DagScheduler` groups agents into topological waves from `AgentDef.depends_on`; waves run in sequence, nodes within a wave in parallel. `full_graph` runs the whole configured graph |
+| `conditional` | `dag` plus output-predicate branching (`dag_scheduler.conditionals`: `{to, when:{contains\|regex}}`) -- only matching branches run |
+| `dynamic` | `planner.plan_or_skip()` makes one LLM call: simple queries answer directly; multi-step queries get an extracted step graph run as dag waves. `max_replans` re-plans on failure |
+
+`DagScheduler` (`orchestration/dag_scheduler.py`) persists a durable graph plan and per-node
+completion to the `steps` table (graph-cursor-resume primitives). `WorkflowGraph`
+(`orchestration/workflow_graph.py`) is a LangGraph-shaped programmatic builder
+(`add_node` / `add_edge` / `add_conditional_edges` / `compile().invoke()`) over the same
+primitives. Demo configs: `dag_demo.yaml`, `conditional_demo.yaml`, `dynamic_demo.yaml`;
+render any with `koboi graph <config>`.
 
 ---
 

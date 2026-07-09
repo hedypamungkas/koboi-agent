@@ -31,7 +31,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **Hook lifecycle**: 15 event types for logging, guardrails, telemetry
 - **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/semantic/hybrid), augmentation
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
-- **Multi-agent orchestration**: keyword/LLM/hybrid routing, sequential/parallel execution
+- **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, and dynamic (LLM-planned) execution
 - **Context management**: truncation, smart truncation, key facts, sliding window
 - **Sandboxed execution**: pluggable passthrough/restricted backends (per-session workdir, network/rlimit isolation)
 - **MCP** client (stdio + HTTP) and server support
@@ -44,7 +44,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 ### Install
 
 ```bash
-pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, eval, eval-test, diagnostics, init-zsh
+pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, eval, eval-test, graph, diagnostics, init-zsh
 # Extras (optional):
 #   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
 #   pip install koboi-agent[api]   # `koboi serve` (HTTP/SSE server; `koboi keys` works on bare install)
@@ -67,6 +67,7 @@ koboi validate configs/simple_chat.yaml     # check a config without running the
 koboi run configs/simple_chat.yaml -m "What is 2 + 2?"     # one-shot query (plain output)
 koboi run configs/simple_chat.yaml --print  # streaming JSON lines (pipe-friendly)
 koboi keys create                           # mint an API key (for `koboi serve`)
+koboi graph configs/dag_demo.yaml           # render an orchestration DAG (Mermaid; --format json)
 ```
 
 Interactive chat needs the `[tui]` extra:
@@ -189,7 +190,7 @@ pytest --cov=koboi            # with coverage
 
 ## Examples
 
-`examples/` contains 32 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` for HTTP serving:
+`examples/` contains 32 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
 
 | Range | Features |
 |-------|----------|
@@ -204,6 +205,7 @@ pytest --cov=koboi            # with coverage
 | 25-28 | Subagent delegation, task management, benchmarks, custom RAG |
 | 29-32 | Skills (enhanced), eval-test, tool selection, sandbox + resume |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
+| hitl_client / workflow_graph_demo / dynamic_workflow_live / phase3_live_e2e | HITL client + DAG/workflow-graph demos |
 
 Examples use `click` + `rich` (in the `[tui]` extra), so install that first:
 
