@@ -329,6 +329,23 @@ class ServerConfig(BaseModel):
     allowed_modes: list[str] = Field(default_factory=list)
 
 
+class JobWebhookConfig(BaseModel):
+    """One outbound webhook entry under ``jobs.webhooks``.
+
+    POSTs a JSON job payload to ``url`` when the job reaches a terminal status in
+    ``events`` (one of ``completed``/``cancelled``/``timed_out``/``failed``; empty
+    = all). ``secret`` HMAC-SHA256-signs the body via the ``X-Koboi-Signature``
+    header so receivers can verify integrity.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    url: str
+    events: list[str] = Field(default_factory=list)  # terminal statuses; empty = all
+    secret: str | None = None
+    timeout: float | None = None  # seconds; None = default (10)
+
+
 class JobsConfig(BaseModel):
     """Top-level ``jobs:`` section -- background/autonomous job runner (M0 skeleton; M4 wiring).
 
@@ -347,6 +364,7 @@ class JobsConfig(BaseModel):
     resume_on_startup: bool = True
     timeout_seconds: float = Field(default=1800.0, gt=0)
     ttl_seconds: float = Field(default=86400.0, gt=0)
+    webhooks: list[JobWebhookConfig] = Field(default_factory=list)
 
 
 class CommandHookConfig(BaseModel):

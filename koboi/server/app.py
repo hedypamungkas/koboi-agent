@@ -203,6 +203,7 @@ def create_app(
     job_queue_depth = config.get("jobs", "queue_depth", default=32)  # G5c-b
     job_ttl = config.get("jobs", "ttl_seconds", default=86400.0) or 86400.0  # G5c-a
     job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
+    job_webhooks = config.get("jobs", "webhooks", default=[]) or []
     job_resume = config.get("jobs", "resume_on_startup", default=True)
     job_registry = JobRegistry(max_events=job_max_events)
     # G6: /chat/stream Idempotency-Key (409-reject, in-memory TTL).
@@ -245,7 +246,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         # M4: resume pending jobs on startup (simplified: running→failed).
         if job_resume:
-            requeued = await resume_on_startup(job_store, pool, job_registry, job_timeout)
+            requeued = await resume_on_startup(job_store, pool, job_registry, job_timeout, job_webhooks)
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
         # 16.24: workdir TTL GC + G5c-a: job TTL GC background sweeps.
@@ -340,6 +341,7 @@ def create_app(
         allowed_modes,
         max_iter_cap,
         stream_tasks,
+        job_webhooks,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -398,6 +400,7 @@ def _register_routes(
     allowed_modes: frozenset[str],
     max_iter_cap: int,
     stream_tasks: set[asyncio.Task],
+    job_webhooks: list[dict] | None = None,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -645,6 +648,7 @@ def _register_routes(
                 job_timeout,
                 job.get("mode"),
                 job.get("max_iterations"),
+                webhooks=job_webhooks,
             )
         )
         job_registry.set_running(job_id, task)
