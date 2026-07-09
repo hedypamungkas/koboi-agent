@@ -1,0 +1,43 @@
+# Proactive long-term memory demo (extract D + recall C + core block B).
+#
+# Closes the proactivity asymmetry: stored facts are AUTO-recalled each turn
+# (semantic top-N injected into the prompt, no tool call) and AUTO-extracted
+# after each run. All opt-in via `memory.proactive`; inert unless `enabled: true`.
+#
+# Run:  koboi chat configs/proactive_memory.yaml
+# (needs an OpenAI key with a chat model + an embedding model)
+
+agent:
+  name: proactive-memory-demo
+  system_prompt: |
+    You are a helpful assistant with proactive long-term memory. Relevant stored
+    facts about the user are surfaced to you automatically each turn.
+  max_iterations: 8
+  mode: act
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
+
+# Dedicated embedding model for proactive recall (C). Falls back to the chat
+# client if omitted, but gpt-4o-mini can't embed -- so set this for recall to work.
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+  api_key: ${OPENAI_API_KEY}
+
+memory:
+  backend: sqlite
+  db_path: koboi_memory.db
+  proactive:
+    enabled: true
+    extract: true      # D: auto-extract durable facts after each run
+    recall: true       # C: semantic recall + inject top-N facts each turn
+    core_block: true   # B: always-in-context core-memory block
+    top_k: 4
+    min_score: 0.2
+    max_facts: 200
+
+tools:
+  builtin: [calculator, memory, search]
