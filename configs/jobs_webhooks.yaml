@@ -1,0 +1,32 @@
+# Illustrative config for job webhooks (`jobs.webhooks`). When a job reaches a
+# terminal status (completed / failed / timed_out / cancelled), koboi POSTs a JSON
+# payload to each matching webhook URL. See koboi/server/CLAUDE.md.
+agent:
+  name: "job-webhook-demo"
+  description: "Autonomous job runner that notifies external systems on completion"
+  system_prompt: "You are a helpful assistant."
+  max_iterations: 5
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL:gpt-4o-mini}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+# Autonomous jobs require sandbox.backend='restricted' (C3).
+sandbox:
+  backend: "restricted"
+
+jobs:
+  enabled: true
+  # Outbound webhooks fired on terminal job status. Operator-configured URLs only
+  # (never tenant-supplied). The payload includes the job `result` (LLM output --
+  # tenant data), so prefer HTTPS and set a `secret` (HMAC-SHA256 via the
+  # X-Koboi-Signature header) so receivers can verify integrity.
+  webhooks:
+    - url: "https://hooks.example.com/koboi-jobs"
+      events: ["completed", "failed", "timed_out"]  # terminal statuses; omit for all four
+      secret: "${JOB_WEBHOOK_SECRET}"                # HMAC-signs the body
+      timeout: 15
+    - url: "https://alerts.example.com/job-failed"
+      events: ["failed"]

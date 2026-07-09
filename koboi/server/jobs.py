@@ -10,6 +10,8 @@ running-as-failed (simplified; full journal resume deferred to M5).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import re
@@ -19,6 +21,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
+
+import httpx
 
 if TYPE_CHECKING:
     from koboi.hooks.langfuse_hook import LangfuseTracingHook
@@ -352,6 +356,128 @@ def new_job_id() -> str:
     return f"job_{uuid4().hex[:24]}"
 
 
+# Outbound webhook delivery for terminal job statuses. Fire-and-forget tasks are
+# tracked here so CPython doesn't GC them mid-POST (same pattern as CommandHook).
+_WEBHOOK_TASKS: set[asyncio.Task] = set()
+_WEBHOOK_DEFAULT_TIMEOUT = 10.0
+
+
+def _webhook_payload(store: JobStore, job_id: str, status: str) -> dict | None:
+    """Build the JSON payload for a terminal job status from the stored row."""
+    row = store.get(job_id)
+    if row is None:
+        return None
+    result: Any = None
+    raw = row.get("result_json")
+    if raw:
+        try:
+            result = json.loads(raw)
+        except (TypeError, ValueError):
+            result = raw
+    return {
+        "job_id": job_id,
+        "session_id": row.get("session_id"),
+        "owner": row.get("owner"),
+        "status": status,
+        "event": f"job.{status}",
+        "result": result,
+        "error": row.get("error"),
+        "error_class": row.get("error_class"),
+        "retriable": bool(row.get("retriable")),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+async def _post_webhook(url: str, body: bytes, headers: dict, timeout: float) -> None:
+    """POST ``body`` to ``url``; 2 attempts on 5xx / network error; fail-safe (logs only)."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            last = None
+            for _attempt in range(2):
+                try:
+                    resp = await client.post(url, content=body, headers=headers)
+                    if resp.status_code < 500:
+                        return
+                    last = f"HTTP {resp.status_code}"
+                except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                    last = str(exc)
+            if last:
+                _logger.warning("job webhook %s failed after retry: %s", url, last)
+    except Exception as exc:  # noqa: BLE001 -- never let delivery break the job flow
+        _logger.warning("job webhook %s error: %s", url, exc)
+
+
+async def _deliver_webhooks(webhooks: list[dict], store: JobStore, job_id: str, status: str) -> None:
+    """POST the job payload to every webhook whose events match ``status``."""
+    if not webhooks:
+        return
+    payload = _webhook_payload(store, job_id, status)
+    if payload is None:
+        return
+    body = json.dumps(payload).encode()
+    for wh in webhooks:
+        events = wh.get("events") or []
+        if events and status not in events:
+            continue
+        url = wh.get("url")
+        if not url:
+            continue
+        headers = {"Content-Type": "application/json"}
+        secret = wh.get("secret")
+        if secret:
+            signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+            headers["X-Koboi-Signature"] = f"sha256={signature}"
+        timeout = wh.get("timeout") or _WEBHOOK_DEFAULT_TIMEOUT
+        await _post_webhook(url, body, headers, float(timeout))
+
+
+def _on_webhook_task_done(task: asyncio.Task) -> None:
+    """Discard the strong ref + surface any exception that escaped ``_deliver_webhooks``.
+
+    ``_post_webhook`` catches its own delivery errors (network/5xx), but a bug in
+    ``_deliver_webhooks`` itself (e.g. a non-numeric ``timeout`` config value, or a
+    non-str ``secret``) would otherwise escape as an unretrieved task exception --
+    logged only by asyncio's default handler at GC time, bypassing this module's
+    logger entirely. Mirrors ``CommandHook._on_bg_done``.
+    """
+    _WEBHOOK_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        _logger.error("job webhook delivery failed: %s", exc, exc_info=True)
+
+
+async def drain_webhook_tasks(timeout: float = 5.0) -> None:
+    """Await in-flight fire-and-forget webhook deliveries (bounded).
+
+    Without this, a graceful shutdown (``_shutdown`` -> ``job_store.close()``) can
+    race an in-flight webhook POST for the very last job to finish -- the delivery
+    that most needs to land is the one most likely to be silently cut off. Called
+    from the server's ``_shutdown`` before closing the job store.
+    """
+    if not _WEBHOOK_TASKS:
+        return
+    try:
+        await asyncio.wait_for(asyncio.gather(*_WEBHOOK_TASKS, return_exceptions=True), timeout=timeout)
+    except asyncio.TimeoutError:
+        _logger.warning("job webhook drain exceeded %.1fs; %d task(s) abandoned", timeout, len(_WEBHOOK_TASKS))
+
+
+def _emit_job_webhooks(webhooks: list[dict] | None, store: JobStore, job_id: str, status: str) -> None:
+    """Schedule outbound webhook delivery for a terminal status (fire-and-forget).
+
+    Called after ``set_terminal`` so the job-queue admission (``_on_job_done``) and
+    next-job scheduling are not delayed by HTTP. Holds task refs to avoid GC.
+    """
+    if not webhooks:
+        return
+    task = asyncio.create_task(_deliver_webhooks(webhooks, store, job_id, status))
+    _WEBHOOK_TASKS.add(task)
+    task.add_done_callback(_on_webhook_task_done)
+
+
 async def run_job(
     job_id: str,
     pool: AgentPool,
@@ -362,6 +488,7 @@ async def run_job(
     mode: str | None = None,
     max_iterations: int | None = None,
     resume: bool = False,
+    webhooks: list[dict] | None = None,
 ) -> None:
     """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events.
 
@@ -383,15 +510,18 @@ async def run_job(
         result_json = json.dumps({"content": final_content}) if final_content else None
         store.update_status(job_id, "completed", result_json=result_json)
         registry.set_terminal(job_id, "completed")
+        _emit_job_webhooks(webhooks, store, job_id, "completed")
     except asyncio.CancelledError:
         store.update_status(job_id, "cancelled")
         registry.set_terminal(job_id, "cancelled")
+        _emit_job_webhooks(webhooks, store, job_id, "cancelled")
         raise
     except asyncio.TimeoutError:
         store.update_status(
             job_id, "timed_out", error="Job exceeded timeout", error_class="TimeoutError", retriable=True
         )
         registry.set_terminal(job_id, "timed_out")
+        _emit_job_webhooks(webhooks, store, job_id, "timed_out")
     except Exception as exc:
         # M2: log type only (no traceback/locals) + mask/truncate the persisted
         # error so a failure never durable-stores the user prompt or leaked creds.
@@ -404,6 +534,7 @@ async def run_job(
             retriable=False,
         )
         registry.set_terminal(job_id, "failed")
+        _emit_job_webhooks(webhooks, store, job_id, "failed")
 
 
 async def _execute_job(
@@ -499,6 +630,7 @@ async def resume_on_startup(
     pool: AgentPool,
     registry: JobRegistry,
     timeout: float,
+    webhooks: list[dict] | None = None,
 ) -> int:
     """Resume interrupted jobs + requeue pending ones (#5: rehydrate-and-continue).
 
@@ -508,6 +640,10 @@ async def resume_on_startup(
     interrupted loop continues from its last durable step. A resume failure falls
     through to ``run_job``'s exception handler (mark failed). Returns the count of
     resumed + requeued jobs.
+
+    Webhook emission for resumed/requeued jobs happens inside ``run_job`` itself
+    (all terminal branches call ``_emit_job_webhooks``) -- no separate emit needed
+    here for the resume path.
     """
     count = 0
 
@@ -525,6 +661,7 @@ async def resume_on_startup(
                 job.get("mode"),
                 job.get("max_iterations"),
                 resume=True,
+                webhooks=webhooks,
             )
         )
         registry.set_running(job["job_id"], task)
@@ -544,6 +681,7 @@ async def resume_on_startup(
                 timeout,
                 job.get("mode"),
                 job.get("max_iterations"),
+                webhooks=webhooks,
             )
         )
         registry.set_running(job["job_id"], task)

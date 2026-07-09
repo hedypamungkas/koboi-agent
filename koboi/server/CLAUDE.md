@@ -85,6 +85,15 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
   Eagerly `mkdir`-ed; GC'd at `server.workdir_ttl_seconds`.
 - **Jobs reject yolo** (`allow_yolo=False` regardless of allowlist) and **require
   `sandbox.backend='restricted'`** (passthrough refused at execution).
+- **Job webhooks** (`jobs.webhooks`): on a terminal status (`completed`/`failed`/
+  `timed_out`/`cancelled`), `run_job` fire-and-forgets an HTTP POST (via `_emit_job_webhooks`
+  → `httpx.AsyncClient`, retries on 5xx/network error, fail-safe logs only) to each
+  matching webhook URL, AFTER `set_terminal` (so the queue isn't blocked). Payload =
+  job row (`result` parsed from `result_json`, redacted `error`). `secret` HMAC-SHA256-signs
+  the body (`X-Koboi-Signature`). Operator-configured URLs only (never tenant); payload
+  carries tenant `result` → use HTTPS + a secret. Config is threaded `create_app` →
+  `_register_routes(job_webhooks=...)` → `_start_job` (NOT a create_app closure: routes
+  live in `_register_routes`). v1: terminal statuses only.
 - **Pooled agent state must be restored**: snapshot `mode`/`max_iterations`/`_tool_pipeline`/
   `approval_handler` before a run, restore in `finally` (agent is reused; without restore
   a later `mode=None` request inherits this request's mode).

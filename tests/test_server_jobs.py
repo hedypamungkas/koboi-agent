@@ -239,7 +239,16 @@ class TestResumeOnStartup:
         calls: list[tuple] = []
 
         async def fake_run_job(
-            job_id, pool, reg, st, message, timeout=1800, mode=None, max_iterations=None, resume=False
+            job_id,
+            pool,
+            reg,
+            st,
+            message,
+            timeout=1800,
+            mode=None,
+            max_iterations=None,
+            resume=False,
+            webhooks=None,
         ):
             calls.append((job_id, resume))
             return None
