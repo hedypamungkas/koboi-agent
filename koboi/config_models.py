@@ -26,6 +26,10 @@ class AgentConfig(BaseModel):
     max_iterations: int = Field(default=10, ge=1)
     mode: str = "chat"
     theme: str = "koboi-dark"
+    # JSON Schema dict; when set, the agent requests provider-enforced structured
+    # output (OpenAI native response_format / Anthropic forced-tool emulation).
+    # Best for final-answer / single-shot structured responses; None = unchanged.
+    output_schema: dict | None = None
 
     @field_validator("name")
     @classmethod
@@ -155,6 +159,10 @@ class PolicyRuleConfig(BaseModel):
     tool: str = "*"
     pattern: str = ""
     action: str = "allow"
+    # Per-argument glob patterns {arg_name: glob}. Generalizes the legacy
+    # ``pattern`` shorthand (which only matched an arg literally named "command").
+    # Example: {filename: "*.env"} denies any tool whose ``filename`` arg matches.
+    argument_patterns: dict[str, str] | None = None
 
 
 class PolicyConfig(BaseModel):
@@ -227,6 +235,13 @@ class MCPServerConfig(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
     timeout: float = 30.0
     group: str | None = None  # Tool group namespace for filtering
+    # Risk gating for tools exposed by this server. Pre-#5 behavior is SAFE for all
+    # MCP tools. risk_level overrides for every tool from this server; risk_heuristic
+    # infers per-tool risk from the tool name (delete/remove->DESTRUCTIVE, etc.).
+    # NOTE: a non-SAFE risk only gates when guardrails.approval or policy.rules is
+    # configured -- otherwise the level is informational.
+    risk_level: str = "safe"
+    risk_heuristic: bool = False
 
 
 class MCPConfig(BaseModel):

@@ -53,6 +53,7 @@ class LLMClient(ABC):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AgentResponse: ...
 
     @abstractmethod
@@ -62,11 +63,18 @@ class LLMClient(ABC):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """Default streaming: fall back to non-streaming, yield as single chunk."""
+        """Default streaming: fall back to non-streaming, yield as single chunk.
+
+        ``response_format`` is a provider-agnostic JSON Schema dict; when set,
+        the provider should enforce (or strongly encourage) a JSON response
+        conforming to it. OpenAI uses native ``response_format``; Anthropic
+        emulates it via a forced ``tool_use`` (see AnthropicAdapter).
+        """
         from koboi.events import CompleteEvent, TextDeltaEvent
 
-        response = await self.complete(messages, tools)
+        response = await self.complete(messages, tools, response_format=response_format)
         if response.content:
             yield TextDeltaEvent(content=response.content)
         yield CompleteEvent(response=response)

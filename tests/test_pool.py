@@ -37,7 +37,7 @@ class FakeClient(LLMClient):
     def model(self) -> str:
         return self._model
 
-    async def complete(self, messages, tools=None):
+    async def complete(self, messages, tools=None, response_format=None):
         self.calls += 1
         if self.mode == "fail" or (self.mode == "fail_once" and self.calls == 1):
             raise LLMAuthenticationError(f"{self.name} auth fail")
@@ -49,7 +49,7 @@ class FakeClient(LLMClient):
             raise LLMAuthenticationError(f"{self.name} embed fail")
         return [1.0, 2.0, 3.0]
 
-    async def complete_stream(self, messages, tools=None):
+    async def complete_stream(self, messages, tools=None, response_format=None):
         from koboi.events import TextDeltaEvent
 
         self.calls += 1

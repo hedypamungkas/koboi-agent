@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 
 import pytest
 
@@ -224,23 +225,33 @@ class TestGuardrailsJobActive:
 
 
 class TestResumeOnStartup:
-    """resume_on_startup: running jobs are marked failed AND retriable (G3*)."""
+    """resume_on_startup (#5): running jobs are rehydrated-and-continued (resume=True),
+    pending jobs requeued fresh. (Was: running -> failed InterruptedByRestart.)"""
 
-    async def test_running_marked_failed_retriable(self, tmp_path):
+    async def test_running_job_is_resumed_not_failed(self, tmp_path, monkeypatch):
+        from koboi.server import jobs
         from koboi.server.jobs import JobRegistry, JobStore, resume_on_startup
 
         store = JobStore(str(tmp_path / "jobs.db"))
         store.insert("job_1", "s1", "alice", "do thing")
         store.update_status("job_1", "running")
-        # No pending jobs → the requeue loop (which needs a live pool) never runs,
-        # so a dummy pool is sufficient to exercise the running→failed path.
-        requeued = await resume_on_startup(store, None, JobRegistry(), timeout=30)
-        assert requeued == 0
+
+        calls: list[tuple] = []
+
+        async def fake_run_job(
+            job_id, pool, reg, st, message, timeout=1800, mode=None, max_iterations=None, resume=False
+        ):
+            calls.append((job_id, resume))
+            return None
+
+        monkeypatch.setattr(jobs, "run_job", fake_run_job)
+        count = await resume_on_startup(store, object(), JobRegistry(), timeout=30)
+        await asyncio.sleep(0.01)  # let the created task record its call
+
+        assert count == 1
+        assert ("job_1", True) in calls  # running -> resume=True (rehydrate-and-continue)
         job = store.get("job_1")
-        assert job["status"] == "failed"
-        assert bool(job["retriable"]) is True
-        assert job["error_class"] == "InterruptedByRestart"
-        assert "interrupted" in job["error"]
+        assert job["status"] != "failed"  # NOT marked failed (old InterruptedByRestart gone)
 
 
 class TestJobRegistryPerOwner:

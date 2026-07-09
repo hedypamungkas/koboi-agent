@@ -9,7 +9,15 @@ Examples for trying out all koboi-agent features. From the simplest to productio
 cp .env.example .env
 
 # 2. Install dependencies
-pip install -e .
+#    Numbered examples (01-28, 30) use the Rich UI + Click via examples/conftest.py,
+#    so they need the [tui] extra (rich + click). The koboi package itself does NOT
+#    need these -- its CLI is argparse-based.
+pip install -e ".[tui]"
+#    Server examples (server_built_in.py, server_customize.py) additionally need [api]:
+pip install -e ".[api]"
+#    Bare-install-safe examples (no extras, `pip install koboi-agent` only):
+#       27_benchmark_suite.py, 29_skills_enhanced.py, 31_tool_selection.py,
+#       32_sandbox_and_resume.py, hitl_client.py, ../benchmarks/crash_recovery/
 ```
 
 ## How to Run

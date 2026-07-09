@@ -208,7 +208,12 @@ class ProviderPool(LLMClient):
         self._breaker.record_success(client)
         self._last_served_model = getattr(client, "model", None)
 
-    async def complete(self, messages: list[dict], tools: list[dict] | None = None) -> AgentResponse:
+    async def complete(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
+    ) -> AgentResponse:
         """Try members in policy order; fail over on ``LLMError``; raise
         ``ProviderPoolExhausted`` (with the chain) when all fail."""
         exclude: list[LLMClient] = []
@@ -218,7 +223,7 @@ class ProviderPool(LLMClient):
             if client is None:
                 break
             try:
-                resp = await client.complete(messages, tools)
+                resp = await client.complete(messages, tools, response_format=response_format)
             except LLMError as err:  # RetryClient raised (post-retry or immediately) -> fail over
                 failures.append((client, err))
                 self._breaker.record_failure(client)
@@ -229,7 +234,10 @@ class ProviderPool(LLMClient):
         raise _exhausted(failures)
 
     async def complete_stream(
-        self, messages: list[dict], tools: list[dict] | None = None
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Fail over only BEFORE the first byte; once yielding, errors re-raise.
         Pre-first-byte exhaustion raises ``ProviderPoolExhausted``."""
@@ -241,7 +249,7 @@ class ProviderPool(LLMClient):
                 break
             yielded = False
             try:
-                async for event in client.complete_stream(messages, tools):
+                async for event in client.complete_stream(messages, tools, response_format=response_format):
                     yielded = True
                     yield event
             except LLMError as err:

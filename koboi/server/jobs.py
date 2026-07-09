@@ -361,11 +361,14 @@ async def run_job(
     timeout: float = 1800,
     mode: str | None = None,
     max_iterations: int | None = None,
+    resume: bool = False,
 ) -> None:
     """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events.
 
     G2: ``mode``/``max_iterations`` are persisted on the jobs row and re-applied
     on resume. ``mode`` is validated + yolo-rejected at submit, so it is trusted here.
+    ``resume=True`` (#5) rehydrates-and-continues an interrupted job via
+    ``AgentCore.resume()`` instead of re-running ``run_stream(message)``.
     """
 
     record = registry.get(job_id)
@@ -374,7 +377,7 @@ async def run_job(
 
     try:
         final_content = await asyncio.wait_for(
-            _execute_job(job_id, pool, registry, store, message, mode, max_iterations),
+            _execute_job(job_id, pool, registry, store, message, mode, max_iterations, resume=resume),
             timeout=timeout,
         )
         result_json = json.dumps({"content": final_content}) if final_content else None
@@ -411,6 +414,7 @@ async def _execute_job(
     message: str,
     mode: str | None = None,
     max_iterations: int | None = None,
+    resume: bool = False,
 ) -> str | None:
     """Inner execution: agent setup + run_stream → event buffer.
 
@@ -470,10 +474,17 @@ async def _execute_job(
                 agent._core.mode_manager.switch_mode(AgentMode(mode))
             if max_iterations is not None:
                 agent._core.max_iterations = max_iterations
-            async for event in agent.run_stream(message):
-                registry.append_event(job_id, event)
-                if isinstance(event, CompleteEvent):
-                    final_content = event.content
+            if resume:
+                # #5: rehydrate-and-continue the interrupted loop. The agent's memory
+                # + journal were already rehydrated by pool.get_or_create (memory.
+                # session_id), so resume() continues from the interrupted step.
+                result = await agent.resume()
+                final_content = result.content
+            else:
+                async for event in agent.run_stream(message):
+                    registry.append_event(job_id, event)
+                    if isinstance(event, CompleteEvent):
+                        final_content = event.content
         finally:
             agent._core.approval_handler = prior_handler
             if had_pipeline:
@@ -489,26 +500,38 @@ async def resume_on_startup(
     registry: JobRegistry,
     timeout: float,
 ) -> int:
-    """Simplified resume: requeue pending; mark running-as-failed (interrupted).
+    """Resume interrupted jobs + requeue pending ones (#5: rehydrate-and-continue).
 
-    Returns count of requeued jobs.
+    Running jobs (killed mid-flight by a redeploy) are rehydrated-and-continued via
+    ``AgentCore.resume()`` (``run_job(resume=True)``) rather than marked failed: the
+    agent's memory + journal rehydrate via ``pool.get_or_create(session_id)``, so the
+    interrupted loop continues from its last durable step. A resume failure falls
+    through to ``run_job``'s exception handler (mark failed). Returns the count of
+    resumed + requeued jobs.
     """
-    # Mark running jobs as failed (interrupted by restart). The job did not fail
-    # on its own merits — it was killed mid-flight by a redeploy — so resubmission
-    # is the correct recovery: retriable=True + a distinct error_class let clients
-    # distinguish restart failures from genuine job failures (cf. TimeoutError at run_job).
-    for job in store.list_by_status("running"):
-        store.update_status(
-            job["job_id"],
-            "failed",
-            error="interrupted by restart",
-            error_class="InterruptedByRestart",
-            retriable=True,
-        )
-        _logger.info("Job %s marked failed (interrupted by restart)", job["job_id"])
-
-    # Requeue pending jobs.
     count = 0
+
+    # #5: rehydrate-and-continue running jobs (was: mark running-as-failed).
+    for job in store.list_by_status("running"):
+        registry.register(job["job_id"], job["session_id"], job["owner"])
+        task = asyncio.create_task(
+            run_job(
+                job["job_id"],
+                pool,
+                registry,
+                store,
+                job["message"],
+                timeout,
+                job.get("mode"),
+                job.get("max_iterations"),
+                resume=True,
+            )
+        )
+        registry.set_running(job["job_id"], task)
+        count += 1
+        _logger.info("Resuming interrupted job %s on startup", job["job_id"])
+
+    # Requeue pending jobs (fresh run).
     for job in store.list_by_status("pending"):
         registry.register(job["job_id"], job["session_id"], job["owner"])
         task = asyncio.create_task(

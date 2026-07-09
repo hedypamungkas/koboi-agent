@@ -7,7 +7,21 @@
 [![License: MIT](https://img.shields.io/pypi/l/koboi-agent)](https://github.com/hedypamungkas/koboi-agent/blob/main/LICENSE)
 [![Docker](https://github.com/hedypamungkas/koboi-agent/actions/workflows/docker.yml/badge.svg)](https://github.com/hedypamungkas/koboi-agent/actions/workflows/docker.yml)
 
-Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-provider LLM (OpenAI, Anthropic, Cloudflare).
+Configurable AI agent framework for **trustworthy unattended autonomy**. YAML-driven config, async Python 3.10+, multi-provider LLM (OpenAI, Anthropic, Cloudflare).
+
+## Why koboi: durable, sandboxed, evaluable
+
+koboi-agent's defensible position is the integration of five assets that are rare **at the library level** (no peer agent framework combines all five):
+
+- **Crash/redeploy resume** — the SQLite `StepJournal` eagerly writes a `running` marker *before* each LLM call (WAL), so a SIGKILL/redeploy leaves a resumable state; `koboi run --resume <session>` rehydrates and continues, re-executing **only the missing tool calls**. Reproducible proof + wall-clock: `python benchmarks/crash_recovery/run.py`. (LangGraph markets "durable execution" only at the platform/LangSmith tier.)
+- **Seccomp HARD network isolation without a container** — the restricted sandbox denies egress at the syscall layer (`connect`/`connectat`/`sendto`/`sendmsg`, inherited across `execve`) plus rlimits + PATH allowlist + secret-stripped env, on Linux + the `python3-seccomp` system package. No peer ships this without spinning up a container.
+- **Self-hostable REST/SSE + autonomous-jobs server with a real security contract** — `koboi serve` exposes interactive SSE chat (human-in-the-loop approvals) + autonomous background jobs behind Bearer keys, per-session ownership, idempotency, and a graceful drain. The **C3 contract**: autonomous destructive jobs are *refused unless* `sandbox.backend='restricted'`, and approvals are deny-by-default without a Trust-DB rule.
+- **CI-native agent evaluation you treat like code** — the eve-style `t` authoring DSL (`koboi eval-test`) drives an agent and asserts outcomes (`calledTool`/`toolWasBlocked`/`retrievedChunk`/`blocked`/`warned`/`activatedSkill`/`completed`) with mock determinism (no API key burned on commit) and gate/soft severity, routed through 12 built-in scorers.
+- **Supply-chain-hardened Skills** — agentskills.io-aligned, 3-tier progressive disclosure, with a shell-injection deny-list on SKILL.md `!cmd` preprocessing (the "ClawHavoc" ~1,200-malicious-skills marketplace attack is a real, documented threat).
+
+Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-only; auto-resolves `pending_approval` events) against `koboi serve configs/hitl_demo.yaml`.
+
+➡️ Full positioning & competitive analysis: [docs/trustworthy-unattended-autonomy.md](docs/trustworthy-unattended-autonomy.md)
 
 ## Features
 
@@ -194,9 +208,11 @@ pytest --cov=koboi            # with coverage
 Examples use `click` + `rich` (in the `[tui]` extra), so install that first:
 
 ```bash
-pip install koboi-agent[tui]                    # examples need click + rich
+pip install -e ".[tui]"                        # examples need click + rich
 python examples/01_simple_chat.py              # automatic mode
 python examples/01_simple_chat.py -m interactive  # interactive mode
+# Server examples need [api]: pip install -e ".[api]"
+# Bare-install-safe (no extras): 27, 29, 31, 32, hitl_client.py
 ```
 
 ## Architecture

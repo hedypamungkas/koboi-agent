@@ -179,6 +179,11 @@ def _build_parser():
     p.add_argument("config_path")
     p.add_argument("--output", "-o", default=None, help="Output file path (default: diagnostics_<ts>.zip)")
 
+    # graph (core) -- render the orchestration agent DAG (Mermaid/JSON)
+    p = sub.add_parser("graph", help="Render the orchestration agent DAG (Mermaid or JSON)")
+    p.add_argument("config_path")
+    p.add_argument("--format", choices=["mermaid", "json"], default="mermaid")
+
     # init-zsh (core)
     p = sub.add_parser("init-zsh", help="Install the ZSH plugin for :koboi prefix command")
     p.add_argument("--target", default=None, help="Custom plugin install directory")
@@ -238,6 +243,8 @@ def main() -> None:
         )
     if args.command == "diagnostics":
         sys.exit(cli_commands.cmd_diagnostics(args.config_path, args.output))
+    if args.command == "graph":
+        sys.exit(cli_commands.cmd_graph(args.config_path, args.format))
     if args.command == "init-zsh":
         sys.exit(cli_commands.cmd_init_zsh(args.target))
 

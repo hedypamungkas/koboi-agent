@@ -8,8 +8,69 @@ from typing import TYPE_CHECKING
 from koboi.types import MCPToolInfo, RiskLevel
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from koboi.logger import AgentLogger
     from koboi.tools.registry import ToolRegistry
+
+
+# Name-based risk inference for MCP tools (opt-in via mcp.servers[].risk_heuristic).
+# MCP tools are SAFE by default (pre-#5); this heuristic flags side-effecting names
+# so they reach the approval/policy gate when one is configured.
+_DESTRUCTIVE_NAME_HINTS = (
+    "delete",
+    "remove",
+    "destroy",
+    "drop",
+    "purge",
+    "wipe",
+    "exec",
+    "shell",
+    "format",
+    "truncate",
+    "kill",
+    "terminate",
+    "reset",
+)
+_MODERATE_NAME_HINTS = (
+    "write",
+    "create",
+    "update",
+    "insert",
+    "send",
+    "post",
+    "put",
+    "patch",
+    "set",
+    "add",
+    "move",
+    "rename",
+    "merge",
+    "submit",
+    "deploy",
+    "publish",
+    "push",
+)
+
+
+def default_risk_heuristic(info: MCPToolInfo) -> RiskLevel:
+    """Infer a RiskLevel from an MCP tool's name (opt-in).
+
+    delete/remove/exec-style names -> DESTRUCTIVE; write/update/send-style -> MODERATE;
+    otherwise SAFE. Uses token-boundary matching (not substring) to avoid false
+    positives like ``get_deleted_items`` (SAFE, not DESTRUCTIVE).
+    """
+    import re
+
+    name = (info.name or "").lower()
+    # Tokenize on word boundaries (_, ., -, /) so "delete" matches "delete_record"
+    # but NOT "get_deleted_items" (where the token is "deleted", not "delete").
+    tokens = set(re.split(r"[_.\-/]", name))
+    if tokens & set(_DESTRUCTIVE_NAME_HINTS):
+        return RiskLevel.DESTRUCTIVE
+    if tokens & set(_MODERATE_NAME_HINTS):
+        return RiskLevel.MODERATE
+    return RiskLevel.SAFE
 
 
 class MCPError(Exception):
@@ -149,7 +210,13 @@ class BaseMCPClient(ABC):
         return "\n".join(parts) if parts else str(result)
 
 
-def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry, group: str | None = None) -> list[str]:
+def register_mcp_tools(
+    client: BaseMCPClient,
+    registry: ToolRegistry,
+    group: str | None = None,
+    risk_level: RiskLevel = RiskLevel.SAFE,
+    risk_resolver: Callable[[MCPToolInfo], RiskLevel] | None = None,
+) -> list[str]:
     """Bridge: discover MCP tools and register them to ToolRegistry.
 
     Each MCP tool is wrapped into an async closure that calls
@@ -157,6 +224,10 @@ def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry, group: str
 
     Args:
         group: Optional group name to assign to all tools from this server.
+        risk_level: RiskLevel assigned to every tool (default SAFE = pre-#5 behavior).
+        risk_resolver: Optional per-tool resolver; overrides risk_level when set
+            (e.g. :func:`default_risk_heuristic`). A non-SAFE level only gates when
+            ``guardrails.approval`` or ``policy.rules`` is configured.
     """
     tool_infos = client.discover_tools()
     registered: list[str] = []
@@ -167,15 +238,16 @@ def register_mcp_tools(client: BaseMCPClient, registry: ToolRegistry, group: str
             async def handler(**kwargs) -> str:
                 return await mcp_client.call_tool(tool_name, kwargs)
 
-            return handler
+            return handler  # noqa: B023 - factory binds tool_name/mcp_client as params (not loop vars)
 
-        tool_fn = make_handler(info.name, client)
+        handler = make_handler(info.name, client)
+        resolved_risk = risk_resolver(info) if risk_resolver else risk_level
         registry.register(
             name=info.name,
             description=info.description,
             parameters=info.input_schema,
-            fn=tool_fn,
-            risk_level=RiskLevel.SAFE,
+            fn=handler,
+            risk_level=resolved_risk,
             group=group,
         )
         registered.append(info.name)

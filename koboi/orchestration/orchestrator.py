@@ -7,7 +7,6 @@ QualityEvaluator: LLM-based answer quality evaluation with revision support.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -37,7 +36,9 @@ from koboi.orchestration.factory import AgentFactory, DynamicAgentBuilder
 
 if TYPE_CHECKING:
     from koboi.client import Client
+    from koboi.hooks.chain import HookChain
     from koboi.logger import AgentLogger
+    from koboi.orchestration.dag_scheduler import DagScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # QualityEvaluator
 # ---------------------------------------------------------------------------
+
+# JSON Schema for the evaluator's structured response. Passed as response_format
+# so providers enforce JSON (OpenAI native / Anthropic forced-tool), removing the
+# need for the previous brittle extract_json + broad-except parsing.
+_QUALITY_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "number"},
+        "feedback": {"type": "string"},
+        "needs_revision": {"type": "boolean"},
+    },
+    "required": ["score", "feedback", "needs_revision"],
+}
 
 
 class QualityEvaluator:
@@ -71,18 +85,22 @@ class QualityEvaluator:
             resp = await self.client.complete(
                 messages=[{"role": "user", "content": prompt}],
                 tools=None,
+                response_format=_QUALITY_SCHEMA,
             )
             content = resp.content or ""
+            # response_format enforces JSON on capable providers; _extract_json
+            # stays as a tolerant fallback for providers that ignore it.
             data = _extract_json(content)
             if data:
                 score = float(data.get("score", 0.5))
                 feedback = data.get("feedback", "")
                 needs = bool(data.get("needs_revision", score < self.threshold))
                 return score, feedback, needs
-        except (json.JSONDecodeError, KeyError, ValueError, AttributeError) as e:
+        except Exception as e:  # noqa: BLE001 - resilience boundary: the evaluator is
+            # embedded in the orchestration revision loop, so any client/transport/parse
+            # failure must degrade to the fallback rather than crash the orchestration.
+            # JSON reliability comes from response_format; this catch is NOT parsing.
             logger.warning("Quality evaluation failed for query '%s': %s", query[:50], e)
-        except Exception as e:
-            logger.error("Unexpected error in quality evaluation: %s", e, exc_info=True)
         return 0.5, "evaluation failed", True
 
 
@@ -107,6 +125,11 @@ class Orchestrator:
         chunk_size: int = 400,
         chunk_overlap: int = 40,
         agents_map: dict | None = None,
+        dag_scheduler: DagScheduler | None = None,
+        default_mode: str = "sequential",
+        hook_chain: HookChain | None = None,
+        full_graph: bool = False,
+        max_replans: int = 0,
     ):
         self.client = client
         self.router = router
@@ -122,6 +145,15 @@ class Orchestrator:
         self._dynamic_builder = dynamic_builder
         self._dynamic_blueprints: dict[str, AgentBlueprint] = {}
         self._agents_map: dict = agents_map or {}
+        self._dag_scheduler = dag_scheduler
+        self.default_mode = default_mode
+        # #5: hook chain for dynamic-mode agents (so they get logging/policy/guardrails/
+        # telemetry -- restores what WS4 omitted). Facade passes assembler.hook_chain.
+        self._hook_chain = hook_chain
+        # #4: full_graph -> dag mode runs the entire configured graph, not the routed subset.
+        self._full_graph = full_graph
+        # #3: max re-plans on node failure in dynamic mode.
+        self._max_replans = max_replans
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -359,6 +391,180 @@ class Orchestrator:
             domain_label=domain_label,
         )
 
+    async def _run_dag_waves_with_flow(
+        self,
+        agent_names: list[str],
+        query: str,
+        deps: dict[str, list[str]],
+    ) -> AsyncGenerator:
+        """Run ``agent_names`` as a dependency graph in topological waves WITH EDGE DATA FLOW.
+
+        Each node's input = the original query + its dependencies' outputs (from prior
+        waves), so downstream nodes actually consume upstream results (closes the
+        no-data-flow gap). Wave-parallel within a level (each node is a distinct
+        AgentCore -> safe), sequential across levels. Yields the
+        AgentDispatch/AgentResult/_AgentCompleted event trio per node so the orchestrator
+        event stream + downstream synthesis are unchanged. Shared by the static ``dag``
+        branch and the ``dynamic`` mode.
+        """
+        from koboi.orchestration.dag_scheduler import DagScheduler
+
+        total = len(agent_names)
+        waves = DagScheduler(deps=deps).waves(agent_names)
+        outputs: dict[str, str] = {}
+
+        def _input_for(name: str) -> str:
+            node_deps = deps.get(name, [])
+            upstream = "\n".join(f"[{d}]: {outputs.get(d, '')}" for d in node_deps if d in outputs)
+            if not upstream:
+                return query
+            return (
+                f"Original request:\n{query}\n\nUpstream results:\n{upstream}\n\n"
+                "Continue from the upstream results above."
+            )
+
+        flat = 0
+        for wave in waves:
+            for name in wave:
+                yield AgentDispatchEvent(agent_name=name, agent_index=flat, total_agents=total, mode="dag")
+                flat += 1
+            wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in wave])
+            for result in wave_results:
+                outputs[result.agent_name] = result.answer
+                # #2: record durable per-node completion for graph-cursor resume.
+                if self._dag_scheduler:
+                    self._dag_scheduler.record_node_completion(result.agent_name, result.answer)
+                yield AgentResultEvent(
+                    agent_name=result.agent_name,
+                    answer=result.answer[:200],
+                    elapsed_seconds=result.elapsed_seconds,
+                    tokens_used=result.tokens_used,
+                    is_dynamic=result.is_dynamic,
+                    domain_label=result.domain_label,
+                    failed=result.failed,
+                )
+                yield _AgentCompletedEvent(agent_result=result)
+                # #6: surface a [NODE_INTERRUPT] marker after an interrupt-flagged node.
+                if self._dag_scheduler and result.agent_name in self._dag_scheduler.interrupt_nodes:
+                    yield TextDeltaEvent(
+                        content=f"[NODE_INTERRUPT] {result.agent_name} completed — awaiting human review"
+                    )
+
+    @staticmethod
+    def _eval_conditional(when: dict, output: str) -> bool:
+        """Evaluate a conditional predicate on a node's output (#1).
+
+        Supports: {contains: "str"}, {regex: "pattern"}, {field, op, value} on JSON.
+        """
+        import json as _json
+        import re as _re
+
+        text = output or ""
+        if "contains" in when:
+            return str(when["contains"]).lower() in text.lower()
+        if "regex" in when:
+            return _re.search(str(when["regex"]), text) is not None
+        if "field" in when:
+            try:
+                data = _json.loads(text)
+                val = data.get(when["field"])
+                op, target = when.get("op"), when.get("value")
+                if op == ">":
+                    return val is not None and val > target
+                if op == ">=":
+                    return val is not None and val >= target
+                if op == "<":
+                    return val is not None and val < target
+                if op == "<=":
+                    return val is not None and val <= target
+                if op in ("==", "="):
+                    return val == target
+                if op == "!=":
+                    return val != target
+            except (ValueError, TypeError):
+                return False
+        return False
+
+    async def _run_conditional_graph(
+        self,
+        agent_names: list[str],
+        query: str,
+        deps: dict[str, list[str]],
+        conditionals: dict[str, list[dict]],
+    ) -> AsyncGenerator:
+        """Runtime scheduler for conditional edges (#1).
+
+        Unlike the static wave scheduler (which pre-computes all waves), this evaluates
+        predicates on each node's output AS IT COMPLETES -> enables/disables branches.
+        A node is READY when its static deps are all completed AND (if it has incoming
+        conditionals) at least one source's predicate fired. Wave-parallel within the
+        ready set; edge data flow preserved (downstream gets upstream outputs).
+        """
+        total = len(agent_names)
+        node_set = set(agent_names)
+        outputs: dict[str, str] = {}
+        completed: set[str] = set()
+        enabled: set[str] = set()  # nodes enabled by a fired conditional
+        remaining = set(agent_names)
+
+        # incoming conditionals: {target: [(source, predicate), ...]}
+        incoming: dict[str, list[tuple[str, dict]]] = {}
+        for src, conds in conditionals.items():
+            for c in conds:
+                if c.get("to") in node_set:
+                    incoming.setdefault(c["to"], []).append((src, c.get("when", {})))
+
+        def _ready(node: str) -> bool:
+            if not all(d in completed for d in deps.get(node, []) if d in node_set):
+                return False
+            if node in incoming:
+                return node in enabled  # must be enabled by a fired conditional
+            return True
+
+        def _input_for(name: str) -> str:
+            node_deps = deps.get(name, [])
+            upstream = "\n".join(f"[{d}]: {outputs.get(d, '')}" for d in node_deps if d in outputs)
+            if not upstream:
+                return query
+            return f"Original request:\n{query}\n\nUpstream results:\n{upstream}\n\nContinue from the upstream results above."
+
+        flat = 0
+        while remaining:
+            ready = [n for n in sorted(remaining) if _ready(n)]
+            if not ready:
+                logger.warning("conditional graph: %d nodes could not be reached (no predicate fired)", len(remaining))
+                break
+            for n in ready:
+                yield AgentDispatchEvent(agent_name=n, agent_index=flat, total_agents=total, mode="dag")
+                flat += 1
+            wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in ready])
+            for result in wave_results:
+                outputs[result.agent_name] = result.answer
+                completed.add(result.agent_name)
+                remaining.discard(result.agent_name)
+                # #2: record durable per-node completion for graph-cursor resume.
+                if self._dag_scheduler:
+                    self._dag_scheduler.record_node_completion(result.agent_name, result.answer)
+                yield AgentResultEvent(
+                    agent_name=result.agent_name,
+                    answer=result.answer[:200],
+                    elapsed_seconds=result.elapsed_seconds,
+                    tokens_used=result.tokens_used,
+                    is_dynamic=result.is_dynamic,
+                    domain_label=result.domain_label,
+                    failed=result.failed,
+                )
+                yield _AgentCompletedEvent(agent_result=result)
+                # #6: surface a [NODE_INTERRUPT] marker after an interrupt-flagged node.
+                if self._dag_scheduler and result.agent_name in self._dag_scheduler.interrupt_nodes:
+                    yield TextDeltaEvent(
+                        content=f"[NODE_INTERRUPT] {result.agent_name} completed — awaiting human review"
+                    )
+                # Evaluate this node's outgoing conditionals -> enable targets.
+                for cond in conditionals.get(result.agent_name, []):
+                    if cond.get("to") in node_set and self._eval_conditional(cond.get("when", {}), result.answer):
+                        enabled.add(cond["to"])
+
     async def _combine_results(self, results: list[AgentResult], query: str) -> str:
         if not results:
             return "No agent available to answer this question."
@@ -431,6 +637,112 @@ class Orchestrator:
                 parts.append(f"=== Answer from {label} Agent ===\n{r.answer}")
             yield TextDeltaEvent(content="\n\n".join(parts))
 
+    async def _run_dynamic(self, query: str) -> AsyncGenerator:
+        """Dynamic workflow (mode='dynamic'): the LLM plans a graph from the query,
+        then the engine executes it with edge data flow. Simple queries skip the
+        planner and answer directly with one general agent (no workflow overhead)."""
+        from koboi.orchestration.factory import AgentFactory
+        from koboi.orchestration.planner import plan_or_skip
+        from koboi.types import AgentDef
+
+        start = time.time()
+        plan = await plan_or_skip(self.client, query)
+        results: list[AgentResult] = []
+
+        if plan.needs_workflow and plan.steps:
+            step_ids = [s.id for s in plan.steps]
+            yield RoutingDecisionEvent(
+                agents=step_ids,
+                confidence=1.0,
+                method="dynamic",
+                reasoning=plan.reason or "dynamic plan",
+                domain_label=None,
+            )
+            # Build per-node agents from the plan (system_prompt = the step instruction).
+            # #5: pass the parent hook_chain so dynamic nodes get logging/policy/guardrails.
+            self._agents_map = {
+                s.id: AgentFactory.create_configured_agent(
+                    AgentDef(name=s.id, system_prompt=s.instruction or s.id),
+                    self.client,
+                    hook_chain=self._hook_chain,
+                )
+                for s in plan.steps
+            }
+            async for event in self._run_dag_waves_with_flow(step_ids, query, plan.deps):
+                if isinstance(event, _AgentCompletedEvent):
+                    results.append(event.agent_result)
+                yield event
+            routing_agents = step_ids
+            # #3: re-plan on node failure (bounded by max_replans).
+            replans_left = self._max_replans
+            while replans_left > 0 and any(r.failed for r in results):
+                replans_left -= 1
+                failed_names = [r.agent_name for r in results if r.failed]
+                retry_query = f"{query}\n\nNote: steps {failed_names} failed previously. Adjust the plan."
+                plan = await plan_or_skip(self.client, retry_query)
+                if not plan.needs_workflow or not plan.steps:
+                    break
+                results = []
+                step_ids = [s.id for s in plan.steps]
+                self._agents_map = {
+                    s.id: AgentFactory.create_configured_agent(
+                        AgentDef(name=s.id, system_prompt=s.instruction or s.id),
+                        self.client,
+                        hook_chain=self._hook_chain,
+                    )
+                    for s in plan.steps
+                }
+                async for event in self._run_dag_waves_with_flow(step_ids, query, plan.deps):
+                    if isinstance(event, _AgentCompletedEvent):
+                        results.append(event.agent_result)
+                    yield event
+                routing_agents = step_ids
+        else:
+            # Simple request: answer directly (no workflow). The negative/triage path.
+            yield RoutingDecisionEvent(
+                agents=["assistant"],
+                confidence=1.0,
+                method="dynamic",
+                reasoning=f"direct: {plan.reason}",
+                domain_label=None,
+            )
+            self._agents_map = {
+                "assistant": AgentFactory.create_configured_agent(
+                    AgentDef(name="assistant", system_prompt="You are a helpful assistant."),
+                    self.client,
+                    hook_chain=self._hook_chain,
+                )
+            }
+            yield AgentDispatchEvent(agent_name="assistant", agent_index=0, total_agents=1, mode="dynamic")
+            result = await self._run_single("assistant", query)
+            results.append(result)
+            yield AgentResultEvent(
+                agent_name=result.agent_name,
+                answer=result.answer[:200],
+                elapsed_seconds=result.elapsed_seconds,
+                tokens_used=result.tokens_used,
+                is_dynamic=result.is_dynamic,
+                domain_label=result.domain_label,
+                failed=result.failed,
+            )
+            yield _AgentCompletedEvent(agent_result=result)
+            routing_agents = ["assistant"]
+
+        # Synthesis + complete (mirrors _execute_pipeline tail).
+        combined_answer = ""
+        async for event in self._combine_results_stream(results, query):
+            if isinstance(event, TextDeltaEvent):
+                combined_answer += event.content
+            yield event
+        yield OrchestrationCompleteEvent(
+            final_answer=combined_answer,
+            elapsed_seconds=time.time() - start,
+            agent_results=results,
+            execution_mode="dynamic",
+            routing_agents=routing_agents,
+            routing_confidence=1.0,
+        )
+
     async def _execute_pipeline(
         self,
         query: str,
@@ -441,6 +753,11 @@ class Orchestrator:
             logger.warning("Revision logic is not supported in streaming mode; falling back to direct execution.")
 
         start = time.time()
+
+        if mode == "dynamic":
+            async for event in self._run_dynamic(query):
+                yield event
+            return
 
         decision = await self.router.route(query)
         if self.logger:
@@ -499,7 +816,29 @@ class Orchestrator:
                     yield _AgentCompletedEvent(agent_result=result)
 
             results.sort(key=lambda r: order.get(r.agent_name, len(order)))
+        elif mode == "dag" and self._dag_scheduler is not None:
+            # #4: full_graph runs the entire configured graph (bypasses the routed subset).
+            _dag_names = list(self._agents_map.keys()) if self._full_graph else agent_names
+            self._dag_scheduler.waves(_dag_names)  # populate _last_waves for persist
+            self._dag_scheduler.persist_plan()
+            # #1: if any conditional edges are configured, use the runtime scheduler
+            # (evaluates predicates on node outputs to enable/disable branches).
+            # Otherwise, the faster pre-computed wave scheduler.
+            if self._dag_scheduler.conditionals:
+                async for event in self._run_conditional_graph(
+                    _dag_names, query, self._dag_scheduler.deps, self._dag_scheduler.conditionals
+                ):
+                    if isinstance(event, _AgentCompletedEvent):
+                        results.append(event.agent_result)
+                    yield event
+            else:
+                async for event in self._run_dag_waves_with_flow(_dag_names, query, self._dag_scheduler.deps):
+                    if isinstance(event, _AgentCompletedEvent):
+                        results.append(event.agent_result)
+                    yield event
         else:
+            if mode == "dag":
+                logger.warning("execution.mode=dag requested but no DagScheduler configured; running sequentially.")
             for i, name in enumerate(agent_names):
                 yield AgentDispatchEvent(
                     agent_name=name,

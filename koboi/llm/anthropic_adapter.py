@@ -16,6 +16,15 @@ if TYPE_CHECKING:
 
 _DEFAULT_MAX_TOKENS = 4096
 
+# Name of the synthetic tool used to emulate OpenAI-style ``response_format`` on
+# Anthropic (which has no native structured-output field). We force the model to
+# call this tool whose ``input_schema`` IS the desired JSON Schema, then collapse
+# the resulting ``tool_use`` back into ``content`` as JSON text so callers see a
+# uniform contract across providers. Limitation: on Anthropic, structured output
+# is incompatible with simultaneous real tool-calls in the same turn (forced
+# tool_choice) -- use it for single-shot structured calls (e.g. QualityEvaluator).
+_STRUCTURED_TOOL_NAME = "return_structured_output"
+
 
 class AnthropicAdapter(LLMClient):
     def __init__(
@@ -47,6 +56,7 @@ class AnthropicAdapter(LLMClient):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AgentResponse:
         system_content, remaining = self._extract_system(messages)
         translated = self._translate_messages(remaining)
@@ -60,9 +70,7 @@ class AnthropicAdapter(LLMClient):
             body["temperature"] = self._temperature
         if system_content:
             body["system"] = system_content
-        if tools:
-            body["tools"] = self._translate_tools(tools)
-            body["tool_choice"] = {"type": "auto"}
+        self._apply_tools(body, tools, response_format)
 
         if self._logger:
             self._logger.log_llm_request(messages, tools)
@@ -70,6 +78,9 @@ class AnthropicAdapter(LLMClient):
         self._apply_extra_params(body)
         data = await self._transport.post("/messages", body)
         result = self._parse_response(data)
+
+        if response_format:
+            result.content, result.tool_calls = self._collapse_structured(result.content, result.tool_calls)
 
         if self._logger:
             self._logger.log_llm_response(result)
@@ -80,6 +91,7 @@ class AnthropicAdapter(LLMClient):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AsyncIterator[TextDeltaEvent | ToolCallEvent | CompleteEvent]:
         system_content, remaining = self._extract_system(messages)
         translated = self._translate_messages(remaining)
@@ -94,9 +106,7 @@ class AnthropicAdapter(LLMClient):
             body["temperature"] = self._temperature
         if system_content:
             body["system"] = system_content
-        if tools:
-            body["tools"] = self._translate_tools(tools)
-            body["tool_choice"] = {"type": "auto"}
+        self._apply_tools(body, tools, response_format)
 
         if self._logger:
             self._logger.log_llm_request(messages, tools)
@@ -173,11 +183,17 @@ class AnthropicAdapter(LLMClient):
                     arguments=tc["arguments"],
                 )
             )
-            yield ToolCallEvent(
-                tool_name=tc["name"],
-                tool_call_id=tc["id"],
-                arguments=tc["arguments"],
-            )
+            # The forced structured-output tool is not a real tool call; suppress
+            # its event (it is collapsed into content below).
+            if tc["name"] != _STRUCTURED_TOOL_NAME:
+                yield ToolCallEvent(
+                    tool_name=tc["name"],
+                    tool_call_id=tc["id"],
+                    arguments=tc["arguments"],
+                )
+
+        if response_format:
+            full_content, parsed_tool_calls = self._collapse_structured(full_content, parsed_tool_calls)
 
         final = AgentResponse(
             content=full_content,
@@ -190,6 +206,40 @@ class AnthropicAdapter(LLMClient):
 
     async def get_embeddings(self, text: str) -> list[float] | None:
         return None
+
+    def _apply_tools(self, body: dict, tools: list[dict] | None, response_format: dict | None) -> None:
+        """Populate ``body['tools']`` + ``body['tool_choice']``.
+
+        When ``response_format`` is set, force the synthetic structured-output
+        tool (emulating OpenAI ``response_format`` via a forced ``tool_use``).
+        Otherwise pass real tools through with ``auto`` choice.
+        """
+        if response_format:
+            structured = {
+                "name": _STRUCTURED_TOOL_NAME,
+                "description": "Return the final answer as JSON conforming to the provided schema.",
+                "input_schema": response_format,
+            }
+            body["tools"] = (self._translate_tools(tools) if tools else []) + [structured]
+            body["tool_choice"] = {"type": "tool", "name": _STRUCTURED_TOOL_NAME}
+        elif tools:
+            body["tools"] = self._translate_tools(tools)
+            body["tool_choice"] = {"type": "auto"}
+
+    @staticmethod
+    def _collapse_structured(content: str | None, tool_calls: list[ToolCall]) -> tuple[str | None, list[ToolCall]]:
+        """Move the forced structured-output tool_use into ``content`` as JSON text.
+
+        Returns ``(new_content, remaining_real_tool_calls)``.
+        """
+        kept: list[ToolCall] = []
+        for tc in tool_calls:
+            if tc.name == _STRUCTURED_TOOL_NAME:
+                # ``arguments`` is already a JSON string (serialized tool_use input)
+                content = tc.arguments or content
+            else:
+                kept.append(tc)
+        return content, kept
 
     @staticmethod
     def _extract_system(messages: list[dict]) -> tuple[str, list[dict]]:

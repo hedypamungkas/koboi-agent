@@ -78,6 +78,42 @@ def _print_error(message: str, *, print_mode: bool = False) -> None:
 # --------------------------------------------------------------------------- #
 # validate
 # --------------------------------------------------------------------------- #
+def cmd_graph(config_path: str, fmt: str = "mermaid") -> int:
+    """Render the orchestration agent DAG (depends_on edges) as Mermaid or JSON.
+
+    Reads ``orchestration.agents[*].depends_on`` from config without running any
+    agent. Useful for inspecting a workflow graph and (Phase 3) feeding visualizers.
+    """
+    from koboi.config import Config
+    from koboi.facade import _parse_agent_defs
+
+    try:
+        config = Config.from_yaml(config_path)
+    except Exception as e:
+        print(f"Config parse error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        agent_defs = _parse_agent_defs(config)
+    except ValueError:
+        print("No orchestration agents found (orchestration.agents is empty).", file=sys.stderr)
+        return 1
+
+    nodes = [ad.name for ad in agent_defs]
+    edges = [{"from": dep, "to": ad.name} for ad in agent_defs for dep in ad.depends_on]
+
+    if fmt == "json":
+        print(json.dumps({"nodes": nodes, "edges": edges}, indent=2))
+    else:
+        lines = ["graph TD"]
+        for n in nodes:
+            lines.append(f'  {n}["{n}"]')
+        for edge in edges:
+            lines.append(f"  {edge['from']} --> {edge['to']}")
+        print("\n".join(lines))
+    return 0
+
+
 def cmd_validate(config_path: str) -> int:
     """Validate a YAML config file without running the agent."""
     from koboi.config import Config

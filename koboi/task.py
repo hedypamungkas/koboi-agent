@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 import time
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
+
+from koboi.memory_sqlite import ensure_tasks_table
 
 
 @dataclass
@@ -21,9 +25,76 @@ class Task:
 class TaskManager:
     """Session-scoped, in-memory task store with dependency support."""
 
-    def __init__(self) -> None:
+    def __init__(self, db_path: str | None = None, session_id: str | None = None) -> None:
         self._tasks: dict[str, Task] = {}
         self._counter: int = 0
+        # #6: when both are set, task state is persisted to SQLite (survives --resume).
+        self._db_path = db_path
+        self._session_id = session_id
+        if db_path and session_id:
+            self._load()
+
+    def _persist(self) -> None:
+        """Save state to SQLite if persistence is configured (called after mutations)."""
+        if self._db_path and self._session_id:
+            self._save()
+
+    def _load(self) -> None:
+        """Rehydrate tasks from the ``tasks`` table (on construction, for --resume)."""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            ensure_tasks_table(conn)
+            rows = conn.execute(
+                "SELECT task_id, subject, description, status, blocked_by_json, created_at "
+                "FROM tasks WHERE session_id=? ORDER BY task_order",
+                (self._session_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        for tid, subject, description, status, blocked_by_json, created_at in rows:
+            try:
+                blocked_by = json.loads(blocked_by_json) if blocked_by_json else []
+            except (json.JSONDecodeError, TypeError):
+                blocked_by = []
+            self._tasks[tid] = Task(
+                id=tid,
+                subject=subject or "",
+                description=description or "",
+                status=cast(Literal["pending", "in_progress", "completed", "blocked"], status or "pending"),
+                blocked_by=blocked_by,
+                created_at=created_at or 0.0,
+            )
+            try:  # restore counter so new task_ids don't collide
+                n = int(tid.split("_")[1], 16)
+                if n > self._counter:
+                    self._counter = n
+            except (IndexError, ValueError):
+                pass
+
+    def _save(self) -> None:
+        """Persist all tasks (full replace for the session)."""
+        conn = sqlite3.connect(self._db_path)
+        try:
+            ensure_tasks_table(conn)
+            conn.execute("DELETE FROM tasks WHERE session_id=?", (self._session_id,))
+            for order, task in enumerate(self._tasks.values()):
+                conn.execute(
+                    "INSERT INTO tasks (session_id, task_id, subject, description, status, "
+                    "blocked_by_json, task_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        self._session_id,
+                        task.id,
+                        task.subject,
+                        task.description,
+                        task.status,
+                        json.dumps(task.blocked_by),
+                        order,
+                        task.created_at,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     def create(
         self,
@@ -45,6 +116,7 @@ class TaskManager:
             created_at=time.time(),
         )
         self._tasks[task_id] = task
+        self._persist()
         return task
 
     def get(self, task_id: str) -> Task | None:
@@ -86,6 +158,7 @@ class TaskManager:
             task.subject = subject
         if description is not None:
             task.description = description
+        self._persist()
         return task
 
     def add_dependency(self, task_id: str, depends_on: str) -> tuple[bool, str]:
@@ -107,6 +180,7 @@ class TaskManager:
         # If task is pending and now has deps, mark blocked
         if task.status == "pending" and task.blocked_by:
             task.status = "blocked"
+        self._persist()
         return True, f"{task_id} now depends on {depends_on}"
 
     def _would_cycle(self, task_id: str, new_dep: str) -> bool:
@@ -147,6 +221,7 @@ class TaskManager:
             return None, []
         task.status = "completed"
         unblocked = self._try_unblock()
+        self._persist()
         return task, unblocked
 
     def summary(self) -> str:
@@ -182,3 +257,4 @@ class TaskManager:
     def clear(self) -> None:
         self._tasks.clear()
         self._counter = 0
+        self._persist()

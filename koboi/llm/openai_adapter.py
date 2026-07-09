@@ -18,6 +18,23 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
+def _openai_response_format(schema: dict) -> dict:
+    """Wrap a provider-agnostic JSON Schema into OpenAI's response_format body.
+
+    ``strict=False`` (best-effort conformance) so partial schemas and schemas
+    with optional fields are not rejected by the API; callers wanting strict
+    enforcement can pass a fully-specified schema.
+    """
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "structured_output",
+            "schema": schema,
+            "strict": False,
+        },
+    }
+
+
 class OpenAIAdapter(LLMClient):
     def __init__(
         self,
@@ -58,6 +75,7 @@ class OpenAIAdapter(LLMClient):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AgentResponse:
         body: dict = {"model": self._model, "messages": messages}
         if self._temperature is not None:
@@ -65,6 +83,8 @@ class OpenAIAdapter(LLMClient):
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        if response_format:
+            body["response_format"] = _openai_response_format(response_format)
 
         if self._logger:
             self._logger.log_llm_request(messages, tools)
@@ -99,6 +119,7 @@ class OpenAIAdapter(LLMClient):
         self,
         messages: list[dict],
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> AsyncIterator[TextDeltaEvent | ToolCallEvent | CompleteEvent]:
         body: dict = {"model": self._model, "messages": messages, "stream": True}
         # Request usage in the final stream chunk — without this, OpenAI-compatible
@@ -109,6 +130,8 @@ class OpenAIAdapter(LLMClient):
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        if response_format:
+            body["response_format"] = _openai_response_format(response_format)
 
         if self._logger:
             self._logger.log_llm_request(messages, tools)

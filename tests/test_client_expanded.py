@@ -37,7 +37,7 @@ class TestClientRetry:
         mock_impl = MagicMock()
         call_count = 0
 
-        async def fail_then_succeed(messages, tools=None):
+        async def fail_then_succeed(messages, tools=None, response_format=None):
             nonlocal call_count
             call_count += 1
             if call_count < 3:
@@ -56,7 +56,7 @@ class TestClientRetry:
     async def test_raises_after_max_retries(self):
         mock_impl = MagicMock()
 
-        async def always_fail(messages, tools=None):
+        async def always_fail(messages, tools=None, response_format=None):
             raise LLMServerError("server error")
 
         mock_impl.complete = always_fail
@@ -70,7 +70,7 @@ class TestClientRetry:
     async def test_non_retryable_error_propagates(self):
         mock_impl = MagicMock()
 
-        async def auth_fail(messages, tools=None):
+        async def auth_fail(messages, tools=None, response_format=None):
             raise LLMError("auth failed")
 
         mock_impl.complete = auth_fail
@@ -84,7 +84,7 @@ class TestClientRetry:
     async def test_unexpected_error_wrapped(self):
         mock_impl = MagicMock()
 
-        async def unexpected_fail(messages, tools=None):
+        async def unexpected_fail(messages, tools=None, response_format=None):
             raise ValueError("unexpected")
 
         mock_impl.complete = unexpected_fail

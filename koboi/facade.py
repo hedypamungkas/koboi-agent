@@ -153,7 +153,9 @@ class KoboiAgent:
             from koboi.loop import _extract_text
 
             query = message if isinstance(message, str) else _extract_text(message)
-            async for event in self._orchestrator.run_stream(query):
+            async for event in self._orchestrator.run_stream(
+                query, mode=getattr(self._orchestrator, "default_mode", "sequential")
+            ):
                 yield event
         else:
             async for event in self._core.run_stream(message):
@@ -1065,6 +1067,7 @@ class AgentAssembler:
             mode_manager=self.mode_manager,
             journal=self.journal,
             trust_db=self.trust_db,
+            output_schema=self.config.get("agent", "output_schema", default=None),
         )
 
         return KoboiAgent(
@@ -1083,7 +1086,8 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
     if not servers:
         return []
 
-    from koboi.mcp.base import register_mcp_tools
+    from koboi.mcp.base import default_risk_heuristic, register_mcp_tools
+    from koboi.types import RiskLevel
 
     clients = []
     for server_conf in servers:
@@ -1092,7 +1096,14 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
             mcp_client = _create_mcp_client(server_conf, transport, logger, config)
             mcp_client.connect()
             group = server_conf.get("group")
-            register_mcp_tools(mcp_client, tools, group=group)
+            # #5: MCP risk gating. Default SAFE (pre-#5); risk_level overrides for all
+            # tools from this server, risk_heuristic infers per-tool risk from the name.
+            try:
+                risk_level = RiskLevel(server_conf.get("risk_level", "safe"))
+            except ValueError:
+                risk_level = RiskLevel.SAFE
+            resolver = default_risk_heuristic if server_conf.get("risk_heuristic", False) else None
+            register_mcp_tools(mcp_client, tools, group=group, risk_level=risk_level, risk_resolver=resolver)
             clients.append(mcp_client)
         except Exception as e:
             import logging
@@ -1163,12 +1174,18 @@ def _build_policy(config: Config):
         except ValueError:
             action = PolicyAction.ALLOW
 
+        # #4: argument_patterns generalizes the legacy ``pattern`` shorthand (which
+        # only matched an arg literally named "command"). Prefer an explicit
+        # argument_patterns dict; fall back to {"command": pattern} for back-compat
+        # so existing run_shell ``pattern:`` configs keep working unchanged.
+        arg_patterns = rule_conf.get("argument_patterns") or ({"command": pattern} if pattern else None)
+
         engine.add_rule(
             PolicyRule(
                 name=f"config_{tool}_{action_str}",
                 action=action,
                 tool_pattern=tool,
-                argument_patterns={"command": pattern} if pattern else None,
+                argument_patterns=arg_patterns,
                 description=f"From config: {tool} {pattern} -> {action_str}",
             )
         )
@@ -1215,6 +1232,9 @@ def _parse_agent_defs(config: Config) -> list:
                 tools_config=ac.get("tools"),
                 rag_config=ac.get("rag"),
                 llm_config=ac.get("llm"),
+                depends_on=ac.get("depends_on", []),
+                conditionals=ac.get("conditionals", []),
+                interrupt_after=ac.get("interrupt_after", False),
             )
         )
     return defs
@@ -1264,37 +1284,57 @@ def _build_orchestration(config: Config, verbose: bool = False):
     assembler.build_hooks()
     assembler.build_sandbox()
 
-    agent_defs = _parse_agent_defs(config)
+    orch_conf = config.orchestration
+    exec_conf = orch_conf.get("execution", {})
+    exec_mode = exec_conf.get("mode", "sequential")
+
+    # Dynamic mode: agents are planned at runtime from the query (no config agents).
+    agent_defs = [] if exec_mode == "dynamic" else _parse_agent_defs(config)
     router = _build_router(config, assembler.client, agent_defs)
 
     parent_rag = config.rag
 
-    # Per-agent LLM client builder. A named ``providers:`` ref (str) FULLY
-    # REPLACES the top-level client; an inline dict MERGES over it (today's
-    # behavior) so temperature/max_tokens/extra params take effect per agent.
-    # Pool specs (W2) raise. Agents without LLM overrides keep sharing
-    # assembler.client (decided inside AgentFactory via _has_client_overrides).
-    def _agent_client_builder(agent_llm: dict | str) -> Client:
-        if isinstance(agent_llm, str):
-            return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
-        if isinstance(agent_llm, dict) and "pool" in agent_llm:
-            return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
-        overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
-        return _build_client(config, assembler.logger, llm_overrides=overrides)
+    if agent_defs:
+        # Per-agent LLM client builder. A named ``providers:`` ref (str) FULLY
+        # REPLACES the top-level client; an inline dict MERGES over it (today's
+        # behavior). Pool specs (W2) raise.
+        def _agent_client_builder(agent_llm: dict | str) -> Client:
+            if isinstance(agent_llm, str):
+                return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
+            if isinstance(agent_llm, dict) and "pool" in agent_llm:
+                return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
+            overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
+            return _build_client(config, assembler.logger, llm_overrides=overrides)
 
-    agents_map = AgentFactory.create_all_configured(
-        agent_defs,
-        assembler.client,
-        assembler.logger,
-        parent_rag_config=parent_rag,
-        hook_chain=assembler.hook_chain,
-        sandbox=assembler.sandbox,
-        embedding_config=config.get("embedding"),
-        client_builder=_agent_client_builder,
-    )
+        agents_map = AgentFactory.create_all_configured(
+            agent_defs,
+            assembler.client,
+            assembler.logger,
+            parent_rag_config=parent_rag,
+            hook_chain=assembler.hook_chain,
+            sandbox=assembler.sandbox,
+            embedding_config=config.get("embedding"),
+            client_builder=_agent_client_builder,
+        )
+    else:
+        agents_map = {}
 
-    orch_conf = config.orchestration
-    exec_conf = orch_conf.get("execution", {})
+    # Build a DagScheduler when execution.mode == "dag", seeded with the per-agent
+    # depends_on edges parsed from config (deterministic, testable).
+    dag_scheduler = None
+    if exec_mode == "dag":
+        from koboi.orchestration.dag_scheduler import DagScheduler
+
+        deps = {ad.name: list(ad.depends_on) for ad in agent_defs}
+        conds = {ad.name: list(ad.conditionals) for ad in agent_defs if ad.conditionals}
+        # Persist the graph plan when the memory backend is SQLite (durable; #3).
+        dag_db_path = None
+        if config.get("memory", "backend", default="sqlite") == "sqlite":
+            dag_db_path = config.get("memory", "db_path", default="koboi_memory.db")
+        interrupt_nodes = {ad.name for ad in agent_defs if ad.interrupt_after}
+        dag_scheduler = DagScheduler(
+            agents_map=agents_map, deps=deps, db_path=dag_db_path, conditionals=conds, interrupt_nodes=interrupt_nodes
+        )
 
     orchestrator = Orchestrator(
         client=assembler.client,
@@ -1304,6 +1344,11 @@ def _build_orchestration(config: Config, verbose: bool = False):
         use_revision=exec_conf.get("use_revision", False),
         enable_dynamic=orch_conf.get("router", {}).get("enable_dynamic", False),
         agents_map=agents_map,
+        dag_scheduler=dag_scheduler,
+        default_mode=exec_mode,
+        hook_chain=assembler.hook_chain,
+        full_graph=exec_conf.get("full_graph", False),
+        max_replans=exec_conf.get("max_replans", 0),
     )
 
     return KoboiAgent(
@@ -1351,7 +1396,14 @@ def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None 
     if "task_create" in tools:
         from koboi.task import TaskManager
 
-        mgr = TaskManager()
+        # #6: persist task state to SQLite when backend=sqlite, so it survives --resume.
+        # When a session_id is set (resume), TaskManager rehydrates existing tasks.
+        db_path = None
+        session_id = None
+        if config.get("memory", "backend", default="sqlite") == "sqlite":
+            db_path = config.get("memory", "db_path", default="koboi_memory.db")
+            session_id = config.get("memory", "session_id", default=None) or None
+        mgr = TaskManager(db_path=db_path, session_id=session_id)
         tools.set_dep("task_manager", mgr)
         # Inject manager into TaskHook if present in the chain
         if hook_chain is not None:
@@ -1373,7 +1425,7 @@ async def _run_orchestrator(orchestrator, message: str | list) -> RunResult:
     query = message if isinstance(message, str) else _extract_text(message)
     start = time.time()
 
-    result = await orchestrator.run(query)
+    result = await orchestrator.run(query, mode=getattr(orchestrator, "default_mode", "sequential"))
     elapsed = time.time() - start
 
     total_tokens = sum(r.tokens_used for r in result.agent_results)

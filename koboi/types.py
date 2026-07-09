@@ -110,7 +110,7 @@ class OrchestratorResult:
     agent_results: list[AgentResult] = field(default_factory=list)
     final_answer: str = ""
     total_elapsed_seconds: float = 0.0
-    execution_mode: Literal["sequential", "parallel", "sequential+revision", "parallel+revision"] = "sequential"
+    execution_mode: Literal["sequential", "parallel", "sequential+revision", "parallel+revision", "dag"] = "sequential"
 
 
 @dataclass
@@ -136,6 +136,15 @@ class AgentDef:
     tools_config: dict | None = None
     rag_config: dict | None = None
     llm_config: dict | None = None
+    # DAG edges: agent names this agent depends on (execution.mode: dag).
+    depends_on: list[str] = field(default_factory=list)
+    # Conditional edges (#1): [{to: <node>, when: <predicate>}]. The predicate `when`
+    # is evaluated on THIS node's output; if it matches, `to` is enabled.
+    # Predicates: {contains: "str"} | {regex: "pattern"} | {field, op, value} on JSON.
+    conditionals: list[dict] = field(default_factory=list)
+    # #6: if True, the scheduler surfaces a [NODE_INTERRUPT] marker after this node
+    # completes (for human review / HITL at the node boundary).
+    interrupt_after: bool = False
 
 
 @dataclass
