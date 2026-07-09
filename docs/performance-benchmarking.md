@@ -37,10 +37,10 @@ how the gate works, the noise policy, and how to maintain it.
 
 | File | Surface | Gate |
 |---|---|---|
-| `bench_core.py` | config, memory, tokens, context truncation, doom-loop, telemetry | absolute NFR (`min`) |
-| `bench_hooks.py` | hook chain emit/find at 1/5/10 depth | absolute NFR (`min`) |
+| `bench_core.py` | config, facade, tool registration, memory, tokens, context truncation, tool-integrity check | absolute NFR (`min`) |
+| `bench_hooks.py` | hook chain emit/list/find (1/5/10 hooks), telemetry, doom-loop detection | absolute NFR (`min`) |
 | `bench_rag.py` | chunking (fixed/sentence/paragraph), keyword retrieval, augmentation | absolute NFR (`min`) |
-| `bench_tui.py` | slash dispatch, export, diff, thinking regex, suggester, bridge, theme | absolute NFR (`min`) |
+| `bench_tui.py` | slash dispatch, export, diff, thinking regex, suggester, bridge, theme; also token estimation at scale, memory get, string concatenation, hook-chain emit | absolute NFR (`min`) |
 | `bench_loop.py` | `AgentCore` turn, N-turn throughput, 8-step `ToolExecutionPipeline`, hook overhead in-loop | report + relative compare (Wave 2) |
 | `bench_server.py` | `/healthz`, `/v1/chat/stream` SSE, `/v1/jobs` admission, pool reuse, idempotency, Bearer auth | report + relative compare (Wave 2) |
 | `bench_memory.py` | peak-bytes (tracemalloc) for a turn, RAG index, server boot | generous absolute ceiling (assertion) |
@@ -67,10 +67,13 @@ thresholds live in `NFR_THRESHOLDS` at its top.
 leaks); its *time* numbers are tracemalloc-inflated and meaningless — read
 `benchmark.extra_info["peak_kb"]`.
 
-**Threshold provenance:** `NFR_THRESHOLDS` values are `ceil(min_ms × 3)` with a
-1ms floor, provisionally measured on a dev machine. They are far tighter than the
-old hand-set values (which had 25–150× headroom and caught nothing) but **must be
-re-measured on the CI runner** (see *Refresh the baseline* below).
+**Threshold provenance:** `NFR_THRESHOLDS` values started as `ceil(min_ms × 3)`
+(1ms floor) measured on a dev machine; a first CI recalibration pass has since
+re-tuned a few entries (`test_facade_creation`, `test_export_json_500`,
+`test_export_json_2000` — see their `# recalibrated from CI run #1` comments).
+The rest are still provisional and **must be re-measured on the CI runner** (see
+*Refresh the baseline* below). All are far tighter than the old hand-set values
+(which had 25–150× headroom and caught nothing).
 
 ## Noise policy
 

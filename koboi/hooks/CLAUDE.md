@@ -6,7 +6,7 @@ Observer-pattern lifecycle hooks. Every stage of the agent loop emits events tha
 ## Key files
 ```
 chain.py              HookEvent enum, HookContext dataclass, Hook ABC, HookChain
-registry.py           Declarative hook registration (HookRegistry, build_hook_chain)
+registry.py           Declarative hook registration (HookEntry, build_hook_chain, register_hook)
 callback_hook.py      CallbackHook -- wraps a plain function as a Hook
 builtin.py            LoggingHook (all events), AuditHook (tool events)
 mode_hook.py          Mode-aware tool filtering and system prompt injection
@@ -45,7 +45,7 @@ PRE_ROUTING, POST_ROUTING, AGENT_DISPATCHED, AGENT_COMPLETED
 6. Register in `koboi/hooks/registry.py` via `HookEntry` for auto-discovery
 
 ## How hooks are wired
-`HookRegistry.build_hook_chain()` creates the `HookChain` from config. Always includes `LoggingHook` (priority 0). Other hooks added based on config predicates.
+The module-level `build_hook_chain()` function in `registry.py` creates the `HookChain` from config. Always includes `LoggingHook` (priority 0). Other hooks added based on config predicates.
 `AgentCore.run()` calls `hook_chain.emit()` at each lifecycle point.
 
 ## Priority ranges

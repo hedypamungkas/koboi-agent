@@ -19,7 +19,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (~185 .py files)
+koboi/              Main package (~188 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
@@ -30,7 +30,7 @@ koboi/              Main package (~185 .py files)
   client.py         RetryClient -- LLM HTTP transport with exponential backoff
   events.py         StreamEvent union type for streaming
   types.py          All dataclasses: RunResult, ToolDefinition, EvalCase, etc.
-  exceptions.py     AgentError and LLMError hierarchies
+  exceptions.py     AgentError hierarchy (LLMError hierarchy lives in llm/base.py)
   memory.py         In-memory ConversationMemory + MemoryBackend protocol
   memory_sqlite.py  SQLite-backed memory backend (WAL mode); also hosts the `steps` journal table
   journal.py        StepJournal -- per-iteration step journal for crash/redeploy resume (P2-A)
@@ -43,9 +43,9 @@ koboi/              Main package (~185 .py files)
   task.py           TaskManager for structured task tracking
   diagnostics.py    Session diagnostic export
   notifications.py  Notification system
-  llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry
+  llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + 18 specialized hooks
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 19 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid), augmentation, registry
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
@@ -58,14 +58,14 @@ koboi/              Main package (~185 .py files)
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (12)
 tests/              ~170 test files, asyncio_mode="auto", shared conftest.py with MockClient
-configs/            20 YAML agent configs
+configs/            21 YAML agent configs
 examples/           32 numbered example scripts (01-32) + server_built_in/server_customize, with matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)
 benchmarks/         BFCL benchmark data (DO NOT read benchmarks/results.json -- 183MB)
-docs/               Architecture overview, TUI design docs
+docs/               Architecture overview, REST/SSE requirements, performance benchmarking, skills/eve research, strategy audits
 ```
 
 ## Code conventions

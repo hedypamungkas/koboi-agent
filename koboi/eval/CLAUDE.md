@@ -7,7 +7,7 @@ Evaluation runner for benchmarking agent quality across multiple frameworks.
 ```
 runner.py           EvalRunner -- executes eval cases against an agent
 config.py           EvalConfig -- eval suite configuration
-registry.py         ScorerRegistry and LoaderRegistry
+registry.py         ScorerRegistry (LoaderRegistry lives in loaders/__init__.py)
 regression.py       RegressionTracker (compare against baseline)
 ```
 
@@ -38,13 +38,13 @@ See `examples/21_eval_suite.py` and `configs/eval_suite.yaml`.
 
 ## How to add a scorer
 1. Create a class in `scorers/` that inherits from `base.BaseScorer`
-2. Implement `score(case: EvalCase, output: str) -> EvalScore`
+2. Implement `async def score(self, case: EvalCase, output: str, context: dict) -> EvalScore`
 3. Register in `registry.py`
 
 ## How to add a loader
 1. Create a class in `loaders/` that inherits from `DatasetLoader`
-2. Implement `load(source: str) -> list[EvalCase]` and `framework_name() -> str`
-3. Register in `registry.py`
+2. Implement `async def load(self, source: str, **kwargs: Any) -> list[EvalCase]` and `framework_name() -> str`
+3. Register via `LoaderRegistry.register(...)` in `loaders/__init__.py` (add to `register_default_loaders()`)
 
 ## `t` authoring surface (`t/`) -- eve-style, test-shaped, CI-native evals
 Write `evals/**/*.eval.py` files exporting `async def test_*(t)` functions. The
@@ -52,7 +52,7 @@ Write `evals/**/*.eval.py` files exporting `async def test_*(t)` functions. The
 `EvalResult`s with **gate/soft** severity. `EvalRunner.format_results` and
 `RegressionTracker` work on the output unchanged.
 ```
-t/__init__.py        Public API: run_tests, run_tests_sync, TestContext, Severity, matchers
+t/__init__.py        Public API: run_tests, run_tests_sync, TestContext, Severity, scripted_response/scripted_tool_call/ScriptedClient, matchers (Contains/Equals/Regex/Matches/Truth)
 t/assertions.py      Severity(GATE/SOFT), Matcher ABC + built-ins, RecordedAssertion
 t/context.py         TestContext (the `t`) -- send/calledTool/check/judge (record-and-collect)
 t/mock.py            ScriptedClient + scripted_response/scripted_tool_call builders
