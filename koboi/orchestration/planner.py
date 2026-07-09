@@ -81,7 +81,7 @@ Request: {instruction}"""
 def _has_cycle(deps: dict[str, list[str]]) -> bool:
     """DFS cycle detection over the deps graph."""
     white, gray, black = 0, 1, 2
-    color = {n: white for n in deps}
+    color = dict.fromkeys(deps, white)
 
     def visit(node: str) -> bool:
         color[node] = gray

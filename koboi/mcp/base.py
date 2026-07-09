@@ -238,7 +238,7 @@ def register_mcp_tools(
             async def handler(**kwargs) -> str:
                 return await mcp_client.call_tool(tool_name, kwargs)
 
-            return handler
+            return handler  # noqa: B023 - factory binds tool_name/mcp_client as params (not loop vars)
 
         handler = make_handler(info.name, client)
         resolved_risk = risk_resolver(info) if risk_resolver else risk_level

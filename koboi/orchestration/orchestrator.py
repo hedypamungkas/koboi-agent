@@ -125,9 +125,9 @@ class Orchestrator:
         chunk_size: int = 400,
         chunk_overlap: int = 40,
         agents_map: dict | None = None,
-        dag_scheduler: "DagScheduler | None" = None,
+        dag_scheduler: DagScheduler | None = None,
         default_mode: str = "sequential",
-        hook_chain: "HookChain | None" = None,
+        hook_chain: HookChain | None = None,
         full_graph: bool = False,
         max_replans: int = 0,
     ):
