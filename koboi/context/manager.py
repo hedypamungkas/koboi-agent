@@ -180,9 +180,15 @@ class TruncationManager(ContextManager):
         return system_msgs + kept, f"kept last {self.keep_last}"
 
 
-@register_context_strategy("smart_truncation", description="System prompt + first user + last N messages")
+@register_context_strategy("smart_truncation", description="System prompt + all user messages + last N non-user")
 class SmartTruncationManager(ContextManager):
-    """Keep: system prompt + first user message + last N messages."""
+    """Keep: system prompt + ALL user messages + last N non-user (assistant/tool).
+
+    Every user message is retained so mid-conversation user constraints and
+    clarifications are never dropped; only assistant/tool messages are trimmed to
+    the last ``keep_last``. ``manage()`` -> ``ensure_tool_integrity()`` repairs any
+    resulting same-role adjacency.
+    """
 
     def __init__(self, logger: AgentLogger | None = None, keep_last: int = 6):
         super().__init__(logger)
@@ -193,20 +199,13 @@ class SmartTruncationManager(ContextManager):
         return "SMART_TRUNCATION"
 
     async def _build_result(self, system_msgs, non_system):
-        first_user = None
-        rest = []
-        for m in non_system:
-            if first_user is None and m.get("role") == "user":
-                first_user = m
-            else:
-                rest.append(m)
-
-        recent = rest[-self.keep_last :]
-        result = list(system_msgs)
-        if first_user:
-            result.append(first_user)
-        result.extend(recent)
-        return result, f"kept system + first_user + last {self.keep_last}"
+        # Keep every user message; trim only assistant/tool to the last keep_last.
+        non_user = [m for m in non_system if m.get("role") != "user"]
+        kept_other_ids = {id(m) for m in non_user[-self.keep_last :]}
+        kept = [m for m in non_system if m.get("role") == "user" or id(m) in kept_other_ids]
+        result = list(system_msgs) + kept
+        n_users = sum(1 for m in kept if m.get("role") == "user")
+        return result, f"kept system + all {n_users} user + last {self.keep_last} non-user"
 
 
 @register_context_strategy("key_facts", description="Extract tool results into compact facts")

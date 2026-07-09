@@ -246,8 +246,10 @@ class SemanticRetriever(BaseRetriever):
             self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
             self._embedding_available = False
             self._index_built = True
-            _logger.info(
-                "SemanticRetriever: falling back to keyword retrieval for %d chunks (embedding endpoint unavailable).",
+            _logger.warning(
+                "SemanticRetriever: falling back to keyword retrieval for %d chunks "
+                "(the provider returned no embeddings). Set a top-level `embedding:` "
+                "section to enable true semantic retrieval.",
                 len(self._chunks),
             )
             return

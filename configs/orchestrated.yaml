@@ -30,6 +30,7 @@ orchestration:
         You are a sales specialist. Answer questions about products, pricing,
         and purchasing. Be helpful and persuasive while staying factual.
       rag:
+        enabled: true
         documents:
           - path: "./data/sample/product_catalog.md"
 
@@ -40,6 +41,7 @@ orchestration:
         You are an HR specialist. Answer questions about company policies,
         employee benefits, and workplace guidelines. Be accurate and cite policies.
       rag:
+        enabled: true
         documents:
           - path: "./data/sample/employee_handbook.md"
           - path: "./data/sample/company_policy.md"

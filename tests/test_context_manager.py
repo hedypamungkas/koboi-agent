@@ -154,7 +154,7 @@ class TestTruncationManager:
 
 class TestSmartTruncationManager:
     @pytest.mark.asyncio
-    async def test_keeps_first_user(self):
+    async def test_keeps_all_user_messages(self):
         mgr = SmartTruncationManager(keep_last=1)
         msgs = [
             {"role": "system", "content": "sys"},
@@ -164,8 +164,13 @@ class TestSmartTruncationManager:
             {"role": "assistant", "content": "resp2"},
         ]
         result = await mgr.manage(msgs, max_tokens=10)
-        # Should have system + first user + recent
-        assert any(m.get("content") == "first user" for m in result)
+        joined = " ".join(m.get("content", "") for m in result)
+        # Every user message survives (middle users are no longer dropped); only
+        # assistant/tool messages are trimmed to the last keep_last. Consecutive
+        # retained users may be merged into one message by ensure_tool_integrity.
+        assert "first user" in joined
+        assert "second user" in joined
+        assert "resp1" not in joined  # old assistant dropped (keep_last=1 -> only resp2)
 
     @pytest.mark.asyncio
     async def test_no_truncation_needed(self):
