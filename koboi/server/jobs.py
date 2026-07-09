@@ -432,6 +432,39 @@ async def _deliver_webhooks(webhooks: list[dict], store: JobStore, job_id: str, 
         await _post_webhook(url, body, headers, float(timeout))
 
 
+def _on_webhook_task_done(task: asyncio.Task) -> None:
+    """Discard the strong ref + surface any exception that escaped ``_deliver_webhooks``.
+
+    ``_post_webhook`` catches its own delivery errors (network/5xx), but a bug in
+    ``_deliver_webhooks`` itself (e.g. a non-numeric ``timeout`` config value, or a
+    non-str ``secret``) would otherwise escape as an unretrieved task exception --
+    logged only by asyncio's default handler at GC time, bypassing this module's
+    logger entirely. Mirrors ``CommandHook._on_bg_done``.
+    """
+    _WEBHOOK_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        _logger.error("job webhook delivery failed: %s", exc, exc_info=True)
+
+
+async def drain_webhook_tasks(timeout: float = 5.0) -> None:
+    """Await in-flight fire-and-forget webhook deliveries (bounded).
+
+    Without this, a graceful shutdown (``_shutdown`` -> ``job_store.close()``) can
+    race an in-flight webhook POST for the very last job to finish -- the delivery
+    that most needs to land is the one most likely to be silently cut off. Called
+    from the server's ``_shutdown`` before closing the job store.
+    """
+    if not _WEBHOOK_TASKS:
+        return
+    try:
+        await asyncio.wait_for(asyncio.gather(*_WEBHOOK_TASKS, return_exceptions=True), timeout=timeout)
+    except asyncio.TimeoutError:
+        _logger.warning("job webhook drain exceeded %.1fs; %d task(s) abandoned", timeout, len(_WEBHOOK_TASKS))
+
+
 def _emit_job_webhooks(webhooks: list[dict] | None, store: JobStore, job_id: str, status: str) -> None:
     """Schedule outbound webhook delivery for a terminal status (fire-and-forget).
 
@@ -442,7 +475,7 @@ def _emit_job_webhooks(webhooks: list[dict] | None, store: JobStore, job_id: str
         return
     task = asyncio.create_task(_deliver_webhooks(webhooks, store, job_id, status))
     _WEBHOOK_TASKS.add(task)
-    task.add_done_callback(_WEBHOOK_TASKS.discard)
+    task.add_done_callback(_on_webhook_task_done)
 
 
 async def run_job(

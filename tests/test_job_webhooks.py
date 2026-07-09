@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -211,3 +212,118 @@ class TestRunJobIntegration:
         with patch.object(jobs, "_execute_job", _boom), patch.object(jobs, "_emit_job_webhooks", spy):
             await run_job("job_1", None, registry, store, "hi", timeout=10, webhooks=[{"url": "http://x/h"}])
         assert spy.call_args.args[3] == "failed"
+
+    async def test_cancelled_emits_webhook(self, tmp_path):
+        store = JobStore(db_path=str(tmp_path / "j.db"))
+        store.insert("job_1", "sess_1", "alice", "hi", None, None, None)
+        registry = _FakeRegistry()
+        spy = MagicMock()
+
+        async def _cancelled(*a, **kw):
+            raise asyncio.CancelledError()
+
+        with (
+            patch.object(jobs, "_execute_job", _cancelled),
+            patch.object(jobs, "_emit_job_webhooks", spy),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await run_job("job_1", None, registry, store, "hi", timeout=10, webhooks=[{"url": "http://x/h"}])
+        spy.assert_called_once()
+        assert spy.call_args.args[3] == "cancelled"
+
+
+class TestWebhookTaskLifecycle:
+    """The fire-and-forget task's own failure must be surfaced, not swallowed
+    (mirrors CommandHook._on_bg_done), and pending tasks must drain on shutdown."""
+
+    async def test_exception_in_deliver_is_logged_not_swallowed(self, caplog):
+        # A bug in _deliver_webhooks itself (not a network/5xx failure inside
+        # _post_webhook) must not vanish as an unretrieved-task-exception.
+        with patch.object(jobs, "_deliver_webhooks", side_effect=ValueError("boom")):
+            with caplog.at_level(logging.ERROR):
+                jobs._emit_job_webhooks([{"url": "http://x/h"}], _FakeStore(_row()), "job_1", "completed")
+                await asyncio.wait_for(asyncio.gather(*jobs._WEBHOOK_TASKS, return_exceptions=True), timeout=2)
+        assert any("job webhook delivery failed" in r.message for r in caplog.records)
+
+    async def test_drain_awaits_pending_tasks(self):
+        started = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def _slow(*a, **kw):
+            started.set()
+            await asyncio.sleep(0.05)
+            finished.set()
+
+        with patch.object(jobs, "_deliver_webhooks", _slow):
+            jobs._emit_job_webhooks([{"url": "http://x/h"}], _FakeStore(_row()), "job_1", "completed")
+            await started.wait()
+            assert not finished.is_set()
+            await jobs.drain_webhook_tasks(timeout=2)
+        assert finished.is_set()
+
+    async def test_drain_is_noop_when_nothing_pending(self):
+        await jobs.drain_webhook_tasks(timeout=1)  # must not raise / hang
+
+
+class TestConfigThreadingE2E:
+    """End-to-end: jobs.webhooks in YAML config actually reaches _emit_job_webhooks
+    through create_app -> _register_routes -> _start_job -> run_job. Exercises the
+    exact wiring that broke 81 tests during development (routes live in
+    _register_routes, not create_app) -- a regression here must fail loudly."""
+
+    async def test_completed_job_fires_configured_webhook(self, tmp_path):
+        pytest.importorskip("fastapi")
+        import httpx
+        from httpx import ASGITransport
+
+        from koboi.config import Config
+        from koboi.server import create_app
+        from tests.conftest import MockClient, make_mock_response
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "srv", "system_prompt": "h", "max_iterations": 3},
+                "llm": {
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "api_key": "test",
+                    "base_url": "http://localhost:8080/v1",
+                },
+                "memory": {"backend": "in_memory"},
+                "sandbox": {"backend": "restricted"},
+                "server": {"auth_required": False},
+                "jobs": {"webhooks": [{"url": "http://webhook.example/h", "events": ["completed"]}]},
+            },
+            validate=True,
+        )
+        delivered = []
+
+        async def _fake_post_webhook(url, body, headers, timeout):
+            delivered.append((url, json.loads(body)))
+
+        app = create_app(
+            cfg,
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+        )
+        with patch.object(jobs, "_post_webhook", _fake_post_webhook):
+            async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+                r = await c.post("/v1/jobs", json={"message": "do"})
+                assert r.status_code == 202
+                job_id = r.json()["job_id"]
+                deadline = asyncio.get_event_loop().time() + 10
+                while asyncio.get_event_loop().time() < deadline:
+                    body = (await c.get(f"/v1/jobs/{job_id}")).json()
+                    if body["status"] == "completed":
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    pytest.fail("job never completed")
+            # fire-and-forget: give the webhook task a moment to run.
+            await asyncio.wait_for(asyncio.gather(*jobs._WEBHOOK_TASKS, return_exceptions=True), timeout=5)
+
+        assert len(delivered) == 1
+        url, payload = delivered[0]
+        assert url == "http://webhook.example/h"
+        assert payload["job_id"] == job_id
+        assert payload["status"] == "completed"

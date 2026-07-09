@@ -33,6 +33,7 @@ from koboi.server.jobs import (
     DuplicateIdempotencyKey,
     JobRegistry,
     JobStore,
+    drain_webhook_tasks,
     new_job_id,
     resume_on_startup,
     run_job,
@@ -238,6 +239,10 @@ def create_app(
         # off-loop + concurrently so a slow Langfuse server can't pin the drain.
         await pool.flush_langfuse()
         job_registry.cancel_all()
+        # Drain in-flight webhook deliveries BEFORE closing the job store -- a
+        # cancelled/completed job's webhook can still be mid-flight (cancel_all only
+        # cancels the run task, not any webhook it already scheduled).
+        await drain_webhook_tasks()
         await pool.close_all()
         ownership.close()
         job_store.close()
