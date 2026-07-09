@@ -522,6 +522,34 @@ class KoboiAgent:
         args = server_conf.get("args", []) or []
         return " ".join([cmd, *args]).strip()
 
+    def add_mcp_client(self, client, group: str | None = None, risk_level: RiskLevel = RiskLevel.SAFE) -> list[str]:
+        """Register a connected MCP client's tools + retain it for cleanup (G6).
+
+        Returns the registered tool names (so callers can revoke them later).
+        Used by the ``/v1/.../mcp/servers`` POST endpoint.
+        """
+        from koboi.mcp.base import register_mcp_tools
+
+        names: list[str] = []
+        if self._core is not None:
+            names = register_mcp_tools(client, self._core.tools, group=group, risk_level=risk_level)
+        self._mcp_clients.append(client)
+        return names
+
+    def remove_mcp_client(self, client) -> None:
+        """Disable a client's tools, close it, and drop it (G6 DELETE)."""
+        if self._core is not None:
+            try:
+                self._core.tools.disable(list(client.tool_names))
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001
+            pass
+        if client in self._mcp_clients:
+            self._mcp_clients.remove(client)
+
 
 def _build_client_from_dict(llm: dict, logger: AgentLogger) -> RetryClient:
     """Build a ``RetryClient`` from a resolved inline llm dict.

@@ -50,6 +50,9 @@ from koboi.server.schema import (
     ErrorResponse,
     JobStatusResponse,
     JobSubmitRequest,
+    McpServerCreateRequest,
+    McpServerListResponse,
+    McpServerResponse,
     ReadyzCheck,
     ReadyzResponse,
     SessionDeletedResponse,
@@ -317,6 +320,7 @@ def create_app(
     app.state.health = health
     app.state.job_streams_per_owner = job_streams_per_owner  # M3
     app.state.job_streams = {}  # M3: owner -> active job-stream count
+    app.state.mcp_registries: dict[str, Any] = {}  # G6: session_id -> SessionMcpRegistry
 
     # Middleware: registration order is the REVERSE of execution order.
     # auth is registered FIRST → executes LAST (innermost, closest to routes).
@@ -472,6 +476,109 @@ def _register_routes(
             return err
         messages = await pool.get_messages(session_id)
         return SessionResponse(session_id=session_id, messages=messages)  # type: ignore[return-value]
+
+    # --- G6: per-session MCP server management ---
+
+    def _mcp_registry_for(session_id: str):
+        reg = app.state.mcp_registries.get(session_id)
+        if reg is None:
+            from koboi.server.mcp_registry import SessionMcpRegistry
+
+            reg = SessionMcpRegistry()
+            app.state.mcp_registries[session_id] = reg
+        agent = pool.get(session_id)
+        if agent is not None:
+            reg.ensure_populated(list(agent.mcp_clients))
+        return reg
+
+    @app.get("/v1/sessions/{session_id}/mcp/servers", response_model=McpServerListResponse)
+    async def list_mcp_servers(session_id: str, request: Request) -> Response:
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        if pool.get(session_id) is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        reg = _mcp_registry_for(session_id)
+        servers = [McpServerResponse(**e) for e in reg.status()]
+        return McpServerListResponse(servers=servers)  # type: ignore[return-value]
+
+    @app.post("/v1/sessions/{session_id}/mcp/servers", response_model=McpServerResponse, status_code=201)
+    async def add_mcp_server(session_id: str, body: McpServerCreateRequest, request: Request) -> Response:
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        agent = pool.get(session_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        from koboi.facade import _create_mcp_client
+        from koboi.types import RiskLevel
+
+        conf = body.model_dump()
+        transport = conf.get("transport", "stdio")
+        risk_map = {
+            "safe": RiskLevel.SAFE,
+            "moderate": RiskLevel.MODERATE,
+            "destructive": RiskLevel.DESTRUCTIVE,
+        }
+        risk = risk_map.get(str(conf.get("risk_level", "safe")).lower(), RiskLevel.SAFE)
+        async with pool.session_lock(session_id):
+            try:
+                client = _create_mcp_client(conf, transport, agent._logger, agent.config)
+                client.connect()
+            except Exception as e:  # noqa: BLE001
+                return _error_response(400, "mcp_connect_failed", f"MCP server failed to connect: {e}", request)
+            agent.add_mcp_client(client, group=conf.get("group"), risk_level=risk)
+            reg = _mcp_registry_for(session_id)
+            sid = reg.register(client)
+        entry = next((e for e in reg.status() if e["id"] == sid), {"id": sid})
+        return McpServerResponse(**entry)  # type: ignore[return-value]
+
+    @app.delete("/v1/sessions/{session_id}/mcp/servers/{server_id}", response_model=McpServerResponse)
+    async def remove_mcp_server(session_id: str, server_id: str, request: Request) -> Response:
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        agent = pool.get(session_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        reg = _mcp_registry_for(session_id)
+        if reg.get(server_id) is None:
+            raise HTTPException(status_code=404, detail="mcp server not found")
+        entry = next((e for e in reg.status() if e["id"] == server_id), {"id": server_id})
+        tools = agent.core.tools if agent.core is not None else None
+        async with pool.session_lock(session_id):
+            reg.remove(server_id, tools, list(agent.mcp_clients))
+        return McpServerResponse(**entry)  # type: ignore[return-value]
+
+    @app.post(
+        "/v1/sessions/{session_id}/mcp/servers/{server_id}/reconnect",
+        response_model=McpServerResponse,
+    )
+    async def reconnect_mcp_server(session_id: str, server_id: str, request: Request) -> Response:
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        agent = pool.get(session_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        reg = _mcp_registry_for(session_id)
+        if reg.get(server_id) is None:
+            raise HTTPException(status_code=404, detail="mcp server not found")
+        async with pool.session_lock(session_id):
+            try:
+                reg.reconnect(server_id)
+            except Exception as e:  # noqa: BLE001
+                return _error_response(400, "mcp_reconnect_failed", f"MCP reconnect failed: {e}", request)
+        entry = next((e for e in reg.status() if e["id"] == server_id), {"id": server_id})
+        return McpServerResponse(**entry)  # type: ignore[return-value]
 
     @app.delete("/v1/sessions/{session_id}", response_model=SessionDeletedResponse)
     async def delete_session(session_id: str, request: Request) -> Response:
