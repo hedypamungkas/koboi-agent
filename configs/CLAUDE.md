@@ -25,7 +25,7 @@ server_simple.yaml        Minimal HTTP/SSE server (passthrough sandbox)
 server_deploy.yaml        Production server (restricted sandbox, per-session workdir, server:/jobs:/tracing:)
 ```
 **Server configs** (`server_simple.yaml`, `server_deploy.yaml`) drive `koboi serve`.
-`server_deploy.yaml` is the Dockerfile `CMD` and the reference for `server:`/`jobs:`/`sandbox:`/`tracing:`.
+`server_deploy.yaml` is the production reference for `server:`/`jobs:`/`sandbox:`/`tracing:`; the Dockerfile `CMD` defaults to `server_simple.yaml` (override at run time via `KOBOI_CONFIG=/app/configs/server_deploy.yaml`).
 
 ## Schema reference
 See `.claude/skills/yaml-config.md` for the full config schema.
@@ -38,4 +38,4 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `llm`, `tools`, `context`, `rag`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `keybindings`
+`agent`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `eval`, `keybindings`

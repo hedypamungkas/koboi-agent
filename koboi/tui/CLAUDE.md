@@ -13,12 +13,13 @@ NOT touch this package. Requires the `[tui]` extra (`rich` for the legacy
 ```
 app.py              Interactive chat surface: run_chat_interactive() + _build_welcome_panel() + legacy _run_interactive() Rich loop (no click; dispatch is in cli.py)
 commands.py          Slash-command registry (/help, /reset, /mode, /skills, etc.)
-approval.py          CLI approval handler bridge (guardrails.approval=cli)
+approval.py          TUIApprovalHandler -- Textual message-based handler that replaces CLIApprovalHandler's stdin prompt; swapped in by textual_app when guardrails.approval.handler is cli or callback
 textual_app.py      Textual App subclass, screen management
+keybindings.py       Configurable keybindings loaded from the YAML `keybindings:` section (13 defaults); load_keybindings()/get_keybinding_display()
 bridge.py           Async bridge between Textual event loop and AgentCore
 loop.py             TUI-specific agent loop wrapper
-export.py           Conversation export (markdown/JSON)
-notifications.py    Toast notification system
+export.py           Conversation export (markdown/JSON/HTML)
+notifications.py    Backward-compat re-export shim (real impl moved to koboi/notifications.py)
 themes.py           Theme definitions (koboi-dark, koboi-light)
 app.tcss            Textual CSS stylesheet
 ```
@@ -28,7 +29,7 @@ app.tcss            Textual CSS stylesheet
 command_palette.py    Slash-command picker (/help, /reset, /mode, etc.)
 help_overlay.py       Keyboard shortcut reference
 history_search.py     Search through conversation history
-permission_dialog.py  Tool approval dialog (for guardrails.approval=cli)
+permission_dialog.py  Tool approval dialog (modal launched by the TUIApprovalHandler flow; active when guardrails.approval.handler is cli/callback)
 session_manager.py    Multi-session management
 subagent_monitor.py   Sub-agent activity display
 transcript_viewer.py  Full transcript view
@@ -53,8 +54,8 @@ status_bar.py         Bottom status bar
 ```
 
 ## Conventions
-- All widgets inherit from Textual `Widget` or `Static`
-- Screens are registered in `textual_app.py`
+- Widgets inherit from Textual `Widget` subclasses: `Widget`, `Static`, `VerticalScroll`, `Vertical`, `Input`, `Suggester`
+- Screens are pushed on demand via `push_screen` from `textual_app.py` (most) and `commands.py` (yolo_confirm)
 - Bridge pattern: `bridge.py` wraps async `AgentCore` calls for Textual's sync event loop
-- Themes defined as Textual CSS variables in `themes.py`
+- Themes defined as Textual `Theme` objects (hex colors) in `themes.py`, registered via `register_themes(app)`; CSS rules live in `app.tcss`
 - Widget exports in `widgets/__init__.py`: `ChatLog`, `InputBox`, `MessageBubble`, `StatusBar`, etc.

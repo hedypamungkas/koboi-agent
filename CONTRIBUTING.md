@@ -18,6 +18,16 @@ pytest -k "hook"              # by keyword
 pytest --cov=koboi            # with coverage
 ```
 
+## Lint, type, and security gates (required by CI)
+
+```bash
+ruff check koboi/             # lint (E,F,W,B,UP,C4)
+ruff format --check koboi/    # format check
+mypy koboi/                   # type check
+bandit -r koboi/ -c pyproject.toml   # static security scan
+pip-audit --strict            # dependency vulnerability audit
+```
+
 ## Branch naming
 
 ```
@@ -32,14 +42,14 @@ refactor/<what-is-refactored>
 <type>: <short summary>
 ```
 
-Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
+Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `style`, `ci`, `perf`, `build`
 
 ## Adding an LLM provider
 
 1. Create `koboi/llm/<provider>_adapter.py` implementing `LLMClient` ABC
-2. Add provider branch to `factory.py:create_client()`
-3. Add env var fallbacks in `facade.py:_build_client()`
-4. Add tests in `tests/test_<provider>.py`
+2. Add a `_create_<provider>()` factory function in `factory.py` and register it via `ProviderRegistry.register(ProviderDescriptor(...))` in `koboi/llm/registry.py:register_builtin_providers()`
+3. Declare env var fallbacks on the `ProviderDescriptor` (`env_key_api`, `env_key_base_url`, `env_key_model`) when registering the provider in `koboi/llm/registry.py:register_builtin_providers()` — `_build_client()` in facade.py no longer resolves env vars.
+4. Add tests in `tests/test_llm_<provider>_adapter.py`
 5. Add example in `examples/`
 
 ## Adding a builtin tool

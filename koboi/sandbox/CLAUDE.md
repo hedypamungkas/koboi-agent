@@ -21,7 +21,7 @@ __init__.py    Re-exports register_sandbox, build_sandbox, BaseSandbox; calls re
   lookup by `backend` name → instance. Subprocess tools (`run_shell`, `git_*`,
   filesystem) declare `deps=["sandbox"]` and read `_deps["sandbox"]`; the facade always
   wires a (passthrough-or-better) sandbox.
-- A **typo'd backend** raises `RuntimeError` (fail-loud) rather than silently falling
+- A **typo'd backend** raises `ValueError` (fail-loud) rather than silently falling
   back to passthrough. Absent/empty/`passthrough` → passthrough.
 
 ## Restricted backend (`restricted.py`)

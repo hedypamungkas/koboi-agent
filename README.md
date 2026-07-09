@@ -1,6 +1,11 @@
 # koboi-agent
 
+[![CI](https://github.com/hedypamungkas/koboi-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/hedypamungkas/koboi-agent/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/hedypamungkas/koboi-agent/branch/main/graph/badge.svg)](https://codecov.io/gh/hedypamungkas/koboi-agent)
+[![PyPI version](https://img.shields.io/pypi/v/koboi-agent)](https://pypi.org/project/koboi-agent/)
+[![Python](https://img.shields.io/pypi/pyversions/koboi-agent)](https://pypi.org/project/koboi-agent/)
+[![License: MIT](https://img.shields.io/pypi/l/koboi-agent)](https://github.com/hedypamungkas/koboi-agent/blob/main/LICENSE)
+[![Docker](https://github.com/hedypamungkas/koboi-agent/actions/workflows/docker.yml/badge.svg)](https://github.com/hedypamungkas/koboi-agent/actions/workflows/docker.yml)
 
 Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-provider LLM (OpenAI, Anthropic, Cloudflare).
 
@@ -25,7 +30,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 ### Install
 
 ```bash
-pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, eval, eval-test
+pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, eval, eval-test, diagnostics, init-zsh
 # Extras (optional):
 #   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
 #   pip install koboi-agent[api]   # `koboi serve` (HTTP/SSE server; `koboi keys` works on bare install)
@@ -138,7 +143,7 @@ context:
 
 rag:
   enabled: true
-  chunker: "paragraph"       # fixed | sentence | paragraph
+  chunker: "paragraph"       # fixed | sentence | paragraph | semantic
   retriever: "keyword"       # keyword | semantic | hybrid
   top_k: 10
   documents:
@@ -175,7 +180,7 @@ pytest --cov=koboi            # with coverage
 | Range | Features |
 |-------|----------|
 | 01-04 | Basic chat and tool use |
-| 05-08 | Context management and RAG |
+| 05-08 | Context management, RAG, and guardrails |
 | 09-10 | MCP client/server |
 | 11-14 | Policy, hooks, skills, custom tools |
 | 15-16 | Multi-agent orchestration |
@@ -186,9 +191,10 @@ pytest --cov=koboi            # with coverage
 | 29-32 | Skills (enhanced), eval-test, tool selection, sandbox + resume |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 
-Run any example:
+Examples use `click` + `rich` (in the `[tui]` extra), so install that first:
 
 ```bash
+pip install koboi-agent[tui]                    # examples need click + rich
 python examples/01_simple_chat.py              # automatic mode
 python examples/01_simple_chat.py -m interactive  # interactive mode
 ```

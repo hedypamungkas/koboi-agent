@@ -180,7 +180,7 @@ Every hook receives a `HookContext` dataclass with these fields:
 | 0-19 | Infrastructure | `LoggingHook` (priority 0) |
 | 20-39 | Security | `PolicyHook` (priority 25) |
 | 40-59 | Business logic | Default (priority 50) |
-| 60-79 | Post-processing | `AuditHook` (priority 80) |
+| 60-79 | Post-processing | -- |
 | 80-100 | Cleanup | -- |
 
 ### Emit mechanics
@@ -282,7 +282,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (18)
+### Config sections (21)
 
 | Section | Controls |
 |---------|----------|
@@ -304,6 +304,9 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
 | `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup |
 | `keybindings` | TUI key overrides |
+| `providers` | Named LLM provider definitions referenced by `llm:` (str ref) and pool members |
+| `pools` | Named provider pools (failover / round_robin) wrapping multiple `providers` members |
+| `embedding` | Embedding provider config for RAG semantic retrieval (inline or named `providers` ref) |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
@@ -417,10 +420,14 @@ rag:
 
 ```python
 class ContextManager(ABC):
+    @property
     @abstractmethod
-    def _build_result(self, system_msgs, non_system) -> tuple[list[dict], str]: ...
+    def _strategy_name(self) -> str: ...
 
-    def manage(self, messages, max_tokens) -> list[dict]:
+    @abstractmethod
+    async def _build_result(self, system_msgs, non_system) -> tuple[list[dict], str]: ...
+
+    async def manage(self, messages, max_tokens) -> list[dict]:
         # 1. Estimate tokens
         # 2. If within budget, return as-is
         # 3. Call _build_result() for strategy-specific selection
@@ -647,7 +654,7 @@ class LLMClient(ABC):
 
 ### ProviderRegistry
 
-`ProviderDescriptor` is a frozen dataclass declaring provider metadata: `name`, `env_key_api`, `env_key_base_url`, `default_model`, `factory`. `ProviderRegistry` stores descriptors and resolves env vars with fallback chains.
+`ProviderDescriptor` is a frozen dataclass declaring provider metadata: `name`, `env_key_api`, `env_key_base_url`, `env_key_model`, `default_model`, `default_base_url`, `factory`, `extra_env`. `ProviderRegistry` stores descriptors and resolves env vars with fallback chains.
 
 ### Built-in providers
 
@@ -792,9 +799,9 @@ mcp:
 
 ### Stream events (`koboi/events.py`)
 
-`TextDeltaEvent`, `ToolCallEvent`, `ToolResultEvent`, `CompleteEvent`, `ErrorEvent`, `IterationEvent`, `RoutingDecisionEvent`, `AgentDispatchEvent`, `AgentResultEvent`, `OrchestrationCompleteEvent`
+`TextDeltaEvent`, `ToolCallEvent`, `ToolResultEvent`, `CompleteEvent`, `ErrorEvent`, `IterationEvent`, `PendingApprovalEvent`, `RoutingDecisionEvent`, `AgentDispatchEvent`, `AgentResultEvent`, `OrchestrationCompleteEvent`
 
-### Error hierarchy (`koboi/exceptions.py`)
+### Error hierarchy (`AgentError` in `koboi/exceptions.py`; `LLMError` in `koboi/llm/base.py`)
 
 ```
 AgentError
