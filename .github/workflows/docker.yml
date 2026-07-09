@@ -58,8 +58,8 @@ jobs:
       # Scan target: a classic docker-format tar (manifest.json at root) so Trivy
       # can read it via --input. type=oci + provenance=true (the build-push-action
       # v7 default) exports a manifest-list/index artifact that Trivy rejects with
-      # "manifest.json not found in tar" — so use type=docker and disable
-      # provenance/attestation for a deterministic single-image tar.
+      # "manifest.json not found in tar" — so use type=docker with provenance
+      # disabled for a deterministic single-image tar.
       - name: Build amd64 image to docker tar (scan target; not pushed yet)
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
@@ -67,7 +67,6 @@ jobs:
           platforms: linux/amd64
           push: false
           provenance: false
-          attestation: false
           outputs: type=docker,dest=/tmp/image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
