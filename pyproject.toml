@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "koboi-agent"
-version = "0.9.0"
+version = "0.10.0"
 description = "Universal configurable AI agent framework — production-grade, YAML-driven, open-source ready."
 license = "MIT"
 readme = "README.md"
