@@ -41,11 +41,14 @@ class BaseSandbox(ABC):
         env: dict | None = None,
         timeout: float | None = None,
         shell: bool = False,
+        input: str | None = None,
     ) -> SandboxResult:
         """Run ``command`` and return a :class:`SandboxResult`.
 
         ``shell=True`` supports pipe/redirect chaining (string command);
-        ``shell=False`` runs an argv list (used by git).
+        ``shell=False`` runs an argv list (used by git). ``input`` (when given)
+        is fed to the child's stdin as text -- used by command hooks to pass a
+        JSON payload (see :class:`koboi.hooks.command_hook.CommandHook`).
         """
 
     @abstractmethod

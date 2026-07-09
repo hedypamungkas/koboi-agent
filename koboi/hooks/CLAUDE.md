@@ -8,6 +8,7 @@ Observer-pattern lifecycle hooks. Every stage of the agent loop emits events tha
 chain.py              HookEvent enum, HookContext dataclass, Hook ABC, HookChain
 registry.py           Declarative hook registration (HookEntry, build_hook_chain, register_hook)
 callback_hook.py      CallbackHook -- wraps a plain function as a Hook
+command_hook.py       CommandHook -- YAML-driven external command hook (uv/uvx; JSON over stdio; see docs/custom-hooks.md)
 builtin.py            LoggingHook (all events), AuditHook (tool events)
 mode_hook.py          Mode-aware tool filtering and system prompt injection
 guardrail_hook.py     Input/output guardrail integration
@@ -53,3 +54,11 @@ The module-level `build_hook_chain()` function in `registry.py` creates the `Hoo
 - 40-59: Business logic (default = 50)
 - 60-79: Post-processing
 - 80-100: Cleanup (AuditHook = 80)
+
+## Custom command hooks (`hooks:` YAML section)
+Declarative external-command hooks -- no Python in the agent. Declared under the
+top-level `hooks:` section (`allow_exec` default-deny gate + `on_event:` entries);
+each entry spawns a command per `events` and exchanges JSON over stdio. Wired by
+`_build_command_hooks()` in `facade.py` (not via `_REGISTRY`). Security is layered
+(allow_exec gate + sandbox isolation + fail-safe). Full protocol + security model +
+server-path notes: `docs/custom-hooks.md`. Runnable demo: `examples/33_command_hook_messaging.py`.

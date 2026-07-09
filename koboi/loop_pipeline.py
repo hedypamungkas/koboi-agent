@@ -317,6 +317,12 @@ class ToolExecutionPipeline:
             post_ctx = await self.hooks.emit(post_ctx)
             for msg in post_ctx.inject_messages:
                 self.memory.add_context_message(msg, label="hook_inject")
+            # Honor a hook's modified_tool_result (e.g. a CommandHook rewriting the
+            # tool output). Without this, the local `tool_result` below would ignore
+            # any POST_TOOL_USE mutation -- memory/audit/on_event/return would all
+            # use the original. Only override when the hook set a (new) value.
+            if post_ctx.tool_result is not None:
+                tool_result = post_ctx.tool_result
 
             # DoomLoopHook detects the pattern during POST_TOOL_USE and sets a
             # metadata flag, but it cannot re-emit DOOM_LOOP_DETECTED itself (hooks
