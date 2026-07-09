@@ -40,6 +40,9 @@ class CompleteEvent:
     iterations_used: int = 0
     tools_used: list[str] = field(default_factory=list)
     trace_id: str = ""
+    # RunResult.metadata parity (rag_results, guardrail_outcomes) so streamed runs
+    # are eval/observable. Empty for adapter-emitted CompleteEvents.
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -175,6 +178,7 @@ def event_to_dict(event: StreamEvent) -> dict:
             "model_name": (resp.model if resp and resp.model else None),
             "url_provider": (resp.base_url if resp and resp.base_url else None),
             "trace_id": event.trace_id or None,
+            "metadata": event.metadata,
         }
     if isinstance(event, ErrorEvent):
         return {

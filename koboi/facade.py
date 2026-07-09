@@ -673,6 +673,28 @@ def _build_embedding_client(config: Config, logger: AgentLogger):
     return build_embedding_client(emb, logger)
 
 
+def _warn_semantic_without_embeddings(config: Config, has_dedicated_embedding_client: bool) -> None:
+    """Best-effort startup nudge: if semantic/hybrid retrieval is selected but no
+    dedicated ``embedding:`` client was built and the (inline) chat provider has no
+    embeddings endpoint (e.g. anthropic), warn so the user knows semantic will fall
+    back to keyword. Named-ref/pool providers are still covered by the retriever's
+    lazy runtime warning; this is the early, build-time signal.
+    """
+    retriever = config.get("rag", "retriever", default="keyword")
+    if retriever not in ("semantic", "hybrid") or has_dedicated_embedding_client:
+        return
+    llm = config.get("llm", default={})
+    provider = llm.get("provider", "openai") if isinstance(llm, dict) else "openai"
+    if provider == "anthropic":
+        logging.getLogger(__name__).warning(
+            "RAG retriever %r needs embeddings, but the chat provider is 'anthropic' "
+            "(no embeddings endpoint) and no top-level `embedding:` section is "
+            "configured -- semantic retrieval will fall back to keyword. Add an "
+            "`embedding:` section to enable it.",
+            retriever,
+        )
+
+
 def _build_rag(config: Config, client: Client, logger: AgentLogger):
     if not config.rag_enabled:
         return None
@@ -691,6 +713,7 @@ def _build_rag(config: Config, client: Client, logger: AgentLogger):
     # Use a dedicated embedding provider when configured (decoupled from chat);
     # else fall back to the chat client. Only the SemanticRetriever consumes it.
     rag_client = _build_embedding_client(config, logger) or client
+    _warn_semantic_without_embeddings(config, has_dedicated_embedding_client=rag_client is not client)
     return build_rag(rag_dict, client=rag_client, logger=logger)
 
 
