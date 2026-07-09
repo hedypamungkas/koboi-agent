@@ -32,6 +32,17 @@ def _run_serve(args) -> None:
     serve_app(args.config, host=args.host, port=args.port)
 
 
+def _run_mcp_serve(args) -> None:
+    """``koboi mcp-serve <config>`` -> expose this agent's tools as a stdio MCP server (G9).
+
+    Core-only (no [api] extra). Default exposure is SAFE-only; ``--allow`` adds a named
+    MODERATE tool; ``--allow-all`` exposes everything (incl. DESTRUCTIVE, dangerous).
+    """
+    from koboi.mcp.tool_server import serve_koboi_tools
+
+    serve_koboi_tools(args.config_path, allow=args.allow, allow_all=args.allow_all)
+
+
 def _run_keys(args) -> None:
     """``koboi keys create|list|revoke|rotate`` -- API key management (M3)."""
     from koboi.server.keys_cli import DEFAULT_KEYS_FILE, create_key, list_keys, revoke_key, rotate_key
@@ -133,6 +144,25 @@ def _build_parser():
     p.add_argument("--print", dest="print_mode", action="store_true", help="Stream JSON lines (pipe-friendly)")
     p.add_argument("--resume", dest="resume_session", default=None, help="Resume an interrupted session by ID")
 
+    # mcp-serve (core-only stdio; exposes koboi tools to external MCP clients)
+    p = sub.add_parser(
+        "mcp-serve",
+        help="Expose this agent's tools as an MCP server over stdio (for Claude Desktop/Cursor/etc.)",
+    )
+    p.add_argument("config_path")
+    p.add_argument(
+        "--allow",
+        action="append",
+        default=[],
+        metavar="TOOL",
+        help="Expose a named (MODERATE) tool in addition to the SAFE-only default (repeatable)",
+    )
+    p.add_argument(
+        "--allow-all",
+        action="store_true",
+        help="Expose EVERY tool including DESTRUCTIVE (dangerous: bypasses approval)",
+    )
+
     # chat (interactive needs [tui]; --print is core)
     p = sub.add_parser("chat", help="Interactive chat (needs [tui] extra unless --print)")
     p.add_argument("config_path")
@@ -225,6 +255,9 @@ def main() -> None:
         sys.exit(
             cli_commands.cmd_run(args.config_path, args.message, args.verbose, args.print_mode, args.resume_session)
         )
+    if args.command == "mcp-serve":
+        _run_mcp_serve(args)
+        return
     if args.command == "sessions":
         sys.exit(cli_commands.cmd_sessions(args.config_path, args.limit, delete=args.delete))
     if args.command == "eval":
