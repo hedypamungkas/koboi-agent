@@ -59,11 +59,11 @@ class SessionMcpRegistry:
         if registry is not None:
             try:
                 registry.disable(list(client.tool_names))
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
                 pass
         try:
             client.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
             pass
         if client in mcp_clients:
             mcp_clients.remove(client)
@@ -76,7 +76,7 @@ class SessionMcpRegistry:
             return False
         try:
             client.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
             pass
         client.connect()  # raises on failure -> caller maps to an error response
         return True

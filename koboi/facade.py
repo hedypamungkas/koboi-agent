@@ -541,11 +541,11 @@ class KoboiAgent:
         if self._core is not None:
             try:
                 self._core.tools.disable(list(client.tool_names))
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
                 pass
         try:
             client.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
             pass
         if client in self._mcp_clients:
             self._mcp_clients.remove(client)

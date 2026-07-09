@@ -67,7 +67,7 @@ def _build_registry(config: Config) -> ToolRegistry:
         from koboi.tools.state import ToolState
 
         registry.set_dep("tool_state", ToolState())
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
         pass
     return registry
 
