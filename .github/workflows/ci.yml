@@ -112,7 +112,19 @@ jobs:
         # merge gate; vulns print to the job log. pip-audit has no native SARIF
         # format, so Security-tab alerting comes from Dependabot instead
         # (see .github/dependabot.yml — covers both pip + github-actions).
-        run: pip-audit --strict
+        #
+        # Audit `pip freeze --exclude-editable`, NOT the live environment: koboi-agent
+        # itself is editable-installed above, and pip-audit resolves every installed
+        # package against the PyPI index. Right after a version bump, the new version
+        # may not have propagated to PyPI yet (chicken-and-egg with release.yml, which
+        # publishes on the same tag push) -- "Dependency not found on PyPI and could not
+        # be audited". `--skip-editable` looks like the fix but isn't: --strict treats a
+        # skipped package as a collection failure too, so it still fails. Excluding the
+        # editable package from the frozen requirements list is the only combination that
+        # keeps --strict protection for all *real* (third-party) dependencies.
+        run: |
+          pip freeze --exclude-editable > /tmp/audit-requirements.txt
+          pip-audit --strict -r /tmp/audit-requirements.txt
 
   seccomp:
     # Validates HARD network isolation (sandbox.network_isolation: seccomp). The
