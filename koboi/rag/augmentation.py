@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 from abc import ABC
 from typing import TYPE_CHECKING
 
+from koboi.rag.retriever import BaseRetriever
 from koboi.rag.types import RetrievalResult
 from koboi.tokens import estimate_single
 
 if TYPE_CHECKING:
     from koboi.logger import AgentLogger
-    from koboi.rag.retriever import BaseRetriever
 
 
 class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods have default no-op impls
@@ -34,6 +35,18 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         if self.relevance_threshold is not None and results:
             results = [r for r in results if r.score >= self.relevance_threshold]
 
+        # #11b: drop duplicate-content chunks (keep first occurrence) so the same
+        # passage isn't injected twice (overlapping chunks / duplicate files).
+        seen: set[str] = set()
+        deduped: list[RetrievalResult] = []
+        for r in results:
+            h = hashlib.sha256(r.chunk.content.encode()).hexdigest()
+            if h in seen:
+                continue
+            seen.add(h)
+            deduped.append(r)
+        results = deduped
+
         # Surface retrieved chunks (R4): overwrite each call so this reflects the
         # latest retrieval (multi-turn safe -- assignment, not accumulation).
         self.last_results = list(results)
@@ -41,10 +54,11 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         if not results:
             return "", results
 
+        # #12: numbered citations [1] [2] ... so the model can echo references.
         context_parts = []
-        for r in results:
+        for i, r in enumerate(results, start=1):
             source = r.chunk.metadata.get("source", r.chunk.doc_id)
-            context_parts.append(f"[Source: {source}]\n{r.chunk.content}")
+            context_parts.append(f"[{i}] [Source: {source}]\n{r.chunk.content}")
         context = "\n---\n".join(context_parts)
 
         if self.logger:
@@ -143,7 +157,7 @@ class OnTheFlyAugmentation(AugmentationStrategy):
 # ---------------------------------------------------------------------------
 
 
-class RerankerRetriever:
+class RerankerRetriever(BaseRetriever):
     """Wraps a retriever and re-scores results using keyword overlap scoring.
 
     This is a lightweight cross-encoder style reranker that doesn't require

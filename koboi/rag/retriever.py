@@ -117,6 +117,69 @@ class KeywordRetriever(BaseRetriever):
         ]
 
 
+class BM25Retriever(BaseRetriever):
+    """BM25Okapi lexical retrieval (saturation + document-length normalization).
+
+    Unlike ``KeywordRetriever`` (TF-IDF cosine), BM25 saturates term frequency
+    (``k1``) and normalizes by document length (``b``) -- the standard lexical
+    ranking used by search engines. Additive: opt in via ``retriever: bm25``;
+    ``keyword`` stays the default.
+    """
+
+    def __init__(
+        self,
+        chunks: list[Chunk],
+        k1: float = 1.5,
+        b: float = 0.75,
+        synonyms: dict[str, list[str]] | None = None,
+    ):
+        self._chunks = chunks
+        self._k1 = k1
+        self._b = b
+        self._synonyms = {k.lower(): v for k, v in (synonyms or {}).items()}
+        self._doc_tokens = [self._tokenize(c.content) for c in chunks]
+        self._doc_len = [len(t) for t in self._doc_tokens]
+        self._avgdl = (sum(self._doc_len) / len(self._doc_len)) if self._doc_len else 0.0
+        n_docs = len(chunks)
+        doc_freq: dict[str, int] = {}
+        self._tf: list[Counter] = []
+        for tokens in self._doc_tokens:
+            counts = Counter(tokens)
+            self._tf.append(counts)
+            for term in counts:
+                doc_freq[term] = doc_freq.get(term, 0) + 1
+        # BM25 idf (the +1 inside the log keeps it non-negative for small corpora).
+        self._idf = {term: math.log((n_docs - freq + 0.5) / (freq + 0.5) + 1) for term, freq in doc_freq.items()}
+
+    def _tokenize(self, text: str) -> list[str]:
+        return re.findall(r"\w+", text.lower())
+
+    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+        query_terms = self._tokenize(query)
+        if self._synonyms:
+            query_terms = query_terms + [a for t in query_terms for a in self._synonyms.get(t, [])]
+        if not query_terms:
+            return []
+
+        avgdl = self._avgdl or 1.0
+        scored: list[tuple[Chunk, float]] = []
+        for i, chunk in enumerate(self._chunks):
+            tf = self._tf[i]
+            dl = self._doc_len[i] or 1
+            score = 0.0
+            for term in set(query_terms):
+                f = tf.get(term, 0)
+                if f == 0 or term not in self._idf:
+                    continue
+                idf = self._idf[term]
+                score += idf * (f * (self._k1 + 1)) / (f + self._k1 * (1 - self._b + self._b * dl / avgdl))
+            if score > 0:
+                scored.append((chunk, score))
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        return [RetrievalResult(chunk=chunk, score=score, retrieval_method="bm25") for chunk, score in scored[:top_k]]
+
+
 class _EmbeddingIndexCache:
     """Process-level shared embedding index, keyed by a corpus signature.
 
@@ -136,9 +199,12 @@ class _EmbeddingIndexCache:
     module-level cache.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cache_path: str | None = None) -> None:
         self._index: dict[str, dict[str, list[float]]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # #5: opt-in on-disk persistence (JSON). None = in-memory only (default).
+        self._cache_path: str | None = cache_path
+        self._disk_loaded = False
 
     @staticmethod
     def _signature(chunks: list[Chunk]) -> str:
@@ -150,8 +216,51 @@ class _EmbeddingIndexCache:
             h.update(b"\0")
         return h.hexdigest()
 
+    def _load_disk(self) -> None:
+        """Lazy-load the JSON on-disk cache into the in-memory index (once)."""
+        if self._disk_loaded:
+            return
+        self._disk_loaded = True
+        if not self._cache_path:
+            return
+        from pathlib import Path
+
+        p = Path(self._cache_path)
+        if not p.exists():
+            return
+        try:
+            import json
+
+            with p.open(encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for sig, emb_map in data.items():
+                    if isinstance(emb_map, dict) and sig not in self._index:
+                        self._index[sig] = emb_map
+        except (OSError, ValueError) as exc:  # corrupt/unreadable cache -> start empty
+            _logger.warning("Embedding cache load failed (%s); starting empty", exc)
+
+    def _save_disk(self) -> None:
+        """Persist the in-memory index to JSON (atomic temp-replace)."""
+        if not self._cache_path:
+            return
+        from pathlib import Path
+
+        try:
+            import json
+
+            p = Path(self._cache_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(p.suffix + ".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(self._index, f)
+            tmp.replace(p)
+        except OSError as exc:  # best-effort; never block retrieval on a save failure
+            _logger.warning("Embedding cache save failed: %s", exc)
+
     async def get_or_build(self, chunks, embed_fn) -> tuple[dict[str, list[float]] | None, bool]:
         """Return ``(id -> embedding, ok)``. ``ok=False`` means unavailable."""
+        self._load_disk()
         sig = self._signature(chunks)
         cached = self._index.get(sig)
         if cached is not None:
@@ -170,6 +279,7 @@ class _EmbeddingIndexCache:
                     return None, False  # endpoint unavailable; do not cache
                 emb_map[c.id] = emb
             self._index[sig] = emb_map
+            self._save_disk()
             return emb_map, True
 
     def clear(self) -> None:
@@ -184,6 +294,16 @@ _EMBEDDING_CACHE = _EmbeddingIndexCache()
 def clear_embedding_cache() -> None:
     """Reset the shared embedding index (test isolation / forced rebuild)."""
     _EMBEDDING_CACHE.clear()
+
+
+def set_embedding_cache_path(path: str | None) -> None:
+    """Set the on-disk embedding cache path (opt-in #5) and force a reload.
+
+    When set, successful corpus embeddings persist to JSON across process restarts
+    so a redeploy does not re-embed the whole corpus. None = in-memory only (default).
+    """
+    _EMBEDDING_CACHE._cache_path = path
+    _EMBEDDING_CACHE._disk_loaded = False  # force reload on next get_or_build
 
 
 class SemanticRetriever(BaseRetriever):
@@ -204,14 +324,26 @@ class SemanticRetriever(BaseRetriever):
         self._fallback: KeywordRetriever | None = None
         self._chunk_embeddings: dict[str, list[float]] = {}
         self._index_built = False
+        # #7: bounded query-embedding cache (the corpus is cached separately in
+        # _EMBEDDING_CACHE). Avoids re-embedding the (often identical) query on
+        # every retrieve() call.
+        self._query_cache: dict[str, list[float]] = {}
+        self._query_cache_size = 256
         self._build_index()
 
     async def _get_embedding(self, text: str) -> list[float] | None:
         if not self._client:
             return None
+        cached = self._query_cache.get(text)
+        if cached is not None:
+            return cached
         result = await self._client.get_embeddings(text)
         if result is None:
             self._embedding_available = False
+            return None
+        if len(self._query_cache) >= self._query_cache_size:
+            self._query_cache.pop(next(iter(self._query_cache)), None)  # FIFO evict
+        self._query_cache[text] = result
         return result
 
     @staticmethod
@@ -361,6 +493,11 @@ def _register_builtins() -> None:
     from koboi.rag.registry import register_retriever as _reg
 
     _reg("keyword", description="TF-IDF cosine similarity retrieval")(KeywordRetriever)
+
+    _reg(
+        "bm25",
+        description="BM25Okapi lexical retrieval with saturation + document-length normalization",
+    )(BM25Retriever)
 
     _reg(
         "semantic",
