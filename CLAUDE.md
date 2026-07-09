@@ -14,6 +14,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 - Serve HTTP:  `koboi serve configs/server_deploy.yaml`  (needs `[api]` extra: `pip install -e ".[api]"`)
 - API keys:    `koboi keys create`                       (Bearer auth; `koboi keys list|revoke|rotate`)
 - Resume:      `koboi run <config> --resume <session>`    (`koboi sessions <config>` lists persisted sessions; `--delete <id>` deletes one)
+- MCP serve:   `koboi mcp-serve configs/simple_chat.yaml` (expose this agent's tools as a stdio MCP server; SAFE-only by default, `--allow NAME`/`--allow-all` to escalate)
 - Eval (eve):  `koboi eval-test evals/ --mock --strict`
 - Benchmarks:  `pytest tests/benchmarks/ -o python_files="bench_*.py" --benchmark-only`  (perf regression gate; see docs/performance-benchmarking.md)
 
@@ -84,6 +85,7 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 
 ## Gotchas
 - `benchmarks/results.json` is 183MB -- never read it
+- MCP exposure/management: `koboi mcp-serve <config>` exposes the agent's tools as a stdio MCP server; **SAFE-only by default** (the bridge calls `ToolRegistry.execute()` which bypasses the risk/approval/audit pipeline), `--allow NAME` adds a MODERATE tool, `--allow-all` is the only way to expose DESTRUCTIVE. The server layer has runtime MCP management at `POST/GET/DELETE /v1/sessions/{id}/mcp/servers` + `POST /v1/sessions/{id}/mcp/servers/{id}/reconnect` (in-process, session-scoped, not persisted across restart/eviction). `BaseMCPClient.is_connected()/transport/tool_names/endpoint/name` + `KoboiAgent.mcp_status()` feed the TUI **f2** MCP-status screen.
 - `koboi_memory.db` is SQLite WAL-mode, 3 files (.db, .db-shm, .db-wal); it also holds a `steps` table (P2-A journal, additive via `CREATE TABLE IF NOT EXISTS`)
 - `sandbox:` YAML section drives `koboi/sandbox/`; default `passthrough` preserves pre-P0b behavior, opt into `restricted` for cwd/env/PATH/network/rlimit isolation. `restricted` network is SOFT by default (token-scan blocks curl/wget/nc but NOT interpreters like `python3 -c 'import urllib'` or `bash /dev/tcp`); set `sandbox.network_isolation: seccomp` for HARD syscall-layer egress deny (Linux + `python3-seccomp` system package; `_HAS_SECCOMP` gate; falls back to soft with a warning). `server_deploy.yaml`/`e2e_full.yaml` enable seccomp by default. `KOBOI_SANDBOX_DIR` is still honored as a back-compat fallback. Subprocess tools (`run_shell`, `git_*`, filesystem) declare `deps=["sandbox"]` and read `_deps["sandbox"]`; the facade always wires a (passthrough-or-better) sandbox
 - `journal:` YAML section (default `enabled: true`) drives `koboi/journal.py`; auto-disabled when `memory.backend != sqlite` (it borrows the SQLite connection). Loop writes are native (not hooks) so durability can't be bypassed

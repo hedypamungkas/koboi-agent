@@ -320,7 +320,7 @@ def create_app(
     app.state.health = health
     app.state.job_streams_per_owner = job_streams_per_owner  # M3
     app.state.job_streams = {}  # M3: owner -> active job-stream count
-    app.state.mcp_registries: dict[str, Any] = {}  # G6: session_id -> SessionMcpRegistry
+    app.state.mcp_registries = {}  # G6: session_id -> SessionMcpRegistry
 
     # Middleware: registration order is the REVERSE of execution order.
     # auth is registered FIRST → executes LAST (innermost, closest to routes).
