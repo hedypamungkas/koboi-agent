@@ -27,6 +27,8 @@ e2e_full.yaml             Full end-to-end (server + RAG + skills + tools)
 hitl_demo.yaml            Human-in-the-loop approval demo (loopback; delete_file/run_shell trigger approvals)
 server_simple.yaml        Minimal HTTP/SSE server (passthrough sandbox)
 server_deploy.yaml        Production server (restricted sandbox, per-session workdir, server:/jobs:/tracing:)
+command_hook_notify.yaml  External-command hook demo (`hooks:` section; see docs/custom-hooks.md)
+jobs_webhooks.yaml        Job-webhook demo (`jobs.webhooks`; HMAC-signed terminal-status callbacks)
 ```
 **Server configs** (`server_simple.yaml`, `server_deploy.yaml`) drive `koboi serve`.
 `server_deploy.yaml` is the production reference for `server:`/`jobs:`/`sandbox:`/`tracing:`; the Dockerfile `CMD` defaults to `server_simple.yaml` (override at run time via `KOBOI_CONFIG=/app/configs/server_deploy.yaml`).
@@ -42,4 +44,4 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `eval`, `keybindings`
+`agent`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`

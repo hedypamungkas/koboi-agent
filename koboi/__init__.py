@@ -39,7 +39,7 @@ def _resolve_version() -> str:
 
         return _get_version("koboi-agent")
     except Exception:
-        return "0.6.0"
+        return "0.9.0"
 
 
 __version__ = _resolve_version()

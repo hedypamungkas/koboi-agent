@@ -59,7 +59,9 @@ KoboiAgent (facade.py)
 | 15 | `build_mode_manager()` | `ModeManager` (CHAT/PLAN/ACT/AUTO/YOLO) |
 | 16 | `build_hooks()` | `HookChain` (LoggingHook + conditional hooks) |
 
-After assembly, `_setup_subagent()` and `_setup_tasks()` wire optional sub-agent and task management tools.
+After assembly, `_build_command_hooks()` wires declarative `hooks:` YAML entries (gated by
+`hooks.allow_exec`) into the chain, then `_setup_subagent()` and `_setup_tasks()` wire optional
+sub-agent and task management tools.
 
 ---
 
@@ -284,7 +286,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (21)
+### Config sections (22)
 
 | Section | Controls |
 |---------|----------|
@@ -298,13 +300,14 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `tracing` | Langfuse integration |
 | `policy` | Allow/deny/confirm rules |
 | `skills` | Search paths |
-| `mcp` | MCP server connections |
+| `mcp` | MCP server connections, per-server `risk_level`/`risk_heuristic` |
 | `memory` | Backend (sqlite/in_memory), db_path |
 | `orchestration` | Router type, agents, execution mode |
 | `sandbox` | Backend (passthrough/restricted), workdir strategy, network, network_isolation (seccomp), rlimits |
 | `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume |
 | `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
-| `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup |
+| `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup, `webhooks` (HMAC-signed terminal-status callbacks) |
+| `hooks` | Declarative external-command hooks: `allow_exec` gate, `on_event` entries (see `docs/custom-hooks.md`) |
 | `keybindings` | TUI key overrides |
 | `providers` | Named LLM provider definitions referenced by `llm:` (str ref) and pool members |
 | `pools` | Named provider pools (failover / round_robin) wrapping multiple `providers` members |

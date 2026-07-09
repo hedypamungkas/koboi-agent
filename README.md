@@ -28,14 +28,14 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **Multi-provider LLM**: OpenAI, Anthropic, Cloudflare Workers AI
 - **YAML-driven config** with `${ENV_VAR}` interpolation
 - **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task
-- **Hook lifecycle**: 15 event types for logging, guardrails, telemetry
+- **Hook lifecycle**: 15 event types for logging, guardrails, telemetry, plus declarative external-command hooks (`hooks:` YAML — no Python required)
 - **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/semantic/hybrid), augmentation
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, and dynamic (LLM-planned) execution
 - **Context management**: truncation, smart truncation, key facts, sliding window
 - **Sandboxed execution**: pluggable passthrough/restricted backends (per-session workdir, network/rlimit isolation)
 - **MCP** client (stdio + HTTP) and server support
-- **HTTP/SSE server & jobs**: `koboi serve` — interactive SSE chat (HITL) + autonomous background jobs; API keys, ownership, idempotency, durable resume
+- **HTTP/SSE server & jobs**: `koboi serve` — interactive SSE chat (HITL) + autonomous background jobs; API keys, ownership, idempotency, durable resume, HMAC-signed job webhooks
 - **Evaluation**: BFCL, GAIA, SWE-bench, RAGAS, DeepEval scorers
 - **Terminal UI** (Textual): chat, command palette, diff view, session management
 
@@ -190,7 +190,7 @@ pytest --cov=koboi            # with coverage
 
 ## Examples
 
-`examples/` contains 32 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
+`examples/` contains 33 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
 
 | Range | Features |
 |-------|----------|
@@ -204,6 +204,7 @@ pytest --cov=koboi            # with coverage
 | 21-24 | Evaluation, production setup, SWE-bench, config-driven orchestration |
 | 25-28 | Subagent delegation, task management, benchmarks, custom RAG |
 | 29-32 | Skills (enhanced), eval-test, tool selection, sandbox + resume |
+| 33 | Declarative external-command hooks (`hooks:` YAML) |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 | hitl_client / workflow_graph_demo / dynamic_workflow_live / phase3_live_e2e | HITL client + DAG/workflow-graph demos |
 

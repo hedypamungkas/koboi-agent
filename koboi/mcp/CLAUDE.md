@@ -64,9 +64,13 @@ picks the subclass by `transport` (`"stdio"` default, `"streamable-http"`) -> `c
 - `_extract_tool_result()` joins text content items, dedupes identical lines.
 
 ## Gotchas
-- **All MCP tools are registered at `RiskLevel.SAFE`** (hardcoded in `register_mcp_tools`).
-  They are never risk-gated or approval-gated; destructive MCP tools bypass the trust/grade
-  system. Trust/PolicyHook cannot rein them in by tool name either.
+- **MCP tools are risk-gated, opt-in** (`register_mcp_tools(risk_level=, risk_resolver=)` in
+  `base.py`). Default per server is still `RiskLevel.SAFE` (pre-#5 behavior); set
+  `mcp.servers[].risk_level: moderate|destructive` to override for every tool from that
+  server, or `risk_heuristic: true` to infer per-tool risk from the tool name via
+  `default_risk_heuristic()` (`delete`/`remove`-like names -> DESTRUCTIVE, etc.). A non-SAFE
+  level only gates when `guardrails.approval` or `policy.rules` is configured -- otherwise
+  it's informational. Wired in `facade.py` (`_build_mcp`).
 - **HTTP auth is Bearer-only** (`auth.type: "bearer"`). No OAuth flow, no token refresh,
   no 401-retry; enterprise token expiry (~1h) is unsupported.
 - **stdio runner allow-list** (basename match): `_MCP_DEFAULT_RUNNERS` =
@@ -76,5 +80,6 @@ picks the subclass by `transport` (`"stdio"` default, `"streamable-http"`) -> `c
   tool's `_check_url_ssrf`); raises `MCPError`.
 - **A failed MCP server connect is a WARNING, not fatal** -- `register_mcp_tools` for that
   server is skipped and the agent continues. Check logs if a server's tools go missing.
-- `agent.mode: chat/plan` blocks ALL custom tools by name, including MCP-bridged ones; use
-  `mode: act`. See koboi/hooks/CLAUDE.md and the approval-before-ModeHook ordering caveat.
+- `agent.mode: chat/plan` blocks ALL custom tools by name, including MCP-bridged ones,
+  regardless of risk level; use `mode: act`. Mode-block is enforced BEFORE approval (see
+  `koboi/loop_pipeline.py`), so an approved MCP tool can no longer be blocked afterward.

@@ -13,7 +13,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 - Run example: `python examples/01_simple_chat.py`
 - Serve HTTP:  `koboi serve configs/server_deploy.yaml`  (needs `[api]` extra: `pip install -e ".[api]"`)
 - API keys:    `koboi keys create`                       (Bearer auth; `koboi keys list|revoke|rotate`)
-- Resume:      `koboi run --resume <session>`            (`koboi sessions <config>` lists persisted sessions)
+- Resume:      `koboi run <config> --resume <session>`    (`koboi sessions <config>` lists persisted sessions)
 - Eval (eve):  `koboi eval-test evals/ --mock --strict`
 - Benchmarks:  `pytest tests/benchmarks/ -o python_files="bench_*.py" --benchmark-only`  (perf regression gate; see docs/performance-benchmarking.md)
 
@@ -43,6 +43,7 @@ koboi/              Main package (191 .py files)
   task.py           TaskManager for structured task tracking
   diagnostics.py    Session diagnostic export
   notifications.py  Notification system
+  _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
   hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 19 specialized hooks
@@ -57,15 +58,15 @@ koboi/              Main package (191 .py files)
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (12)
-tests/              ~186 test files, asyncio_mode="auto", shared conftest.py with MockClient
-configs/            25 YAML agent configs
-examples/           32 numbered example scripts (01-32) + server_built_in/server_customize, hitl_client, and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
+tests/              ~188 test files, asyncio_mode="auto", shared conftest.py with MockClient
+configs/            27 YAML agent configs
+examples/           33 numbered example scripts (01-33) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)
 benchmarks/         BFCL benchmark data (DO NOT read benchmarks/results.json -- 183MB)
-docs/               Architecture overview, REST/SSE requirements, performance benchmarking, trustworthy-unattended-autonomy positioning, one-pager, skills/eve research, strategy audits
+docs/               Architecture overview, REST/SSE requirements, performance benchmarking, custom command-hooks guide, trustworthy-unattended-autonomy positioning, one-pager, skills/eve research, strategy audits
 ```
 
 ## Code conventions
@@ -109,3 +110,6 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - Graceful drain (`_shutdown`): cancels in-flight interactive stream tasks, flushes Langfuse **off-loop + concurrently** (`asyncio.to_thread`+`gather`; `agent.close()` does NOT flush), then closes jobs/pool/store, under `wait_for(server.timeouts.drain_seconds)`
 - `Idempotency-Key` header: 409-reject on `/v1/chat/stream` (same owner+session+key within `server.idempotency.chat_ttl_seconds`); dedup on `/v1/jobs` (same key → same job_id, replay-friendly)
 - `AutonomousApprovalHandler` (jobs) is deny-by-default on destructive tools without a Trust-DB rule; autonomous jobs additionally **require `sandbox.backend='restricted'`** (passthrough refused at execution, C3)
+- `hooks:` YAML section declares external-command hooks (no Python in the agent): `allow_exec` default-deny gate + `on_event:` entries, each spawning a command (`uv`/`uvx`-friendly) that exchanges JSON over stdio. Wired by `_build_command_hooks()` in `facade.py` (not the `_REGISTRY` pattern). See `docs/custom-hooks.md` for the wire protocol and `examples/33_command_hook_messaging.py` for a runnable demo
+- `jobs.webhooks` fires an HTTP POST (fire-and-forget, retried on 5xx/network error) to each matching URL on a job's terminal status (`completed`/`failed`/`timed_out`/`cancelled`); `secret` HMAC-SHA256-signs the body (`X-Koboi-Signature` header). Operator-configured URLs only, never tenant-supplied
+- Mode-block runs BEFORE approval in `ToolExecutionPipeline` (`loop_pipeline.py`) -- an approved tool is never retroactively mode-blocked, and a Trust-DB allow rule cannot bypass chat/plan mode-blocking. `ModeManager.is_tool_allowed()` is the single source of truth shared by the pipeline gate and `ModeHook`

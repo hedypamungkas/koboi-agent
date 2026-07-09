@@ -26,9 +26,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/koboi-ai/koboi-agent"
-Repository = "https://github.com/koboi-ai/koboi-agent"
-Documentation = "https://github.com/koboi-ai/koboi-agent#readme"
+Homepage = "https://github.com/hedypamungkas/koboi-agent"
+Repository = "https://github.com/hedypamungkas/koboi-agent"
+Documentation = "https://github.com/hedypamungkas/koboi-agent#readme"
 
 [project.optional-dependencies]
 tracing = ["langfuse>=2.0,<3.0"]

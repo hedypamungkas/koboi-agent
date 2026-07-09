@@ -89,6 +89,7 @@ koboi chat examples/01_simple_chat.yaml
 | 30 | [Eval `t` Tests](30_eval_test.py) | eve-style `t` eval authoring (CI-native, mock mode) | `python examples/30_eval_test.py` |
 | 31 | [Tool Selection](31_tool_selection.py) | Tool selection + secret hygiene | `python examples/31_tool_selection.py` |
 | 32 | [Sandbox + Resume](32_sandbox_and_resume.py) | Restricted sandbox (soft + seccomp) + step-journal resume | `python examples/32_sandbox_and_resume.py` |
+| 33 | [Command Hook Messaging](33_command_hook_messaging.py) | Declarative `hooks:` YAML -- external-command hook forwards LLM responses | `python examples/33_command_hook_messaging.py` |
 
 ### Server
 
@@ -100,6 +101,7 @@ koboi chat examples/01_simple_chat.yaml
 | [Workflow Graph Demo](workflow_graph_demo.py) | Programmatic DAG builder (no YAML, no planner) | `python examples/workflow_graph_demo.py` |
 | [Dynamic Workflow Live](dynamic_workflow_live.py) | Live-LLM dynamic + DAG workflow e2e | `python examples/dynamic_workflow_live.py` |
 | [Phase 3 Live E2E](phase3_live_e2e.py) | Live-LLM validation of Phase 3 capabilities | `python examples/phase3_live_e2e.py` |
+| [Command Hook Forwarder](_command_hook_forwarder.py) | Standalone script invoked by example 33's `hooks:` entry | `uv run examples/_command_hook_forwarder.py OUTFILE` |
 
 ## Feature Coverage
 
@@ -134,6 +136,7 @@ koboi chat examples/01_simple_chat.yaml
 | Eval `t` authoring (CI-native, mock mode) | 30 |
 | Tool selection + secret hygiene | 31 |
 | Sandbox isolation (soft + seccomp) + step-journal resume | 32 |
+| Declarative external-command hooks (`hooks:` YAML) | 33 |
 | HTTP/SSE server (built-in + code-customized) | server_built_in, server_customize |
 
 ## Notes
