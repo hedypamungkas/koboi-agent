@@ -427,9 +427,13 @@ class SemanticRetriever(BaseRetriever):
 
         query_emb = await self._get_embedding(query)
         if query_emb is None:
+            _logger.warning("SemanticRetriever: query embedding returned None; falling back to keyword retrieval")
             if self._fallback is None:
                 self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
-            return await self._fallback.retrieve(query, top_k, metadata_filter=metadata_filter)
+            results = await self._fallback.retrieve(query, top_k, metadata_filter=metadata_filter)
+            for r in results:
+                r.retrieval_method = "semantic (fallback to keyword)"
+            return results
 
         allowed = self._allowed_ids(metadata_filter)  # #10: relevance scoping (NOT ACL)
         scored = [
