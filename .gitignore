@@ -57,6 +57,7 @@ koboi_trust.db
 .agent_memory.json.lock
 .koboi_embedding_cache.json
 .koboi_embedding_cache.json.tmp
+.koboi_doc_cache/
 
 # === Benchmarks (large files) ===
 benchmarks/results.json

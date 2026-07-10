@@ -117,6 +117,8 @@ class RagConfig(BaseModel):
     rerank: bool = False
     # #5: opt-in on-disk embedding cache (JSON) so restarts don't re-embed the corpus.
     embedding_cache_path: str | None = None
+    # #1: opt-in on-disk cache for fetched remote documents (avoids re-fetch per session).
+    document_cache_path: str | None = None
 
 
 class InputGuardrailConfig(BaseModel):

@@ -58,8 +58,12 @@ kwargs and validates `config_aliases` targets exist (raises `ValueError` otherwi
   retriever* (not the semantic chunker) for embedding-based behavior.
 - **`RerankerRetriever` is exported but NOT registered**: you cannot select it by name in YAML.
   It is a manual wrapper -- instantiate it around a base retriever in code.
-- **Document loading is filesystem-only**: `_load_documents` reads `path:` entries from disk. No
-  HTTP/remote object storage; consumers with docs in R2/S3 must pre-fetch to local files.
+- **Document sources**: `_load_documents` supports `source: file` (default; local
+  path/glob/dir), `source: http` (httpx -- presigned URLs work for R2/S3 public-ish
+  objects; 0 new dep), and `source: s3` (boto3, the `[rag-cloud]` extra; Cloudflare R2
+  via `endpoint_url`). Loaded bytes are parsed by format (text/html/pdf/docx) via
+  `parser_registry` (`[rag]` extra for PDF/DOCX; HTML is stdlib). `document_cache_path`
+  caches remote fetches across the per-session rebuilds in `koboi/server/pool.py`.
 - **Semantic/Hybrid retrievers degrade to keyword** when no `client` is injected or the embedding
   endpoint returns None (logged as a warning). Hybrid's RRF still fuses both legs.
 - **Process-level embedding cache** (`_EMBEDDING_CACHE`) embeds a corpus once per process, keyed by

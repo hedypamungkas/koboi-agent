@@ -168,7 +168,7 @@ def test_glob_and_directory_load_documents(tmp_path):
     sub = tmp_path / "sub"
     sub.mkdir()
     (sub / "c.md").write_text("file c")
-    (tmp_path / "bin.dat").write_bytes(b"\xff\xfe\x80\xc3\x28")  # invalid UTF-8 -> skipped
+    (tmp_path / "bin.dat").write_bytes(b"\x00\x01\x02\x03PNG\x00binary\xff\xfe")  # NUL bytes -> binary -> skipped
 
     _, globbed = _load_documents({"enabled": True, "documents": [{"path": str(tmp_path / "*.md")}]})
     assert len(globbed) == 2  # a.md, b.md (non-recursive)

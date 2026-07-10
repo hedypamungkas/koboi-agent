@@ -123,6 +123,7 @@ def _extract_parameters(cls: type) -> dict[str, dict[str, Any]]:
 chunker_registry = ComponentRegistry("chunker")
 retriever_registry = ComponentRegistry("retriever")
 augmentation_registry = ComponentRegistry("augmentation")
+parser_registry = ComponentRegistry("parser")
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +205,26 @@ def register_augmentation(
     return decorator
 
 
+def register_parser(
+    name: str,
+    description: str = "",
+):
+    """Decorator to register a document-format parser.
+
+    Usage::
+
+        @register_parser("csv", description="CSV via pandas")
+        class CsvParser(BaseParser):
+            ...
+    """
+
+    def decorator(cls: type) -> type:
+        parser_registry.register(name, cls, description=description)
+        return cls
+
+    return decorator
+
+
 # ---------------------------------------------------------------------------
 # Component builders
 # ---------------------------------------------------------------------------
@@ -276,21 +297,31 @@ def _resolve_kwargs(
 def _load_documents(
     rag_conf: dict[str, Any],
 ) -> tuple[BaseChunker, list[Chunk]]:
-    """Load and chunk documents from RAG config.
+    """Load, parse, and chunk documents from RAG config.
 
-    Returns (chunker, chunks) so callers can reuse the chunker if needed. Each
-    ``documents[]`` entry accepts ``{path: ...}`` (or a bare string); the path may
-    be a file, a glob pattern (``*.md`` / ``**/*.txt``), or a directory (recursed).
-    Unreadable/binary files are skipped (format parsing is a separate gap).
+    Returns ``(chunker, chunks)``. Each ``documents[]`` entry selects a source:
+
+    - ``{path: "..."}`` or a bare string -- local file / glob (``*.md``) / directory
+      (recursed). Backward compatible with pre-existing configs.
+    - ``{source: http, url: "..."}`` -- fetch over HTTP(S) via httpx (presigned URLs
+      work for R2/S3 public-ish objects). Zero new dependency.
+    - ``{source: s3, bucket: "...", key: "prefix/", endpoint_url: "${R2_ENDPOINT}",
+      region: "auto"}`` -- S3-compatible (Cloudflare R2) via boto3 (``[rag-cloud]``).
+
+    Fetched/loaded bytes are parsed by format (text/html/pdf/docx) via the parser
+    registry; unreadable/binary files are skipped. ``document_cache_path`` caches
+    remote fetches across the per-session rebuilds in ``koboi/server/pool.py``.
     """
     import glob as _glob
     from pathlib import Path as PathlibPath
 
+    from koboi.rag.parsers import dispatch_parser
+    from koboi.rag.sources import DocumentCache, fetch_http_entry, fetch_s3_entry
     from koboi.rag.types import Document
 
     chunker = _build_chunker(rag_conf)
-    doc_paths = rag_conf.get("documents", [])
-    all_chunks: list[Chunk] = []
+    doc_cache_path = rag_conf.get("document_cache_path")
+    doc_cache = DocumentCache(doc_cache_path) if doc_cache_path else None
 
     def _resolve_files(path: str) -> list[PathlibPath]:
         # #3: expand glob patterns and directories into a concrete file list.
@@ -301,23 +332,48 @@ def _load_documents(
             return sorted(f for f in p.rglob("*") if f.is_file())
         return [p] if p.is_file() else []
 
-    for doc_conf in doc_paths:
-        if isinstance(doc_conf, str):
-            path = doc_conf
-        elif isinstance(doc_conf, dict):
-            path = doc_conf.get("path", "")
-        else:
-            path = ""
-        if not path:
-            continue
-        for fp in _resolve_files(path):
-            try:
-                content = fp.read_text()
-            except (OSError, UnicodeDecodeError):
-                continue  # skip unreadable/binary files
-            doc = Document(id=fp.stem, title=fp.stem, content=content)
+    def _resolve_entry(entry: Any):
+        # Yield (name, bytes) for one documents[] entry from any source.
+        if isinstance(entry, str):
+            for fp in _resolve_files(entry):
+                try:
+                    yield fp.name, fp.read_bytes()
+                except OSError:
+                    continue
+            return
+        if not isinstance(entry, dict):
+            return
+        source = (entry.get("source") or "file").lower()
+        if source in ("file", "local"):
+            path = entry.get("path", "")
+            if path:
+                for fp in _resolve_files(path):
+                    try:
+                        yield fp.name, fp.read_bytes()
+                    except OSError:
+                        continue
+            return
+        if source == "http" or "url" in entry:
+            yield from fetch_http_entry(entry, doc_cache)
+            return
+        if source == "s3":
+            yield from fetch_s3_entry(entry, doc_cache)
+            return
+        _logger.warning("Unknown document source %r; skipping", source)
+
+    all_chunks: list[Chunk] = []
+    for entry in rag_conf.get("documents", []):
+        for name, data in _resolve_entry(entry):
+            text, meta = dispatch_parser(name, data)
+            if not text or not text.strip():
+                # binary / unreadable / empty -> skip (never ingest mojibake)
+                continue
+            stem = PathlibPath(name).stem or name
+            doc = Document(id=stem, title=stem, content=text)
             for chunk in chunker.chunk(doc):
-                chunk.metadata["source"] = doc.title
+                chunk.metadata["source"] = stem
+                if meta.get("source_format"):
+                    chunk.metadata["source_format"] = meta["source_format"]
                 all_chunks.append(chunk)
 
     return chunker, all_chunks
