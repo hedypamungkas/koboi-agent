@@ -41,10 +41,12 @@ from koboi.rag.registry import (
 from koboi.rag.chunker import _register_builtins as _reg_chunkers
 from koboi.rag.retriever import _register_builtins as _reg_retrievers
 from koboi.rag.augmentation import _register_builtins as _reg_augmentations
+from koboi.rag.parsers import _register_builtins as _reg_parsers
 
 _reg_chunkers()
 _reg_retrievers()
 _reg_augmentations()
+_reg_parsers()
 
 __all__ = [
     # Types
@@ -75,9 +77,11 @@ __all__ = [
     "chunker_registry",
     "retriever_registry",
     "augmentation_registry",
+    "parser_registry",
     "build_rag",
     "register_chunker",
     "register_retriever",
     "register_augmentation",
+    "register_parser",
     "load_custom_components",
 ]
