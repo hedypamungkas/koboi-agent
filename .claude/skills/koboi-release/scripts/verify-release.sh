@@ -15,6 +15,8 @@ set -euo pipefail
 
 VERSION="${1:?usage: $0 X.Y.Z}"
 VERSION="${VERSION#v}"
+# The git tag (and the gh `--branch` filter for tag-triggered runs) carries the "v" prefix.
+GIT_TAG="v${VERSION}"
 # GHCR image tag has NO "v" prefix since PR #13 rewrote docker.yml: the metadata
 # action's `type=semver,pattern={{version}}` yields e.g. 0.8.0, not v0.8.0.
 # (Releases <= v0.7.0 used the old v6 workflow and DO carry a v prefix — :v0.7.0.)
@@ -24,17 +26,17 @@ IMG="ghcr.io/hedypamungkas/koboi-agent"
 # Wait until a run of <workflow> triggered by <tag> appears, then watch it to completion.
 watch_tag_run() {
   local wf="$1" name="$2" i run_id
-  echo "=== waiting for ${name} (${wf}) run on ${TAG} to appear ==="
+  echo "=== waiting for ${name} (${wf}) run on ${GIT_TAG} to appear ==="
   run_id=""
   for i in $(seq 1 30); do          # up to ~150s for GitHub to register the run
-    run_id="$(gh run list --workflow="${wf}" --branch="${TAG}" --limit 1 \
+    run_id="$(gh run list --workflow="${wf}" --branch="${GIT_TAG}" --limit 1 \
                 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)"
     [ -n "$run_id" ] && break
     sleep 5
   done
   if [ -z "$run_id" ]; then
-    echo "❌ no ${name} run found for ${TAG} after ~150s."
-    echo "   check: gh run list --workflow=${wf} --branch=${TAG}"
+    echo "❌ no ${name} run found for ${GIT_TAG} after ~150s."
+    echo "   check: gh run list --workflow=${wf} --branch=${GIT_TAG}"
     exit 1
   fi
   echo "  ${name} run: https://github.com/hedypamungkas/koboi-agent/actions/runs/${run_id}"
@@ -83,8 +85,8 @@ docker stop "$CONTAINER" >/dev/null 2>&1 || true; trap - EXIT
 
 echo ""
 echo "=========================="
-echo " RELEASE ${TAG} VERIFIED ✅"
+echo " RELEASE ${GIT_TAG} VERIFIED ✅"
 echo "=========================="
 echo "PyPI ${VERSION} + GHCR ${TAG}/latest + /healthz all green."
 echo "Now publish the GitHub release (release-create comes AFTER verification on purpose):"
-echo "  gh release create ${TAG} --title '${TAG} — ...' --notes '...'"
+echo "  gh release create ${GIT_TAG} --title '${GIT_TAG} — ...' --notes '...'"
