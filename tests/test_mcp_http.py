@@ -160,14 +160,24 @@ class TestStdioAllowlist:
         assert client is not None
 
 
-class TestStreamableHTTPMCPClientConnect:
+class _SSRFBypass:
+    """Shared base: bypass the SSRF guard so connect()-based unit tests stay offline.
+
+    connect() (koboi/mcp/http_client.py) calls _check_url_ssrf, which resolves the
+    hostname via socket.getaddrinfo. Tests that mock httpx.Client but call connect()
+    with https://example.com/mcp would otherwise depend on live DNS -- flaky on CI
+    (a macOS/3.11 runner once failed to resolve example.com, surfacing as a spurious
+    "SSRF-blocked MCP URL"). TestStreamableHTTPMCPClientSSRF intentionally does NOT
+    inherit this, so its loopback-rejection test keeps the real checker.
+    """
+
     @pytest.fixture(autouse=True)
     def _bypass_ssrf(self):
-        # M4: connect() now runs _check_url_ssrf (real DNS). Bypass it here so the
-        # connect unit tests don't depend on network/DNS for example.com.
         with patch("koboi.tools.builtin.web._check_url_ssrf", return_value=None):
             yield
 
+
+class TestStreamableHTTPMCPClientConnect(_SSRFBypass):
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_connect_success(self, MockClient):
         mock_client = MockClient.return_value
@@ -226,7 +236,7 @@ class TestStreamableHTTPMCPClientConnect:
         assert client._client is None
 
 
-class TestStreamableHTTPMCPClientDiscoverTools:
+class TestStreamableHTTPMCPClientDiscoverTools(_SSRFBypass):
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_discover_tools(self, MockClient):
         mock_client = MockClient.return_value
@@ -272,7 +282,7 @@ class TestStreamableHTTPMCPClientDiscoverTools:
         assert tools[1].name == "tool2"
 
 
-class TestStreamableHTTPMCPClientCallTool:
+class TestStreamableHTTPMCPClientCallTool(_SSRFBypass):
     @patch("koboi.mcp.http_client.httpx.Client")
     async def test_call_tool(self, MockClient):
         mock_client = MockClient.return_value
@@ -342,7 +352,7 @@ class TestStreamableHTTPMCPClientCallTool:
         assert isinstance(result, str)
 
 
-class TestStreamableHTTPMCPClientSSE:
+class TestStreamableHTTPMCPClientSSE(_SSRFBypass):
     def test_parse_sse_response(self):
         sse_text = (
             'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}\n\n'
@@ -395,7 +405,7 @@ class TestStreamableHTTPMCPClientSSE:
         assert result == "sse result"
 
 
-class TestStreamableHTTPMCPClientSession:
+class TestStreamableHTTPMCPClientSession(_SSRFBypass):
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_session_id_sent_in_subsequent_requests(self, MockClient):
         mock_client = MockClient.return_value
@@ -432,7 +442,7 @@ class TestStreamableHTTPMCPClientSession:
         assert client._session_id is None
 
 
-class TestStreamableHTTPMCPClientAuth:
+class TestStreamableHTTPMCPClientAuth(_SSRFBypass):
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_bearer_token_in_headers(self, MockClient):
         mock_client = MockClient.return_value
@@ -500,7 +510,7 @@ class TestStreamableHTTPMCPClientClose:
         client.close()  # should not raise
 
 
-class TestStreamableHTTPMCPClientErrorHandling:
+class TestStreamableHTTPMCPClientErrorHandling(_SSRFBypass):
     @patch("koboi.mcp.http_client.httpx.Client")
     def test_connection_error(self, MockClient):
         import httpx
