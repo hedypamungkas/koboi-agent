@@ -85,6 +85,7 @@ class ToolRegistry:
         risk_level: RiskLevel = RiskLevel.SAFE,
         timeout: float | None = None,
         group: str | None = None,
+        idempotent: bool = True,
     ) -> None:
         self._tools[name] = ToolDefinition(
             name=name,
@@ -93,6 +94,7 @@ class ToolRegistry:
             risk_level=risk_level,
             timeout=timeout,
             group=group,
+            idempotent=idempotent,
         )
         self._handlers[name] = fn
 
@@ -159,6 +161,10 @@ class ToolRegistry:
             return self._tools[name].risk_level
         return None
 
+    def get_definition(self, name: str) -> ToolDefinition | None:
+        """Return the ToolDefinition for name, or None if not registered."""
+        return self._tools.get(name)
+
     def __contains__(self, name: str) -> bool:
         """Check if a tool is registered."""
         return name in self._tools
@@ -221,6 +227,7 @@ def tool(
     timeout: float | None = None,
     group: str | None = None,
     deps: list[str] | None = None,
+    idempotent: bool = True,
 ):
     """Decorator to register a function as a tool.
 
@@ -229,6 +236,9 @@ def tool(
         deps: List of dependency names this tool requires. At registration time,
               the tool is wrapped with a closure that injects these dependencies
               from the registry's dep store as a ``_deps`` dict parameter.
+        idempotent: Whether re-running this tool on resume is safe (issue #8b).
+              Default True. Set False for side-effecting tools that must not
+              silently double-fire on crash-resume.
     """
 
     def decorator(fn: Callable) -> Callable:
@@ -239,6 +249,7 @@ def tool(
             risk_level=risk_level,
             timeout=timeout,
             group=group,
+            idempotent=idempotent,
         )
         fn._tool_def = td  # type: ignore[attr-defined]  # attrs attached by the @tool decorator
         fn._tool_deps = deps or []  # type: ignore[attr-defined]

@@ -19,6 +19,8 @@ import logging
 import sqlite3
 from typing import TYPE_CHECKING
 
+from koboi.redact import redact_tool_arguments
+
 if TYPE_CHECKING:
     from koboi.types import ToolCall
 
@@ -85,7 +87,20 @@ class StepJournal:
         tool_calls_json = None
         tool_call_count = 0
         if tool_calls and self._record_tool_calls:
-            tool_calls_json = json.dumps([{"name": tc.name, "arguments": tc.arguments} for tc in tool_calls])
+            # Redact secrets in tool arguments before durable storage so the
+            # step journal never persists leaked credentials. Fail-safe: redaction
+            # must NEVER break the durability write -- on any error, mask the
+            # arguments wholesale rather than letting the exception abort the run
+            # (and the step row). Round-trippable on the happy path.
+            def _safe_redact(args: str) -> str:
+                try:
+                    return redact_tool_arguments(args)
+                except Exception:  # nosec B110 - durability must not depend on redaction
+                    return "***redaction-failed***"
+
+            tool_calls_json = json.dumps(
+                [{"name": tc.name, "arguments": _safe_redact(tc.arguments)} for tc in tool_calls]
+            )
             tool_call_count = len(tool_calls)
         elif tool_calls:
             tool_call_count = len(tool_calls)

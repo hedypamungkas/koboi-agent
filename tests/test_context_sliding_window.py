@@ -98,7 +98,9 @@ class TestSlidingWindowManager:
 
 
 class TestKeyFactsManagerEdge:
-    async def test_no_tool_results_in_old(self):
+    async def test_user_assistant_promoted_when_no_tool_results(self):
+        # Issue #7: previously key_facts dropped user/assistant content in the old
+        # section (only role=tool was promoted). Now they are folded into facts.
         mgr = KeyFactsManager(keep_last=2)
         messages = [
             {"role": "system", "content": "sys"},
@@ -109,9 +111,10 @@ class TestKeyFactsManagerEdge:
         ]
         mgr.last_actual_tokens = 100000
         result = await mgr.manage(messages, max_tokens=100)
-        # No facts message since no tool results
         facts_msgs = [m for m in result if "Previously collected" in m.get("content", "")]
-        assert len(facts_msgs) == 0
+        assert len(facts_msgs) == 1
+        blob = facts_msgs[0]["content"]
+        assert "[user]" in blob and "[assistant]" in blob
 
 
 class TestEffectiveTokens:

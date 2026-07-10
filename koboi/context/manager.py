@@ -97,18 +97,48 @@ def ensure_tool_integrity(messages: list[dict]) -> list[dict]:
     return clean_messages
 
 
+def _flatten_text(content: object) -> str:
+    """Flatten a message content (str or multimodal list/dict) to a plain string."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for p in content:
+            if isinstance(p, dict):
+                parts.append(p.get("text") or p.get("content") or "")
+            else:
+                parts.append(str(p))
+        return " ".join(parts)
+    if isinstance(content, dict):
+        return content.get("text") or content.get("content") or str(content)
+    return str(content)
+
+
 class ContextManager(ABC):
     def __init__(self, logger: AgentLogger | None = None):
         self.logger = logger
         self.last_actual_tokens: int = 0
+        # Optional real tokenizer (issue #3); set by the facade when an accurate
+        # BPE counter is available (OpenAI + tiktoken). None -> chars/3 heuristic.
+        self.tokenizer = None
+        # Safety margin subtracted from the budget inside manage() (issue #5):
+        # reserves headroom for the upcoming response so a single large reply or
+        # tool result doesn't push an over-budget payload. Default 0 = old behavior.
+        self.safety_margin: int = 0
+        # Optional per-session metadata store (issue #4a); a SQLiteMemory (or any
+        # object with get_meta/set_meta) set by the facade. Used by sliding_window
+        # to persist its summary across restart/resume. None -> in-memory only.
+        self.meta_store = None
 
     def _log(self, detail: str) -> None:
         if self.logger:
             self.logger.log_context_management(detail)
 
     def _effective_tokens(self, messages: list[dict]) -> int:
-        """Return the best token estimate: heuristic or actual LLM-reported."""
-        estimated = estimate_tokens(messages)
+        """Return the best token estimate: real tokenizer, else heuristic."""
+        estimated = self.tokenizer(messages) if self.tokenizer else estimate_tokens(messages)
         return max(estimated, self.last_actual_tokens)
 
     @property
@@ -132,7 +162,12 @@ class ContextManager(ABC):
 
     async def manage(self, messages: list[dict], max_tokens: int) -> list[dict]:
         tokens = self._effective_tokens(messages)
-        if tokens <= max_tokens:
+        # Issue #5: reserve headroom for the upcoming response/tool result so a
+        # single large reply can't push an over-budget payload (compaction only
+        # re-runs at the next iteration's start). Applied here -- not at call
+        # sites -- so the /compact force-path (max_tokens=0) still compacts fully.
+        budget = max(0, max_tokens - self.safety_margin)
+        if tokens <= budget:
             return messages
 
         system_msgs = [m for m in messages if m.get("role") == "system"]
@@ -182,11 +217,28 @@ class TruncationManager(ContextManager):
 
 @register_context_strategy("smart_truncation", description="System prompt + first user + last N messages")
 class SmartTruncationManager(ContextManager):
-    """Keep: system prompt + first user message + last N messages."""
+    """Keep: system prompt + first user message + compact earlier-user notes + last N.
 
-    def __init__(self, logger: AgentLogger | None = None, keep_last: int = 6):
+    The first user message is always anchored. Any *other* dropped user messages
+    are folded into a compact 'Earlier user messages' note so mid-conversation
+    facts are not silently lost (issue #6).
+    """
+
+    def __init__(
+        self,
+        logger: AgentLogger | None = None,
+        keep_last: int = 6,
+        summarization_truncation: int | None = 200,
+    ):
         super().__init__(logger)
         self.keep_last = keep_last
+        # Accept (and ignore-by-default-coerce) summarization_truncation so config
+        # forwarding never TypeErrors; use it to cap earlier-user note line length.
+        self._trunc = (
+            summarization_truncation
+            if isinstance(summarization_truncation, int) and not isinstance(summarization_truncation, bool)
+            else 200
+        )
 
     @property
     def _strategy_name(self) -> str:
@@ -202,20 +254,50 @@ class SmartTruncationManager(ContextManager):
                 rest.append(m)
 
         recent = rest[-self.keep_last :]
+        dropped = rest[: max(0, len(rest) - self.keep_last)]
+
+        # Fold dropped user messages into a compact note (issue #6).
+        earlier_user_lines: list[str] = []
+        for m in dropped:
+            if m.get("role") == "user":
+                text = _flatten_text(m.get("content"))
+                if text:
+                    earlier_user_lines.append(f"- {text[: self._trunc]}")
+
         result = list(system_msgs)
         if first_user:
             result.append(first_user)
+        if earlier_user_lines:
+            note = "Earlier user messages:\n" + "\n".join(earlier_user_lines)
+            result.append({"role": "system", "content": note})
         result.extend(recent)
-        return result, f"kept system + first_user + last {self.keep_last}"
+        detail = f"kept system + first_user + {len(earlier_user_lines)} earlier-user notes + last {self.keep_last}"
+        return result, detail
 
 
 @register_context_strategy("key_facts", description="Extract tool results into compact facts")
 class KeyFactsManager(ContextManager):
-    """Extract tool results into a compact facts message, discard old messages."""
+    """Extract user/assistant/tool content from old messages into compact facts.
 
-    def __init__(self, logger: AgentLogger | None = None, keep_last: int = 4):
+    Generalized (issue #7): previously only role=tool content was promoted; user
+    and assistant content in the old section are now folded in too so they are
+    not silently dropped. Defaults to no truncation (preserves prior full-content
+    behavior for tool results); set ``summarization_truncation`` to cap length.
+    """
+
+    def __init__(
+        self,
+        logger: AgentLogger | None = None,
+        keep_last: int = 4,
+        summarization_truncation: int | None = None,
+    ):
         super().__init__(logger)
         self.keep_last = keep_last
+        self._trunc = (
+            summarization_truncation
+            if isinstance(summarization_truncation, int) and not isinstance(summarization_truncation, bool)
+            else None
+        )
 
     @property
     def _strategy_name(self) -> str:
@@ -228,8 +310,17 @@ class KeyFactsManager(ContextManager):
 
         facts_lines: list[str] = []
         for m in old:
-            if m.get("role") == "tool" and m.get("content"):
-                facts_lines.append(f"- {m['content']}")
+            role = m.get("role")
+            text = _flatten_text(m.get("content"))
+            if not text:
+                continue
+            seg = text if not self._trunc else text[: self._trunc]
+            if role == "tool":
+                facts_lines.append(f"- {seg}")
+            elif role == "user":
+                facts_lines.append(f"- [user] {seg}")
+            elif role == "assistant":
+                facts_lines.append(f"- [assistant] {seg}")
 
         facts_msg = None
         if facts_lines:
@@ -240,7 +331,7 @@ class KeyFactsManager(ContextManager):
         if facts_msg:
             result.append(facts_msg)
         result.extend(recent)
-        return result, f"extracted {len(facts_lines)} tool results into facts"
+        return result, f"extracted {len(facts_lines)} facts from old messages"
 
 
 @register_context_strategy("sliding_window", description="Summarize old messages via LLM + keep recent")
@@ -259,12 +350,41 @@ class SlidingWindowManager(ContextManager):
         self.keep_last = keep_last
         self._summarization_truncation = summarization_truncation
         self._summary: str = ""
+        self._summary_loaded: bool = False  # issue #4a: lazy-load from meta_store
 
     @property
     def _strategy_name(self) -> str:
         return "SLIDING_WINDOW"
 
+    def _ensure_summary_loaded(self) -> None:
+        """Lazily hydrate the summary from the meta store (issue #4a).
+
+        meta_store is attached by the facade after construction, so loading is
+        deferred to first use. Idempotent; failures fall back to empty summary.
+        """
+        if self._summary_loaded:
+            return
+        self._summary_loaded = True
+        store = getattr(self, "meta_store", None)
+        if store is not None:
+            try:
+                loaded = store.get_meta("sliding_window_summary")
+                if loaded:
+                    self._summary = loaded
+            except Exception as exc:  # nosec - best-effort hydration
+                self._log(f"Summary load failed, starting empty: {exc}")
+
+    def _persist_summary(self) -> None:
+        """Persist the current summary so it survives restart/resume (issue #4a)."""
+        store = getattr(self, "meta_store", None)
+        if store is not None:
+            try:
+                store.set_meta("sliding_window_summary", self._summary)
+            except Exception as exc:  # nosec - best-effort persist
+                self._log(f"Summary persist failed: {exc}")
+
     async def _build_result(self, system_msgs, non_system):
+        self._ensure_summary_loaded()
         split = max(0, len(non_system) - self.keep_last)
         old = non_system[:split]
         recent = non_system[split:]
@@ -309,6 +429,7 @@ class SlidingWindowManager(ContextManager):
                 tools=None,
             )
             self._summary = resp.content or ""
+            self._persist_summary()  # issue #4a
         except Exception as exc:
             self._log(f"Summarization failed, keeping previous summary: {exc}")
 

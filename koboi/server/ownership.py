@@ -49,6 +49,11 @@ class OwnershipStore:
     def is_owner(self, session_id: str, owner: str) -> bool:
         return self.get_owner(session_id) == owner
 
+    def list_owned_sessions(self, owner: str) -> list[str]:
+        """All session_ids owned by ``owner`` (issue #10a: owner-scoped listing)."""
+        rows = self._conn.execute("SELECT session_id FROM session_owners WHERE owner = ?", (owner,)).fetchall()
+        return [r["session_id"] for r in rows]
+
     def ping(self) -> bool:
         """Liveness probe for ``/readyz``: True iff the connection answers ``SELECT 1``."""
         try:

@@ -34,6 +34,9 @@ Documentation = "https://github.com/hedypamungkas/koboi-agent#readme"
 tracing = ["langfuse>=2.0,<3.0"]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 tui = ["rich>=13.0", "textual>=0.40", "click>=8.0", "prompt_toolkit>=3.0", "rapidfuzz>=3.0"]
+# Issue #3: optional real tokenizer for accurate OpenAI token counts (chars/3
+# heuristic is the fallback when this extra is absent).
+tokenizer = ["tiktoken>=0.7"]
 # NOTE: HARD network isolation for the restricted sandbox uses seccomp, which is a
 # SYSTEM package (Debian/Ubuntu: `apt install python3-seccomp`), NOT a PyPI dep --
 # the libseccomp Python bindings are not published on PyPI. See koboi/sandbox/CLAUDE.md.
@@ -47,6 +50,7 @@ all = [
     "langfuse>=2.0,<3.0",
     "fastapi>=0.110", "uvicorn[standard]>=0.27",
     "rich>=13.0", "textual>=0.40", "click>=8.0", "prompt_toolkit>=3.0", "rapidfuzz>=3.0",
+    "tiktoken>=0.7",
     "ragas>=0.2", "datasets>=2.14", "pandas>=2.0", "deepeval>=0.20",
     "pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.19.1,<2.3.0", "bandit>=1.9", "types-PyYAML",
 ]

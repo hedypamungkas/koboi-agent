@@ -231,8 +231,8 @@ def cmd_chat_print(config_path: str, verbose: bool) -> int:
 # --------------------------------------------------------------------------- #
 # sessions
 # --------------------------------------------------------------------------- #
-def cmd_sessions(config_path: str, limit: int) -> int:
-    """List persisted sessions for an agent's SQLite database (P2-A)."""
+def cmd_sessions(config_path: str, limit: int, delete: str | None = None) -> int:
+    """List persisted sessions, or delete one with --delete (issue #10a)."""
     from koboi.config import Config
     from koboi.memory_sqlite import SQLiteMemory
 
@@ -245,6 +245,14 @@ def cmd_sessions(config_path: str, limit: int) -> int:
     db_path = config.get("memory", "db_path", default="koboi_memory.db")
     if config.get("memory", "backend", default="sqlite") != "sqlite":
         print("Memory backend is not sqlite -- no persisted sessions.")
+        return 0
+
+    if delete:
+        deleted = SQLiteMemory.delete_session(db_path, delete)
+        if deleted:
+            print(f"Deleted session {delete} (messages/steps/meta/sessions rows).")
+        else:
+            print(f"Session {delete} not found in {db_path}.")
         return 0
 
     rows = SQLiteMemory.list_sessions(db_path, limit=limit)

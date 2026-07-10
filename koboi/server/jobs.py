@@ -278,6 +278,15 @@ class JobRegistry:
             if len(record.events) > self._max_events:
                 record.events = record.events[-self._max_events :]
 
+    def get_events(self, job_id: str) -> list[Any]:
+        """Return the capped event list for a job (issue #1 EventBuffer surface).
+
+        Route handlers read events through this method (not ``record.events``
+        directly) so a future Redis EventBuffer can swap in transparently.
+        """
+        record = self._jobs.get(job_id)
+        return list(record.events) if record else []
+
     def set_running(self, job_id: str, task: asyncio.Task) -> None:
         record = self._jobs.get(job_id)
         if record:
