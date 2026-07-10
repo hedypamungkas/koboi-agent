@@ -1,0 +1,53 @@
+agent:
+  name: "rag-modern-pipeline"
+  description: "Modern RAG: BM25 + rewriting + filtering + reranking + caches"
+  system_prompt: |
+    You are an assistant that answers based on the provided document context.
+    Cite sources using the [1], [2] numbering. If the context lacks the answer, say so.
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+context:
+  strategy: "smart_truncation"
+  max_context_tokens: 8000
+
+rag:
+  enabled: true
+  chunker: "paragraph"
+  chunk_size: 600
+  # #8: BM25 (saturation + length-norm) over default keyword (TF-IDF cosine)
+  retriever: "bm25"
+  top_k: 5
+  augmentation: "on_the_fly"
+  # #11a: lightweight reranker wrapper (keyword-overlap precision boost)
+  rerank: true
+  # #9: LLM rewrites verbose/paraphrased queries before retrieval
+  query_rewrite: true
+  rewrite:
+    timeout: 8.0
+    fallback_to_raw: true
+  # #10: metadata relevance scoping (NOT ACL). source = file stem; filter to
+  # known docs so retrieval ignores irrelevant context.
+  filter:
+    source: {$in: [company_policy, product_catalog, employee_handbook]}
+  # #5: persists the embedding index across restarts so redeploys don't re-embed
+  embedding_cache_path: "./.koboi_embedding_cache.json"
+  # #1: caches remote fetches across per-session rebuilds (pool.py)
+  document_cache_path: "./.koboi_doc_cache"
+  # OOM guard: files over this are skipped + warned (default 10 MB)
+  max_document_size_mb: 10
+  documents:
+    # Local sample docs (runnable without R2/S3 creds):
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/product_catalog.md"
+    # Remote sources — uncomment after setting env + installing extras:
+    #   pip install koboi-agent[rag-cloud]  # boto3 for S3/R2
+    # - {source: s3, bucket: "${R2_BUCKET}", key: "docs/", endpoint_url: "${R2_ENDPOINT}", region: "auto"}
+    # - {source: http, url: "${HANDBOOK_URL}"}
+    # Table-heavy PDF — needs: pip install koboi-agent[rag]  # pdfplumber
+    # - {path: "./data/sample/report.pdf", format: pdf_table}
