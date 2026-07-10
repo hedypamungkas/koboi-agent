@@ -460,6 +460,10 @@ class AgentCore:
                     }
                     for r in results
                 ]
+        # #9: stamp the query-rewrite outcome so evals/observability can inspect it.
+        rw = getattr(self.augmentation, "last_rewrite", None)
+        if rw:
+            meta["rag_rewrite"] = rw
         # R2: stamp output-guardrail warn outcome so evals can assert (t.warned).
         if self._last_output_guardrail is not None:
             meta["guardrail_outcomes"] = [{"direction": "output", **self._last_output_guardrail}]

@@ -51,6 +51,12 @@ kwargs and validates `config_aliases` targets exist (raises `ValueError` otherwi
   `RunResult.metadata['rag_results']` for eval assertions.
 - Two injection points: `in_memory` augments the user message before storing; `on_the_fly`
   augments the last user message in-place before each LLM call.
+- **Query rewriting / HyDE (#9)**: `rag.query_rewrite: true` rewrites the query (rule-based
+  normalization always + an LLM call) before retrieval; `rag.hyde: true` generates a
+  hypothetical answer for the semantic/hybrid leg. Needs a **chat** client, plumbed via
+  `build_rag(..., chat_client=...)` (distinct from the embedding `client`). Output is
+  ephemeral (retrieval query only, never stored); falls back to the raw query on error.
+  `AugmentationStrategy.last_rewrite` is stamped to `RunResult.metadata['rag_rewrite']`.
 
 ## Gotchas
 - **`SemanticChunker` is effectively `SentenceChunker`**: `_get_embeddings_sync()` has no access

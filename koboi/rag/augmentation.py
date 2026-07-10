@@ -9,6 +9,7 @@ from koboi.rag.types import RetrievalResult
 from koboi.tokens import estimate_single
 
 if TYPE_CHECKING:
+    from koboi.llm.base import LLMClient
     from koboi.logger import AgentLogger
 
 
@@ -19,6 +20,10 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         top_k: int = 3,
         relevance_threshold: float | None = None,
         logger: AgentLogger | None = None,
+        query_rewrite: bool = False,
+        hyde: bool = False,
+        rewrite_client: LLMClient | None = None,
+        rewrite_config: dict | None = None,
     ):
         self.retriever = retriever
         self.top_k = top_k
@@ -27,9 +32,32 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         # Last retrieved chunks (R4): surfaced so AgentCore can stamp them onto
         # RunResult.metadata['rag_results'] for eval assertions (t.retrievedChunk).
         self.last_results: list[RetrievalResult] = []
+        # #9: opt-in query rewriting / HyDE. ``rewrite_client`` must be CHAT-capable
+        # (NOT the embedding client). ``last_rewrite`` is surfaced to
+        # RunResult.metadata['rag_rewrite'] for eval/observability.
+        self._query_rewrite = bool(query_rewrite)
+        self._hyde = bool(hyde)
+        self._rewriter = None
+        if (self._query_rewrite or self._hyde) and rewrite_client is not None:
+            from koboi.rag.rewrite import QueryRewriter
+
+            self._rewriter = QueryRewriter(client=rewrite_client, config=rewrite_config)
+        self.last_rewrite: dict | None = None
+
+    async def _maybe_rewrite(self, query: str) -> str:
+        """Apply opt-in query rewriting; stamp ``self.last_rewrite``. Returns the effective query."""
+        if self._rewriter is None:
+            self.last_rewrite = None
+            return query
+        mode = "hyde" if self._hyde else "llm"
+        effective, meta = await self._rewriter.rewrite(query, mode=mode)
+        self.last_rewrite = meta
+        return effective
 
     async def _retrieve_and_format(self, query: str) -> tuple[str, list[RetrievalResult]]:
-        results = await self.retriever.retrieve(query, top_k=self.top_k)
+        # #9: rewrite the query (opt-in) before retrieval; logs/evals keep the ORIGINAL query.
+        effective_query = await self._maybe_rewrite(query)
+        results = await self.retriever.retrieve(effective_query, top_k=self.top_k)
 
         # Relevance gate: filter out results below threshold
         if self.relevance_threshold is not None and results:
@@ -107,8 +135,21 @@ class OnTheFlyAugmentation(AugmentationStrategy):
         top_k: int = 3,
         relevance_threshold: float | None = None,
         logger: AgentLogger | None = None,
+        query_rewrite: bool = False,
+        hyde: bool = False,
+        rewrite_client: LLMClient | None = None,
+        rewrite_config: dict | None = None,
     ):
-        super().__init__(retriever=retriever, top_k=top_k, relevance_threshold=relevance_threshold, logger=logger)
+        super().__init__(
+            retriever=retriever,
+            top_k=top_k,
+            relevance_threshold=relevance_threshold,
+            logger=logger,
+            query_rewrite=query_rewrite,
+            hyde=hyde,
+            rewrite_client=rewrite_client,
+            rewrite_config=rewrite_config,
+        )
         self._cache: dict[str, str] = {}
 
     async def augment_for_llm(self, messages: list[dict]) -> list[dict]:

@@ -125,6 +125,11 @@ class RagConfig(BaseModel):
     document_cache_path: str | None = None
     # soft per-document size cap (MB); over-cap files are skipped + warned (OOM guard).
     max_document_size_mb: int = Field(default=10, ge=0)
+    # #9: opt-in query rewriting (LLM) + HyDE (semantic/hybrid) before retrieval.
+    query_rewrite: bool = False
+    hyde: bool = False
+    # #10: opt-in metadata filter for relevance scoping (NOT ACL).
+    filter: dict | None = None
 
 
 class InputGuardrailConfig(BaseModel):
