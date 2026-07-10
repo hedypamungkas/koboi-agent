@@ -147,7 +147,9 @@ class TestSyncHandlerCancelOnTimeout:
         threading.Thread(target=loop.run_forever, daemon=True).start()
         try:
             handler = ts._make_sync_handler("slow", _SlowReg(), loop)
-            with pytest.raises(TimeoutError):
+            from concurrent.futures import TimeoutError as FutureTimeoutError
+
+            with pytest.raises(FutureTimeoutError):
                 handler(x=1)
             # give the cancellation a moment to propagate
             import time

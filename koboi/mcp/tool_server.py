@@ -16,6 +16,7 @@ import asyncio
 import json
 import sys
 import threading
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import TYPE_CHECKING
 
 from koboi.config import Config
@@ -95,7 +96,7 @@ def _make_sync_handler(name: str, registry: ToolRegistry, loop: asyncio.Abstract
         fut = asyncio.run_coroutine_threadsafe(registry.execute(name, json.dumps(arguments)), loop)
         try:
             return fut.result(timeout=TOOL_CALL_TIMEOUT)
-        except TimeoutError:
+        except FutureTimeoutError:
             fut.cancel()  # 29-G: signal the bg-loop task to abort
             raise
 
