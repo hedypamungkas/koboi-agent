@@ -1047,6 +1047,33 @@ class AgentAssembler:
         )
         return self.hook_chain
 
+    def build_proactive_memory(self):
+        """Build the proactive long-term-memory coordinator (opt-in; None unless enabled).
+
+        Constructed only when ``memory.proactive.enabled`` is true. Reuses the
+        KV ``_MemoryStore`` (creating one if the memory tool isn't registered)
+        and the embedding client (dedicated if configured, else the chat client).
+        """
+        cfg = self.config.get("memory", "proactive", default={}) or {}
+        if not cfg.get("enabled"):
+            self.proactive_memory = None
+            return None
+        from koboi.proactive_memory import ProactiveMemory
+        from koboi.tools.builtin.memory import _MemoryStore
+
+        store = self.tools.get_dep("memory_store_ref") if self.tools else None
+        if store is None:
+            store = _MemoryStore(filepath=self.config.get("tools", "memory_file", default=".agent_memory.json"))
+        embedding_client = _build_embedding_client(self.config, self.logger) or self.client
+        self.proactive_memory = ProactiveMemory(
+            client=self.client,
+            embedding_client=embedding_client,
+            memory=self.memory,
+            store=store,
+            config=cfg,
+        )
+        return self.proactive_memory
+
     def build(self) -> KoboiAgent:
         """Run all build steps in dependency order and return assembled agent."""
         self.build_logger()
@@ -1064,6 +1091,7 @@ class AgentAssembler:
         self.build_policy()
         self.build_skills()
         self.build_mode_manager()
+        self.build_proactive_memory()
         self.build_hooks()
 
         # YAML-driven external command hooks (hooks: section). Gated by
@@ -1095,6 +1123,12 @@ class AgentAssembler:
 
                 self.hook_chain.add(ReadBeforeWriteResetHook())
 
+        # D: proactive long-term-memory extraction (opt-in). Runs at SESSION_END.
+        if self.proactive_memory is not None and self.proactive_memory.extract_enabled and self.hook_chain:
+            from koboi.hooks.proactive_extraction_hook import ProactiveExtractionHook
+
+            self.hook_chain.add(ProactiveExtractionHook(proactive=self.proactive_memory))
+
         from koboi.loop import AgentCore
 
         core = AgentCore(
@@ -1119,6 +1153,7 @@ class AgentAssembler:
             journal=self.journal,
             trust_db=self.trust_db,
             output_schema=self.config.get("agent", "output_schema", default=None),
+            proactive_memory=self.proactive_memory,
         )
 
         return KoboiAgent(

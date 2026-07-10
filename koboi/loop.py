@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from koboi.modes import ModeManager
     from koboi.journal import StepJournal
     from koboi.trust import TrustStore
+    from koboi.proactive_memory import ProactiveMemory
 
 _log = _logging.getLogger("koboi.loop")
 
@@ -94,6 +95,7 @@ class AgentCore:
         journal: StepJournal | None = None,
         trust_db: TrustStore | None = None,
         output_schema: dict | None = None,
+        proactive_memory: ProactiveMemory | None = None,
         # Backward-compatible singular kwargs
         input_guardrail: BaseGuardrail | None = None,
         output_guardrail: BaseGuardrail | None = None,
@@ -125,6 +127,8 @@ class AgentCore:
         self.trust_db = trust_db
         # JSON Schema dict (provider-agnostic) for structured final output, or None.
         self.response_schema = output_schema
+        # Proactive long-term memory (opt-in; None unless memory.proactive.enabled).
+        self.proactive_memory = proactive_memory
         # P2-A: turn counter. On a fresh agent this is 0; on resume it inherits
         # the journal's highest recorded turn so numbering stays continuous.
         self._turn_index: int = journal.turn_index if journal else 0
@@ -200,7 +204,41 @@ class AgentCore:
             # ReadBeforeWriteResetHook) only act on a real trim, not every iter.
             self._last_compacted = len(messages) < pre
 
+        # C/B: proactive long-term memory — ephemerally append recalled facts
+        # (and the core block) to the system message AFTER compaction so they
+        # reach the LLM this turn without persisting as conversation rows. Skipped
+        # unless memory.proactive is enabled.
+        if self.proactive_memory is not None and self._last_user_message:
+            block = await self._proactive_block(self._last_user_message)
+            if block:
+                for i, m in enumerate(messages):
+                    if m.get("role") == "system":
+                        messages[i] = {"role": "system", "content": m["content"] + "\n\n" + block}
+                        break
+                else:
+                    messages.insert(0, {"role": "system", "content": block})
+
         return messages
+
+    async def _proactive_block(self, query: str) -> str:
+        """Build the ephemeral proactive-memory injection (core block + recalled facts)."""
+        pm = self.proactive_memory
+        if pm is None:
+            return ""
+        parts: list[str] = []
+        if pm.core_block_enabled:
+            cb = pm.get_core_block()
+            if cb:
+                parts.append(cb)
+        if pm.recall_enabled:
+            try:
+                recalled = await pm.recall(query)
+            except Exception as exc:  # nosec - best-effort; never break the turn
+                self._log(f"Proactive recall failed: {exc}")
+                recalled = None
+            if recalled:
+                parts.append(recalled)
+        return "\n\n".join(parts)
 
     async def _augment_memory(self, user_message: str) -> str:
         if not self.augmentation:

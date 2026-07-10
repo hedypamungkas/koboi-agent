@@ -183,6 +183,26 @@ class MemoryRetentionConfig(BaseModel):
     max_messages: int | None = None
 
 
+class ProactiveMemoryConfig(BaseModel):
+    """Opt-in proactive long-term memory (extract D / recall C / core-block B).
+
+    Master switch ``enabled`` (default False) = zero behavior change. Sub-toggles
+    select which features run. Recall embeds the user message and injects the
+    top-N stored facts each turn (no tool call); extraction pulls durable facts
+    after the run; the core block is a small always-in-context summary.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    extract: bool = False  # D: auto-extract durable facts after each run
+    recall: bool = False  # C: semantic recall + inject top-N each turn
+    core_block: bool = False  # B: always-in-context core-memory block
+    top_k: int = Field(default=4, ge=1)  # facts injected per turn (C)
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)  # cosine floor (C)
+    max_facts: int = Field(default=200, ge=1)  # cap the embedded KV set (C)
+
+
 class MemoryConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -193,6 +213,10 @@ class MemoryConfig(BaseModel):
     # Issue #2: optional tenant/owner tag stamped on stored rows (schema prep for
     # multi-tenancy). None = untagged (today's behavior).
     owner: str | None = None
+    # Proactive long-term memory (extract/recall/core-block). Master switch is
+    # `enabled`; sub-toggles select features. All default off (zero behavior
+    # change unless a config opts in).
+    proactive: ProactiveMemoryConfig = Field(default_factory=ProactiveMemoryConfig)
 
 
 class HarnessConfig(BaseModel):
