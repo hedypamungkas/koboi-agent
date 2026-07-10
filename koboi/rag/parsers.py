@@ -118,6 +118,14 @@ try:  # pragma: no cover - dep guard
 except ImportError:
     docx = None  # type: ignore[assignment]
 
+_PDFPLUMBER_AVAILABLE = False
+try:  # pragma: no cover - dep guard
+    import pdfplumber  # type: ignore[import-not-found]  # noqa: F401
+
+    _PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    pdfplumber = None  # type: ignore[assignment]
+
 
 class PdfParser(BaseParser):
     """PDF text-layer extraction via ``pypdf`` (scanned/encrypted PDFs may yield '')."""
@@ -128,6 +136,46 @@ class PdfParser(BaseParser):
         reader = PdfReader(BytesIO(data))
         pages = [(page.extract_text() or "") for page in reader.pages]
         return "\n".join(pages), {"source_format": "pdf", "page_count": len(reader.pages)}
+
+
+class PdfTableParser(BaseParser):
+    """PDF text + tables via ``pdfplumber`` (heavier than pypdf; opt-in per-document).
+
+    Extracts page text AND tables (rendered as markdown rows). Select it for PDFs where
+    table content matters, via a per-document ``format: pdf_table`` override.
+    """
+
+    def extract(self, name: str, data: bytes) -> tuple[str, dict]:
+        from io import BytesIO
+
+        import pdfplumber  # type: ignore[import-not-found]
+
+        text_parts: list[str] = []
+        table_count = 0
+        page_count = 0
+        with pdfplumber.open(BytesIO(data)) as pdf:
+            page_count = len(pdf.pages)
+            for page in pdf.pages:
+                text_parts.append(page.extract_text() or "")
+                for table in page.extract_tables() or []:
+                    table_count += 1
+                    text_parts.append(self._table_to_markdown(table))
+        return "\n".join(t for t in text_parts if t), {
+            "source_format": "pdf_table",
+            "table_count": table_count,
+            "page_count": page_count,
+        }
+
+    @staticmethod
+    def _table_to_markdown(table: list[list]) -> str:
+        rows = []
+        for row in table:
+            cells = ["" if c is None else str(c).replace("|", "/").strip() for c in row]
+            rows.append("| " + " | ".join(cells) + " |")
+        if rows:
+            cols = max(1, rows[0].count("|") - 1)
+            rows.insert(1, "| " + " | ".join("---" for _ in range(cols)) + " |")
+        return "\n".join(rows)
 
 
 class DocxParser(BaseParser):
@@ -156,15 +204,16 @@ def detect_format(name: str, data: bytes) -> str:
     return "text"
 
 
-def dispatch_parser(name: str, data: bytes) -> tuple[str, dict]:
+def dispatch_parser(name: str, data: bytes, format_hint: str | None = None) -> tuple[str, dict]:
     """Pick a parser by format and extract text.
 
-    Falls back to an encoding-safe text decode if the format is unknown, the parser
-    isn't registered (optional dep missing), or the parser raises (corrupt file).
+    ``format_hint`` overrides extension/magic detection (e.g. ``"pdf_table"`` for a PDF
+    whose tables matter). Falls back to an encoding-safe text decode if the format is
+    unknown, the parser isn't registered (optional dep missing), or it raises.
     """
     from koboi.rag.registry import parser_registry
 
-    fmt = detect_format(name, data)
+    fmt = format_hint or detect_format(name, data)
     entry = parser_registry.get(fmt) or parser_registry.get("text")
     if entry is None:  # text not registered yet (import order) -> decode directly
         return data.decode("utf-8", errors="replace"), {}
@@ -185,3 +234,5 @@ def _register_builtins() -> None:
         _reg("pdf", description="PDF text extraction via pypdf (optional, [rag] extra)")(PdfParser)
     if _DOCX_AVAILABLE:
         _reg("docx", description="DOCX text extraction via python-docx (optional, [rag] extra)")(DocxParser)
+    if _PDFPLUMBER_AVAILABLE:
+        _reg("pdf_table", description="PDF text+tables via pdfplumber (optional, [rag] extra)")(PdfTableParser)
