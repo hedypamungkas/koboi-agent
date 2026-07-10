@@ -44,7 +44,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 ### Install
 
 ```bash
-pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, eval, eval-test, graph, diagnostics, init-zsh
+pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, mcp-serve, eval, eval-test, graph, diagnostics, init-zsh
 # Extras (optional):
 #   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
 #   pip install koboi-agent[api]   # `koboi serve` (HTTP/SSE server; `koboi keys` works on bare install)
@@ -191,7 +191,7 @@ pytest --cov=koboi            # with coverage
 
 ## Examples
 
-`examples/` contains 33 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
+`examples/` contains 34 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
 
 | Range | Features |
 |-------|----------|
@@ -206,6 +206,7 @@ pytest --cov=koboi            # with coverage
 | 25-28 | Subagent delegation, task management, benchmarks, custom RAG |
 | 29-32 | Skills (enhanced), eval-test, tool selection, sandbox + resume |
 | 33 | Declarative external-command hooks (`hooks:` YAML) |
+| 34 | Modern RAG pipeline (BM25 + rewriting + filtering + reranking + caches) |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 | hitl_client / workflow_graph_demo / dynamic_workflow_live / phase3_live_e2e | HITL client + DAG/workflow-graph demos |
 

@@ -1,4 +1,4 @@
-"""Example 33: Modern RAG pipeline — BM25 + rewriting + filtering + reranking + caches.
+"""Example 34: Modern RAG pipeline — BM25 + rewriting + filtering + reranking + caches.
 
 Demonstrates every RAG capability shipped in the consolidated stack:
   - #8 BM25 retriever (saturation + length-norm, not TF-IDF)
@@ -18,8 +18,8 @@ Optional extras:
     pip install koboi-agent[rag-cloud]  # S3/R2 via boto3
 
 Run:
-    python examples/33_rag_modern_pipeline.py
-    python examples/33_rag_modern_pipeline.py -m interactive
+    python examples/34_rag_modern_pipeline.py
+    python examples/34_rag_modern_pipeline.py -m interactive
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def main(mode: str, verbose: bool) -> None:
         "Modern RAG Pipeline",
         "BM25 + rewriting + filtering + reranking + caches",
     )
-    agent = create_agent("33_rag_modern_pipeline", verbose=verbose)
+    agent = create_agent("34_rag_modern_pipeline", verbose=verbose)
     _show_active_features(agent)
 
     if mode == "automatic":

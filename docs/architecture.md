@@ -38,7 +38,7 @@ KoboiAgent (facade.py)
      Shared: ModeManager (modes.py), TrustDatabase (trust.py)
 ```
 
-`AgentAssembler.build()` runs 16 steps in dependency order:
+`AgentAssembler.build()` runs 17 steps in dependency order:
 
 | Step | Method | Produces |
 |------|--------|----------|
@@ -57,7 +57,8 @@ KoboiAgent (facade.py)
 | 13 | `build_policy()` | `PolicyEngine` (from config rules) |
 | 14 | `build_skills()` | `SkillRegistry` (scans for SKILL.md files) |
 | 15 | `build_mode_manager()` | `ModeManager` (CHAT/PLAN/ACT/AUTO/YOLO) |
-| 16 | `build_hooks()` | `HookChain` (LoggingHook + conditional hooks) |
+| 16 | `build_proactive_memory()` | `ProactiveMemory` (opt-in: extract durable facts + semantic recall + core-memory block) |
+| 17 | `build_hooks()` | `HookChain` (LoggingHook + conditional hooks) |
 
 After assembly, `_build_command_hooks()` wires declarative `hooks:` YAML entries (gated by
 `hooks.allow_exec`) into the chain, then `_setup_subagent()` and `_setup_tasks()` wire optional
@@ -322,9 +323,8 @@ For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 ## CLI Layer
 
 The `koboi` console script (`koboi.cli:main`) is a single argparse dispatcher. Every no-TUI
-subcommand (`validate`, `run`, `chat --print`, `sessions`, `keys`, `eval`, `eval-test`, `graph`,
-`diagnostics`, `init-zsh`) routes to a stdlib-only handler in `koboi/cli_commands.py` and
-works on a bare `pip install koboi-agent` (no extras). Only `serve` (lazy-imports
+subcommand (`validate`, `run`, `chat --print`, `sessions`, `keys`, `mcp-serve`, `eval`, `eval-test`,
+`graph`, `diagnostics`, `init-zsh`) works on a bare `pip install koboi-agent` (no extras). Only `serve` (lazy-imports
 `koboi.server.app`, needs `[api]`) and interactive `chat` (lazy-imports `koboi.tui.app`,
 needs `[tui]`) require extras; both fail with a clear install hint instead of a traceback.
 `python -m koboi` routes through `cli.main` too.

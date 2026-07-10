@@ -90,6 +90,7 @@ koboi chat examples/01_simple_chat.yaml
 | 31 | [Tool Selection](31_tool_selection.py) | Tool selection + secret hygiene | `python examples/31_tool_selection.py` |
 | 32 | [Sandbox + Resume](32_sandbox_and_resume.py) | Restricted sandbox (soft + seccomp) + step-journal resume | `python examples/32_sandbox_and_resume.py` |
 | 33 | [Command Hook Messaging](33_command_hook_messaging.py) | Declarative `hooks:` YAML -- external-command hook forwards LLM responses | `python examples/33_command_hook_messaging.py` |
+| 34 | [Modern RAG Pipeline](34_rag_modern_pipeline.py) | BM25 + rewriting + filtering + reranking + caches | `python examples/34_rag_modern_pipeline.py` |
 
 ### Server
 
@@ -137,6 +138,7 @@ koboi chat examples/01_simple_chat.yaml
 | Tool selection + secret hygiene | 31 |
 | Sandbox isolation (soft + seccomp) + step-journal resume | 32 |
 | Declarative external-command hooks (`hooks:` YAML) | 33 |
+| Modern RAG pipeline (BM25, rewriting, filtering, reranking, caches) | 34 |
 | HTTP/SSE server (built-in + code-customized) | server_built_in, server_customize |
 
 ## Notes

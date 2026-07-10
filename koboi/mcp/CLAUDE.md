@@ -4,14 +4,16 @@
 MCP integration. Consumes external MCP servers (stdio subprocess or Streamable HTTP) and
 exposes their tools through the koboi `ToolRegistry`, so agent configs get third-party
 tools with zero glue. Also ships an `MCPServer` to TURN any Python functions into an MCP
-server over stdio. JSON-RPC 2.0 wire protocol; MCP spec protocolVersion `2024-11-05`.
+server over stdio. JSON-RPC 2.0 wire protocol; MCP spec protocolVersion `2025-03-26`.
 
 ## Key files
 ```
 base.py        BaseMCPClient ABC, MCPError exception, register_mcp_tools() bridge, shared JSON-RPC helpers
 client.py      MCPClient -- stdio transport (spawns server subprocess); re-exports MCPError, register_mcp_tools
 http_client.py StreamableHTTPMCPClient -- HTTP transport (POST, JSON or SSE), Bearer auth, SSRF defense
+auth.py        AuthStrategy implementations (static Bearer + OAuth2 client-credentials with token refresh)
 server.py      MCPServer -- stdio JSON-RPC server; @server.tool() decorator + run() loop
+tool_server.py Expose a koboi agent's tools as a stdio MCP server (`koboi mcp-serve <config>`); SAFE-only by default, `--allow`/`--allow-all` to escalate
 __init__.py    Re-exports BaseMCPClient, MCPClient, StreamableHTTPMCPClient, MCPServer, MCPError, register_mcp_tools
 ```
 

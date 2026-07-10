@@ -20,11 +20,11 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (194 .py files)
+koboi/              Main package (202 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
-  cli.py            Console-script entry (`koboi`): argparse dispatcher routing serve/keys/validate/run/chat/sessions/eval/eval-test/graph/diagnostics/init-zsh; bare-install works for all no-TUI commands (bodies in cli_commands.py; interactive `chat` lazy-imports tui.app)
+  cli.py            Console-script entry (`koboi`): argparse dispatcher routing serve/keys/mcp-serve/validate/run/chat/sessions/eval/eval-test/graph/diagnostics/init-zsh; bare-install works for all no-TUI commands (bodies in cli_commands.py; `serve`/`keys`/`mcp-serve`/interactive `chat` live in cli.py, the rest in cli_commands.py)
   cli_commands.py   Core (no-extra) command bodies for validate/run/chat-print/sessions/eval/eval-test/graph/diagnostics/init-zsh -- stdlib print() output, returns exit codes
   loop.py           AgentCore -- async agent loop, hook integration
   loop_pipeline.py  ToolExecutionPipeline -- 8-step tool execution flow
@@ -49,7 +49,7 @@ koboi/              Main package (194 .py files)
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 20 specialized hooks
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 19 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid), augmentation, registry
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
@@ -60,10 +60,10 @@ koboi/              Main package (194 .py files)
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
-  tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (12)
-tests/              ~224 test files, asyncio_mode="auto", shared conftest.py with MockClient
+  tui/              Terminal UI (Textual): app, screens/ (10), widgets/ (12)
+tests/              ~237 test files, asyncio_mode="auto", shared conftest.py with MockClient
 configs/            28 YAML agent configs
-examples/           33 numbered example scripts (01-33) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
+examples/           34 numbered example scripts (01-34) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py

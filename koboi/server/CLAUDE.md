@@ -43,6 +43,10 @@ GET    /v1/sessions/{id}              Messages (owner-checked)
 DELETE /v1/sessions/{id}              Evict from pool + clear DB rows (under existing_session_lock)
 POST   /v1/sessions/{id}/fork         Fork persisted messages into a new session (sqlite only)
 POST   /v1/sessions/{id}/resume       Resume interrupted session (journal rehydrate)
+GET    /v1/sessions/{id}/mcp/servers  List a session's attached MCP servers (in-process)
+POST   /v1/sessions/{id}/mcp/servers  Attach an MCP server to a session (in-process)
+DELETE /v1/sessions/{id}/mcp/servers/{sid}  Detach a session MCP server
+POST   /v1/sessions/{id}/mcp/servers/{sid}/reconnect  Reconnect a session MCP server
 POST   /v1/chat/stream                Interactive SSE chat (lock + HITL + idempotency + per-request mode/cap)
 POST   /v1/sessions/{id}/approve      Resolve a pending HITL approval
 POST   /v1/jobs                       Submit autonomous job (202; admission + idempotency)

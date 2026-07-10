@@ -15,7 +15,7 @@ app.py              Interactive chat surface: run_chat_interactive() + _build_we
 commands.py          Slash-command registry (/help, /reset, /mode, /skills, etc.)
 approval.py          TUIApprovalHandler -- Textual message-based handler that replaces CLIApprovalHandler's stdin prompt; swapped in by textual_app when guardrails.approval.handler is cli or callback
 textual_app.py      Textual App subclass, screen management
-keybindings.py       Configurable keybindings loaded from the YAML `keybindings:` section (13 defaults); load_keybindings()/get_keybinding_display()
+keybindings.py       Configurable keybindings loaded from the YAML `keybindings:` section (14 defaults); load_keybindings()/get_keybinding_display()
 bridge.py           Async bridge between Textual event loop and AgentCore
 loop.py             TUI-specific agent loop wrapper
 export.py           Conversation export (markdown/JSON/HTML)
@@ -31,6 +31,7 @@ help_overlay.py       Keyboard shortcut reference
 history_search.py     Search through conversation history
 permission_dialog.py  Tool approval dialog (modal launched by the TUIApprovalHandler flow; active when guardrails.approval.handler is cli/callback)
 session_manager.py    Multi-session management
+mcp_status.py         MCP server connection status (f2)
 subagent_monitor.py   Sub-agent activity display
 transcript_viewer.py  Full transcript view
 welcome_screen.py     First-run welcome
