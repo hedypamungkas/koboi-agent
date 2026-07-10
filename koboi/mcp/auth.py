@@ -157,8 +157,8 @@ def build_mcp_auth(auth_config: dict | None) -> AuthStrategy | None:
     if auth_type == "bearer":
         token = cfg.get("token", "")
         # 24-D: an explicit type=bearer with an empty token (e.g. a typo'd ${VAR} that
-        #       resolved to "") is a misconfiguration, not a "no auth" intent (use
-        #       type: none for that). Surface it loudly instead of silently connecting
+        #       resolved to "") is a misconfiguration, not a "no auth" intent (use the
+        #       "none" type for that). Surface it loudly instead of silently connecting
         #       unauthenticated.
         if not token:
             raise ValueError(
