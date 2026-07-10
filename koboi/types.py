@@ -187,6 +187,25 @@ class MCPToolInfo:
 
 
 @dataclass
+class MCPResource:
+    """An MCP ``resources/*`` resource descriptor (G2)."""
+
+    uri: str
+    name: str = ""
+    description: str = ""
+    mime_type: str | None = None
+
+
+@dataclass
+class MCPPrompt:
+    """An MCP ``prompts/*`` prompt descriptor (G2)."""
+
+    name: str
+    description: str = ""
+    arguments: list = None  # type: ignore[assignment]  # list[dict] per spec; None = no args
+
+
+@dataclass
 class SkillDefinition:
     name: str
     description: str

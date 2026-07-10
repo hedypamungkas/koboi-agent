@@ -15,7 +15,7 @@ class TestMCPServerDispatch:
         server = MCPServer(name="test", version="1.0.0")
         result = server._handle_initialize(1, {})
         assert result["serverInfo"]["name"] == "test"
-        assert result["protocolVersion"] == "2024-11-05"
+        assert result["protocolVersion"] == "2025-03-26"
 
     def test_handle_tools_list_empty(self):
         server = MCPServer(name="test")
@@ -147,6 +147,11 @@ class TestMCPClientTransport:
 
     def test_call_tool_sync(self):
         client = MCPClient(["echo", "test"])
+        # Pretend the subprocess is alive so ensure_connected() (G4) is a no-op and
+        # this test stays focused on request/response parsing.
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None
+        client._process = mock_process
         client._send_request = MagicMock(
             return_value={
                 "content": [

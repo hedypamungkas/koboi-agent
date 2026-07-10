@@ -811,10 +811,41 @@ Configuration:
 ```yaml
 mcp:
   servers:
-    - name: "my_server"
-      command: ["python", "my_server.py"]
-      # or: url: "http://localhost:8080/mcp"
+    # stdio transport: spawn a subprocess speaking JSON-RPC over stdin/stdout
+    - transport: stdio                # default
+      command: "python3"              # str (not a list); basename must be in the
+      args: ["mcp_servers/my_server.py"]   # stdio runner allow-list
+      timeout: 15                     # connect + per-call timeout (seconds)
+      group: "my_server"              # optional: namespacing / tool-group filter
+      # risk_level: moderate          # optional: safe (default) | moderate | destructive
+    # streamable-http transport: connect to a remote HTTP/SSE MCP server
+    - transport: streamable-http
+      url: "https://mcp.example.com/ep"
+      timeout: 30
+      auth: { type: bearer, token: "${MCP_TOKEN}" }   # none | bearer | oauth
+      headers: { X-Org-Id: "acme" }
 ```
+
+Notes: `command` is a **string** (the runner) and `args` is a list — there is no `name` field
+(use `group` for namespacing). Runtime reads use dotted-path `config.get("mcp", ...)`; the
+Pydantic `MCPConfig`/`MCPServerConfig` models (`koboi/config_models.py`) are validation-only.
+Token values support `${VAR}` / `${VAR:default}` env interpolation.
+
+### Behavior notes (risk, namespacing, fail-fast, modes)
+
+- **`risk_level`** (per server): MCP tools default to `safe` and therefore skip the
+  approval gate. Set `risk_level: moderate`/`destructive` for servers that perform
+  state-changing or destructive remote actions so they flow through approval + audit.
+- **`namespace`** (`mcp.namespace: true`): registers each tool as `mcp__<group|index>__<name>`
+  to prevent an MCP tool shadowing a builtin of the same name (last-register-wins otherwise;
+  collisions now log a warning).
+- **`fail_fast`** (`mcp.fail_fast: true`): raise (instead of warn-and-skip) when an MCP
+  server fails to connect, so misconfiguration surfaces loudly.
+- **Modes**: MCP tools are not in the read-only allowlist, so in **chat/plan** mode they are
+  blocked unless either `agent.mode: act` (or higher) is set, or the tool is added to
+  `mode.read_only_tools: [...]`. SAFE read-only MCP tools can be allowlisted there.
+- **Protocol version**: the client negotiates `2025-03-26` and tolerates servers advertising
+  other versions.
 
 ---
 
