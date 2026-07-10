@@ -123,6 +123,8 @@ class RagConfig(BaseModel):
     embedding_cache_path: str | None = None
     # #1: opt-in on-disk cache for fetched remote documents (avoids re-fetch per session).
     document_cache_path: str | None = None
+    # soft per-document size cap (MB); over-cap files are skipped + warned (OOM guard).
+    max_document_size_mb: int = Field(default=10, ge=0)
 
 
 class InputGuardrailConfig(BaseModel):

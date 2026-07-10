@@ -361,10 +361,16 @@ def _load_documents(
             return
         _logger.warning("Unknown document source %r; skipping", source)
 
+    max_mb = int(rag_conf.get("max_document_size_mb", 10))
+    max_bytes = max_mb * 1024 * 1024
     all_chunks: list[Chunk] = []
     for entry in rag_conf.get("documents", []):
+        fmt_hint = entry.get("format") if isinstance(entry, dict) else None
         for name, data in _resolve_entry(entry):
-            text, meta = dispatch_parser(name, data)
+            if len(data) > max_bytes:
+                _logger.warning("Skipping %s: %d bytes exceeds max_document_size_mb=%d", name, len(data), max_mb)
+                continue
+            text, meta = dispatch_parser(name, data, format_hint=fmt_hint)
             if not text or not text.strip():
                 # binary / unreadable / empty -> skip (never ingest mojibake)
                 continue
