@@ -51,33 +51,53 @@ def select_exposed_tools(
     return out
 
 
-def _build_registry(config: Config) -> ToolRegistry:
-    """Build the ToolRegistry from config + best-effort sandbox/tool_state deps."""
+def _build_registry(config: Config, require_deps: bool = False) -> ToolRegistry:
+    """Build the ToolRegistry from config + wire sandbox/tool_state deps.
+
+    29-B: dep-wiring failures are fatal when ``require_deps`` is set -- i.e. the operator
+    escalated exposure via ``--allow``/``--allow-all``, in which case an exposed tool may
+    need the dep at call time and would otherwise fail with an opaque ``'NoneType' ...``
+    error after being advertised in ``tools/list``. For the SAFE-only default, wiring
+    stays best-effort (SAFE tools don't need these deps)."""
     from koboi.facade import _build_sandbox, _build_tools
 
     registry = _build_tools(config)
-    # Best-effort: wire sandbox + tool_state so allowlisted fs/shell tools can run.
-    # SAFE-only tools (calculator/web/memory/search) typically don't need these.
+    failures: dict[str, str] = {}
     try:
         sandbox = _build_sandbox(config, None)
         registry.set_dep("sandbox", sandbox)
     except Exception as e:  # noqa: BLE001
-        print(f"[mcp-serve] sandbox not wired ({e}); SAFE-only tools still work", file=sys.stderr)
+        failures["sandbox"] = str(e)
     try:
         from koboi.tools.state import ToolState
 
         registry.set_dep("tool_state", ToolState())
-    except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
-        pass
+    except Exception as e:  # noqa: BLE001
+        failures["tool_state"] = str(e)
+    if require_deps and failures:
+        raise RuntimeError(
+            "[mcp-serve] tool dependency wiring failed but non-SAFE tools are exposed "
+            f"(--allow/--allow-all); failing deps: {failures}. Refusing to start because "
+            "an exposed tool would crash at call time. Fix the config or drop --allow."
+        )
+    for dep, msg in failures.items():
+        print(f"[mcp-serve] optional dep '{dep}' not wired ({msg}); SAFE-only tools still work", file=sys.stderr)
     return registry
 
 
 def _make_sync_handler(name: str, registry: ToolRegistry, loop: asyncio.AbstractEventLoop):
-    """Bridge a sync MCP ``tools/call`` to the async ``registry.execute`` on a bg loop."""
+    """Bridge a sync MCP ``tools/call`` to the async ``registry.execute`` on a bg loop.
+
+    29-G: on bridge timeout the background task is cancelled so a state-changing tool
+    can't keep running (out-of-band) after the caller has timed out and moved on."""
 
     def handler(**arguments) -> str:
         fut = asyncio.run_coroutine_threadsafe(registry.execute(name, json.dumps(arguments)), loop)
-        return fut.result(timeout=TOOL_CALL_TIMEOUT)
+        try:
+            return fut.result(timeout=TOOL_CALL_TIMEOUT)
+        except TimeoutError:
+            fut.cancel()  # 29-G: signal the bg-loop task to abort
+            raise
 
     return handler
 
@@ -87,7 +107,7 @@ def build_tool_server(
 ) -> tuple[MCPServer, ToolRegistry, asyncio.AbstractEventLoop]:
     """Build (not run) an MCPServer exposing koboi tools. Used by the CLI + tests."""
     config = Config.from_yaml(config_path)
-    registry = _build_registry(config)
+    registry = _build_registry(config, require_deps=bool(allow or allow_all))
     exposed = select_exposed_tools(registry, allow=allow, allow_all=allow_all)
     if not exposed:
         print(
