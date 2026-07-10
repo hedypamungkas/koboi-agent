@@ -36,10 +36,10 @@ class _CompleteClient(LLMClient):
 
     model = "mock-complete"
 
-    async def complete(self, messages, tools=None):
+    async def complete(self, messages, tools=None, **kwargs):
         return AgentResponse(content="mock answer", tool_calls=[])
 
-    async def complete_stream(self, messages, tools=None):
+    async def complete_stream(self, messages, tools=None, **kwargs):
         yield CompleteEvent(response=AgentResponse(content="mock answer", tool_calls=[]))
 
     async def get_embeddings(self, text):
