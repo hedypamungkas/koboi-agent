@@ -123,12 +123,26 @@ class ProactiveMemory:
         # redacts away entirely so secrets never reach the KV store / core block.
         facts = self._parse_facts(redact_tool_arguments(json.dumps(facts)))
         clean = {str(k)[:256]: str(v)[:50000] for k, v in facts.items() if v and v != "***REDACTED***"}
-        for key, value in clean.items():
-            self._store.store(key, value)
-        # B: maintain the always-in-context core-memory block from the same facts.
-        if self._core_block and clean:
-            self._merge_core_block(clean)
-        count = len(clean)
+        # Persist each fact; track which actually landed so the reported count is
+        # honest and the core block never advertises facts the KV store rejected
+        # (which would desync the two stores across a restart). Detect failure by
+        # the store's "Error:" prefix (stable across success-message rewording) so
+        # a prose change can't silently disable the feature. Wrapped to honor the
+        # "never raises" contract at SESSION_END.
+        persisted: dict[str, str] = {}
+        try:
+            for key, value in clean.items():
+                result = self._store.store(key, value)
+                if str(result).startswith("Error"):
+                    _logger.warning("Proactive memory: KV store rejected fact '%s': %s", key, result)
+                else:
+                    persisted[key] = value
+        except Exception as exc:  # nosec - never break the run at SESSION_END
+            _logger.warning("Proactive memory: KV store loop failed: %s", exc)
+        # B: maintain the always-in-context core-memory block from persisted facts.
+        if self._core_block and persisted:
+            self._merge_core_block(persisted)
+        count = len(persisted)
         if count:
             _logger.debug("Proactive memory: stored %d fact(s)", count)
             # Invalidate caches so the next recall sees the new facts.
@@ -183,14 +197,14 @@ class ProactiveMemory:
 
         Embeds the query once, cosine-ranks the embedded KV facts (reusing
         ``SemanticRetriever._cosine_similarity`` — NOT the corpus-coupled
-        retriever), and returns the top-K above ``min_score``. Results are cached
-        per query so repeated iterations within a run are free.
+        retriever), and returns the top-K above ``min_score``. Results (including
+        no-match ``None``) are cached per query, so repeated iterations within a
+        run never re-embed -- including turns that match nothing.
         """
         if not query or self._embedding_client is None:
             return None
-        cached = self._recall_cache.get(query)
-        if cached is not None:
-            return cached
+        if query in self._recall_cache:
+            return self._recall_cache[query]  # cached (str, or None for a no-match query)
         try:
             await self._ensure_embeddings()
             qvec = await self._embedding_client.get_embeddings(query)
@@ -256,7 +270,12 @@ class ProactiveMemory:
         return "Core memory:\n" + "\n".join(f"- {k}: {v}" for k, v in data.items())
 
     def _merge_core_block(self, new_facts: dict[str, str]) -> None:
-        """Merge newly extracted facts into the core block (dedup by key, bounded)."""
+        """Merge newly extracted facts into the core block (dedup by key, bounded).
+
+        Never wipes the existing block on a read/parse error -- a single corrupt
+        ``session_meta`` value must not destroy all accumulated facts. On error it
+        logs and skips the merge (existing block left untouched).
+        """
         set_meta = getattr(self._memory, "set_meta", None)
         if set_meta is None:
             return
@@ -265,12 +284,17 @@ class ProactiveMemory:
         if get_meta is not None:
             try:
                 raw = get_meta(_CORE_META_KEY)
-                if raw:
+            except Exception as exc:  # nosec - keep existing on read error
+                _logger.warning("Proactive core block read failed; merge skipped: %s", exc)
+                return
+            if raw:
+                try:
                     parsed = json.loads(raw)
-                    if isinstance(parsed, dict):
-                        existing = {str(k): str(v) for k, v in parsed.items()}
-            except Exception:  # nosec - start fresh on corrupt block
-                existing = {}
+                except (json.JSONDecodeError, ValueError) as exc:
+                    _logger.warning("Proactive core block corrupt; keeping existing, merge skipped: %s", exc)
+                    return
+                if isinstance(parsed, dict):
+                    existing = {str(k): str(v) for k, v in parsed.items()}
         existing.update(new_facts)
         items = list(existing.items())[-self._max_facts :]
         rendered = json.dumps(dict(items))

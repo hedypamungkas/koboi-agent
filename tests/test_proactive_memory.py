@@ -286,3 +286,79 @@ class TestConfigGatingAndHook:
         assert h.priority == 65
 
 
+@pytest.mark.asyncio
+class TestCriticalRegressions:
+    async def test_recall_sees_newly_extracted_fact(self, tmp_path):
+        # TG1: extract -> cache invalidation -> recall finds the new fact (no
+        # manual seeding). Guards the extract->recall boundary.
+        client = MagicMock()
+        client.complete = AsyncMock(
+            return_value=AgentResponse(content='{"preferred_language": "python"}')
+        )
+
+        async def emb(text):
+            return [1.0, 0.0, 0.0] if "python" in text.lower() else [0.0, 0.0, 0.0]
+
+        client.get_embeddings = emb
+        mem = SQLiteMemory(db_path=str(tmp_path / "p.db"), session_id="S")
+        mem.add_user_message("I love python.")
+        mem.add_assistant_message("Noted.")
+        pm = ProactiveMemory(
+            client=client,
+            embedding_client=client,
+            memory=mem,
+            store=_MemoryStore(filepath=str(tmp_path / "m.json")),
+            config={"extract": True, "recall": True},
+        )
+        assert await pm.recall("does the user prefer python") is None  # empty store
+        await pm.extract_and_store()  # stores fact + clears caches
+        block = await pm.recall("does the user prefer python")
+        assert block is not None
+        assert "preferred_language" in block
+
+    async def test_real_turn_injection_is_ephemeral(self, tmp_path, monkeypatch):
+        # TG2: a real turn injects the recall block into the LLM prompt AND does
+        # not persist it as a conversation row (ephemerality).
+        monkeypatch.chdir(tmp_path)
+        from koboi.facade import KoboiAgent
+        from tests.conftest import make_mock_response
+
+        agent = KoboiAgent.from_dict(
+            {
+                "agent": {"name": "t", "system_prompt": "sys", "max_iterations": 3, "mode": "chat"},
+                "llm": {"provider": "openai", "model": "m", "api_key": "x", "base_url": "http://x"},
+                "memory": {
+                    "backend": "sqlite",
+                    "db_path": str(tmp_path / "p.db"),
+                    "proactive": {"enabled": True, "recall": True},
+                },
+            }
+        )
+        pm = agent._core.proactive_memory
+        assert pm is not None
+        pm._store._data = {"preferred_language": "python"}  # seed a fact
+        captured: dict = {}
+        mock_client = MagicMock()
+
+        async def fake_complete(messages, tools=None, **kwargs):
+            captured["messages"] = messages
+            return make_mock_response(content="ok")
+
+        async def fake_embed(text):
+            return [1.0, 0.0, 0.0] if "python" in text.lower() else [0.0, 0.0, 0.0]
+
+        mock_client.complete = fake_complete
+        mock_client.get_embeddings = fake_embed
+        agent._core.client = mock_client
+        pm._embedding_client = mock_client
+
+        await agent.run("does the user prefer python")
+        sent = captured.get("messages", [])
+        sys_blob = " ".join(m.get("content", "") for m in sent if m.get("role") == "system")
+        assert "Relevant long-term memory" in sys_blob  # injected into the prompt
+        # ephemerality: the block is NOT a persisted conversation row
+        persisted = " ".join(str(m.get("content", "")) for m in agent._core.memory.get_messages())
+        assert "Relevant long-term memory" not in persisted
+
+
+
