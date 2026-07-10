@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from koboi.hooks.chain import HookChain
     from koboi.journal import StepJournal
     from koboi.loop import AgentCore
+    from koboi.mcp.base import BaseMCPClient
     from koboi.orchestration.orchestrator import Orchestrator
     from koboi.rag.augmentation import AugmentationStrategy
     from koboi.sandbox.base import BaseSandbox
@@ -1251,32 +1252,31 @@ class AgentAssembler:
         )
 
 
-def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list:
-    """Connect to MCP servers from config and register their tools."""
+def _connect_mcp_servers(config: Config, logger: AgentLogger) -> list[tuple[BaseMCPClient, dict]]:
+    """Connect all configured MCP servers with retry + fail_fast (G4/G10).
+
+    Returns ``[(client, server_conf), ...]`` for each successfully connected server
+    (failed servers are warn+skipped unless ``mcp.fail_fast``). Shared by the
+    single-agent path (``_build_mcp``) and the orchestration path (``_build_orchestration``).
+    """
     servers = config.get("mcp", "servers", default=[])
     if not servers:
         return []
 
-    from koboi.mcp.base import default_risk_heuristic, register_mcp_tools
-    from koboi.types import RiskLevel
+    fail_fast = config.get("mcp", "fail_fast", default=False)
+    connect_retries = int(config.get("mcp", "connect_retries", default=2))
+    backoff_base = float(config.get("mcp", "connect_backoff_base", default=2.0))
 
-    clients = []
+    pairs: list[tuple[BaseMCPClient, dict]] = []
     for server_conf in servers:
         transport = server_conf.get("transport", "stdio")
         try:
-            mcp_client = _create_mcp_client(server_conf, transport, logger, config)
-            mcp_client.connect()
-            group = server_conf.get("group")
-            # #5: MCP risk gating. Default SAFE (pre-#5); risk_level overrides for all
-            # tools from this server, risk_heuristic infers per-tool risk from the name.
-            try:
-                risk_level = RiskLevel(server_conf.get("risk_level", "safe"))
-            except ValueError:
-                risk_level = RiskLevel.SAFE
-            resolver = default_risk_heuristic if server_conf.get("risk_heuristic", False) else None
-            register_mcp_tools(mcp_client, tools, group=group, risk_level=risk_level, risk_resolver=resolver)
-            clients.append(mcp_client)
+            client = _create_mcp_client(server_conf, transport, logger, config)
+            _connect_with_retry(client, connect_retries, backoff_base)
+            pairs.append((client, server_conf))
         except Exception as e:
+            if fail_fast:
+                raise
             import logging
 
             logging.getLogger(__name__).warning(
@@ -1284,15 +1284,102 @@ def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list
                 server_conf.get("url") or server_conf.get("command", "?"),
                 e,
             )
+    return pairs
 
+
+def _mcp_namespace_prefix(idx: int, server_conf: dict, config: Config) -> str | None:
+    namespace = bool(config.get("mcp", "namespace", default=False))
+    if not namespace:
+        return None
+    group = server_conf.get("group")
+    return f"mcp__{group or idx}"
+
+
+def _mcp_registrar_for_pairs(pairs: list[tuple[BaseMCPClient, dict]], config: Config):
+    """Return a closure that registers shared MCP tools (group/risk/namespace) into a registry (G5).
+
+    Used by the orchestration path so every sub-agent's per-agent ToolRegistry gets the
+    SAME shared MCP clients registered (one subprocess/connection per server).
+    """
+    from koboi.mcp.base import default_risk_heuristic, register_mcp_tools
+
+    def registrar(registry: ToolRegistry) -> None:
+        for idx, (client, server_conf) in enumerate(pairs):
+            resolver = default_risk_heuristic if server_conf.get("risk_heuristic", False) else None
+            register_mcp_tools(
+                client,
+                registry,
+                group=server_conf.get("group"),
+                risk_level=_mcp_risk_level(server_conf),
+                risk_resolver=resolver,
+                namespace_prefix=_mcp_namespace_prefix(idx, server_conf, config),
+            )
+
+    return registrar
+
+
+def _build_mcp(config: Config, tools: ToolRegistry, logger: AgentLogger) -> list:
+    """Connect to MCP servers from config and register their tools."""
+    from koboi.mcp.base import default_risk_heuristic, register_mcp_tools
+
+    pairs = _connect_mcp_servers(config, logger)
+    clients: list[BaseMCPClient] = []
+    for idx, (client, server_conf) in enumerate(pairs):
+        resolver = default_risk_heuristic if server_conf.get("risk_heuristic", False) else None
+        register_mcp_tools(
+            client,
+            tools,
+            group=server_conf.get("group"),
+            risk_level=_mcp_risk_level(server_conf),
+            risk_resolver=resolver,
+            namespace_prefix=_mcp_namespace_prefix(idx, server_conf, config),
+        )
+        clients.append(client)
     return clients
+
+
+def _connect_with_retry(client: BaseMCPClient, connect_retries: int, backoff_base: float) -> None:
+    """Connect an MCP client with exponential backoff (G4).
+
+    Mirrors the RetryClient backoff shape (koboi/client.py): attempt 0..connect_retries,
+    ``wait = backoff_base ** attempt`` between retries. The last failure propagates so the
+    caller (``_build_mcp``) can re-raise under ``fail_fast`` or log-and-skip.
+    """
+    import time
+
+    last_exc: Exception | None = None
+    for attempt in range(connect_retries + 1):
+        try:
+            client.connect()
+            return
+        except Exception as e:  # noqa: BLE001
+            last_exc = e
+            if attempt < connect_retries:
+                time.sleep(backoff_base**attempt)
+    # Loop ran without returning -> connect failed every attempt; last_exc is set.
+    if last_exc is None:  # pragma: no cover - unreachable: loop body always sets it
+        raise RuntimeError("connect retry loop did not record an exception")
+    raise last_exc
+
+
+def _mcp_risk_level(server_conf: dict) -> RiskLevel:
+    """Map a server's configured ``risk_level`` string to a RiskLevel (G3). Defaults to SAFE."""
+    mapping = {
+        "safe": RiskLevel.SAFE,
+        "moderate": RiskLevel.MODERATE,
+        "destructive": RiskLevel.DESTRUCTIVE,
+    }
+    raw = str(server_conf.get("risk_level", "safe")).lower()
+    return mapping.get(raw, RiskLevel.SAFE)
 
 
 # M4: allowed MCP stdio runners (basename match). Extend via mcp.allowlist_commands.
 _MCP_DEFAULT_RUNNERS = frozenset({"npx", "uvx", "python", "python3", "node", "uv", "deno", "bun"})
 
 
-def _create_mcp_client(server_conf: dict, transport: str, logger: AgentLogger, config: Config | None = None):
+def _create_mcp_client(
+    server_conf: dict, transport: str, logger: AgentLogger, config: Config | None = None
+) -> BaseMCPClient:
     """Factory: create the right MCPClient subclass based on transport config."""
     if transport == "streamable-http":
         from koboi.mcp.http_client import StreamableHTTPMCPClient
@@ -1548,6 +1635,15 @@ def _build_orchestration(config: Config, verbose: bool = False):
             overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
             return _build_client(config, assembler.logger, llm_overrides=overrides)
 
+    # G5: wire shared MCP clients into orchestration (default on). The shared clients
+    # are connected once; the registrar re-registers their tools into each sub-agent's
+    # per-agent ToolRegistry so every agent can call them through one subprocess/server.
+    share_mcp = config.get("orchestration", "share_mcp", default=True)
+    mcp_pairs = _connect_mcp_servers(config, assembler.logger) if share_mcp else []
+    shared_mcp_clients = [client for client, _ in mcp_pairs]
+    mcp_registrar = _mcp_registrar_for_pairs(mcp_pairs, config)
+
+    if agent_defs:
         agents_map = AgentFactory.create_all_configured(
             agent_defs,
             assembler.client,
@@ -1557,6 +1653,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
             sandbox=assembler.sandbox,
             embedding_config=config.get("embedding"),
             client_builder=_agent_client_builder,
+            mcp_registrar=mcp_registrar,
         )
     else:
         agents_map = {}
@@ -1597,6 +1694,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         core=None,
         config=config,
         logger=assembler.logger,
+        mcp_clients=shared_mcp_clients,
         mode_manager=assembler.mode_manager,
         trust_db=assembler.trust_db,
         orchestrator=orchestrator,

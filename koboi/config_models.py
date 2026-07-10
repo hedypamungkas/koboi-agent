@@ -39,6 +39,18 @@ class AgentConfig(BaseModel):
         return v
 
 
+class ModeConfig(BaseModel):
+    """Mode-behavior overrides (distinct from ``agent.mode`` which selects the enum).
+
+    ``read_only_tools`` extends ModeHook's built-in read-only allowlist so SAFE tools
+    (e.g. read-only MCP tools) are also permitted in CHAT/PLAN (mode-block nuance).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    read_only_tools: list[str] = Field(default_factory=list)
+
+
 class LLMConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -252,13 +264,22 @@ class OrchestrationConfig(BaseModel):
     router: dict = Field(default_factory=dict)
     execution: dict = Field(default_factory=dict)
     agents: list[dict] = Field(default_factory=list)
+    share_mcp: bool = True  # G5: wire shared MCP clients into orchestration sub-agents
 
 
 class MCPAuthConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
-    type: str = "none"  # "none" | "bearer"
-    token: str = ""
+    type: str = "none"  # "none" | "bearer" | "oauth"
+    token: str = ""  # static bearer token (type=bearer)
+    # OAuth2 fields (type=oauth) -- client_credentials / refresh_token grant (G1)
+    token_endpoint: str = ""
+    client_id: str = ""
+    client_secret: str = ""
+    scopes: str = ""
+    refresh_token: str = ""
+    access_token: str = ""  # optional pre-seeded token
+    expires_in: float | None = None
 
 
 class MCPServerConfig(BaseModel):
@@ -288,6 +309,11 @@ class MCPConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     servers: list[MCPServerConfig] = Field(default_factory=list)
+    fail_fast: bool = False  # raise (instead of warn+skip) when an MCP server fails to connect
+    connect_retries: int = 2  # number of connect attempts after the first (backoff between)
+    connect_backoff_base: float = 2.0  # backoff = base ** attempt seconds
+    namespace: bool = False  # register MCP tools as mcp__<group|index>__<name> to avoid collisions
+    allowlist_commands: list[str] = Field(default_factory=list)  # extra stdio runners (basename)
 
 
 class RlimitsConfig(BaseModel):
@@ -458,6 +484,7 @@ class KoboiConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    mode: ModeConfig = Field(default_factory=ModeConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     embedding: EmbeddingConfig | None = None
     tools: ToolsConfig = Field(default_factory=ToolsConfig)

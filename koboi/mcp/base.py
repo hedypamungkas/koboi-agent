@@ -5,7 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from koboi.types import MCPToolInfo, RiskLevel
+from koboi.types import MCPResource, MCPPrompt, MCPToolInfo, RiskLevel
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -205,7 +206,7 @@ class BaseMCPClient(ABC):
         result = self._send_request_impl(
             "initialize",
             {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-03-26",
                 "capabilities": {},
                 "clientInfo": {"name": "koboi-agent", "version": "0.1.0"},
             },
@@ -241,12 +242,60 @@ class BaseMCPClient(ABC):
                     parts.append(text)
         return "\n".join(parts) if parts else str(result)
 
+    # --- resources / prompts primitives (G2) ---
+    # These are transport-agnostic: they reuse _send_request_impl, so both stdio and
+    # HTTP transports inherit them for free (mirrors how _do_initialize_handshake works).
+
+    def list_resources(self) -> list[MCPResource]:
+        """Send resources/list, return the server's resource descriptors."""
+        result = self._send_request_impl("resources/list")
+        return [
+            MCPResource(
+                uri=r.get("uri", ""),
+                name=r.get("name", ""),
+                description=r.get("description", ""),
+                mime_type=r.get("mimeType"),
+            )
+            for r in result.get("resources", [])
+        ]
+
+    def read_resource(self, uri: str) -> str:
+        """Send resources/read, return the concatenated text contents."""
+        result = self._send_request_impl("resources/read", {"uri": uri})
+        parts = [c.get("text", "") for c in result.get("contents", []) if c.get("text")]
+        return "\n".join(parts) if parts else str(result)
+
+    def list_prompts(self) -> list[MCPPrompt]:
+        """Send prompts/list, return the server's prompt descriptors."""
+        result = self._send_request_impl("prompts/list")
+        return [
+            MCPPrompt(
+                name=p.get("name", ""),
+                description=p.get("description", ""),
+                arguments=p.get("arguments", []),
+            )
+            for p in result.get("prompts", [])
+        ]
+
+    def get_prompt(self, name: str, arguments: dict | None = None) -> str:
+        """Send prompts/get, return the rendered prompt text."""
+        result = self._send_request_impl("prompts/get", {"name": name, "arguments": arguments or {}})
+        parts: list[str] = []
+        for msg in result.get("messages", []):
+            content = msg.get("content", {})
+            if isinstance(content, dict) and content.get("text"):
+                parts.append(content["text"])
+            elif isinstance(content, str):
+                parts.append(content)
+        return "\n".join(parts) if parts else str(result)
+
 
 def register_mcp_tools(
     client: BaseMCPClient,
     registry: ToolRegistry,
     group: str | None = None,
     risk_level: RiskLevel = RiskLevel.SAFE,
+    namespace_prefix: str | None = None,
     risk_resolver: Callable[[MCPToolInfo], RiskLevel] | None = None,
 ) -> list[str]:
     """Bridge: discover MCP tools and register them to ToolRegistry.
@@ -256,7 +305,9 @@ def register_mcp_tools(
 
     Args:
         group: Optional group name to assign to all tools from this server.
-        risk_level: RiskLevel assigned to every tool (default SAFE = pre-#5 behavior).
+        risk_level: RiskLevel for every tool from this server (default SAFE).
+        namespace_prefix: Optional prefix (G8); registers each tool as
+            ``{prefix}__{name}`` to avoid colliding with builtins / other servers.
         risk_resolver: Optional per-tool resolver; overrides risk_level when set
             (e.g. :func:`default_risk_heuristic`). A non-SAFE level only gates when
             ``guardrails.approval`` or ``policy.rules`` is configured.
@@ -273,15 +324,16 @@ def register_mcp_tools(
             return handler  # noqa: B023 - factory binds tool_name/mcp_client as params (not loop vars)
 
         handler = make_handler(info.name, client)
+        reg_name = f"{namespace_prefix}__{info.name}" if namespace_prefix else info.name
         resolved_risk = risk_resolver(info) if risk_resolver else risk_level
         registry.register(
-            name=info.name,
+            name=reg_name,
             description=info.description,
             parameters=info.input_schema,
             fn=handler,
             risk_level=resolved_risk,
             group=group,
         )
-        registered.append(info.name)
+        registered.append(reg_name)
 
     return registered

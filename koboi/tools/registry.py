@@ -87,6 +87,16 @@ class ToolRegistry:
         group: str | None = None,
         idempotent: bool = True,
     ) -> None:
+        # G8: surface silent-overwrite collisions (e.g. an MCP tool shadowing a builtin).
+        # Non-breaking: still overwrites (last-wins), but logs so the shadow is visible.
+        if name in self._tools:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "ToolRegistry: overwriting existing tool '%s' (last-register-wins). "
+                "Use distinct names or mcp.namespace to avoid MCP/builtin collisions.",
+                name,
+            )
         self._tools[name] = ToolDefinition(
             name=name,
             description=description,
@@ -97,6 +107,20 @@ class ToolRegistry:
             idempotent=idempotent,
         )
         self._handlers[name] = fn
+
+    def set_risk_level(self, name: str, level: RiskLevel) -> None:
+        """Override the risk level of an already-registered tool (G3).
+
+        Used to reclassify MCP-sourced tools (registered as SAFE by default) as
+        MODERATE/DESTRUCTIVE so they flow through the approval + audit gates.
+        No-op (with a debug log) if the tool is unknown.
+        """
+        import logging
+
+        if name in self._tools:
+            self._tools[name].risk_level = level
+        else:
+            logging.getLogger(__name__).debug("set_risk_level: tool '%s' not registered, skipping", name)
 
     def set_active_groups(self, groups: list[str] | None) -> None:
         """Set which tool groups are exposed to the LLM.

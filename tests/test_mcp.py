@@ -39,7 +39,7 @@ class TestMCPServer:
     def test_handle_initialize(self):
         server = MCPServer(name="test")
         result = server._handle_initialize(None, {})
-        assert result["protocolVersion"] == "2024-11-05"
+        assert result["protocolVersion"] == "2025-03-26"
         assert result["serverInfo"]["name"] == "test"
 
     def test_handle_tools_list(self):

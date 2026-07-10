@@ -56,6 +56,11 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         self._session_id: str | None = None
         self._client: httpx.Client | None = None
         self._lock = threading.Lock()
+        # G1: build an AuthStrategy (None | BearerAuth | OAuthClientCredentialsAuth).
+        # Lazily imported to avoid importing the auth module for the common no-auth case.
+        from koboi.mcp.auth import build_mcp_auth
+
+        self._auth = build_mcp_auth(self._auth_config)
 
     # --- Public API ---
 
@@ -99,8 +104,14 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         """Call a tool via HTTP POST. Async via thread offload."""
         return await asyncio.to_thread(self._call_tool_sync, name, arguments)
 
+    def ensure_connected(self) -> None:
+        """Re-establish the HTTP session if it was closed (G4). Single reconnect attempt."""
+        if self._client is None:
+            self.connect()
+
     def _call_tool_sync(self, name: str, arguments: dict) -> str:
         """Sync implementation of call_tool."""
+        self.ensure_connected()
         result = self._send_request(
             "tools/call",
             {
@@ -141,6 +152,15 @@ class StreamableHTTPMCPClient(BaseMCPClient):
 
     # --- HTTP transport details ---
 
+    def _post_safe(self, message: dict, headers: dict[str, str]) -> httpx.Response:
+        """POST with connect/timeout -> MCPError translation (shared by retry path)."""
+        try:
+            return self._client.post(self._url, json=message, headers=headers)  # type: ignore[union-attr]
+        except httpx.ConnectError as e:
+            raise MCPError(code=-1, message=f"Connection failed: {e}") from e
+        except httpx.TimeoutException as e:
+            raise MCPError(code=-1, message=f"Request timed out: {e}") from e
+
     def _post_json_rpc(self, message: dict, is_notification: bool = False) -> dict:
         """POST a JSON-RPC message to the MCP endpoint.
 
@@ -155,12 +175,7 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         if self.logger:
             self.logger.log_mcp_comm("send", message)
 
-        try:
-            response = self._client.post(self._url, json=message, headers=headers)
-        except httpx.ConnectError as e:
-            raise MCPError(code=-1, message=f"Connection failed: {e}") from e
-        except httpx.TimeoutException as e:
-            raise MCPError(code=-1, message=f"Request timed out: {e}") from e
+        response = self._post_safe(message, headers)
 
         # Capture session ID from response
         new_session_id = response.headers.get("mcp-session-id")
@@ -170,6 +185,14 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         # Notifications get 202 Accepted with no body
         if is_notification:
             return {}
+
+        # G1: on 401 with a refresh-capable auth (OAuth), refresh once and retry.
+        if response.status_code == 401 and self._auth is not None and getattr(self._auth, "supports_refresh", False):
+            self._auth.refresh(force=True)  # type: ignore[attr-defined]
+            response = self._post_safe(message, self._build_headers())
+            new_session_id = response.headers.get("mcp-session-id")
+            if new_session_id:
+                self._session_id = new_session_id
 
         # Handle HTTP errors
         if response.status_code >= 400:
@@ -201,12 +224,9 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
 
-        # Auth
-        auth_type = self._auth_config.get("type", "none")
-        if auth_type == "bearer":
-            token = self._auth_config.get("token", "")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+        # G1: auth via AuthStrategy (None | BearerAuth | OAuthClientCredentialsAuth).
+        if self._auth is not None:
+            self._auth.apply(headers)
 
         headers.update(self._extra_headers)
         return headers

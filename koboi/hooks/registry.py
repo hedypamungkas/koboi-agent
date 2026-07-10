@@ -77,7 +77,7 @@ _REGISTRY: list[HookEntry] = [
         name="ModeHook",
         config_key="agent.mode",
         should_add=lambda config, **kw: kw.get("mode_manager") is not None,
-        factory=lambda config, **kw: _create_mode_hook(kw["mode_manager"]),
+        factory=lambda config, **kw: _create_mode_hook(kw["mode_manager"], config=config),
     ),
     HookEntry(
         name="TelemetryHook",
@@ -149,10 +149,11 @@ def _create_policy_hook(
     return PolicyHook(policy_engine=policy_engine, risk_lookup=risk_lookup, audit_log=audit_log)
 
 
-def _create_mode_hook(mode_manager: ModeManager | None) -> Hook:
+def _create_mode_hook(mode_manager: ModeManager | None, config: Config | None = None) -> Hook:
     from koboi.hooks.mode_hook import ModeHook
 
-    return ModeHook(mode_manager=mode_manager)
+    extras = config.get("mode", "read_only_tools", default=[]) if config else []
+    return ModeHook(mode_manager=mode_manager, extra_read_only=extras)
 
 
 def _create_telemetry_hook(config: Config) -> Hook:
