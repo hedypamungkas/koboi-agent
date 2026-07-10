@@ -23,8 +23,11 @@ class ModeHook(Hook):
     (to block disallowed tools based on the current mode).
     """
 
-    def __init__(self, mode_manager: ModeManager):
+    def __init__(self, mode_manager: ModeManager, extra_read_only: list[str] | None = None):
         self._mode_manager = mode_manager
+        # mode-block nuance: user-configured read-only tools (e.g. SAFE MCP tools) that
+        # should also be permitted in CHAT/PLAN. Normalized lowercase for matching.
+        self._extra_read_only = {t.lower() for t in (extra_read_only or [])}
 
     def handles(self) -> list[HookEvent]:
         return [HookEvent.PRE_INPUT, HookEvent.PRE_TOOL_USE]
@@ -35,6 +38,10 @@ class ModeHook(Hook):
         elif ctx.event == HookEvent.PRE_TOOL_USE:
             return self._on_pre_tool_use(ctx)
         return ctx
+
+    def _is_read_only_or_extra(self, tool_name: str) -> bool:
+        """Built-in read-only set OR a user-configured extra (mode-block nuance)."""
+        return self._is_read_only(tool_name) or tool_name.lower() in self._extra_read_only
 
     def _on_pre_input(self, ctx: HookContext) -> HookContext:
         """Inject mode-specific system prompt suffix."""
@@ -56,6 +63,12 @@ class ModeHook(Hook):
             return ctx
 
         allowed, reason = self._mode_manager.is_tool_allowed(ctx.tool_name)
+        # mode-block nuance: user-configured extra read-only tools (e.g. SAFE MCP tools
+        # via mode.read_only_tools) are also permitted in CHAT/PLAN even when not in the
+        # built-in read-only set. Reconciles #24's allowlist with main's is_tool_allowed.
+        if not allowed and ctx.tool_name.lower() in self._extra_read_only:
+            allowed = True
+            reason = ""
         if not allowed:
             ctx.metadata["mode_blocked"] = True
             ctx.metadata["mode_block_reason"] = reason

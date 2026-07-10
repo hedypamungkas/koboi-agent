@@ -26,12 +26,31 @@ class _MCPToolDef:
     handler: Callable
 
 
+@dataclass
+class _MCPResourceDef:
+    uri: str
+    name: str
+    description: str
+    mimeType: str
+    handler: Callable  # () -> str (returns the resource text)
+
+
+@dataclass
+class _MCPPromptDef:
+    name: str
+    description: str
+    arguments: list
+    handler: Callable  # (arguments: dict) -> str (returns the rendered prompt text)
+
+
 class MCPServer:
     def __init__(self, name: str, version: str = "1.0.0"):
         self.name = name
         self.version = version
         self._tools: dict[str, _MCPToolDef] = {}
-        self._protocol_version = "2024-11-05"
+        self._resources: dict[str, _MCPResourceDef] = {}
+        self._prompts: dict[str, _MCPPromptDef] = {}
+        self._protocol_version = "2025-03-26"
 
     # --- Tool registration (similar to existing @tool decorator) ---
 
@@ -43,6 +62,37 @@ class MCPServer:
                 name=name,
                 description=description,
                 inputSchema=input_schema,
+                handler=fn,
+            )
+            return fn
+
+        return decorator
+
+    # --- Resource / prompt registration (G2) ---
+
+    def resource(self, uri: str, name: str = "", description: str = "", mime_type: str = "text/plain"):
+        """Decorator to register a function returning a resource's text content."""
+
+        def decorator(fn: Callable) -> Callable:
+            self._resources[uri] = _MCPResourceDef(
+                uri=uri,
+                name=name or uri,
+                description=description,
+                mimeType=mime_type,
+                handler=fn,
+            )
+            return fn
+
+        return decorator
+
+    def prompt(self, name: str, description: str = "", arguments: list | None = None):
+        """Decorator to register a function rendering a prompt (args dict -> str)."""
+
+        def decorator(fn: Callable) -> Callable:
+            self._prompts[name] = _MCPPromptDef(
+                name=name,
+                description=description,
+                arguments=arguments or [],
                 handler=fn,
             )
             return fn
@@ -97,6 +147,10 @@ class MCPServer:
             "initialize": self._handle_initialize,
             "tools/list": self._handle_tools_list,
             "tools/call": self._handle_tools_call,
+            "resources/list": self._handle_resources_list,
+            "resources/read": self._handle_resources_read,
+            "prompts/list": self._handle_prompts_list,
+            "prompts/get": self._handle_prompts_get,
         }
 
         handler = handlers.get(method)
@@ -135,7 +189,7 @@ class MCPServer:
     def _handle_initialize(self, id_, params: dict) -> dict:
         return {
             "protocolVersion": self._protocol_version,
-            "capabilities": {"tools": {}},
+            "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
             "serverInfo": {"name": self.name, "version": self.version},
         }
 
@@ -164,6 +218,50 @@ class MCPServer:
         result = tool_def.handler(**arguments)
         return {
             "content": [{"type": "text", "text": str(result)}],
+        }
+
+    # --- resources / prompts handlers (G2) ---
+
+    def _handle_resources_list(self, id_, params: dict) -> dict:
+        resources = [
+            {
+                "uri": r.uri,
+                "name": r.name,
+                "description": r.description,
+                "mimeType": r.mimeType,
+            }
+            for r in self._resources.values()
+        ]
+        return {"resources": resources}
+
+    def _handle_resources_read(self, id_, params: dict) -> dict:
+        uri = params.get("uri", "")
+        if uri not in self._resources:
+            return {"contents": []}
+        rdef = self._resources[uri]
+        return {"contents": [{"uri": uri, "mimeType": rdef.mimeType, "text": str(rdef.handler())}]}
+
+    def _handle_prompts_list(self, id_, params: dict) -> dict:
+        prompts = [
+            {
+                "name": p.name,
+                "description": p.description,
+                "arguments": p.arguments,
+            }
+            for p in self._prompts.values()
+        ]
+        return {"prompts": prompts}
+
+    def _handle_prompts_get(self, id_, params: dict) -> dict:
+        name = params.get("name", "")
+        arguments = params.get("arguments", {})
+        if name not in self._prompts:
+            return {"description": "", "messages": []}
+        pdef = self._prompts[name]
+        text = str(pdef.handler(arguments))
+        return {
+            "description": pdef.description,
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}],
         }
 
     # --- Internal ---

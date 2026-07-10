@@ -207,6 +207,7 @@ class AgentFactory:
         sandbox: object | None = None,
         embedding_config: dict | None = None,
         client_builder: Callable[[dict], Client] | None = None,
+        mcp_registrar: Callable[[object], None] | None = None,
     ) -> Agent:
         """Build an AgentCore from an AgentDef (config-driven).
 
@@ -236,6 +237,11 @@ class AgentFactory:
 
         tools = cls._build_tools_from_config(agent_def.tools_config, sandbox=sandbox)
 
+        # G5: register shared MCP tools into this sub-agent's registry (one set of
+        # shared clients across all agents). Skipped when the agent has no tools at all.
+        if tools is not None and mcp_registrar is not None:
+            mcp_registrar(tools)
+
         return Agent(
             client=agent_client,
             system_prompt=agent_def.system_prompt,
@@ -258,6 +264,7 @@ class AgentFactory:
         sandbox: object | None = None,
         embedding_config: dict | None = None,
         client_builder: Callable[[dict], Client] | None = None,
+        mcp_registrar: Callable[[object], None] | None = None,
     ) -> dict[str, Agent]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -279,6 +286,7 @@ class AgentFactory:
                 sandbox=sandbox,
                 embedding_config=embedding_config,
                 client_builder=client_builder,
+                mcp_registrar=mcp_registrar,
             )
         return agents
 

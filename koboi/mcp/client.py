@@ -83,8 +83,18 @@ class MCPClient(BaseMCPClient):
         """Send tools/call via thread to avoid blocking the event loop."""
         return await asyncio.to_thread(self._call_tool_sync, name, arguments)
 
+    def ensure_connected(self) -> None:
+        """Re-establish the subprocess if it died (G4). Single reconnect attempt.
+
+        Called before every tool call so a crashed/killed server is respawned
+        transparently instead of raising BrokenPipeError on the next write.
+        """
+        if self._process is None or self._process.poll() is not None:
+            self.connect()
+
     def _call_tool_sync(self, name: str, arguments: dict) -> str:
         """Sync implementation of call_tool, run in a thread."""
+        self.ensure_connected()
         result = self._send_request(
             "tools/call",
             {
