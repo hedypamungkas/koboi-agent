@@ -662,7 +662,9 @@ def _build_rag(config: Config, client: Client, logger: AgentLogger):
     # Use a dedicated embedding provider when configured (decoupled from chat);
     # else fall back to the chat client. Only the SemanticRetriever consumes it.
     rag_client = _build_embedding_client(config, logger) or client
-    return build_rag(rag_dict, client=rag_client, logger=logger)
+    # #9: pass the chat client separately so query rewriting can use a chat model
+    # (rag_client above is the embedding client for the semantic leg).
+    return build_rag(rag_dict, client=rag_client, chat_client=client, logger=logger)
 
 
 def _normalize_guardrail_config(conf: dict | list | None, default_name: str = "injection_detector") -> list[dict]:

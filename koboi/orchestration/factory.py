@@ -349,7 +349,7 @@ class AgentFactory:
         from koboi.rag.registry import build_rag
 
         rag_client = build_embedding_client(embedding_config, logger) or client
-        return build_rag(rag_conf, client=rag_client, logger=logger)
+        return build_rag(rag_conf, client=rag_client, chat_client=client, logger=logger)
 
 
 # ---------------------------------------------------------------------------

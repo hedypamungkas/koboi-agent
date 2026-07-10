@@ -220,8 +220,9 @@ class TestBuildRagEmbeddingClient:
     def test_no_embedding_config_uses_chat_client(self, monkeypatch):
         captured: dict = {}
 
-        def fake_build_rag(rag_dict, *, client=None, logger=None):
+        def fake_build_rag(rag_dict, *, client=None, logger=None, chat_client=None):
             captured["client"] = client
+            captured["chat_client"] = chat_client
             return "AUG"
 
         monkeypatch.setattr("koboi.rag.registry.build_rag", fake_build_rag)
@@ -231,12 +232,15 @@ class TestBuildRagEmbeddingClient:
             {"enabled": True, "augmentation": "in_memory"}, None, None, client=chat_client
         )
         assert captured["client"] is chat_client
+        # #9: the chat client is threaded separately for query rewriting.
+        assert captured["chat_client"] is chat_client
 
     def test_embedding_config_with_api_key_uses_dedicated_client(self, monkeypatch):
         captured: dict = {}
 
-        def fake_build_rag(rag_dict, *, client=None, logger=None):
+        def fake_build_rag(rag_dict, *, client=None, logger=None, chat_client=None):
             captured["client"] = client
+            captured["chat_client"] = chat_client
             return "AUG"
 
         monkeypatch.setattr("koboi.rag.registry.build_rag", fake_build_rag)

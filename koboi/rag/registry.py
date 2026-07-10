@@ -333,6 +333,7 @@ def build_rag(
     *,
     client: LLMClient | None = None,
     logger: AgentLogger | None = None,
+    chat_client: LLMClient | None = None,
 ) -> AugmentationStrategy | None:
     """Build a complete RAG augmentation pipeline from config.
 
@@ -389,6 +390,13 @@ def build_rag(
     }
     if logger is not None:
         kwargs["logger"] = logger
+    # #9: opt-in query rewriting / HyDE -- thread the chat client (distinct from the
+    # embedding `client`) and the `rewrite:` config into the augmentation.
+    if rag_conf.get("query_rewrite") or rag_conf.get("hyde"):
+        kwargs["query_rewrite"] = bool(rag_conf.get("query_rewrite"))
+        kwargs["hyde"] = bool(rag_conf.get("hyde"))
+        kwargs["rewrite_client"] = chat_client
+        kwargs["rewrite_config"] = rag_conf.get("rewrite") or {}
 
     for param_name in entry.parameters:
         if param_name not in kwargs and param_name in rag_conf:
