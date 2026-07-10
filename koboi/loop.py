@@ -460,6 +460,10 @@ class AgentCore:
                     }
                     for r in results
                 ]
+        # #9: stamp the query-rewrite outcome so evals/observability can inspect it.
+        rw = getattr(self.augmentation, "last_rewrite", None)
+        if rw:
+            meta["rag_rewrite"] = rw
         # R2: stamp output-guardrail warn outcome so evals can assert (t.warned).
         if self._last_output_guardrail is not None:
             meta["guardrail_outcomes"] = [{"direction": "output", **self._last_output_guardrail}]
@@ -631,6 +635,7 @@ class AgentCore:
             yield ErrorEvent(error=exc)
             return
 
+        self._last_output_guardrail = None  # R2: reset per run (parity with _run_loop)
         _stream_tools_used: list[str] = []
         # G8b: when output guardrails are configured, buffer TextDeltas and flush
         # them only after _process_output passes -- otherwise the tokens stream
@@ -703,6 +708,9 @@ class AgentCore:
                     iterations_used=i + 1,
                     tools_used=unique_tools,
                     trace_id=trace_id,
+                    # Parity with run(): stamp rag_results + guardrail_outcomes so the
+                    # streaming path is eval/observable for retrieval (t.retrievedChunk).
+                    metadata=self._run_metadata(resumed=False, last_step=i),
                 )
                 return
 

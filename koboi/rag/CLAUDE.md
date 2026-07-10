@@ -51,6 +51,16 @@ kwargs and validates `config_aliases` targets exist (raises `ValueError` otherwi
   `RunResult.metadata['rag_results']` for eval assertions.
 - Two injection points: `in_memory` augments the user message before storing; `on_the_fly`
   augments the last user message in-place before each LLM call.
+- **Query rewriting / HyDE (#9)**: `rag.query_rewrite: true` rewrites the query (rule-based
+  normalization always + an LLM call) before retrieval; `rag.hyde: true` generates a
+  hypothetical answer for the semantic/hybrid leg. Needs a **chat** client, plumbed via
+  `build_rag(..., chat_client=...)` (distinct from the embedding `client`). Output is
+  ephemeral (retrieval query only, never stored); falls back to the raw query on error.
+  `AugmentationStrategy.last_rewrite` is stamped to `RunResult.metadata['rag_rewrite']`.
+- **Metadata filtering (#10)**: `rag.filter` constrains which chunks a retriever considers
+  (relevance scoping -- freshness/source/type), e.g. `{year: {$gte: 2024}, source: {$in: [policy, handbook]}}`.
+  Operators: scalar (equality), `$gte`/`$gt`/`$lte`/`$lt`, `$in`. Applied as a pre-filter in each
+  retriever (so top_k isn't shrunk). **NOT a security/ACL boundary** -- see `koboi/rag/filters.py`.
 
 ## Gotchas
 - **`SemanticChunker` is effectively `SentenceChunker`**: `_get_embeddings_sync()` has no access
@@ -58,8 +68,12 @@ kwargs and validates `config_aliases` targets exist (raises `ValueError` otherwi
   retriever* (not the semantic chunker) for embedding-based behavior.
 - **`RerankerRetriever` is exported but NOT registered**: you cannot select it by name in YAML.
   It is a manual wrapper -- instantiate it around a base retriever in code.
-- **Document loading is filesystem-only**: `_load_documents` reads `path:` entries from disk. No
-  HTTP/remote object storage; consumers with docs in R2/S3 must pre-fetch to local files.
+- **Document sources**: `_load_documents` supports `source: file` (default; local
+  path/glob/dir), `source: http` (httpx -- presigned URLs work for R2/S3 public-ish
+  objects; 0 new dep), and `source: s3` (boto3, the `[rag-cloud]` extra; Cloudflare R2
+  via `endpoint_url`). Loaded bytes are parsed by format (text/html/pdf/docx) via
+  `parser_registry` (`[rag]` extra for PDF/DOCX; HTML is stdlib). `document_cache_path`
+  caches remote fetches across the per-session rebuilds in `koboi/server/pool.py`.
 - **Semantic/Hybrid retrievers degrade to keyword** when no `client` is injected or the embedding
   endpoint returns None (logged as a warning). Hybrid's RRF still fuses both legs.
 - **Process-level embedding cache** (`_EMBEDDING_CACHE`) embeds a corpus once per process, keyed by

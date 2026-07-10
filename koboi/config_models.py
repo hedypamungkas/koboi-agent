@@ -129,6 +129,20 @@ class RagConfig(BaseModel):
     top_k: int = Field(default=3, ge=1)
     augmentation: str = "on_the_fly"
     documents: list[str | dict] = Field(default_factory=list)
+    # #11a: wrap the chosen retriever in the lightweight RerankerRetriever.
+    rerank: bool = False
+    # #5: opt-in on-disk embedding cache (JSON) so restarts don't re-embed the corpus.
+    embedding_cache_path: str | None = None
+    # #1: opt-in on-disk cache for fetched remote documents (avoids re-fetch per session).
+    document_cache_path: str | None = None
+    # soft per-document size cap (MB); over-cap files are skipped + warned (OOM guard).
+    max_document_size_mb: int = Field(default=10, ge=0)
+    # #9: opt-in query rewriting (LLM) + HyDE (semantic/hybrid) before retrieval.
+    query_rewrite: bool = False
+    hyde: bool = False
+    # #10: opt-in metadata filter for relevance scoping (NOT ACL). Operators:
+    # scalar (equality), {"$gte"/"$lte"/"$gt"/"$lt": v}, {"$in": [...]}.
+    filter: dict | None = None
 
 
 class InputGuardrailConfig(BaseModel):

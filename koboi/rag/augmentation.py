@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 from abc import ABC
 from typing import TYPE_CHECKING
 
+from koboi.rag.retriever import BaseRetriever
 from koboi.rag.types import RetrievalResult
 from koboi.tokens import estimate_single
 
 if TYPE_CHECKING:
+    from koboi.llm.base import LLMClient
     from koboi.logger import AgentLogger
-    from koboi.rag.retriever import BaseRetriever
 
 
 class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods have default no-op impls
@@ -18,21 +20,62 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         top_k: int = 3,
         relevance_threshold: float | None = None,
         logger: AgentLogger | None = None,
+        query_rewrite: bool = False,
+        hyde: bool = False,
+        rewrite_client: LLMClient | None = None,
+        rewrite_config: dict | None = None,
+        metadata_filter: dict | None = None,
     ):
         self.retriever = retriever
         self.top_k = top_k
         self.relevance_threshold = relevance_threshold
         self.logger = logger
+        self.metadata_filter = metadata_filter  # #10: relevance scoping (NOT ACL)
         # Last retrieved chunks (R4): surfaced so AgentCore can stamp them onto
         # RunResult.metadata['rag_results'] for eval assertions (t.retrievedChunk).
         self.last_results: list[RetrievalResult] = []
+        # #9: opt-in query rewriting / HyDE. ``rewrite_client`` must be CHAT-capable
+        # (NOT the embedding client). ``last_rewrite`` is surfaced to
+        # RunResult.metadata['rag_rewrite'] for eval/observability.
+        self._query_rewrite = bool(query_rewrite)
+        self._hyde = bool(hyde)
+        self._rewriter = None
+        if (self._query_rewrite or self._hyde) and rewrite_client is not None:
+            from koboi.rag.rewrite import QueryRewriter
+
+            self._rewriter = QueryRewriter(client=rewrite_client, config=rewrite_config)
+        self.last_rewrite: dict | None = None
+
+    async def _maybe_rewrite(self, query: str) -> str:
+        """Apply opt-in query rewriting; stamp ``self.last_rewrite``. Returns the effective query."""
+        if self._rewriter is None:
+            self.last_rewrite = None
+            return query
+        mode = "hyde" if self._hyde else "llm"
+        effective, meta = await self._rewriter.rewrite(query, mode=mode)
+        self.last_rewrite = meta
+        return effective
 
     async def _retrieve_and_format(self, query: str) -> tuple[str, list[RetrievalResult]]:
-        results = await self.retriever.retrieve(query, top_k=self.top_k)
+        # #9: rewrite the query (opt-in) before retrieval; logs/evals keep the ORIGINAL query.
+        effective_query = await self._maybe_rewrite(query)
+        results = await self.retriever.retrieve(effective_query, top_k=self.top_k, metadata_filter=self.metadata_filter)
 
         # Relevance gate: filter out results below threshold
         if self.relevance_threshold is not None and results:
             results = [r for r in results if r.score >= self.relevance_threshold]
+
+        # #11b: drop duplicate-content chunks (keep first occurrence) so the same
+        # passage isn't injected twice (overlapping chunks / duplicate files).
+        seen: set[str] = set()
+        deduped: list[RetrievalResult] = []
+        for r in results:
+            h = hashlib.sha256(r.chunk.content.encode()).hexdigest()
+            if h in seen:
+                continue
+            seen.add(h)
+            deduped.append(r)
+        results = deduped
 
         # Surface retrieved chunks (R4): overwrite each call so this reflects the
         # latest retrieval (multi-turn safe -- assignment, not accumulation).
@@ -41,10 +84,11 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         if not results:
             return "", results
 
+        # #12: numbered citations [1] [2] ... so the model can echo references.
         context_parts = []
-        for r in results:
+        for i, r in enumerate(results, start=1):
             source = r.chunk.metadata.get("source", r.chunk.doc_id)
-            context_parts.append(f"[Source: {source}]\n{r.chunk.content}")
+            context_parts.append(f"[{i}] [Source: {source}]\n{r.chunk.content}")
         context = "\n---\n".join(context_parts)
 
         if self.logger:
@@ -93,8 +137,23 @@ class OnTheFlyAugmentation(AugmentationStrategy):
         top_k: int = 3,
         relevance_threshold: float | None = None,
         logger: AgentLogger | None = None,
+        query_rewrite: bool = False,
+        hyde: bool = False,
+        rewrite_client: LLMClient | None = None,
+        rewrite_config: dict | None = None,
+        metadata_filter: dict | None = None,
     ):
-        super().__init__(retriever=retriever, top_k=top_k, relevance_threshold=relevance_threshold, logger=logger)
+        super().__init__(
+            retriever=retriever,
+            top_k=top_k,
+            relevance_threshold=relevance_threshold,
+            logger=logger,
+            query_rewrite=query_rewrite,
+            hyde=hyde,
+            rewrite_client=rewrite_client,
+            rewrite_config=rewrite_config,
+            metadata_filter=metadata_filter,
+        )
         self._cache: dict[str, str] = {}
 
     async def augment_for_llm(self, messages: list[dict]) -> list[dict]:
@@ -143,7 +202,7 @@ class OnTheFlyAugmentation(AugmentationStrategy):
 # ---------------------------------------------------------------------------
 
 
-class RerankerRetriever:
+class RerankerRetriever(BaseRetriever):
     """Wraps a retriever and re-scores results using keyword overlap scoring.
 
     This is a lightweight cross-encoder style reranker that doesn't require
@@ -163,10 +222,10 @@ class RerankerRetriever:
         self._fetch_multiplier = fetch_multiplier
         self._length_penalty = length_penalty
 
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
         # Fetch more results from base retriever for reranking
         fetch_k = max(top_k * self._fetch_multiplier, top_k + 5)
-        results = await self._base.retrieve(query, top_k=fetch_k)
+        results = await self._base.retrieve(query, top_k=fetch_k, metadata_filter=metadata_filter)
 
         if not results or len(results) <= top_k:
             return results

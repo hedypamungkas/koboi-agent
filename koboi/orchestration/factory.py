@@ -349,7 +349,12 @@ class AgentFactory:
         semantic leg, decoupling it from the chat ``client``; otherwise the chat
         client is used (and semantic falls back to keyword).
         """
-        rag_conf = agent_rag_config or parent_rag_config
+        # Merge (shallow): an agent's partial rag: block customizes -- not replaces --
+        # the parent config. Without this, an agent that sets a rag: block to change its
+        # corpus but omits `enabled: true` shadows the parent (truthy dict) and then
+        # fails the enabled gate -> RAG OFF, while an agent with NO rag block inherits
+        # the parent. Explicit `enabled: false` still opts out (agent value wins).
+        rag_conf = {**(parent_rag_config or {}), **(agent_rag_config or {})}
         if not rag_conf or not rag_conf.get("enabled"):
             return None
 
@@ -357,7 +362,7 @@ class AgentFactory:
         from koboi.rag.registry import build_rag
 
         rag_client = build_embedding_client(embedding_config, logger) or client
-        return build_rag(rag_conf, client=rag_client, logger=logger)
+        return build_rag(rag_conf, client=rag_client, chat_client=client, logger=logger)
 
 
 # ---------------------------------------------------------------------------

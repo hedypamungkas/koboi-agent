@@ -157,6 +157,13 @@ class SemanticChunker(BaseChunker):
         # Try to get embeddings from the global LLM client
         embeddings = self._get_embeddings_sync(sentences)
         if embeddings is None:
+            _logger.warning(
+                "SemanticChunker: no embedding client is wired (the sync chunker "
+                "cannot call the async embedding endpoint); falling back to "
+                "SentenceChunker. Use `chunker: sentence`/`paragraph` to silence "
+                "this, or pre-compute embeddings before chunking for real semantic "
+                "boundaries."
+            )
             return self._fallback.chunk(document)
 
         return self._split_by_similarity(document, sentences, embeddings)

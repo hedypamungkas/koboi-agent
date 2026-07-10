@@ -123,6 +123,7 @@ def _extract_parameters(cls: type) -> dict[str, dict[str, Any]]:
 chunker_registry = ComponentRegistry("chunker")
 retriever_registry = ComponentRegistry("retriever")
 augmentation_registry = ComponentRegistry("augmentation")
+parser_registry = ComponentRegistry("parser")
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +205,26 @@ def register_augmentation(
     return decorator
 
 
+def register_parser(
+    name: str,
+    description: str = "",
+):
+    """Decorator to register a document-format parser.
+
+    Usage::
+
+        @register_parser("csv", description="CSV via pandas")
+        class CsvParser(BaseParser):
+            ...
+    """
+
+    def decorator(cls: type) -> type:
+        parser_registry.register(name, cls, description=description)
+        return cls
+
+    return decorator
+
+
 # ---------------------------------------------------------------------------
 # Component builders
 # ---------------------------------------------------------------------------
@@ -276,29 +297,90 @@ def _resolve_kwargs(
 def _load_documents(
     rag_conf: dict[str, Any],
 ) -> tuple[BaseChunker, list[Chunk]]:
-    """Load and chunk documents from RAG config.
+    """Load, parse, and chunk documents from RAG config.
 
-    Returns (chunker, chunks) so callers can reuse the chunker if needed.
+    Returns ``(chunker, chunks)``. Each ``documents[]`` entry selects a source:
+
+    - ``{path: "..."}`` or a bare string -- local file / glob (``*.md``) / directory
+      (recursed). Backward compatible with pre-existing configs.
+    - ``{source: http, url: "..."}`` -- fetch over HTTP(S) via httpx (presigned URLs
+      work for R2/S3 public-ish objects). Zero new dependency.
+    - ``{source: s3, bucket: "...", key: "prefix/", endpoint_url: "${R2_ENDPOINT}",
+      region: "auto"}`` -- S3-compatible (Cloudflare R2) via boto3 (``[rag-cloud]``).
+
+    Fetched/loaded bytes are parsed by format (text/html/pdf/docx) via the parser
+    registry; unreadable/binary files are skipped. ``document_cache_path`` caches
+    remote fetches across the per-session rebuilds in ``koboi/server/pool.py``.
     """
+    import glob as _glob
+    from pathlib import Path as PathlibPath
+
+    from koboi.rag.parsers import dispatch_parser
+    from koboi.rag.sources import DocumentCache, fetch_http_entry, fetch_s3_entry
     from koboi.rag.types import Document
 
     chunker = _build_chunker(rag_conf)
-    doc_paths = rag_conf.get("documents", [])
+    doc_cache_path = rag_conf.get("document_cache_path")
+    doc_cache = DocumentCache(doc_cache_path) if doc_cache_path else None
+
+    def _resolve_files(path: str) -> list[PathlibPath]:
+        # #3: expand glob patterns and directories into a concrete file list.
+        if any(ch in path for ch in "*?["):
+            return sorted(PathlibPath(p) for p in _glob.glob(path, recursive=True) if PathlibPath(p).is_file())
+        p = PathlibPath(path)
+        if p.is_dir():
+            return sorted(f for f in p.rglob("*") if f.is_file())
+        return [p] if p.is_file() else []
+
+    def _resolve_entry(entry: Any):
+        # Yield (name, bytes) for one documents[] entry from any source.
+        if isinstance(entry, str):
+            for fp in _resolve_files(entry):
+                try:
+                    yield fp.name, fp.read_bytes()
+                except OSError:
+                    continue
+            return
+        if not isinstance(entry, dict):
+            return
+        source = (entry.get("source") or "file").lower()
+        if source in ("file", "local"):
+            path = entry.get("path", "")
+            if path:
+                for fp in _resolve_files(path):
+                    try:
+                        yield fp.name, fp.read_bytes()
+                    except OSError:
+                        continue
+            return
+        if source == "http" or "url" in entry:
+            yield from fetch_http_entry(entry, doc_cache)
+            return
+        if source == "s3":
+            yield from fetch_s3_entry(entry, doc_cache)
+            return
+        _logger.warning("Unknown document source %r; skipping", source)
+
+    max_mb = int(rag_conf.get("max_document_size_mb", 10))
+    max_bytes = max_mb * 1024 * 1024
     all_chunks: list[Chunk] = []
-
-    for doc_conf in doc_paths:
-        path = doc_conf.get("path", "")
-        if path:
-            from pathlib import Path as PathlibPath
-
-            p = PathlibPath(path)
-            if p.exists():
-                content = p.read_text()
-                doc = Document(id=p.stem, title=p.stem, content=content)
-                chunks = chunker.chunk(doc)
-                for chunk in chunks:
-                    chunk.metadata["source"] = doc.title
-                all_chunks.extend(chunks)
+    for entry in rag_conf.get("documents", []):
+        fmt_hint = entry.get("format") if isinstance(entry, dict) else None
+        for name, data in _resolve_entry(entry):
+            if len(data) > max_bytes:
+                _logger.warning("Skipping %s: %d bytes exceeds max_document_size_mb=%d", name, len(data), max_mb)
+                continue
+            text, meta = dispatch_parser(name, data, format_hint=fmt_hint)
+            if not text or not text.strip():
+                # binary / unreadable / empty -> skip (never ingest mojibake)
+                continue
+            stem = PathlibPath(name).stem or name
+            doc = Document(id=stem, title=stem, content=text)
+            for chunk in chunker.chunk(doc):
+                chunk.metadata["source"] = stem
+                if meta.get("source_format"):
+                    chunk.metadata["source_format"] = meta["source_format"]
+                all_chunks.append(chunk)
 
     return chunker, all_chunks
 
@@ -313,6 +395,7 @@ def build_rag(
     *,
     client: LLMClient | None = None,
     logger: AgentLogger | None = None,
+    chat_client: LLMClient | None = None,
 ) -> AugmentationStrategy | None:
     """Build a complete RAG augmentation pipeline from config.
 
@@ -330,12 +413,26 @@ def build_rag(
     if not rag_conf or not rag_conf.get("enabled"):
         return None
 
+    # #5: opt-in on-disk embedding cache -> avoid re-embedding the corpus on restart.
+    cache_path = rag_conf.get("embedding_cache_path")
+    if cache_path:
+        from koboi.rag.retriever import set_embedding_cache_path
+
+        set_embedding_cache_path(cache_path)
+
     _, all_chunks = _load_documents(rag_conf)
     if not all_chunks:
         _logger.warning("RAG enabled but no documents loaded")
         return None
 
     retriever = _build_retriever(all_chunks, rag_conf, client=client)
+
+    # #11a: opt-in reranker -- wrap the chosen retriever (RerankerRetriever is a
+    # wrapper, so it is enabled via a flag rather than selected by name).
+    if rag_conf.get("rerank"):
+        from koboi.rag.augmentation import RerankerRetriever
+
+        retriever = RerankerRetriever(retriever)
 
     aug_name = rag_conf.get("augmentation", "in_memory")
     entry = augmentation_registry.get(aug_name)
@@ -355,6 +452,17 @@ def build_rag(
     }
     if logger is not None:
         kwargs["logger"] = logger
+    # #9: opt-in query rewriting / HyDE -- thread the chat client (distinct from the
+    # embedding `client`) and the `rewrite:` config into the augmentation.
+    if rag_conf.get("query_rewrite") or rag_conf.get("hyde"):
+        kwargs["query_rewrite"] = bool(rag_conf.get("query_rewrite"))
+        kwargs["hyde"] = bool(rag_conf.get("hyde"))
+        kwargs["rewrite_client"] = chat_client
+        kwargs["rewrite_config"] = rag_conf.get("rewrite") or {}
+
+    # #10: opt-in metadata filter for relevance scoping (NOT an ACL boundary).
+    if rag_conf.get("filter"):
+        kwargs["metadata_filter"] = rag_conf.get("filter")
 
     for param_name in entry.parameters:
         if param_name not in kwargs and param_name in rag_conf:
