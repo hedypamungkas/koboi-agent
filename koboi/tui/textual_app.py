@@ -423,6 +423,13 @@ class KoboiApp(App):
 
         self.push_screen(SubagentMonitorScreen(self._agent_states))
 
+    def action_mcp_status(self) -> None:
+        """Open the MCP server status panel (G7)."""
+        from koboi.tui.screens.mcp_status import McpStatusScreen
+
+        entries = self._agent.mcp_status() if self._agent is not None else []
+        self.push_screen(McpStatusScreen(entries))
+
     def action_focus_input(self) -> None:
         """Focus the input box."""
         self.query_one("#input-box").focus()

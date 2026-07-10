@@ -136,3 +136,42 @@ class JobStatusResponse(BaseModel):
     error: str | None = None
     error_class: str | None = None
     retriable: bool = False
+
+
+# --- G6: MCP server management (/v1/sessions/{id}/mcp/servers) ---
+
+
+class McpServerCreateRequest(BaseModel):
+    """POST body to attach an MCP server to a session at runtime."""
+
+    model_config = {"extra": "ignore"}
+
+    transport: Literal["stdio", "streamable-http"] = "stdio"
+    # stdio
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    # streamable-http
+    url: str = ""
+    auth: dict[str, Any] | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    # shared
+    timeout: float = 30.0
+    group: str | None = None
+    risk_level: str = "safe"  # safe | moderate | destructive
+
+
+class McpServerResponse(BaseModel):
+    model_config = {"extra": "ignore"}
+
+    id: str
+    name: str = ""
+    transport: str = "stdio"
+    connected: bool = False
+    tool_names: list[str] = Field(default_factory=list)
+    server_info: dict[str, Any] = Field(default_factory=dict)
+
+
+class McpServerListResponse(BaseModel):
+    model_config = {"extra": "ignore"}
+
+    servers: list[McpServerResponse] = Field(default_factory=list)

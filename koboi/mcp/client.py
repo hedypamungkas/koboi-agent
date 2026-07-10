@@ -26,6 +26,15 @@ class MCPClient(BaseMCPClient):
     """
 
     CONNECT_TIMEOUT = 15.0
+    TRANSPORT = "stdio"
+
+    def is_connected(self) -> bool:
+        """Live iff the subprocess handle exists and hasn't exited."""
+        return self._process is not None and self._process.poll() is None
+
+    @property
+    def endpoint(self) -> str:
+        return " ".join(self.server_command)
 
     def __init__(self, server_command: list[str], logger=None, connect_timeout: float = 15.0):
         super().__init__(logger=logger)

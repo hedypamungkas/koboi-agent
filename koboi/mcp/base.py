@@ -123,6 +123,38 @@ class BaseMCPClient(ABC):
     def server_info(self) -> dict:
         return self._server_info
 
+    # --- Status accessors (G6/G7) ---
+
+    #: Transport label overridden by subclasses ("stdio" / "streamable-http").
+    TRANSPORT: str = ""
+
+    @property
+    def transport(self) -> str:
+        """Transport label for this client (e.g. ``"stdio"``)."""
+        return self.TRANSPORT
+
+    @property
+    def tool_names(self) -> list[str]:
+        """Names of the tools discovered from this server."""
+        return [t.name for t in self._tools]
+
+    @property
+    def name(self) -> str:
+        """Human-readable server name from the initialize handshake (best-effort)."""
+        info = self._server_info.get("serverInfo") if isinstance(self._server_info, dict) else None
+        if isinstance(info, dict) and info.get("name"):
+            return str(info["name"])
+        return ""
+
+    @property
+    def endpoint(self) -> str:
+        """Connection target (command line for stdio, URL for HTTP). Override per transport."""
+        return ""
+
+    def is_connected(self) -> bool:
+        """Whether the transport is currently live. Override per transport (default False)."""
+        return False
+
     # --- Abstract transport I/O ---
 
     @abstractmethod

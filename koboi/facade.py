@@ -466,6 +466,91 @@ class KoboiAgent:
     def trust_db(self) -> TrustDatabase | None:
         return self._trust_db
 
+    @property
+    def mcp_clients(self) -> list:
+        """The connected MCP clients (read-only view; used by the TUI/server layers)."""
+        return list(self._mcp_clients)
+
+    def mcp_status(self) -> list[dict]:
+        """Per-MCP-server status for the TUI and ``/v1/.../mcp/servers`` (G6/G7).
+
+        Returns one entry per live client (with ``connected`` from the transport's
+        ``is_connected()``) PLUS one entry per configured server that failed to connect
+        (``connected: False``, no client) so dead servers are visible. Each entry::
+
+            {id, name, transport, connected, server_info, tool_names, configured}
+        """
+        live_endpoints: set[str] = set()
+        entries: list[dict] = []
+        for client in self._mcp_clients:
+            endpoint = client.endpoint
+            live_endpoints.add(endpoint)
+            entries.append(
+                {
+                    "id": client.name or endpoint or client.transport,
+                    "name": client.name or endpoint,
+                    "transport": client.transport,
+                    "connected": client.is_connected(),
+                    "server_info": client.server_info,
+                    "tool_names": list(client.tool_names),
+                    "configured": True,
+                }
+            )
+        # Configured-but-failed servers (connect raised -> not in _mcp_clients).
+        for sc in self._config.get("mcp", "servers", default=[]) if self._config else []:
+            endpoint = self._mcp_conf_endpoint(sc)
+            if endpoint in live_endpoints:
+                continue
+            entries.append(
+                {
+                    "id": sc.get("group") or endpoint or sc.get("transport", "stdio"),
+                    "name": sc.get("group") or endpoint or sc.get("command") or sc.get("url", ""),
+                    "transport": sc.get("transport", "stdio"),
+                    "connected": False,
+                    "server_info": {},
+                    "tool_names": [],
+                    "configured": True,
+                }
+            )
+        return entries
+
+    @staticmethod
+    def _mcp_conf_endpoint(server_conf: dict) -> str:
+        """Identity endpoint string for a configured server (matches client.endpoint)."""
+        if server_conf.get("transport") == "streamable-http":
+            return server_conf.get("url", "")
+        cmd = server_conf.get("command", "")
+        args = server_conf.get("args", []) or []
+        return " ".join([cmd, *args]).strip()
+
+    def add_mcp_client(self, client, group: str | None = None, risk_level: RiskLevel = RiskLevel.SAFE) -> list[str]:
+        """Register a connected MCP client's tools + retain it for cleanup (G6).
+
+        Returns the registered tool names (so callers can revoke them later).
+        Used by the ``/v1/.../mcp/servers`` POST endpoint.
+        """
+        from koboi.mcp.base import register_mcp_tools
+
+        names: list[str] = []
+        if self._core is not None:
+            names = register_mcp_tools(client, self._core.tools, group=group, risk_level=risk_level)
+        self._mcp_clients.append(client)
+        return names
+
+    def remove_mcp_client(self, client) -> None:
+        """Disable a client's tools, close it, and drop it (G6 DELETE)."""
+        if self._core is not None:
+            try:
+                self._core.tools.disable(list(client.tool_names))
+            except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
+                pass
+        try:
+            client.close()
+        except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
+            pass
+        if client in self._mcp_clients:
+            self._mcp_clients.remove(client)
+
 
 def _build_client_from_dict(llm: dict, logger: AgentLogger) -> RetryClient:
     """Build a ``RetryClient`` from a resolved inline llm dict.
