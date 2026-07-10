@@ -398,6 +398,10 @@ def build_rag(
         kwargs["rewrite_client"] = chat_client
         kwargs["rewrite_config"] = rag_conf.get("rewrite") or {}
 
+    # #10: opt-in metadata filter for relevance scoping (NOT an ACL boundary).
+    if rag_conf.get("filter"):
+        kwargs["metadata_filter"] = rag_conf.get("filter")
+
     for param_name in entry.parameters:
         if param_name not in kwargs and param_name in rag_conf:
             kwargs[param_name] = rag_conf[param_name]

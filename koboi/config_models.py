@@ -120,6 +120,9 @@ class RagConfig(BaseModel):
     # #9: opt-in query rewriting (LLM) + HyDE (semantic/hybrid) before retrieval.
     query_rewrite: bool = False
     hyde: bool = False
+    # #10: opt-in metadata filter for relevance scoping (NOT ACL). Operators:
+    # scalar (equality), {"$gte"/"$lte"/"$gt"/"$lt": v}, {"$in": [...]}.
+    filter: dict | None = None
 
 
 class InputGuardrailConfig(BaseModel):

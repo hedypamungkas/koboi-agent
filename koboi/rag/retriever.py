@@ -39,8 +39,24 @@ def resolve_retriever(config: dict, chunks: list[Chunk], client: LLMClient | Non
 
 
 class BaseRetriever(ABC):
+    _chunks: list[Chunk]  # populated by subclasses in __init__
+
+    def _allowed_ids(self, metadata_filter: dict | None) -> set[str] | None:
+        """#10: relevance-scoping filter -> the set of chunk ids that pass it.
+
+        Returns ``None`` when no filter is set (all chunks eligible). NOT an ACL
+        boundary -- see ``koboi/rag/filters.py``.
+        """
+        if not metadata_filter:
+            return None
+        from koboi.rag.filters import matches_filter
+
+        return {c.id for c in self._chunks if matches_filter(c.metadata, metadata_filter)}
+
     @abstractmethod
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]: ...
+    async def retrieve(
+        self, query: str, top_k: int = 3, metadata_filter: dict | None = None
+    ) -> list[RetrievalResult]: ...
 
 
 class KeywordRetriever(BaseRetriever):
@@ -95,7 +111,7 @@ class KeywordRetriever(BaseRetriever):
             return 0.0
         return dot / (norm_q * norm_c)
 
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
         query_terms = self._tokenize(query)
         if not query_terms:
             return []
@@ -107,7 +123,12 @@ class KeywordRetriever(BaseRetriever):
             if expanded:
                 query_terms = query_terms + expanded
 
-        scored = [(chunk, self._score(query_terms, chunk.id)) for chunk in self._chunks]
+        allowed = self._allowed_ids(metadata_filter)  # #10: relevance scoping (NOT ACL)
+        scored = [
+            (chunk, self._score(query_terms, chunk.id))
+            for chunk in self._chunks
+            if allowed is None or chunk.id in allowed
+        ]
         scored.sort(key=lambda x: x[1], reverse=True)
 
         return [
@@ -154,16 +175,19 @@ class BM25Retriever(BaseRetriever):
     def _tokenize(self, text: str) -> list[str]:
         return re.findall(r"\w+", text.lower())
 
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
         query_terms = self._tokenize(query)
         if self._synonyms:
             query_terms = query_terms + [a for t in query_terms for a in self._synonyms.get(t, [])]
         if not query_terms:
             return []
 
+        allowed = self._allowed_ids(metadata_filter)  # #10: relevance scoping (NOT ACL)
         avgdl = self._avgdl or 1.0
         scored: list[tuple[Chunk, float]] = []
         for i, chunk in enumerate(self._chunks):
+            if allowed is not None and chunk.id not in allowed:
+                continue
             tf = self._tf[i]
             dl = self._doc_len[i] or 1
             score = 0.0
@@ -388,13 +412,13 @@ class SemanticRetriever(BaseRetriever):
             c.embedding = emb_map.get(c.id)
         self._index_built = True
 
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
         await self._ensure_index_built()
 
         if not self._embedding_available:
             if self._fallback is None:
                 self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
-            results = await self._fallback.retrieve(query, top_k)
+            results = await self._fallback.retrieve(query, top_k, metadata_filter=metadata_filter)
             for r in results:
                 r.retrieval_method = "semantic (fallback to keyword)"
             return results
@@ -403,8 +427,9 @@ class SemanticRetriever(BaseRetriever):
         if query_emb is None:
             if self._fallback is None:
                 self._fallback = KeywordRetriever(self._chunks, synonyms=self._synonyms)
-            return await self._fallback.retrieve(query, top_k)
+            return await self._fallback.retrieve(query, top_k, metadata_filter=metadata_filter)
 
+        allowed = self._allowed_ids(metadata_filter)  # #10: relevance scoping (NOT ACL)
         scored = [
             (chunk, self._cosine_similarity(query_emb, emb))
             for chunk, emb in zip(
@@ -412,7 +437,7 @@ class SemanticRetriever(BaseRetriever):
                 [self._chunk_embeddings.get(c.id, []) for c in self._chunks],
                 strict=False,
             )
-            if emb
+            if emb and (allowed is None or chunk.id in allowed)
         ]
         scored.sort(key=lambda x: x[1], reverse=True)
 
@@ -448,11 +473,11 @@ class HybridRetriever(BaseRetriever):
         self._keyword = KeywordRetriever(chunks, synonyms=synonyms)
         self._semantic = SemanticRetriever(chunks, client=client, synonyms=synonyms)
 
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
         # Get results from both retrievers (fetch more than top_k for fusion)
         fetch_k = max(top_k * 3, 10)
-        kw_results = await self._keyword.retrieve(query, top_k=fetch_k)
-        sem_results = await self._semantic.retrieve(query, top_k=fetch_k)
+        kw_results = await self._keyword.retrieve(query, top_k=fetch_k, metadata_filter=metadata_filter)
+        sem_results = await self._semantic.retrieve(query, top_k=fetch_k, metadata_filter=metadata_filter)
 
         # Build RRF scores: score = weight / (k + rank)
         rrf_scores: dict[str, float] = {}
