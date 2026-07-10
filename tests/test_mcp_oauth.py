@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock
 
 import pytest
 
 from koboi.mcp.auth import OAuthClientCredentialsAuth, OAuthError, build_mcp_auth
 from koboi.mcp.http_client import StreamableHTTPMCPClient
+
+
+@pytest.fixture(autouse=True)
+def _bypass_token_endpoint_ssrf(monkeypatch):
+    # 24-B added an SSRF gate on the OAuth token_endpoint; the fake endpoints used
+    # here (https://idp/token) don't resolve, so bypass the checker module-wide.
+    # Tests that exercise the gate re-patch it to raise.
+    monkeypatch.setattr("koboi.tools.builtin.web._check_url_ssrf", lambda url: None)
 
 
 class _FakeResp:
@@ -36,8 +45,10 @@ class TestBuildMcpAuth:
         assert isinstance(a, BearerAuth)
         assert a.apply({})["Authorization"] == "Bearer abc"
 
-    def test_bearer_empty_token_is_none(self):
-        assert build_mcp_auth({"type": "bearer", "token": ""}) is None
+    def test_bearer_empty_token_raises(self):
+        # 24-D: explicit type=bearer with an empty token is a misconfiguration, not no-auth.
+        with pytest.raises(ValueError, match="token"):
+            build_mcp_auth({"type": "bearer", "token": ""})
 
     def test_oauth(self):
         a = build_mcp_auth(
@@ -86,11 +97,33 @@ class TestOAuthStrategy:
         assert seen["refresh_token"] == "RT"
         assert auth.apply({})["Authorization"] == "Bearer NEW"  # rotated
 
-    def test_token_endpoint_error_raises(self, monkeypatch):
-        monkeypatch.setattr("koboi.mcp.auth.httpx.post", lambda *a, **k: _FakeResp(status_code=401, text="bad"))
+    def test_token_endpoint_error_raises_no_body_leak(self, monkeypatch):
+        monkeypatch.setattr("koboi.mcp.auth.httpx.post", lambda *a, **k: _FakeResp(status_code=401, text="SECRET-BODY"))
         auth = OAuthClientCredentialsAuth(token_endpoint="https://idp/token", client_id="c")
-        with pytest.raises(OAuthError, match="HTTP 401"):
+        with pytest.raises(OAuthError, match="HTTP 401") as exc:
             auth.apply({})
+        assert "SECRET-BODY" not in str(exc.value)  # 24-B: response body never leaked into the error
+
+    def test_token_endpoint_transport_error_is_oautherror(self, monkeypatch):
+        # 24-E: a transport failure (not HTTP 4xx) surfaces as OAuthError, not raw httpx.
+        import httpx
+
+        def _boom(*a, **k):
+            raise httpx.ConnectError("no route")
+
+        monkeypatch.setattr("koboi.mcp.auth.httpx.post", _boom)
+        auth = OAuthClientCredentialsAuth(token_endpoint="https://idp/token", client_id="c")
+        with pytest.raises(OAuthError, match="request failed"):
+            auth.apply({})
+
+    def test_token_endpoint_ssrf_blocked(self, monkeypatch):
+        # 24-B: a token_endpoint the SSRF checker rejects is refused at construction.
+        def _block(url):
+            raise ValueError("private network")
+
+        monkeypatch.setattr("koboi.tools.builtin.web._check_url_ssrf", _block)
+        with pytest.raises(ValueError, match="SSRF-blocked"):
+            OAuthClientCredentialsAuth(token_endpoint="http://169.254.169.254/latest", client_id="c")
 
     def test_requires_endpoint_and_client_id(self):
         with pytest.raises(ValueError):
@@ -130,6 +163,37 @@ class TestStreamableHTTP401Retry:
         result = c._post_json_rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}})
         assert mock_client.post.call_count == 2  # initial 401 + retried 200
         assert result["result"]["content"][0]["text"] == "ok"
+
+    def test_401_skips_refresh_when_sibling_already_refreshed(self, monkeypatch):
+        # 24-A: if a concurrent call already refreshed during this request, don't refresh again.
+        monkeypatch.setattr(
+            "koboi.mcp.auth.httpx.post",
+            lambda *a, **k: _FakeResp(payload={"access_token": "T2", "expires_in": 3600}),
+        )
+        r401 = MagicMock(status_code=401, headers={}, text="bad")
+        r200 = MagicMock(status_code=200, headers={}, text="{}")
+        r200.json.return_value = {"jsonrpc": "2.0", "id": 1, "result": {}}
+        mock_client = MagicMock()
+        mock_client.post.side_effect = [r401, r200]
+        c = StreamableHTTPMCPClient(
+            url="https://mcp.example.com/ep",
+            auth_config={
+                "type": "oauth",
+                "token_endpoint": "https://idp/token",
+                "client_id": "c",
+                "client_secret": "s",
+                "access_token": "SEED",  # seeded + not expired so apply() doesn't refresh
+                "expires_in": 3600,
+            },
+        )
+        c._client = mock_client
+        # simulate "a sibling already refreshed" by stamping last_refresh_at into the future.
+        c._auth._last_refresh_at = time.monotonic() + 100  # type: ignore[attr-defined]
+        refresh_calls: list[bool] = []
+        c._auth.refresh = lambda force=True: refresh_calls.append(force)  # type: ignore[assignment,method-assign]
+        c._post_json_rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}})
+        assert refresh_calls == []  # double-check skipped the redundant refresh
+        assert mock_client.post.call_count == 2  # initial 401 + retried 200
 
     def test_bearer_401_does_not_retry(self, monkeypatch):
         # Bearer auth has no supports_refresh -> a 401 must surface as MCPError, not loop.
