@@ -110,7 +110,7 @@ async def test_augmentation_query_rewrite_stamps_last_rewrite_and_uses_effective
     kw = KeywordRetriever(_chunks())
     orig = kw.retrieve
 
-    async def spy(query, top_k=3):
+    async def spy(query, top_k=3, metadata_filter=None):
         retrieved.append(query)
         return await orig(query, top_k)
 

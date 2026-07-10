@@ -57,6 +57,10 @@ kwargs and validates `config_aliases` targets exist (raises `ValueError` otherwi
   `build_rag(..., chat_client=...)` (distinct from the embedding `client`). Output is
   ephemeral (retrieval query only, never stored); falls back to the raw query on error.
   `AugmentationStrategy.last_rewrite` is stamped to `RunResult.metadata['rag_rewrite']`.
+- **Metadata filtering (#10)**: `rag.filter` constrains which chunks a retriever considers
+  (relevance scoping -- freshness/source/type), e.g. `{year: {$gte: 2024}, source: {$in: [policy, handbook]}}`.
+  Operators: scalar (equality), `$gte`/`$gt`/`$lte`/`$lt`, `$in`. Applied as a pre-filter in each
+  retriever (so top_k isn't shrunk). **NOT a security/ACL boundary** -- see `koboi/rag/filters.py`.
 
 ## Gotchas
 - **`SemanticChunker` is effectively `SentenceChunker`**: `_get_embeddings_sync()` has no access

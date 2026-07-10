@@ -24,11 +24,13 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         hyde: bool = False,
         rewrite_client: LLMClient | None = None,
         rewrite_config: dict | None = None,
+        metadata_filter: dict | None = None,
     ):
         self.retriever = retriever
         self.top_k = top_k
         self.relevance_threshold = relevance_threshold
         self.logger = logger
+        self.metadata_filter = metadata_filter  # #10: relevance scoping (NOT ACL)
         # Last retrieved chunks (R4): surfaced so AgentCore can stamp them onto
         # RunResult.metadata['rag_results'] for eval assertions (t.retrievedChunk).
         self.last_results: list[RetrievalResult] = []
@@ -57,7 +59,7 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
     async def _retrieve_and_format(self, query: str) -> tuple[str, list[RetrievalResult]]:
         # #9: rewrite the query (opt-in) before retrieval; logs/evals keep the ORIGINAL query.
         effective_query = await self._maybe_rewrite(query)
-        results = await self.retriever.retrieve(effective_query, top_k=self.top_k)
+        results = await self.retriever.retrieve(effective_query, top_k=self.top_k, metadata_filter=self.metadata_filter)
 
         # Relevance gate: filter out results below threshold
         if self.relevance_threshold is not None and results:
@@ -139,6 +141,7 @@ class OnTheFlyAugmentation(AugmentationStrategy):
         hyde: bool = False,
         rewrite_client: LLMClient | None = None,
         rewrite_config: dict | None = None,
+        metadata_filter: dict | None = None,
     ):
         super().__init__(
             retriever=retriever,
@@ -149,6 +152,7 @@ class OnTheFlyAugmentation(AugmentationStrategy):
             hyde=hyde,
             rewrite_client=rewrite_client,
             rewrite_config=rewrite_config,
+            metadata_filter=metadata_filter,
         )
         self._cache: dict[str, str] = {}
 
@@ -218,10 +222,10 @@ class RerankerRetriever(BaseRetriever):
         self._fetch_multiplier = fetch_multiplier
         self._length_penalty = length_penalty
 
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
+    async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
         # Fetch more results from base retriever for reranking
         fetch_k = max(top_k * self._fetch_multiplier, top_k + 5)
-        results = await self._base.retrieve(query, top_k=fetch_k)
+        results = await self._base.retrieve(query, top_k=fetch_k, metadata_filter=metadata_filter)
 
         if not results or len(results) <= top_k:
             return results
