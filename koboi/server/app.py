@@ -371,9 +371,9 @@ def create_app(
         allowed_modes,
         max_iter_cap,
         stream_tasks,
-        job_webhooks,
         memory_backend,
         shared_db,
+        job_webhooks,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -432,9 +432,9 @@ def _register_routes(
     allowed_modes: frozenset[str],
     max_iter_cap: int,
     stream_tasks: set[asyncio.Task],
-    job_webhooks: list[dict] | None = None,
     memory_backend: str,
     shared_db: str,
+    job_webhooks: list[dict] | None = None,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -480,18 +480,22 @@ def _register_routes(
         err = _check_owner(ownership, session_id, request)
         if err:
             return err
-        evicted = await pool.evict(session_id)
-        # Issue #10a: also clear persisted DB rows (messages/steps/session_meta/
-        # sessions) so DELETE isn't pool-only. No-op for non-sqlite backends.
-        db_cleared = False
-        if memory_backend == "sqlite":
-            from koboi.memory_sqlite import SQLiteMemory
+        # Hold the session lock (if pooled) so a concurrent /chat/stream on the
+        # same session finishes before we clear its rows -- otherwise the stream
+        # re-inserts orphaned, unowned rows after the delete. No agent creation.
+        async with pool.existing_session_lock(session_id):
+            evicted = await pool.evict(session_id)
+            # Also clear persisted DB rows (messages/steps/session_meta/sessions/
+            # tasks) so DELETE isn't pool-only. No-op for non-sqlite backends.
+            db_cleared = False
+            if memory_backend == "sqlite":
+                from koboi.memory_sqlite import SQLiteMemory
 
-            db_cleared = SQLiteMemory.delete_session(shared_db, session_id)
-        ownership.delete(session_id)
+                db_cleared = SQLiteMemory.delete_session(shared_db, session_id)
+            ownership.delete(session_id)
         if not evicted and not db_cleared:
             raise HTTPException(status_code=404, detail="session not found")
-        return SessionDeletedResponse(session_id=session_id, evicted=True)  # type: ignore[return-value]
+        return SessionDeletedResponse(session_id=session_id, evicted=evicted or db_cleared)  # type: ignore[return-value]
 
     @app.get("/v1/sessions", response_model=SessionListResponse)
     async def list_sessions_route(request: Request) -> Response:
@@ -502,8 +506,12 @@ def _register_routes(
 
         rows = SQLiteMemory.list_sessions(shared_db)
         # Owner-scope: filter to the caller's sessions via the ownership sidecar.
+        # Fail CLOSED when auth is on but no caller identity was stamped -- never
+        # silently fall back to a real tenant name like "dev" (cross-tenant leak).
         if auth_enabled:
-            owner = getattr(request.state, "api_key_id", "dev")
+            owner = getattr(request.state, "api_key_id", None)
+            if not owner:
+                return _error_response(401, "unauthenticated", "no caller identity", request)
             owned = set(ownership.list_owned_sessions(owner))
             rows = [r for r in rows if r.get("session_id") in owned]
         items = [
@@ -542,7 +550,15 @@ def _register_routes(
         try:
             await pool.get_or_create(new_sid)
         except PoolFull as exc:
+            # Roll back the committed fork rows so we don't leave a ghost session
+            # (DB + owner rows, no pool entry, no X-Session-Id sent to the client).
+            SQLiteMemory.delete_session(shared_db, new_sid)
+            ownership.delete(new_sid)
             return _error_response(429, "pool_full", str(exc), request)
+        except Exception as exc:
+            SQLiteMemory.delete_session(shared_db, new_sid)
+            ownership.delete(new_sid)
+            return _error_response(500, "fork_failed", str(exc), request)
         response.headers["X-Session-Id"] = new_sid
         return SessionForkResponse(session_id=new_sid, source_session_id=session_id)  # type: ignore[return-value]
 

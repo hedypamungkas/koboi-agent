@@ -73,3 +73,25 @@ class TestSessionSurface:
         async with httpx.AsyncClient(transport=ASGITransport(app=_app(_cfg(db))), base_url="http://t") as c:
             r = await c.post("/v1/sessions/nonexistent/fork")
             assert r.status_code == 404
+
+    async def test_fork_rolls_back_on_pool_failure(self, tmp_path):
+        # C1: if pool.get_or_create fails (any exception) AFTER fork_session
+        # committed, the forked DB/owner rows must be rolled back (no ghost).
+        db = str(tmp_path / "d.db")
+        factory = lambda: MockClient([make_mock_response(content="ok")])  # noqa: E731
+        app = create_app(_cfg(db), client_factory=factory, enable_cors=False)
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            r = await c.post("/v1/sessions")  # original session
+            sid = r.json()["session_id"]
+            mem = SQLiteMemory(db_path=db, session_id=sid)
+            mem.add_user_message("seed")
+            mem.close()
+            # force get_or_create to fail for the fork's new session
+            async def _fail(_session_id):
+                raise RuntimeError("forced failure")
+
+            app.state.pool.get_or_create = _fail
+            r = await c.post(f"/v1/sessions/{sid}/fork")
+            assert r.status_code == 500  # fork_failed, rolled back
+            sids = [s["session_id"] for s in SQLiteMemory.list_sessions(db)]
+            assert sids == [sid]  # only the original; no ghost fork

@@ -235,6 +235,23 @@ class AgentPool:
             yield
             self._last_used[session_id] = time.monotonic()
 
+    @asynccontextmanager
+    async def existing_session_lock(self, session_id: str):
+        """Acquire the session lock ONLY if the session is pooled (no creation).
+
+        Unlike ``session_lock`` (which ``get_or_create``s an agent), this yields
+        immediately when the session isn't in the pool. Used by admin ops (DELETE)
+        that must not materialize an agent but should serialize against an active
+        stream on the same session (which holds this lock). Yields whether a lock
+        was actually held.
+        """
+        lock = self._locks.get(session_id)
+        if lock is None:
+            yield False
+            return
+        async with lock:
+            yield True
+
     async def get_messages(self, session_id: str) -> list[dict]:
         agent = self._agents.get(session_id)
         if agent is None or agent._core is None or agent._core.memory is None:

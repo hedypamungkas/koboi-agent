@@ -104,3 +104,32 @@ class TestOwnerColumn:
         assert len(alice_only) == 1
         assert alice_only[0]["session_id"] == "A"
         assert alice_only[0]["owner"] == "alice"
+
+    def test_fork_copies_owner(self, tmp_path):
+        # I1: fork_session must carry the owner column through (was dropped -> NULL).
+        db = str(tmp_path / "fork.db")
+        src = SQLiteMemory(db_path=db, session_id="SRC", owner="alice")
+        src.add_user_message("hello")
+        src.ensure_session_record(agent_name="a", model="m")
+        src.close()
+        SQLiteMemory.fork_session(db, "SRC", "DST")
+        forked = SQLiteMemory.list_sessions(db, owner="alice")
+        assert any(r["session_id"] == "DST" for r in forked)  # owner preserved
+        conn = sqlite3.connect(db)
+        msg_owner = conn.execute("SELECT owner FROM messages WHERE session_id='DST'").fetchone()
+        sess_owner = conn.execute("SELECT owner FROM sessions WHERE session_id='DST'").fetchone()
+        conn.close()
+        assert msg_owner[0] == "alice"
+        assert sess_owner[0] == "alice"
+
+    def test_list_and_delete_self_heal_legacy_db(self, tmp_path):
+        # C3: list_sessions/delete_session must not crash on a pre-#23 DB that
+        # lacks the owner column + the session_meta table. _make_old_db builds a
+        # faithful pre-owner schema (full messages/sessions columns, no owner,
+        # no session_meta/steps/tasks).
+        db = str(tmp_path / "legacy.db")
+        _make_old_db(db)
+        rows = SQLiteMemory.list_sessions(db)  # self-heals owner col + tables
+        assert any(r["session_id"] == "S" for r in rows)
+        assert SQLiteMemory.delete_session(db, "S") is True  # self-heals session_meta
+        assert SQLiteMemory.list_sessions(db) == []

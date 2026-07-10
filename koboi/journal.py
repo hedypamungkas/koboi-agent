@@ -88,10 +88,18 @@ class StepJournal:
         tool_call_count = 0
         if tool_calls and self._record_tool_calls:
             # Redact secrets in tool arguments before durable storage so the
-            # step journal never persists leaked credentials. Round-trippable:
-            # redact_tool_arguments returns a JSON string of the same shape.
+            # step journal never persists leaked credentials. Fail-safe: redaction
+            # must NEVER break the durability write -- on any error, mask the
+            # arguments wholesale rather than letting the exception abort the run
+            # (and the step row). Round-trippable on the happy path.
+            def _safe_redact(args: str) -> str:
+                try:
+                    return redact_tool_arguments(args)
+                except Exception:  # nosec B110 - durability must not depend on redaction
+                    return "***redaction-failed***"
+
             tool_calls_json = json.dumps(
-                [{"name": tc.name, "arguments": redact_tool_arguments(tc.arguments)} for tc in tool_calls]
+                [{"name": tc.name, "arguments": _safe_redact(tc.arguments)} for tc in tool_calls]
             )
             tool_call_count = len(tool_calls)
         elif tool_calls:

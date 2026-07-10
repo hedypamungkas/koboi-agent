@@ -21,6 +21,10 @@ import re
 
 REDACTED = "***REDACTED***"
 
+# Max nesting depth for _redact_nested (guards against RecursionError on deeply
+# nested untrusted JSON in the durability-critical journal write path).
+_REDACT_MAX_DEPTH = 32
+
 # Value-shape patterns (copied from koboi/server/jobs.py:47-52).
 _SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-[A-Za-z0-9_-]{20,}"),  # OpenAI-style keys
@@ -96,15 +100,23 @@ def redact_value(text: str) -> str:
     return redacted
 
 
-def _redact_nested(obj: object) -> object:
-    """Recursively mask dict values by sensitive key name + leaf value shapes."""
+def _redact_nested(obj: object, _depth: int = 0) -> object:
+    """Recursively mask dict values by sensitive key name + leaf value shapes.
+
+    Depth-capped (``_REDACT_MAX_DEPTH``) so a pathologically/hallucinatorily
+    nested JSON argument from an untrusted LLM cannot cause a RecursionError in
+    the durability-critical journal write path; past the cap, leaves are masked
+    via value-shape redaction rather than recursed into.
+    """
+    if _depth > _REDACT_MAX_DEPTH:
+        return redact_value(obj) if isinstance(obj, str) else obj
     if isinstance(obj, dict):
         out: dict = {}
         for k, v in obj.items():
-            out[k] = REDACTED if _is_sensitive_key(k) else _redact_nested(v)
+            out[k] = REDACTED if _is_sensitive_key(k) else _redact_nested(v, _depth + 1)
         return out
     if isinstance(obj, list):
-        return [_redact_nested(v) for v in obj]
+        return [_redact_nested(v, _depth + 1) for v in obj]
     if isinstance(obj, str):
         return redact_value(obj)
     return obj

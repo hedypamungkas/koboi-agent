@@ -181,6 +181,24 @@ class SQLiteMemory(ConversationMemory):
             conn.execute("ALTER TABLE sessions ADD COLUMN owner TEXT")
         conn.commit()
 
+    @staticmethod
+    def _ensure_schema_on(conn: sqlite3.Connection) -> None:
+        """Ensure the full schema exists on a raw/short-lived connection.
+
+        The static helpers (list/delete/fork/get) open via ``_open_conn``, which
+        skips ``_init_db``. They must self-heal the schema (steps/tasks/session_meta
+        tables + the owner column) before referencing it, or they crash on DBs
+        created before these features existed (every pre-#23 deployment).
+        """
+        ensure_steps_table(conn)
+        ensure_tasks_table(conn)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS session_meta ("
+            "session_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, "
+            "PRIMARY KEY (session_id, key))"
+        )
+        SQLiteMemory._migrate_add_owner(conn)
+
     def _load_from_db(self) -> None:
         conn = self._ensure_conn()
         rows = conn.execute(
@@ -378,6 +396,7 @@ class SQLiteMemory(ConversationMemory):
     def list_sessions(db_path: str, limit: int = 50, owner: str | None = None) -> list[dict]:
         """List sessions with metadata, most recent first. Optional owner filter (issue #2)."""
         conn = SQLiteMemory._open_conn(db_path)
+        SQLiteMemory._ensure_schema_on(conn)
         conn.row_factory = sqlite3.Row
         select = (
             "SELECT s.session_id, s.title, s.created_at, s.updated_at, "
@@ -401,15 +420,19 @@ class SQLiteMemory(ConversationMemory):
 
     @staticmethod
     def delete_session(db_path: str, session_id: str) -> bool:
-        """Delete a session and all its rows (messages, steps, session_meta, sessions)."""
+        """Delete a session and all its rows (messages, steps, session_meta, sessions, tasks)."""
         conn = SQLiteMemory._open_conn(db_path)
-        conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        conn.execute("DELETE FROM steps WHERE session_id = ?", (session_id,))
-        conn.execute("DELETE FROM session_meta WHERE session_id = ?", (session_id,))
-        conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
-        conn.commit()
-        deleted = conn.total_changes > 0
-        conn.close()
+        try:
+            SQLiteMemory._ensure_schema_on(conn)
+            conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM steps WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM session_meta WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM tasks WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
+            deleted = conn.total_changes > 0
+        finally:
+            conn.close()
         return deleted
 
     @staticmethod
@@ -439,16 +462,17 @@ class SQLiteMemory(ConversationMemory):
     ) -> str:
         """Fork a session: copy all messages into a new session."""
         conn = SQLiteMemory._open_conn(db_path)
+        SQLiteMemory._ensure_schema_on(conn)
         conn.execute(
-            "INSERT INTO messages (session_id, role, content, tool_calls_json, tool_call_id, label) "
-            "SELECT ?, role, content, tool_calls_json, tool_call_id, label "
+            "INSERT INTO messages (session_id, role, content, tool_calls_json, tool_call_id, label, owner) "
+            "SELECT ?, role, content, tool_calls_json, tool_call_id, label, owner "
             "FROM messages WHERE session_id = ?",
             (new_session_id, source_session_id),
         )
         conn.execute(
-            "INSERT INTO sessions (session_id, title, message_count) "
+            "INSERT INTO sessions (session_id, title, message_count, owner) "
             "SELECT ?, 'Fork of ' || COALESCE(title, ?), "
-            "(SELECT COUNT(*) FROM messages WHERE session_id = ?) "
+            "(SELECT COUNT(*) FROM messages WHERE session_id = ?), owner "
             "FROM sessions WHERE session_id = ?",
             (new_session_id, source_session_id, new_session_id, source_session_id),
         )
