@@ -286,14 +286,14 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (22)
+### Config sections (24)
 
 | Section | Controls |
 |---------|----------|
 | `agent` | Name, system prompt, max iterations, mode |
 | `llm` | Provider, model, API key, base_url, timeout, retries, temperature |
 | `tools` | Builtin list, custom modules, per-tool overrides |
-| `context` | Strategy, max_context_tokens, keep_last |
+| `context` | Strategy, max_context_tokens, keep_last, `safety_margin` (response headroom) |
 | `rag` | Chunker, retriever, augmentation, documents |
 | `guardrails` | Input/output checks, rate limits, approval mode |
 | `harness` | Telemetry, carryover, doom loop, notifications |
@@ -301,7 +301,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `policy` | Allow/deny/confirm rules |
 | `skills` | Search paths |
 | `mcp` | MCP server connections, per-server `risk_level`/`risk_heuristic` |
-| `memory` | Backend (sqlite/in_memory), db_path |
+| `memory` | Backend (sqlite/in_memory), db_path, `retention` (max_messages cap), `owner` (tenant tag), `proactive` (opt-in extract/recall/core_block long-term memory) |
 | `orchestration` | Router type, agents, execution mode |
 | `sandbox` | Backend (passthrough/restricted), workdir strategy, network, network_isolation (seccomp), rlimits |
 | `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume |
@@ -311,7 +311,9 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `keybindings` | TUI key overrides |
 | `providers` | Named LLM provider definitions referenced by `llm:` (str ref) and pool members |
 | `pools` | Named provider pools (failover / round_robin) wrapping multiple `providers` members |
-| `embedding` | Embedding provider config for RAG semantic retrieval (inline or named `providers` ref) |
+| `embedding` | Embedding provider config for RAG semantic retrieval + proactive recall (inline or named `providers` ref) |
+| `subagent` | Parallel sub-agent delegation config |
+| `eval` | Evaluation suite cases/scorers (e.g. `eval_suite.yaml`, `benchmark_eval.yaml`) |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
@@ -349,7 +351,10 @@ containment, PATH allowlist, env hygiene, rlimits, network deny). Network deny i
 ## Serving Layer (HTTP/SSE)
 
 `koboi/server/` exposes the agent over HTTP/SSE via a FastAPI app (`create_app()` /
-`koboi serve`). Two execution modes share one `AgentPool` (per-session `KoboiAgent` +
+`koboi serve`). `create_app()` accepts externalized-state injection kwargs
+(`session_store`/`job_store`/`event_buffer`/`idempotency_store`/`ownership_store`/`approval_registry`,
+each defaulting to the in-process impl) — the seam for a future Redis/Postgres backend.
+Two execution modes share one `AgentPool` (per-session `KoboiAgent` +
 per-session `asyncio.Lock` — AgentCore is not concurrent-safe — + per-session sandbox
 workdir):
 
@@ -721,7 +726,21 @@ class MemoryBackend(Protocol):
 | `ConversationMemory` | In-memory list | Ephemeral sessions, testing |
 | `SQLiteMemory` | SQLite WAL-mode | Persistent sessions, cross-restart durability |
 
-`SQLiteMemory` adds session management (`list_sessions`, `delete_session`, `fork_session`) and persists messages to a SQLite database.
+`SQLiteMemory` adds session management (`list_sessions`, `delete_session`, `fork_session`), per-session metadata (`get_meta`/`set_meta` backed by a `session_meta` table), optional retention pruning (`memory.retention.max_messages`), an `owner` tenant tag, and persists messages to a SQLite database. `list`/`delete`/`fork` self-heal the schema on raw connections.
+
+### Proactive long-term memory (opt-in)
+
+`koboi/proactive_memory.py` (`ProactiveMemory`, enabled via `memory.proactive`) closes the proactivity gap: RAG/conversation-history are auto-injected every turn, but the KV memory layer was on-demand only. Three features, all best-effort:
+
+- **D extract** — `ProactiveExtractionHook` (SESSION_END, priority 65) side-LLM-extracts durable user facts, **redacts** them via `koboi/redact.py`, and stores them in the KV `_MemoryStore` (`.agent_memory.json`).
+- **C recall** — each turn, embed the user message, cosine-rank stored facts (`SemanticRetriever._cosine_similarity`), and inject the top-N **ephemerally** into the system message in `loop._get_managed_messages` (not persisted as a conversation row).
+- **B core block** — a bounded always-in-context summary in `session_meta`, maintained by the extractor.
+
+Recall needs a dedicated `embedding:` model (the chat model can't embed).
+
+### Secret redaction
+
+`koboi/redact.py` provides shared value-shape + key-name masking, reused by the step journal (`journal.py`), error strings (`server/jobs.py`), and diagnostics. In the journal it's **fail-safe** (masks args wholesale on any error — never aborts the durability write) and depth-capped.
 
 ### AuditTrail
 
@@ -815,7 +834,7 @@ mcp:
 
 ### Built-in scorers
 
-`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost`, `RAGNoise`, `ContextEfficiency`, `ToolSelection`, `TokenEfficiency` -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
+`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost`, `RAGNoise`, `ContextEfficiency`, `ToolSelection`, `TokenEfficiency`, `SkillTriggerAccuracy` -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
 
 ---
 

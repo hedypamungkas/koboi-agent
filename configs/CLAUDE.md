@@ -29,6 +29,7 @@ server_simple.yaml        Minimal HTTP/SSE server (passthrough sandbox)
 server_deploy.yaml        Production server (restricted sandbox, per-session workdir, server:/jobs:/tracing:)
 command_hook_notify.yaml  External-command hook demo (`hooks:` section; see docs/custom-hooks.md)
 jobs_webhooks.yaml        Job-webhook demo (`jobs.webhooks`; HMAC-signed terminal-status callbacks)
+proactive_memory.yaml     Proactive long-term memory demo (D extract + C recall + B core block; `memory.proactive:` + `embedding:`)
 ```
 **Server configs** (`server_simple.yaml`, `server_deploy.yaml`) drive `koboi serve`.
 `server_deploy.yaml` is the production reference for `server:`/`jobs:`/`sandbox:`/`tracing:`; the Dockerfile `CMD` defaults to `server_simple.yaml` (override at run time via `KOBOI_CONFIG=/app/configs/server_deploy.yaml`).
@@ -45,3 +46,10 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 
 ## Top-level sections
 `agent`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`
+
+### Notable sub-sections (recently added)
+- `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
+- `memory.retention.max_messages` — cap stored message rows (oldest pruned); None = unbounded.
+- `memory.owner` — tenant/owner tag stamped on stored rows (schema prep for multi-tenancy).
+- `context.safety_margin` — tokens of headroom reserved inside `manage()` so one large response can't push an over-budget payload (default 0).
+

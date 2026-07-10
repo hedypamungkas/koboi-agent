@@ -13,13 +13,13 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 - Run example: `python examples/01_simple_chat.py`
 - Serve HTTP:  `koboi serve configs/server_deploy.yaml`  (needs `[api]` extra: `pip install -e ".[api]"`)
 - API keys:    `koboi keys create`                       (Bearer auth; `koboi keys list|revoke|rotate`)
-- Resume:      `koboi run <config> --resume <session>`    (`koboi sessions <config>` lists persisted sessions)
+- Resume:      `koboi run <config> --resume <session>`    (`koboi sessions <config>` lists persisted sessions; `--delete <id>` deletes one)
 - Eval (eve):  `koboi eval-test evals/ --mock --strict`
 - Benchmarks:  `pytest tests/benchmarks/ -o python_files="bench_*.py" --benchmark-only`  (perf regression gate; see docs/performance-benchmarking.md)
 
 ## Directory map
 ```
-koboi/              Main package (191 .py files)
+koboi/              Main package (194 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
@@ -34,7 +34,9 @@ koboi/              Main package (191 .py files)
   memory.py         In-memory ConversationMemory + MemoryBackend protocol
   memory_sqlite.py  SQLite-backed memory backend (WAL mode); also hosts the `steps` journal table
   journal.py        StepJournal -- per-iteration step journal for crash/redeploy resume (P2-A)
-  tokens.py         Token estimation helpers
+  proactive_memory.py  ProactiveMemory -- opt-in proactive long-term memory (auto-extract D + semantic recall C + core-memory block B); `memory.proactive` config
+  redact.py         Shared secret redaction (value-shape + key-name masking) used by journal/jobs/diagnostics
+  tokens.py         Token estimation helpers; optional tiktoken BPE via `[tokenizer]` extra (chars/3 fallback)
   modes.py          AgentMode enum (chat/plan/act/auto/yolo), ModeManager
   trust.py          TrustDatabase for graduated permissions
   logger.py         AgentLogger
@@ -46,7 +48,7 @@ koboi/              Main package (191 .py files)
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 19 specialized hooks
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 20 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid), augmentation, registry
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
@@ -58,8 +60,8 @@ koboi/              Main package (191 .py files)
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (9), widgets/ (12)
-tests/              ~188 test files, asyncio_mode="auto", shared conftest.py with MockClient
-configs/            27 YAML agent configs
+tests/              ~224 test files, asyncio_mode="auto", shared conftest.py with MockClient
+configs/            28 YAML agent configs
 examples/           33 numbered example scripts (01-33) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
@@ -113,3 +115,11 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - `hooks:` YAML section declares external-command hooks (no Python in the agent): `allow_exec` default-deny gate + `on_event:` entries, each spawning a command (`uv`/`uvx`-friendly) that exchanges JSON over stdio. Wired by `_build_command_hooks()` in `facade.py` (not the `_REGISTRY` pattern). See `docs/custom-hooks.md` for the wire protocol and `examples/33_command_hook_messaging.py` for a runnable demo
 - `jobs.webhooks` fires an HTTP POST (fire-and-forget, retried on 5xx/network error) to each matching URL on a job's terminal status (`completed`/`failed`/`timed_out`/`cancelled`); `secret` HMAC-SHA256-signs the body (`X-Koboi-Signature` header). Operator-configured URLs only, never tenant-supplied
 - Mode-block runs BEFORE approval in `ToolExecutionPipeline` (`loop_pipeline.py`) -- an approved tool is never retroactively mode-blocked, and a Trust-DB allow rule cannot bypass chat/plan mode-blocking. `ModeManager.is_tool_allowed()` is the single source of truth shared by the pipeline gate and `ModeHook`
+- **Proactive long-term memory** (`memory.proactive`, opt-in, inert by default): `ProactiveMemory` (`proactive_memory.py`) makes KV memory proactive. **D extract** = `ProactiveExtractionHook` (SESSION_END, priority 65) side-LLM-extracts durable facts → redacts → stores in the KV `_MemoryStore` + maintains a core block. **C recall** = each turn, embed the user msg, cosine-rank KV facts (`SemanticRetriever._cosine_similarity`, NOT the corpus-coupled retriever), inject top-N **ephemerally** into the system msg in `loop._get_managed_messages` (NOT persisted as a conversation row — survives compaction because it's re-added each turn). **B core block** = bounded always-in-context summary in `session_meta`. Recall needs a real **`embedding:` model** (gpt-4o-mini can't embed; set `embedding:` or it falls back to the chat client and fails). Recall cache is invalidated whenever extract stores new facts.
+- **Redaction** (`redact.py`): shared value-shape + key-name masking reused by `journal.py`/`server/jobs.py`/`diagnostics.py`. In the step journal it's **fail-safe** (`_safe_redact` masks args wholesale on any error → never aborts the durability write) and `_redact_nested` is **depth-capped** (`_REDACT_MAX_DEPTH=32`, guards `RecursionError` on untrusted nested args).
+- **Schema self-heal**: `SQLiteMemory.list_sessions`/`delete_session`/`fork_session` call `_ensure_schema_on(conn)` on a raw connection (adds steps/tasks/session_meta tables + the `owner` column via `_migrate_add_owner`) — safe to point at a pre-existing/older DB. `delete_session` clears messages+steps+session_meta+tasks+sessions.
+- **Tokenizer extra**: `pip install koboi-agent[tokenizer]` → `tiktoken>=0.7` for accurate OpenAI token counts; `tokens.make_tokenizer(provider, model)` returns a BPE counter (OpenAI only) wired into `ContextManager.tokenizer`, else the chars/3 heuristic. CI installs `.[dev,tui,api]` (no tokenizer) → tiktoken tests `importorskip`.
+- **`ToolDefinition.idempotent: bool = True`** (`types.py`, set via `@tool(..., idempotent=)`): `False` marks side-effecting tools that must not silently double-fire on crash-resume — `_repair_interrupted_turn` skips re-execution (records a synthetic result) for non-idempotent tools. Default `True` preserves prior behavior.
+- New memory/context knobs: `memory.retention.max_messages` (cap stored rows, default None=unbounded), `memory.owner` (tenant tag on stored rows, schema prep for multi-tenancy), `context.safety_margin` (headroom reserved inside `manage()` so one large response can't push an over-budget payload; default 0).
+- **Session REST surface** (`server/app.py`): `GET /v1/sessions` (list, owner-scoped + fails closed 401 when auth on but no caller identity), `POST /v1/sessions/{id}/fork` (rolls back DB+owner rows on any `get_or_create` failure), `DELETE /v1/sessions/{id}` (clears DB rows AND holds `pool.existing_session_lock` so a concurrent `/chat/stream` can't re-insert orphaned rows). `create_app` accepts externalized-state injection kwargs (`session_store`/`job_store`/`event_buffer`/`idempotency_store`/`ownership_store`/`approval_registry`, each default None → in-process impl).
+

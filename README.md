@@ -48,6 +48,7 @@ pip install koboi-agent            # bare install: --help, validate, run, sessio
 # Extras (optional):
 #   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
 #   pip install koboi-agent[api]   # `koboi serve` (HTTP/SSE server; `koboi keys` works on bare install)
+#   pip install koboi-agent[tokenizer]  # accurate OpenAI token counts (tiktoken); chars/3 heuristic is the fallback
 #   pip install koboi-agent[dev,tui,api]  # everything (contributors)
 ```
 
@@ -237,6 +238,8 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **TrustDatabase** (`trust.py`) -- graduated permissions
 - **Sandbox** (`sandbox/`) -- passthrough/restricted execution backends (per-session workdir, network/rlimit isolation)
 - **StepJournal** (`journal.py`) -- per-iteration step journal for crash/redeploy resume
+- **ProactiveMemory** (`proactive_memory.py`) -- opt-in long-term memory: auto-extract durable facts (D), semantic recall + per-turn injection (C), always-in-context core block (B)
+- **Redaction** (`redact.py`) -- shared secret masking (value-shape + key-name) for the journal/jobs/diagnostics
 - **Server** (`server/`) -- FastAPI HTTP/SSE serving (interactive chat + autonomous jobs)
 - **Orchestrator** (`orchestration/`) -- multi-agent coordination
 - **SubAgentManager** (`subagent.py`) -- parallel sub-agent delegation

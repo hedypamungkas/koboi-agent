@@ -17,7 +17,8 @@ builtin/      9 built-in tools (calculator/filesystem/shell/web/memory/search/gi
 
 ## Public surface (verified against registry.py / types.py)
 - `ToolRegistry(default_timeout=None)`:
-  - `register(name, description, parameters, fn, risk_level=SAFE, timeout=None, group=None)`
+  - `register(name, description, parameters, fn, risk_level=SAFE, timeout=None, group=None, idempotent=True)`
+  - `get_definition(name) -> ToolDefinition | None`
   - `list_tools() -> dict[str, ToolDefinition]`
   - `get_definitions() -> list[dict]` -- OpenAI function-spec list (filtered by active groups)
   - `get_risk_level(name) -> RiskLevel | None`; `__contains__(name)` membership check
@@ -25,8 +26,9 @@ builtin/      9 built-in tools (calculator/filesystem/shell/web/memory/search/gi
   - `set_dep(name, value)` / `get_dep(name)` -- dependency store
   - `set_tool_config(defaults, overrides)` / `get_tool_config(tool_name)` -- merged config
   - `set_active_groups(groups)`, `keep_only(names)`, `disable(names)` -- selection
-- `@tool(name, description, parameters, risk_level=SAFE, timeout=None, group=None, deps=None)`
-  attaches `fn._tool_def` (a `ToolDefinition`) + `fn._tool_deps`; does NOT register by itself.
+- `@tool(name, description, parameters, risk_level=SAFE, timeout=None, group=None, deps=None, idempotent=True)`
+  attaches `fn._tool_def` (a `ToolDefinition` incl. the `idempotent` flag) + `fn._tool_deps`; does NOT register by itself.
+  Set `idempotent=False` for side-effecting tools that must not silently double-fire on crash-resume.
 - `register_decorated(registry, module)` -- scans a module for `_tool_def`-tagged functions,
   wraps them (injecting `_deps` / `_tool_config`), then registers them.
 - `apply_tool_selection(registry, tools_config)` -- single chokepoint for

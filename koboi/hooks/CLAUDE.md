@@ -22,6 +22,7 @@ carryover_hook.py     Cross-session state carryover
 doom_loop_hook.py     Repeated-action detection and abort
 task_hook.py          Task management lifecycle
 task_persistence_hook.py   Persists task state across compaction
+proactive_extraction_hook.py  SESSION_END auto-extract of durable facts -> KV store (proactive memory D-side; priority 65)
 subagent_hook.py      Sub-agent lifecycle tracking
 notification_hook.py  Notification dispatch
 rich_subagent_hook.py Rich TUI sub-agent display

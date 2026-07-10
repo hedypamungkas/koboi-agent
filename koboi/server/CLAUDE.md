@@ -10,6 +10,9 @@ Activated by the `[api]` extra (`fastapi`, `uvicorn`); pure submodules
 
 Two entrypoints, same composition: **`koboi serve <config>`** (built-in, zero code)
 and **`create_app(config, extra_tools=..., extra_hooks=..., approval_handler=...)`**
+(customize by code). `create_app` also accepts externalized-state injection kwargs
+(`session_store`/`job_store`/`event_buffer`/`idempotency_store`/`ownership_store`/`approval_registry`,
+each default None → in-process impl) — the seam for a future Redis/Postgres backend.
 (customize by code).
 
 ## Key files
@@ -35,8 +38,10 @@ protocols.py       M5 forward-only Protocols (SessionStore/LockProvider/EventBuf
 GET    /healthz                       Liveness (always open)
 GET    /readyz                        Readiness -- pool + DB checks, 503 if any fail (always open)
 POST   /v1/sessions                   Create session
+GET    /v1/sessions                   List sessions (owner-scoped when auth on; fail-closed 401)
 GET    /v1/sessions/{id}              Messages (owner-checked)
-DELETE /v1/sessions/{id}              Evict from pool
+DELETE /v1/sessions/{id}              Evict from pool + clear DB rows (under existing_session_lock)
+POST   /v1/sessions/{id}/fork         Fork persisted messages into a new session (sqlite only)
 POST   /v1/sessions/{id}/resume       Resume interrupted session (journal rehydrate)
 POST   /v1/chat/stream                Interactive SSE chat (lock + HITL + idempotency + per-request mode/cap)
 POST   /v1/sessions/{id}/approve      Resolve a pending HITL approval
@@ -80,6 +85,12 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
 - **AgentCore is NOT concurrent-safe** -- each session gets its own `asyncio.Lock`;
   the lock is acquired inside the stream generator so its lifetime == the stream's.
   Install the per-run approval handler UNDER `pool.session_lock`.
+- **DELETE `/v1/sessions/{id}` holds `pool.existing_session_lock(session_id)`** (NOT
+  `session_lock` — it does NOT `get_or_create`/materialize an agent) across the evict +
+  DB-row clear + ownership-delete, so a concurrent `/chat/stream` finishes first and can't
+  re-insert orphaned unowned rows. `list_sessions`/`delete_session`/`fork_session` all
+  self-heal schema via `_ensure_schema_on` (safe on older DBs). Fork rolls back its
+  committed DB+owner rows on any `get_or_create` failure.
 - **Per-session sandbox workdir** (`workdir_for(session_id)` = `{workspace_root}/{id}`);
   `session_id` validated at the route boundary AND in `workdir_for` (defense-in-depth).
   Eagerly `mkdir`-ed; GC'd at `server.workdir_ttl_seconds`.
