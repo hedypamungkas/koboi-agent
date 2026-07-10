@@ -57,6 +57,7 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         self._session_id: str | None = None
         self._client: httpx.Client | None = None
         self._lock = threading.Lock()
+        self._respawn_count = 0  # 24-C: count of ensure_connected reconnects (parity w/ stdio)
         # G1: build an AuthStrategy (None | BearerAuth | OAuthClientCredentialsAuth).
         # Lazily imported to avoid importing the auth module for the common no-auth case.
         from koboi.mcp.auth import build_mcp_auth
@@ -106,8 +107,14 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         return await asyncio.to_thread(self._call_tool_sync, name, arguments)
 
     def ensure_connected(self) -> None:
-        """Re-establish the HTTP session if it was closed (G4). Single reconnect attempt."""
+        """Re-establish the HTTP session if it was closed (G4). Single reconnect attempt.
+
+        24-C: a reconnect is logged (with count) for parity with the stdio transport,
+        so a session that keeps dying is observable rather than silently re-handshaken."""
         if self._client is None:
+            self._respawn_count += 1
+            if self.logger:
+                self.logger.log(f"MCP HTTP client reconnecting '{self._url}' (reconnect #{self._respawn_count})")
             self.connect()
 
     def _call_tool_sync(self, name: str, arguments: dict) -> str:

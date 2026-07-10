@@ -9,6 +9,7 @@ import asyncio
 import json
 import subprocess
 import threading
+from collections import deque
 
 from koboi.mcp.base import BaseMCPClient, MCPError, register_mcp_tools  # noqa: F401
 from koboi.types import MCPToolInfo
@@ -42,6 +43,8 @@ class MCPClient(BaseMCPClient):
         self._process: subprocess.Popen | None = None
         self._stderr_thread: threading.Thread | None = None
         self._connect_timeout = connect_timeout
+        self._respawn_count = 0  # 24-C: count of ensure_connected respawns (crash-loop signal)
+        self._stderr_tail: deque[str] = deque(maxlen=20)  # 24-C: last stderr lines for diagnostics
 
     # --- Public API ---
 
@@ -97,8 +100,17 @@ class MCPClient(BaseMCPClient):
 
         Called before every tool call so a crashed/killed server is respawned
         transparently instead of raising BrokenPipeError on the next write.
+        24-C: a respawn is logged (with count + the captured stderr tail) so a
+        crash-looping server is diagnosable instead of silently retried forever.
         """
         if self._process is None or self._process.poll() is not None:
+            self._respawn_count += 1
+            if self.logger:
+                tail = "\n".join(self._stderr_tail) or "(no stderr captured)"
+                self.logger.log(
+                    f"MCP stdio client respawning '{' '.join(self.server_command)}' "
+                    f"(respawn #{self._respawn_count}); last server stderr:\n{tail}"
+                )
             self.connect()
 
     def _call_tool_sync(self, name: str, arguments: dict) -> str:
@@ -204,11 +216,17 @@ class MCPClient(BaseMCPClient):
         return result[0] if result else b""
 
     def _drain_stderr(self) -> None:
-        """Read stderr in background so buffer doesn't fill up."""
+        """Read stderr in background so the OS pipe buffer doesn't fill + deadlock.
+
+        24-C: keep a small tail (last lines) so a crash-looping server's reason
+        isn't discarded -- it's surfaced in the ensure_connected respawn warning."""
         if not self._process or not self._process.stderr:
             return
         try:
-            for _line in self._process.stderr:
-                pass
+            for line in self._process.stderr:
+                try:
+                    self._stderr_tail.append(line.decode(errors="replace").rstrip())
+                except Exception:  # noqa: BLE001  # nosec B110 - best-effort capture
+                    pass
         except (ValueError, OSError):
             pass
