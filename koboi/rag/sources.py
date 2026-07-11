@@ -23,7 +23,9 @@ _logger = logging.getLogger(__name__)
 # Reuse the web tool's SSRF guard + retry policy so remote RAG ingestion can't reach
 # cloud metadata services and shares the same backoff semantics as web_fetch.
 from koboi.tools.builtin.web import (  # noqa: E402
+    MAX_RETRIES,
     MAX_TIMEOUT,
+    RETRYABLE_STATUS,
     _check_url_ssrf,
 )
 
@@ -34,8 +36,8 @@ _MAX_REDIRECTS = 5
 def fetch_http(url: str, *, headers: dict | None = None, timeout: int | None = None) -> bytes:
     """Fetch a single HTTP(S) document. Raises on failure.
 
-    C1 fix: SSRF-checked on EVERY redirect hop (follow_redirects=False + manual loop),
-    mirroring web_fetch's defense against 302 → cloud-metadata exfiltration.
+    SSRF-checked on EVERY redirect hop (follow_redirects=False + manual loop, mirroring
+    web_fetch). Retries on transient failures (RETRYABLE_STATUS + transport errors).
     """
     import httpx  # hard dependency (pyproject)
 
@@ -44,11 +46,20 @@ def fetch_http(url: str, *, headers: dict | None = None, timeout: int | None = N
         current_url = url
         for _ in range(_MAX_REDIRECTS + 1):
             _check_url_ssrf(str(current_url))
-            resp = client.get(current_url, headers=headers)
+            resp = None
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    resp = client.get(current_url, headers=headers)
+                    if resp.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
+                        continue
+                    break
+                except httpx.HTTPError:
+                    if attempt >= MAX_RETRIES:
+                        raise
             if resp.status_code in (301, 302, 303, 307, 308):
                 loc = resp.headers.get("location")
                 if not loc:
-                    break
+                    raise RuntimeError(f"HTTP {resp.status_code} from {current_url} had no Location header")
                 current_url = str(httpx.URL(current_url).join(loc))
                 continue
             resp.raise_for_status()
@@ -186,5 +197,9 @@ class DocumentCache:
     @staticmethod
     def _atomic_write(path: Path, data: bytes) -> None:
         tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_bytes(data)
-        tmp.replace(path)
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise

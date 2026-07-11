@@ -359,7 +359,8 @@ def _load_documents(
                 for fp in _resolve_files(path):
                     try:
                         yield fp.name, fp.read_bytes()
-                    except OSError:
+                    except OSError as exc:
+                        _logger.warning("RAG: skipping unreadable file %s: %s", fp, exc)
                         continue
             return
         if source == "http" or "url" in entry:
