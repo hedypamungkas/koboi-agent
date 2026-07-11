@@ -158,7 +158,10 @@ class TestContext:
         client = getattr(getattr(self._agent, "core", None), "client", None)
         if isinstance(client, ScriptedClient):
             return False
-        if importlib.util.find_spec(extra) is None:
+        # ``extra`` gates judge-LLM deps (e.g. "ragas" for faithfulness). Pass
+        # ``extra=None`` for retrieval-only live evals (semantic/hybrid ranking) that
+        # need the embedding endpoint but no judge framework.
+        if extra is not None and importlib.util.find_spec(extra) is None:
             return False
         key = (
             os.environ.get("OPENAI_API_KEY")

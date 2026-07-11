@@ -119,14 +119,37 @@ Pre-change: ~2 of 9 well-evidenced (robustness + ingestion-format); the 3 heavie
   `[eval-ragas]`, runs `koboi eval-test evals/ --tags live` (no `--mock`). Self-skips
   (exit 0) if no LLM key secret is set; flip on `--strict` once thresholds calibrate.
 
-**Caveat (honest):** these run only with a real LLM key + `[eval-ragas]`, which the
-author could not exercise here — the `min_score` thresholds are PROVISIONAL and need
-calibration against real nightly runs. Judge severity is SOFT until then.
+**Tier 2 tail — semantic/hybrid ranking (live):**
+- `evals/rag_semantic_ranking.eval.py` (HIGH, w0.17) — a vocabulary-mismatched
+  paraphrase ("vacation" vs corpus "annual leave") must retrieve the target with real
+  embeddings; asserts `retrieval_method == "semantic"` (no silent keyword fallback).
+- `evals/rag_hybrid_ranking.eval.py` (HIGH) — RRF fusion must promote the target into
+  top-k; asserts `retrieval_method == "hybrid"`.
+- `koboi/loop.py` `_run_metadata` — additive stamp of `retrieval_method` + `doc_id` on
+  every `rag_results` entry (no behavior change) so these evals can detect degradation
+  and golden qrels can match by stable id.
+- `t.live_ready(extra=None)` — retrieval-only live evals (no judge dep) skip cleanly.
 
-**Remaining Tier 2:** `rag_semantic_hybrid_ranking.eval.py` (semantic/hybrid/HyDE with
-real embeddings — needs an `embedding:` config + endpoint; the facade wiring exists
-via `_build_embedding_client`) and the live legs of noise (faithfulness drop ≤5%),
-abstention (refusal correctness), and citation (ALCE precision).
+**Caveat (honest):** all live evals run only with a real LLM key (+ `[eval-ragas]` for
+the RAGAS judges, + an `embedding:` endpoint for semantic/hybrid), which the author
+could not exercise here — `min_score` thresholds are PROVISIONAL and need calibration
+against real nightly runs. Judge severity is SOFT until then. The live legs of noise
+(faithfulness drop ≤5%) / abstention (refusal correctness) / citation (ALCE precision)
+remain future polish; their retrieval/format legs are already mock-gated in Tier 1.
+
+### Tier 3 — statistical-confidence gate (live; shipped, uncalibrated)
+- `evals/ragas_golden_suite.eval.py` (CRITICAL, w0.08) — runs `ragas_faithfulness` over
+  the frozen Acme qrels and gates on the bootstrap **95% CI lower bound** (not the
+  mean) via the shipped `bootstrap_ci`. This is the audit-grade "at what confidence?"
+  leg; SOFT half-width at the hand-authored N.
+- `evals/fixtures/acme_qrels.json` — expanded 24 → 45 needle-verified queries (tighter
+  retrieval CI).
+- `scripts/generate_rag_golden.py` — offline generator (reuses koboi's
+  `RAGASDataGenerator`, LLM-only — no `[eval-ragas]` needed) to scale toward N≥100 for
+  tighter CIs; human-spot-check then commit.
+
+Same caveat: the golden-suite threshold (lower bound ≥0.8) is PROVISIONAL and unverified
+without a live key + judge.
 
 ### Threshold table (Tier 1, provisional — calibrate after first real run)
 | Dimension | Metric | Target |
@@ -173,11 +196,13 @@ external production assertion.
 
 ## 7. Verification (2026-07-11)
 
-- `koboi eval-test evals/ --mock --strict` → **38/38 passed** (33 mock + 5 live self-skips).
-- `pytest` → **3199 passed / 0 failed / 178 skipped**, coverage **83%**.
+- `koboi eval-test evals/ --mock --strict` → **41/41 passed** (33 mock + 8 live self-skips).
+- `pytest` → **3201 passed / 0 failed / 178 skipped**, coverage **83%**.
 - `ruff check koboi/ evals/` → clean.
 - `mypy koboi/` → clean (205 files).
 - `bandit -r koboi/ -c pyproject.toml` → 0 issues (neutral vs main).
-- Tier-2 live evals **self-skip under `--mock`** (`live_skip`, verified) — they run
-  for real only on `eval-ragas-nightly` (needs `[eval-ragas]` + LLM key; thresholds
-  uncalibrated until then).
+- `loop._run_metadata` stamp change verified by a focused unit test (additive
+  `retrieval_method`/`doc_id`; existing readers ignore unknown keys).
+- Tier-2/3 live evals **self-skip under `--mock`** (`live_skip`, verified) — they run
+  for real only on `eval-ragas-nightly` (needs `[eval-ragas]` + LLM key, + an
+  `embedding:` endpoint for semantic/hybrid; thresholds uncalibrated until then).

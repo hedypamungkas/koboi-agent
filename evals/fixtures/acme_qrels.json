@@ -29,6 +29,27 @@
     {"query": "What is the warranty period for AcmeSwitch Enterprise?", "gold_needles": ["5-year"], "gold_doc": "product_catalog.md"},
     {"query": "What is the hourly rate for IT consulting?", "gold_needles": ["$200/hour"], "gold_doc": "product_catalog.md"},
     {"query": "What is the monthly price for managed services?", "gold_needles": ["$1,500/month"], "gold_doc": "product_catalog.md"},
-    {"query": "What is the uptime SLA for managed services?", "gold_needles": ["99.9%"], "gold_doc": "product_catalog.md"}
+    {"query": "What is the uptime SLA for managed services?", "gold_needles": ["99.9%"], "gold_doc": "product_catalog.md"},
+    {"query": "What are the standard working hours Monday to Friday?", "gold_needles": ["08:00 - 17:00"], "gold_doc": "company_policy.md"},
+    {"query": "When is the lunch break?", "gold_needles": ["12:00 - 13:00"], "gold_doc": "company_policy.md"},
+    {"query": "What is the office WiFi speed?", "gold_needles": ["100 Mbps"], "gold_doc": "company_policy.md"},
+    {"query": "Where is the prayer room located?", "gold_needles": ["2nd floor"], "gold_doc": "company_policy.md"},
+    {"query": "What are the cafeteria opening hours?", "gold_needles": ["07:00 - 18:00"], "gold_doc": "company_policy.md"},
+    {"query": "When are weekly reports due?", "gold_needles": ["every Friday"], "gold_doc": "company_policy.md"},
+    {"query": "Who does health insurance cover?", "gold_needles": ["immediate family"], "gold_doc": "company_policy.md"},
+    {"query": "What is Acme Corp's vision?", "gold_needles": ["leading technology company"], "gold_doc": "employee_handbook.md"},
+    {"query": "What does the Engineering department do?", "gold_needles": ["Software and hardware"], "gold_doc": "employee_handbook.md"},
+    {"query": "What happens on Day 1 of onboarding?", "gold_needles": ["Office orientation"], "gold_doc": "employee_handbook.md"},
+    {"query": "When is the probation review held?", "gold_needles": ["Month 3"], "gold_doc": "employee_handbook.md"},
+    {"query": "What retirement plan does Acme offer?", "gold_needles": ["401(k)"], "gold_doc": "employee_handbook.md"},
+    {"query": "What experience range is a Level 1 Junior?", "gold_needles": ["0-2 years"], "gold_doc": "employee_handbook.md"},
+    {"query": "How often are performance check-ins held?", "gold_needles": ["Quarterly"], "gold_doc": "employee_handbook.md"},
+    {"query": "What is the price of the Starter SaaS package?", "gold_needles": ["$99/month"], "gold_doc": "product_catalog.md"},
+    {"query": "What is the price of the Professional SaaS package?", "gold_needles": ["$299/month"], "gold_doc": "product_catalog.md"},
+    {"query": "How much does the AcmeSwitch Enterprise cost?", "gold_needles": ["$2,500"], "gold_doc": "product_catalog.md"},
+    {"query": "What is the warranty on the AcmeServer RackMount?", "gold_needles": ["3-year"], "gold_doc": "product_catalog.md"},
+    {"query": "What deposit is required upon order confirmation?", "gold_needles": ["30%"], "gold_doc": "product_catalog.md"},
+    {"query": "What is the minimum hours for IT consulting?", "gold_needles": ["4 hours"], "gold_doc": "product_catalog.md"},
+    {"query": "How long is the warranty on custom development?", "gold_needles": ["90-day"], "gold_doc": "product_catalog.md"}
   ]
 }

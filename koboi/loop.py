@@ -457,6 +457,13 @@ class AgentCore:
                         "content": r.chunk.content,
                         "score": r.score,
                         "source": r.chunk.metadata.get("source", r.chunk.doc_id),
+                        # Additive (RAG eval Tier 2/3): expose the retrieval method so
+                        # semantic/hybrid evals can detect a silent degrade-to-keyword,
+                        # and a stable doc_id for golden-qrels matching (vs fragile
+                        # content-needle). No behavior change; existing readers ignore
+                        # unknown keys.
+                        "retrieval_method": r.retrieval_method,
+                        "doc_id": r.chunk.doc_id,
                     }
                     for r in results
                 ]

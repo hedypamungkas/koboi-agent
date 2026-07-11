@@ -345,6 +345,11 @@ class TestLiveReady:
         # ScriptedClient => mock mode => never live-ready (deterministic branch).
         assert _ctx_scripted().live_ready() is False
 
+    def test_live_ready_accepts_no_extra(self):
+        # Retrieval-only live evals (semantic/hybrid) pass extra=None (no judge dep).
+        # Still False here because the scripted client signals mock mode.
+        assert _ctx_scripted().live_ready(extra=None) is False
+
     async def test_require_live_skips_and_records(self):
         ctx = _ctx_scripted()
         assert ctx.require_live() is False
@@ -353,3 +358,37 @@ class TestLiveReady:
         skip = [a for a in ctx.collect() if a.name == "live_skip"][0]
         out = skip.outcome()
         assert out.passed is True and out.value == 1.0  # SOFT pass, not a gate failure
+
+
+# --------------------------------------------------------------------------
+# loop._run_metadata rag_results stamp (Tier 2/3 additive keys)
+# --------------------------------------------------------------------------
+
+
+class TestRunMetadataStamp:
+    def test_rag_results_stamp_carries_retrieval_method_and_doc_id(self):
+        """The additive stamp keys (retrieval_method, doc_id) let semantic/hybrid evals
+        detect a silent degrade and let golden qrels match by stable id."""
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from koboi.rag.types import Chunk, RetrievalResult
+        from tests.conftest import MockClient, make_tool_registry
+
+        core = AgentCore(client=MockClient([]), memory=ConversationMemory(), tools=make_tool_registry())
+
+        class _FakeAug:
+            last_results = [
+                RetrievalResult(
+                    chunk=Chunk(id="c1", doc_id="company_policy.md", content="Permanent: 12 days"),
+                    score=0.9,
+                    retrieval_method="keyword",
+                )
+            ]
+
+        core.augmentation = _FakeAug()  # type: ignore[assignment]
+        meta = core._run_metadata(resumed=False, last_step=0)  # noqa: SLF001
+        rr = meta["rag_results"][0]
+        assert rr["content"] == "Permanent: 12 days"
+        assert rr["score"] == 0.9
+        assert rr["retrieval_method"] == "keyword"
+        assert rr["doc_id"] == "company_policy.md"
