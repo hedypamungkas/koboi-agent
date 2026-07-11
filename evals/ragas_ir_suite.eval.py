@@ -44,7 +44,7 @@ CONFIG = {
     "rag": {
         "enabled": True,
         "chunker": "paragraph",
-        "retriever": "keyword",
+        "retriever": "bm25",
         "top_k": 10,
         "augmentation": "on_the_fly",
         "documents": [{"path": "./data/ir_corpus/*.txt"}],

@@ -33,7 +33,7 @@ CONFIG = {
     "rag": {
         "enabled": True,
         "chunker": "paragraph",
-        "retriever": "keyword",
+        "retriever": "bm25",
         "top_k": 10,
         "stopwords": True,
         "augmentation": "on_the_fly",
