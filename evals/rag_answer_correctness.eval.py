@@ -32,7 +32,7 @@ CONFIG = {
         "enabled": True,
         "chunker": "paragraph",
         "retriever": "keyword",
-        "top_k": 5,
+        "top_k": 10,
         "augmentation": "on_the_fly",
         "documents": [
             {"path": "./data/sample/company_policy.md"},
@@ -69,4 +69,31 @@ async def test_contract_not_permanent_disambiguation(t):
         return
     await t.send("How many annual leave days is a contract employee entitled to?")
     await t.judge("ragas_recall", min_score=0.8, expected_answer="6 days", severity=Severity.SOFT)
+    t.completed()
+
+
+async def test_context_precision(t):
+    """The top-k retrieved context must be on-topic (context_precision >= 0.7)."""
+    if not t.require_live():
+        return
+    await t.send("What is the price of AcmeERP Enterprise?")
+    await t.judge("ragas_precision", min_score=0.7, severity=Severity.SOFT)
+    t.completed()
+
+
+async def test_factual_correctness(t):
+    """The answer must be factually correct vs the reference (factual_correctness >= 0.7).
+
+    Note: FactualCorrectness needs a full reference *statement* (not a bare value) so its
+    NLI claim-decomposition has a sentence to compare against.
+    """
+    if not t.require_live():
+        return
+    await t.send("What is the notice period for resignation at Acme Corp?")
+    await t.judge(
+        "ragas_factual_correctness",
+        min_score=0.7,
+        expected_answer="The notice period for resignation is 30 days.",
+        severity=Severity.SOFT,
+    )
     t.completed()

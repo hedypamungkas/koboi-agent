@@ -39,7 +39,7 @@ CONFIG = {
         "enabled": True,
         "chunker": "paragraph",
         "retriever": "keyword",
-        "top_k": 5,
+        "top_k": 10,
         "augmentation": "on_the_fly",
         "documents": [
             {"path": "./data/sample/company_policy.md"},

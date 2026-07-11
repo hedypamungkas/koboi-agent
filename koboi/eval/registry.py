@@ -135,6 +135,7 @@ def register_framework_scorers() -> None:
         ScorerRegistry.register("ragas_relevancy", lambda **kw: RAGASScorer("answer_relevancy", **kw))
         ScorerRegistry.register("ragas_precision", lambda **kw: RAGASScorer("context_precision", **kw))
         ScorerRegistry.register("ragas_recall", lambda **kw: RAGASScorer("context_recall", **kw))
+        ScorerRegistry.register("ragas_factual_correctness", lambda **kw: RAGASScorer("factual_correctness", **kw))
         ScorerRegistry.register("ragas_composite", lambda **kw: RAGASCompositeScorer(**kw))
     except ImportError:
         pass

@@ -28,9 +28,9 @@ CONFIG = {
     },
     "embedding": {
         "provider": "openai",
-        "model": "${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}",
-        "api_key": "${OPENAI_API_KEY:dummy}",
-        "base_url": "${OPENAI_BASE_URL:}",
+        "model": "${EMBEDDING_MODEL:text-embedding-3-small}",
+        "api_key": "${EMBEDDING_API_KEY:}",
+        "base_url": "${EMBEDDING_BASE_URL:}",
     },
     "rag": {
         "enabled": True,

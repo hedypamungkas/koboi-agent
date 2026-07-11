@@ -35,6 +35,11 @@ jobs:
       OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      # Separate embedding endpoint for AnswerRelevancy/ContextPrecision (RAGAS).
+      # If unset, LLM-only metrics (faithfulness, context_recall) still run.
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_BASE_URL: ${{ vars.EMBEDDING_BASE_URL }}
+      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'text-embedding-3-small' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Set up Python 3.12
