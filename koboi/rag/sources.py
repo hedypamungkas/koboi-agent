@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -165,6 +167,100 @@ def fetch_s3_entry(entry: dict, doc_cache: DocumentCache | None) -> Iterator[tup
             _logger.warning("s3: %d object(s) skipped due to errors (bucket=%s)", skipped, bucket)
     except Exception as exc:  # credentials / endpoint / network -> skip, keep building
         _logger.warning("s3 fetch failed (bucket=%s): %s", bucket, exc)
+
+
+def _firecrawl_crawl(base_url: str, api_key: str, limit: int, endpoint: str | None) -> list[dict]:
+    """Run a Firecrawl site crawl (``POST /v1/crawl`` -> poll ``GET /v1/crawl/{id}``).
+
+    Returns the list of page dicts (each carries ``markdown``/``html`` + ``metadata.sourceURL``).
+    Raises on transport/HTTP failure or poll timeout. Raises on a sync ``data`` payload too.
+    """
+    import httpx  # hard dependency (pyproject)
+
+    base = (endpoint or "https://api.firecrawl.dev").rstrip("/")
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"url": base_url, "limit": limit, "scrapeOptions": {"formats": ["markdown"]}}
+    with httpx.Client(timeout=60) as client:
+        resp = client.post(f"{base}/v1/crawl", json=payload, headers=headers)
+        resp.raise_for_status()
+        job = resp.json()
+        # Sync response already carrying data, or an async job id to poll.
+        if isinstance(job.get("data"), list):
+            return job["data"]
+        job_id = job.get("id")
+        if not job_id:
+            raise RuntimeError("firecrawl crawl returned no job id and no data")
+        for _ in range(120):  # up to ~4 minutes
+            r = client.get(f"{base}/v1/crawl/{job_id}", headers=headers)
+            r.raise_for_status()
+            status = r.json()
+            if status.get("status") == "completed":
+                return status.get("data") or []
+            if status.get("status") == "failed":
+                raise RuntimeError(f"firecrawl crawl job failed: {status.get('error', '')}")
+            time.sleep(2)
+        raise RuntimeError("firecrawl crawl job timed out")
+
+
+def fetch_firecrawl_entry(entry: dict, doc_cache: DocumentCache | None) -> Iterator[tuple[str, bytes]]:
+    """Yield ``(name, bytes)`` for pages of a Firecrawl site crawl, with per-page cache.
+
+    Mirrors ``fetch_http_entry`` / ``fetch_s3_entry``: one bad page skips (does not abort the
+    crawl); ``DocumentCache`` keys by ``source_key({"source":"firecrawl","url":page_url})`` so
+    remote crawls aren't re-run on every per-session rebuild.
+
+    ``entry`` keys: ``url`` (seed), ``api_key`` (or ``$FIRECRAWL_API_KEY``), ``limit`` (max
+    pages, default 50), ``endpoint_url`` (self-host override).
+    """
+    url = entry.get("url", "")
+    if not url:
+        return
+    api_key = entry.get("api_key") or os.getenv("FIRECRAWL_API_KEY", "")
+    if not api_key:
+        _logger.warning("firecrawl source %s missing api_key; skipping", url)
+        return
+    # Defense in depth: validate the seed URL client-side before handing it to the SaaS.
+    # ValueError = private range; OSError = DNS failure (gaierror). Either -> skip the entry.
+    try:
+        _check_url_ssrf(url)
+    except (ValueError, OSError) as exc:
+        _logger.warning("firecrawl source %s rejected by SSRF guard: %s", url, exc)
+        return
+
+    limit = int(entry.get("limit", 50))
+    try:
+        pages = _firecrawl_crawl(url, api_key, limit, entry.get("endpoint_url"))
+    except Exception as exc:  # noqa: BLE001 - network / API / poll -> skip, keep building
+        _logger.warning("firecrawl crawl failed for %s: %s", url, exc)
+        return
+
+    found = False
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        meta = page.get("metadata") or {}
+        page_url = (meta.get("sourceURL") if isinstance(meta, dict) else "") or url
+        name = name_from_url(page_url) or "page"
+        ckey = source_key({"source": "firecrawl", "url": page_url})
+        if doc_cache:
+            cached = doc_cache.get(ckey)
+            if cached is not None:
+                found = True
+                yield cached
+                continue
+        content = page.get("markdown", "") or page.get("html", "")
+        if not content:
+            continue
+        found = True
+        data = content.encode("utf-8")
+        if doc_cache:
+            try:
+                doc_cache.put(ckey, name, data)
+            except OSError as exc:
+                _logger.warning("DocumentCache write failed for firecrawl %s: %s", page_url, exc)
+        yield name, data
+    if not found:
+        _logger.warning("firecrawl crawl of %s returned no usable pages", url)
 
 
 class DocumentCache:

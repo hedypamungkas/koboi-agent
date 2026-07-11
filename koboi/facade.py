@@ -663,14 +663,16 @@ def _build_tools(config: Config) -> ToolRegistry:
         from koboi.tools.builtin import register_all
 
         register_all(registry)
-        # W0: inject the registry-resolved search provider (koboi.web). web_search reads
-        # this from its _deps; absent web: config -> mock provider (offline-safe default).
-        from koboi.web import build_search_provider, load_custom_components
+        # W0/W1: inject the registry-resolved web providers (koboi.web). web_search /
+        # web_fetch read these from their _deps; absent web: config -> mock search and
+        # httpx+readability fetch (offline-safe defaults).
+        from koboi.web import build_fetch_provider, build_search_provider, load_custom_components
 
         web_conf = config.get("web", default={})
         if web_conf.get("custom_modules"):
             load_custom_components(web_conf["custom_modules"])
         registry.set_dep("search_provider", build_search_provider(web_conf))
+        registry.set_dep("fetch_provider", build_fetch_provider(web_conf))
         # Inject per-agent memory store so agents don't share state
         from koboi.tools.builtin.memory import _MemoryStore
 

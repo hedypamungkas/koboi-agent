@@ -222,8 +222,23 @@ def _extract_html_content(text: str) -> str:
         },
         "required": ["url"],
     },
+    deps=["fetch_provider"],
 )
-async def web_fetch(url: str, timeout: int = 15) -> str:
+async def web_fetch(url: str, timeout: int = 15, _deps: dict | None = None, _tool_config: dict | None = None) -> str:
+    # When a fetch provider is wired (agent / deep-research path), delegate to it. Direct
+    # callers with no registry fall through to the inline SSRF+redirect+retry loop below,
+    # so the existing offline test suite (which patches this module's httpx/socket/_check_url_ssrf)
+    # keeps working unchanged.
+    provider = (_deps or {}).get("fetch_provider")
+    if provider is not None:
+        try:
+            result = await provider.fetch(url, timeout=timeout)
+        except Exception as e:  # noqa: BLE001 - boundary: any provider failure becomes an error string
+            return f"Error: fetch failed — {e}"
+        if result.metadata.get("error"):
+            return f"Error: {result.metadata['error']}"
+        return result.content
+
     if not url.startswith(("http://", "https://")):
         return "Error: URL must start with http:// or https://"
 

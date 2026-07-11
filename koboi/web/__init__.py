@@ -15,8 +15,9 @@ from koboi.web.types import FetchResult, SearchResult
 # Register built-in providers (idempotent; decorators fire on import of each module).
 from koboi.web.providers import brave as _brave  # noqa: F401
 from koboi.web.providers import ddg as _ddg  # noqa: F401
-from koboi.web.providers import firecrawl as _firecrawl  # noqa: F401
+from koboi.web.providers import firecrawl as _firecrawl  # noqa: F401  (registers search + fetch)
 from koboi.web.providers import mock as _mock  # noqa: F401
+from koboi.web.providers import readability as _readability  # noqa: F401  (registers default "httpx" fetch)
 
 from koboi.web.registry import (
     ProviderEntry,
