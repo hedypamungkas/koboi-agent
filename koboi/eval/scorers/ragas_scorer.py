@@ -177,6 +177,30 @@ def _composite_weighted(weights: dict[str, float], scores: dict[str, float | Non
     return acc / total_w if total_w > 0 else 0.0
 
 
+def _judge_openai_creds() -> tuple[str, str, str | None]:
+    """Judge LLM creds, decoupled from the answer model, + a self-preference guard.
+
+    Reads ``RAGAS_JUDGE_MODEL`` / ``RAGAS_JUDGE_API_KEY`` / ``RAGAS_JUDGE_BASE_URL``
+    (falling back to ``OPENAI_*`` -- the same gateway, so only the model name differs).
+    Warns loudly when the judge is the SAME model as the generator (self-preference bias
+    inflates faithfulness/relevancy); raises if ``RAGAS_REQUIRE_SEPARATE_JUDGE=1``
+    (release-gate opt-in).
+    """
+    gen_model = os.environ.get("OPENAI_MODEL", "")
+    model = os.environ.get("RAGAS_JUDGE_MODEL") or gen_model or "gpt-4o-mini"
+    api_key = os.environ.get("RAGAS_JUDGE_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    base_url = os.environ.get("RAGAS_JUDGE_BASE_URL") or os.environ.get("OPENAI_BASE_URL") or None
+    if gen_model and model == gen_model:
+        msg = (
+            f"RAGAS judge == generator model ({model}); self-preference bias inflates "
+            "scores -- set RAGAS_JUDGE_MODEL to a stronger/different model."
+        )
+        if os.environ.get("RAGAS_REQUIRE_SEPARATE_JUDGE", "").lower() in ("1", "true", "yes"):
+            raise RuntimeError(msg)
+        _logger.warning(msg)
+    return model, api_key, base_url
+
+
 def _create_ragas_llm():
     """Create a RAGAS judge LLM from env vars (provider via RAGAS_PROVIDER, default openai)."""
     if not _RAGAS_AVAILABLE:
@@ -200,9 +224,7 @@ def _create_ragas_llm():
 
             from openai import OpenAI  # type: ignore[import-not-found]
 
-            model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-            api_key = os.environ.get("OPENAI_API_KEY", "")
-            base_url = os.environ.get("OPENAI_BASE_URL") or None
+            model, api_key, base_url = _judge_openai_creds()
             kwargs = {"api_key": api_key}
             if base_url:
                 kwargs["base_url"] = base_url
@@ -224,11 +246,8 @@ def _create_ragas_llm():
         else:
             from langchain_openai import ChatOpenAI
 
-            llm = ChatOpenAI(
-                model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-                api_key=os.environ.get("OPENAI_API_KEY", ""),
-                base_url=os.environ.get("OPENAI_BASE_URL", ""),
-            )
+            model, api_key, base_url = _judge_openai_creds()
+            llm = ChatOpenAI(model=model, api_key=api_key, base_url=base_url or "")
         return LangchainLLMWrapper(llm)
     except Exception as e:
         _logger.warning("Failed to create RAGAS LLM: %s", e)

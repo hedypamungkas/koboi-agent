@@ -259,3 +259,38 @@ the eval correctly surfaces the one real retrieval gap (rank-6 facts need top_k�
 - Tier-2/3 live evals **self-skip under `--mock`** (`live_skip`, verified) — they run
   for real only on `eval-ragas-nightly` (needs `[eval-ragas]` + LLM key, + an
   `embedding:` endpoint for semantic/hybrid; thresholds uncalibrated until then).
+
+### 7b. Path B recalibration (2026-07-11) — the honest numbers (decoupled judge, real corpus)
+
+⚠ The §7a "all 1.0" table above was **self-inflated** (same model judged its own answers
+on a 36-chunk toy corpus at N=1) — an adversarial audit confirmed it. Path B removes each
+cause and re-measures honestly:
+
+- **Decoupled judge** (`RAGAS_JUDGE_MODEL=gpt-5.4`, a stronger model than the agent's
+  `gpt-5.4-mini`) via `_judge_openai_creds()` + a self-preference guard (warns when
+  judge==generator; `RAGAS_REQUIRE_SEPARATE_JUDGE=1` hard-fails for release gates).
+- **Real corpus**: MS MARCO v2.1, **2987 passages** (`scripts/build_ir_corpus.py` →
+  `data/ir_corpus/`, gitignored; `evals/fixtures/ir_qrels.json` committed, license-light) →
+  top_k=10 returns **0.3%** of the corpus (was 28% of 36 chunks).
+- **N=128** qrels with bootstrap 95%-CI lower-bound gating (`evals/ragas_ir_suite.eval.py`).
+- **Adversarial hard strata** on a controlled KB (`evals/ragas_ir_adversarial.eval.py`).
+
+**Measured (N=10 sample; full N=128 on the nightly), decoupled judge:**
+
+| Metric | Self-judged (§7a) | **Honest (Path B)** | Target |
+|---|---|---|---|
+| faithfulness | 1.00 | **0.935** (CI 0.87–1.0) | ≥0.9 |
+| context_recall | 1.00 | **0.900** (CI 0.70–1.0) | ≥0.9 |
+| retrieval recall@10 | n/a | **1.000** (gold reachable) | ≥0.8 |
+
+**Adversarial hard strata (the cases §7a never tested):** negation ✅, conflicting-evidence
+✅ (prefers authoritative value / flags conflict), **multi-hop ⚠ partial** (agent struggles
+with 2-hop Eng→Sam Lee), **near-miss-abstention ❌** (answers instead of refusing when the
+person exists but the email doesn't).
+
+**Honest verdict:** on answerable single-fact queries the pipeline is solid (faithfulness
+~0.93 under a stricter, independent judge — not the self-inflated 1.0). The **real gaps are
+the hard strata**: multi-hop reasoning and abstention-under-non-empty-context both fail.
+These are the production blockers; Path C (stopword filter, refusal-prompt/relevance_threshold,
+factual_correctness deterministic fallback) targets them. A trustworthy production claim
+still needs the full N=128 nightly CI + closing the hard-strata gaps.

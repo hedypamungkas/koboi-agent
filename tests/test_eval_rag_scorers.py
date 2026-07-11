@@ -10,7 +10,7 @@ import pytest
 
 from koboi.eval.scorers.ci import BootstrapCIScorer, bootstrap_ci
 from koboi.eval.scorers.citation_grounding import CitationGroundingScorer, citation_precision
-from koboi.eval.scorers.ragas_scorer import _composite_weighted, _extract_ragas_score
+from koboi.eval.scorers.ragas_scorer import _composite_weighted, _extract_ragas_score, _judge_openai_creds
 from koboi.eval.scorers.retrieval_metric import (
     RetrievalMetricScorer,
     compute_ranking_metric,
@@ -464,3 +464,59 @@ class TestExtractRagasScore:
         # FactualCorrectness keys under factual_correctness(mode=f1).
         r = _FakeResult({"factual_correctness(mode=f1)": [1.0]})
         assert _extract_ragas_score(r, "factual_correctness") == 1.0
+
+
+class TestJudgeDecouple:
+    """Path B1: the RAGAS judge is decoupled from the answer model (self-preference guard)."""
+
+    def test_judge_creds_precedence(self, monkeypatch):
+        # RAGAS_JUDGE_* wins over OPENAI_* (separate model / key / base_url).
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
+        monkeypatch.setenv("OPENAI_API_KEY", "gen-key")
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://gen")
+        monkeypatch.setenv("RAGAS_JUDGE_MODEL", "gpt-5.4")
+        monkeypatch.setenv("RAGAS_JUDGE_API_KEY", "judge-key")
+        monkeypatch.setenv("RAGAS_JUDGE_BASE_URL", "https://judge")
+        model, key, base = _judge_openai_creds()
+        assert (model, key, base) == ("gpt-5.4", "judge-key", "https://judge")
+
+    def test_judge_creds_fallback_to_generator(self, monkeypatch):
+        # When RAGAS_JUDGE_* unset, falls back to OPENAI_* (same gateway, same model).
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
+        monkeypatch.setenv("OPENAI_API_KEY", "gen-key")
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://gen")
+        monkeypatch.delenv("RAGAS_JUDGE_MODEL", raising=False)
+        monkeypatch.delenv("RAGAS_JUDGE_API_KEY", raising=False)
+        monkeypatch.delenv("RAGAS_JUDGE_BASE_URL", raising=False)
+        monkeypatch.delenv("RAGAS_REQUIRE_SEPARATE_JUDGE", raising=False)
+        model, key, base = _judge_openai_creds()
+        assert (model, key, base) == ("gpt-5.4-mini", "gen-key", "https://gen")
+
+    def test_guard_warns_when_judge_equals_generator(self, monkeypatch, caplog):
+        # Same model -> a WARNING is logged (not a raise).
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
+        monkeypatch.delenv("RAGAS_JUDGE_MODEL", raising=False)
+        monkeypatch.delenv("RAGAS_REQUIRE_SEPARATE_JUDGE", raising=False)
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="koboi.eval.scorers.ragas_scorer"):
+            _judge_openai_creds()
+        assert any("self-preference bias" in r.message for r in caplog.records)
+
+    def test_guard_raises_in_strict_mode(self, monkeypatch):
+        # RAGAS_REQUIRE_SEPARATE_JUDGE=1 + same model -> RuntimeError (release gate).
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
+        monkeypatch.delenv("RAGAS_JUDGE_MODEL", raising=False)
+        monkeypatch.setenv("RAGAS_REQUIRE_SEPARATE_JUDGE", "1")
+        with pytest.raises(RuntimeError, match="self-preference"):
+            _judge_openai_creds()
+
+    def test_no_warning_when_decoupled(self, monkeypatch, caplog):
+        monkeypatch.setenv("OPENAI_MODEL", "gpt-5.4-mini")
+        monkeypatch.setenv("RAGAS_JUDGE_MODEL", "gpt-5.4")
+        monkeypatch.delenv("RAGAS_REQUIRE_SEPARATE_JUDGE", raising=False)
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="koboi.eval.scorers.ragas_scorer"):
+            _judge_openai_creds()
+        assert not any("self-preference bias" in r.message for r in caplog.records)

@@ -33,6 +33,11 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o-mini' }}
       OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+      # Decoupled judge (STRONGER/different model than the agent) to avoid self-preference
+      # bias. Defaults to OPENAI_* creds (same gateway); only the model name differs.
+      RAGAS_JUDGE_MODEL: ${{ vars.RAGAS_JUDGE_MODEL }}
+      RAGAS_JUDGE_API_KEY: ${{ secrets.RAGAS_JUDGE_API_KEY }}
+      RAGAS_JUDGE_BASE_URL: ${{ vars.RAGAS_JUDGE_BASE_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       # Separate embedding endpoint for AnswerRelevancy/ContextPrecision (RAGAS).
