@@ -29,7 +29,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **YAML-driven config** with `${ENV_VAR}` interpolation
 - **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task
 - **Hook lifecycle**: 15 event types for logging, guardrails, telemetry, plus declarative external-command hooks (`hooks:` YAML — no Python required)
-- **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/semantic/hybrid), augmentation
+- **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/semantic/hybrid + reranking), augmentation, query rewriting/HyDE, metadata filtering, remote sources (HTTP/S3)
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, and dynamic (LLM-planned) execution
 - **Context management**: truncation, smart truncation, key facts, sliding window

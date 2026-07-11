@@ -61,7 +61,7 @@ koboi/              Main package (202 .py files)
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (10), widgets/ (12)
-tests/              ~237 test files, asyncio_mode="auto", shared conftest.py with MockClient
+tests/              213 test files (~238 .py incl conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
 configs/            28 YAML agent configs
 examples/           34 numbered example scripts (01-34) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`

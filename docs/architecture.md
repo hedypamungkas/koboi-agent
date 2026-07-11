@@ -367,7 +367,10 @@ workdir):
 Cross-cutting: API-key (Bearer) auth + per-session ownership, `/healthz` + `/readyz`,
 request-id middleware, graceful drain (cancel in-flight streams + off-loop Langfuse
 flush), and M5 `Protocol` seams (`SessionStore`/`LockProvider`/`EventBuffer`) for a
-future Redis/SaaS state swap.
+future Redis/SaaS state swap. Runtime per-session MCP server management
+(`GET/POST/DELETE /v1/sessions/{id}/mcp/servers` + `.../reconnect`) is backed by
+`SessionMcpRegistry` (`server/mcp_registry.py`) — in-process and session-scoped, not
+persisted across restart/eviction.
 
 Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
 (`fastapi`, `uvicorn`). See `koboi/server/CLAUDE.md` for routes/conventions/gotchas and

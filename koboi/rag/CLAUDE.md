@@ -15,6 +15,10 @@ registry.py         ComponentRegistry + ComponentEntry, @register_* decorators, 
 chunker.py          BaseChunker ABC + Fixed/Sentence/Paragraph/Semantic chunkers; resolve_chunker()
 retriever.py        BaseRetriever ABC + Keyword/Semantic/Hybrid retrievers; embedding cache; resolve_retriever()
 augmentation.py     AugmentationStrategy ABC + InMemory/OnTheFly; RerankerRetriever wrapper
+rewrite.py          Query rewriting + HyDE backing module (#9); needs a chat client, output is ephemeral
+filters.py          Metadata pre-filter operators (#10); NOT a security/ACL boundary
+parsers.py          parser_registry -- text/html/pdf/docx document parsing ([rag] extra for PDF/DOCX)
+sources.py          _load_documents source loaders: file/http (httpx)/s3 (boto3, [rag-cloud] extra)
 sample_documents.py Loaders for data/sample/ docs (company policy, handbook, catalog)
 __init__.py         Re-exports public API; calls _register_builtins() at import
 ```

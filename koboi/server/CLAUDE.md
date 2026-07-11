@@ -24,6 +24,7 @@ jobs.py            JobStore (SQLite 'jobs') + JobRegistry (in-memory task+events
 approvals.py       HITL bridge -- ApprovalCoordinator (PendingApprovalEvent -> SSE queue -> awaits Future) + ApprovalRegistry
 auth.py            KeyStore (file+env, SHA-256 hashed) + make_auth_middleware (Bearer, fail-closed)
 ownership.py       OwnershipStore -- SQLite 'session_owners' sidecar (session_id -> owner) for tenant isolation
+mcp_registry.py    SessionMcpRegistry -- in-process per-session MCP server attach/detach/reconnect (/v1/sessions/{id}/mcp/servers)
 idempotency.py     IdempotencyRegistry -- in-memory TTL for /chat/stream Idempotency-Key (409-reject)
 schema.py          Pure-Pydantic-v2 request/response models + ErrorResponse/ErrorDetail envelope
 sse.py             Pure SSE wire encoder -- keepalive on silence, always terminates data: [DONE]

@@ -51,8 +51,10 @@ builtin/      9 built-in tools (calculator/filesystem/shell/web/memory/search/gi
   while remaining executable.
 
 ## Gotchas
-- **MCP tools are forced `RiskLevel.SAFE`** at registration (`mcp/base.py`): external MCP tools
-  never trigger approval regardless of what they do.
+- **MCP tools default to `RiskLevel.SAFE` but are NOT forced SAFE**: `register_mcp_tools()`
+  (`mcp/base.py`) accepts a per-server `risk_level` and a per-tool `risk_resolver`. Elevate a whole
+  server via `mcp.servers[].risk_level: moderate|destructive` (G3), or opt into name-based per-tool
+  inference with `risk_heuristic: true` (`default_risk_heuristic`). See `koboi/mcp/CLAUDE.md`.
 - **Unknown args are silently stripped**: `execute()` keeps only keys present in
   `parameters.properties`; an arg missing from the schema never reaches the handler.
 - **`policy.rules` arg matching is name-keyed**: a rule's `argument_patterns` keys must equal
