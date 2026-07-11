@@ -432,3 +432,23 @@ class TestWave5Tracing:
         orch = _orch(_FakeClient(plan_needs_workflow=False), {"max_depth": 1, "coverage_threshold": 0.7}, tmp_path)
         events = [e async for e in orch._run_deep_research("hi")]
         assert any(isinstance(e, OrchestrationCompleteEvent) for e in events)
+
+
+class TestWave6MetadataPropagation:
+    """C1a: _run_orchestrator propagates OrchestratorResult.metadata into RunResult.metadata."""
+
+    async def test_research_metadata_reaches_run_result(self, tmp_path):
+        from koboi.facade import _run_orchestrator
+
+        orch = _orch(
+            _FakeClient(coverage_score=0.95),  # covered after 1 round
+            {"max_depth": 1, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        orch.default_mode = "deep_research"  # so _run_orchestrator dispatches to deep_research
+        result = await _run_orchestrator(orch, "Tell me about X")
+        # The orchestrator's metadata (research_sources/coverage/depth) propagated into RunResult.
+        assert "research_sources" in result.metadata
+        assert "coverage" in result.metadata
+        assert "depth" in result.metadata
+        assert result.metadata["execution_mode"] == "deep_research"

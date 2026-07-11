@@ -1863,5 +1863,8 @@ async def _run_orchestrator(orchestrator, message: str | list) -> RunResult:
             "agents_used": [r.agent_name for r in result.agent_results],
             "execution_mode": result.execution_mode,
             "total_tokens": total_tokens,
+            # W6 C1a: propagate orchestrator metadata (deep_research research_sources/coverage/depth)
+            # so t.* eval assertions + RunResult consumers can see them.
+            **result.metadata,
         },
     )

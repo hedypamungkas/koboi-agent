@@ -224,3 +224,34 @@ class TestTokenUsage:
         assert usage.prompt_tokens == 20
         assert usage.completion_tokens == 40
         assert usage.total_tokens == 60
+
+
+class TestCitation:
+    """W6 C1b: t.citation -- every [n] marker resolves to a research_sources id (GATE)."""
+
+    def _ctx_with_turn(self, reply: str, sources: list[dict]) -> TestContext:
+        from koboi.types import RunResult
+
+        ctx = TestContext(_mock_agent([make_mock_response("ok")]))
+        ctx._turns.append(RunResult(content=reply, metadata={"research_sources": sources}))
+        return ctx
+
+    def test_passes_when_all_markers_resolve(self):
+        ctx = self._ctx_with_turn("see [1] for details", [{"citation_id": 1, "node_id": "nA"}])
+        ctx.citation(min_citations=1)
+        assert ctx.collect()[0].outcome().passed is True
+
+    def test_fails_on_unresolvable_marker(self):
+        ctx = self._ctx_with_turn("see [1] and [99]", [{"citation_id": 1, "node_id": "nA"}])
+        ctx.citation()
+        assert ctx.collect()[0].outcome().passed is False  # [99] unresolved -> GATE fail
+
+    def test_fails_when_too_few_citations(self):
+        ctx = self._ctx_with_turn("no markers here", [{"citation_id": 1, "node_id": "nA"}])
+        ctx.citation(min_citations=1)
+        assert ctx.collect()[0].outcome().passed is False  # 0 markers < min_citations=1
+
+    def test_fails_when_no_research_sources(self):
+        ctx = self._ctx_with_turn("see [1]", [])
+        ctx.citation()
+        assert ctx.collect()[0].outcome().passed is False  # source missing -> [1] unresolved

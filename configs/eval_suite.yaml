@@ -39,14 +39,9 @@ eval:
         - cost
       max_cases: 50
 
-    # RAGAS: RAG Quality (requires ragas package)
-    - name: ragas_quality
-      framework: yaml
-      source: "./evals/rag_quality.yaml"
-      scorers:
-        - ragas_faithfulness
-        - ragas_relevancy
-        - ragas_composite
+    # RAGAS: RAG Quality (requires ragas package) -- suite entry removed: it referenced a
+    # non-existent evals/rag_quality.yaml. Re-add when a YAML-cases RAG quality file exists
+    # (the t.* evals use a different loader -- PythonTestLoader, not YAMLLoader).
 
     # GAIA: General Tasks (requires datasets package)
     - name: gaia_level1
