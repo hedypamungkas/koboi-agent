@@ -880,6 +880,14 @@ class Orchestrator:
                 combined_answer += event.content
             yield event
 
+        # W3: persist the gathered findings (best-effort) for cross-session corpus reuse.
+        persist_path = self._research.get("persist_findings")
+        if persist_path:
+            try:
+                ctx.source_store.to_corpus_file(persist_path)
+            except Exception as e:  # noqa: BLE001 - persistence is best-effort, never fatal
+                logger.warning("research findings persistence failed: %s", e)
+
         yield OrchestrationCompleteEvent(
             final_answer=combined_answer,
             elapsed_seconds=time.time() - start,

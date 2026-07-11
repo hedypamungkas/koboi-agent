@@ -133,6 +133,9 @@ class RagConfig(BaseModel):
     # heuristic RerankerRetriever; a DICT selects a true cross-encoder backend, e.g.
     # ``{provider: jina|cohere|local, api_key, model, ...}`` (see koboi/rag/rerank.py).
     rerank: bool | dict = False
+    # W3: opt-in live corpus -- the facade swaps the augmentation retriever for a LiveRetriever
+    # over a shared LiveCorpus + injects it as the ``live_corpus`` dep for the ingest_url tool.
+    live: bool = False
     # #5: opt-in on-disk embedding cache (JSON) so restarts don't re-embed the corpus.
     embedding_cache_path: str | None = None
     # #1: opt-in on-disk cache for fetched remote documents (avoids re-fetch per session).
@@ -184,6 +187,8 @@ class ResearchConfig(BaseModel):
     tools: dict | None = None
     search_provider: str | None = None
     fetch_provider: str | None = None
+    # W3: path to write the run's gathered findings as jsonl (cross-session corpus reuse).
+    persist_findings: str | None = None
 
 
 class InputGuardrailConfig(BaseModel):

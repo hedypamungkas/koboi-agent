@@ -170,6 +170,21 @@ class SourceStore:
     def sources_list(self) -> list[dict]:
         return [{"citation_id": s.citation_id, "node_id": s.node_id} for s in self._sources]
 
+    def to_corpus_file(self, path: str) -> None:
+        """Write findings as jsonl (``{citation_id, node_id, text}`` per row) for later reuse.
+
+        A future ``_load_documents``-style loader can re-ingest this as a RAG corpus, so a
+        finished research run's findings accumulate across sessions.
+        """
+        import json
+        from pathlib import Path
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w", encoding="utf-8") as f:
+            for s in self._sources:
+                f.write(json.dumps({"citation_id": s.citation_id, "node_id": s.node_id, "text": s.text}) + "\n")
+
 
 # ---------------------------------------------------------------------------
 # ResearchContext

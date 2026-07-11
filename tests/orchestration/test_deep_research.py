@@ -275,3 +275,20 @@ class TestRunDeepResearch:
         finally:
             conn.close()
         assert count >= 1  # at least one journal row written
+
+    async def test_persists_findings_to_corpus_file(self, tmp_path):
+        out_path = str(tmp_path / "findings.jsonl")
+        orch = _orch(
+            _FakeClient(coverage_score=0.95),
+            {"max_depth": 1, "coverage_threshold": 0.7, "persist_findings": out_path},
+            tmp_path,
+        )
+        _ = [e async for e in orch._run_deep_research("Tell me about X")]
+        # The run wrote its findings as jsonl (one row per source, with text).
+        import json
+        import os
+
+        assert os.path.exists(out_path)
+        rows = [json.loads(line) for line in open(out_path, encoding="utf-8") if line.strip()]
+        assert rows  # at least one finding row
+        assert {"citation_id", "node_id", "text"} <= set(rows[0])

@@ -1141,6 +1141,19 @@ class AgentAssembler:
 
     def build_rag(self) -> object:
         self.augmentation = _build_rag(self.config, self.client, self.logger)
+        # W3: opt-in live corpus -- swap the augmentation retriever for a LiveRetriever over a
+        # shared LiveCorpus (seeded with the static chunks) and inject it as the live_corpus dep
+        # so the ingest_url tool can grow it mid-conversation (rag.live + tools.builtin:
+        # [ingest_url, ...]). add_chunks is cheap; the KeywordRetriever delegate rebuilds lazily.
+        if self.augmentation is not None and self.config.get("rag", "live", default=False):
+            from koboi.rag.live import LiveCorpus, LiveRetriever
+
+            seed = getattr(self.augmentation.retriever, "_chunks", []) or []
+            corpus = LiveCorpus(seed)
+            self.augmentation.retriever = LiveRetriever(corpus)
+            tools = getattr(self, "tools", None)
+            if tools is not None:
+                tools.set_dep("live_corpus", corpus)
         return self.augmentation
 
     def build_guardrails(self) -> tuple:
