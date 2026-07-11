@@ -124,27 +124,57 @@ def _build_metric(name: str) -> Any:
     return cls() if _INSTANTIATE_METRICS else cls
 
 
-def _extract_ragas_score(result: Any, name: str) -> float:
-    """Pull one metric's score out of a ragas EvaluationResult.
+def _extract_ragas_score(result: Any, name: str) -> float | None:
+    """Pull one metric's score out of a ragas EvaluationResult, or None if absent.
 
-    Result is dict-like keyed by metric name -> float or list[float]. Some metrics
-    (e.g. FactualCorrectness) key under ``name(mode=...)``; fall back to a prefix match.
+    Returns ``None`` when the metric produced no usable score (key absent, empty list, or
+    NaN) so callers can distinguish "did not run" from "scored 0". Result is dict-like
+    keyed by metric name -> float or list[float]; some metrics (e.g. FactualCorrectness)
+    key under ``name(mode=...)`` and fall back to a prefix match. Clamps to [0,1].
     """
+    import math
+
+    raw: Any = None
     try:
         raw = result[name]
     except (KeyError, TypeError, IndexError):
-        # Fallback: find a key that starts with the metric name.
-        raw = None
         if hasattr(result, "__getitem__"):
             for key in list(getattr(result, "_scores_dict", {}).keys()):
                 if str(key).startswith(name):
                     raw = result[key]
                     break
-        if raw is None:
-            return 0.0
+    if raw is None:
+        return None
     if isinstance(raw, list):
-        return float(raw[0]) if raw else 0.0
-    return float(raw)
+        if not raw:
+            return None
+        raw = raw[0]
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(val):
+        return None
+    return max(0.0, min(1.0, val))
+
+
+def _composite_weighted(weights: dict[str, float], scores: dict[str, float | None]) -> float:
+    """Honest weighted mean of a composite RAGAS score.
+
+    A metric that produced a score (including a real ``0.0``) counts at its ORIGINAL
+    weight; a metric that returned ``None`` (did not run) is EXCLUDED -- neither penalized
+    nor hidden. Real zeros drag the mean down (so a failed leg can no longer be silently
+    dropped to manufacture a 1.0). Returns 0.0 if no metric produced a score.
+    """
+    total_w = 0.0
+    acc = 0.0
+    for name, weight in weights.items():
+        val = scores.get(name)
+        if val is None:
+            continue
+        total_w += weight
+        acc += weight * val
+    return acc / total_w if total_w > 0 else 0.0
 
 
 def _create_ragas_llm():
@@ -279,7 +309,9 @@ class RAGASScorer(BaseScorer):
                 evaluate_kwargs["embeddings"] = embeddings
 
             result = ragas_evaluate(**evaluate_kwargs)
-            score_val = max(0.0, min(1.0, _extract_ragas_score(result, self.metric_name)))
+            score_val = _extract_ragas_score(result, self.metric_name)
+            if score_val is None:
+                return EvalScore(score_name, 0.0, f"RAGAS {self.metric_name} produced no score")
             return EvalScore(score_name, round(score_val, 3), f"RAGAS {self.metric_name}")
 
         except Exception as e:
@@ -334,24 +366,19 @@ class RAGASCompositeScorer(BaseScorer):
 
             result = ragas_evaluate(**evaluate_kwargs)
 
-            import math
-
-            scores: dict[str, float] = {}
+            # Per-metric score: None means the metric did not produce a usable score
+            # (absent/NaN) and is excluded; a real 0.0 is kept and counts.
+            scores: dict[str, float | None] = {}
             for name in self.weights:
                 try:
-                    val = _extract_ragas_score(result, name)
-                    scores[name] = 0.0 if math.isnan(val) else max(0.0, min(1.0, val))
+                    scores[name] = _extract_ragas_score(result, name)
                 except Exception:
-                    scores[name] = 0.0
+                    scores[name] = None
 
-            # Redistribute weights: only among metrics that returned valid (>0) scores.
-            valid = {m: w for m, w in self.weights.items() if m in scores and scores[m] > 0}
-            if valid:
-                total_w = sum(valid.values())
-                weighted = sum(scores[m] * (w / total_w) for m, w in valid.items())
-            else:
-                weighted = 0.0
-            details = ", ".join(f"{m}={v:.2f}" for m, v in scores.items())
+            weighted = _composite_weighted(self.weights, scores)
+            details = ", ".join(
+                f"{m}={'None' if v is None else f'{v:.2f}'}" for m, v in scores.items()
+            )
 
             return EvalScore("ragas_composite", round(weighted, 3), details)
 

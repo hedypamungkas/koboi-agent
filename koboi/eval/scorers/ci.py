@@ -45,7 +45,10 @@ def bootstrap_ci(
     if n == 0:
         return CIResult(0.0, 0.0, 0.0, 0.0, 0)
     if n == 1:
-        return CIResult(float(scores[0]), float(scores[0]), float(scores[0]), 0.0, 1)
+        # One observation of a [0,1] variable carries ~no information about the spread:
+        # the honest conservative 95% CI is full-width. This makes any CI-lower-bound
+        # gate FAIL at N=1 (you cannot pass on a single sample) and forces growing N.
+        return CIResult(float(scores[0]), 0.0, 1.0, 0.5, 1)
 
     rng = random.Random(seed)  # nosec B311 - bootstrap resampling, not cryptographic
     means: list[float] = []
@@ -90,5 +93,6 @@ class BootstrapCIScorer(BaseScorer):
 
         ci = bootstrap_ci(samples, self.confidence, self.n_boot, self.seed)
         pct = int(self.confidence * 100)
-        reason = f"{pct}% CI=[{ci.lower:.3f}, {ci.upper:.3f}] hw={ci.half_width:.3f} n={ci.n} mean={ci.mean:.3f}"
+        note = " (n<2: uninformative full-width CI — grow N)" if ci.n < 2 else ""
+        reason = f"{pct}% CI=[{ci.lower:.3f}, {ci.upper:.3f}] hw={ci.half_width:.3f} n={ci.n} mean={ci.mean:.3f}{note}"
         return EvalScore("bootstrap_ci", round(ci.lower, 3), reason)

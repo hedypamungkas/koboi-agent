@@ -10,6 +10,7 @@ import pytest
 
 from koboi.eval.scorers.ci import BootstrapCIScorer, bootstrap_ci
 from koboi.eval.scorers.citation_grounding import CitationGroundingScorer, citation_precision
+from koboi.eval.scorers.ragas_scorer import _composite_weighted, _extract_ragas_score
 from koboi.eval.scorers.retrieval_metric import (
     RetrievalMetricScorer,
     compute_ranking_metric,
@@ -177,10 +178,14 @@ class TestBootstrapCI:
         ci = bootstrap_ci([])
         assert (ci.mean, ci.lower, ci.upper, ci.n) == (0.0, 0.0, 0.0, 0)
 
-    def test_single_sample(self):
+    def test_single_sample_is_uninformative_full_width(self):
+        # N=1 carries ~no spread info: the honest conservative CI is full-width, so a
+        # CI-lower-bound gate FAILS at N=1 (you cannot pass on one sample).
         ci = bootstrap_ci([0.7])
-        assert ci.lower == ci.upper == 0.7
-        assert ci.half_width == 0.0
+        assert ci.n == 1
+        assert ci.mean == 0.7
+        assert ci.lower == 0.0 and ci.upper == 1.0
+        assert ci.half_width == 0.5
 
     def test_deterministic_with_seed(self):
         data = [1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
@@ -392,3 +397,70 @@ class TestRunMetadataStamp:
         assert rr["score"] == 0.9
         assert rr["retrieval_method"] == "keyword"
         assert rr["doc_id"] == "company_policy.md"
+
+
+# --------------------------------------------------------------------------
+# RAGAS composite honesty fixes: _composite_weighted + _extract_ragas_score
+# --------------------------------------------------------------------------
+
+
+class _FakeResult:
+    """Minimal stand-in for a ragas EvaluationResult (dict-like over _scores_dict)."""
+
+    def __init__(self, scores_dict: dict):
+        self._scores_dict = scores_dict
+
+    def __getitem__(self, key):
+        return self._scores_dict[key]  # KeyError if absent -> triggers prefix fallback
+
+
+class TestCompositeWeighted:
+    """The composite must keep real zeros (drag the mean down) and only exclude
+    metrics that did not run (None) -- the bug dropped zeros, manufacturing 1.0."""
+
+    def _w(self):
+        return {"faithfulness": 0.3, "answer_relevancy": 0.3, "context_precision": 0.2, "context_recall": 0.2}
+
+    def test_real_zero_counts(self):
+        # 1,1,1,0 -> (0.3+0.3+0.2+0)/1.0 = 0.8 (was 1.0 under the old drop-zeros bug).
+        s = {"faithfulness": 1.0, "answer_relevancy": 1.0, "context_precision": 1.0, "context_recall": 0.0}
+        assert _composite_weighted(self._w(), s) == pytest.approx(0.8)
+
+    def test_none_metric_excluded(self):
+        # 1,1,1,None -> excluded, not penalized: (0.3+0.3+0.2)/0.8 = 1.0.
+        s = {"faithfulness": 1.0, "answer_relevancy": 1.0, "context_precision": 1.0, "context_recall": None}
+        assert _composite_weighted(self._w(), s) == pytest.approx(1.0)
+
+    def test_all_none_is_zero(self):
+        s = dict.fromkeys(self._w(), None)
+        assert _composite_weighted(self._w(), s) == 0.0
+
+    def test_zero_not_silently_dropped_against_high_legs(self):
+        # The regression the audit found: a single 0 among 1.0s must NOT round-trip to 1.0.
+        s = {"faithfulness": 1.0, "answer_relevancy": 1.0, "context_precision": 1.0, "context_recall": 0.0}
+        assert _composite_weighted(self._w(), s) < 1.0
+
+
+class TestExtractRagasScore:
+    """None vs 0.0 distinction (did-not-run vs scored-zero)."""
+
+    def test_present_value(self):
+        assert _extract_ragas_score(_FakeResult({"faithfulness": [1.0]}), "faithfulness") == 1.0
+
+    def test_present_real_zero_is_zero_not_none(self):
+        # A genuine 0 must stay 0.0 (so the composite counts it), not become None.
+        assert _extract_ragas_score(_FakeResult({"faithfulness": [0.0]}), "faithfulness") == 0.0
+
+    def test_absent_key_is_none(self):
+        assert _extract_ragas_score(_FakeResult({}), "faithfulness") is None
+
+    def test_nan_is_none(self):
+        assert _extract_ragas_score(_FakeResult({"faithfulness": [float("nan")]}), "faithfulness") is None
+
+    def test_empty_list_is_none(self):
+        assert _extract_ragas_score(_FakeResult({"faithfulness": []}), "faithfulness") is None
+
+    def test_prefix_fallback_for_mode_keyed_metric(self):
+        # FactualCorrectness keys under factual_correctness(mode=f1).
+        r = _FakeResult({"factual_correctness(mode=f1)": [1.0]})
+        assert _extract_ragas_score(r, "factual_correctness") == 1.0
