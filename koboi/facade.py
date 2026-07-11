@@ -229,7 +229,7 @@ class KoboiAgent:
             try:
                 mcp.close()
             except Exception as e:  # noqa: BLE001
-                logging.getLogger(__name__).debug("MCP client close failed: %s", e)  # 24-G
+                logging.getLogger(__name__).warning("MCP client close failed: %s", e)  # 24-G
         if self._orchestrator is not None:
             shared_client = self._orchestrator.client
             # Clean up orchestrator's sub-agent memories + their dedicated LLM
@@ -272,7 +272,7 @@ class KoboiAgent:
             try:
                 mcp.close()
             except Exception as e:  # noqa: BLE001
-                logging.getLogger(__name__).debug("MCP client close failed: %s", e)  # 24-G
+                logging.getLogger(__name__).warning("MCP client close failed: %s", e)  # 24-G
         if self._logger is not None:
             try:
                 self._logger.close()

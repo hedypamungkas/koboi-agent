@@ -134,6 +134,7 @@ class TestSyncHandlerCancelOnTimeout:
 
         monkeypatch.setattr(ts, "TOOL_CALL_TIMEOUT", 0.1)
         completed: list[bool] = []
+        cancelled: list[bool] = []
 
         class _SlowReg:
             async def execute(self, name, args_json):  # noqa: ARG002
@@ -141,6 +142,7 @@ class TestSyncHandlerCancelOnTimeout:
                     await asyncio.sleep(10)
                     completed.append(True)  # only reached if NOT cancelled
                 except asyncio.CancelledError:
+                    cancelled.append(True)  # 29-G: verify cancellation actually propagated
                     raise
 
         loop = asyncio.new_event_loop()
@@ -155,6 +157,7 @@ class TestSyncHandlerCancelOnTimeout:
             import time
 
             time.sleep(0.3)
-            assert completed == []  # the bg task was cancelled, not completed
+            assert cancelled == [True]  # 29-G: fut.cancel() actually cancelled the bg task
+            assert completed == []  # the bg task did NOT complete
         finally:
             loop.call_soon_threadsafe(loop.stop)

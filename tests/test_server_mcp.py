@@ -181,3 +181,113 @@ async def test_add_mcp_server_bad_command_400():
         )
         assert r.status_code == 400
         assert r.json()["error"]["code"] == "mcp_connect_failed"
+
+
+# --- 29-C: identity-aware register() (no double-index) ---
+
+
+def test_register_after_ensure_populated_no_duplicate():
+    """29-C: ensure_populated + register on the same client must not double-index."""
+    reg = SessionMcpRegistry()
+    client = _FakeClient("todo")
+    reg.ensure_populated([client])  # indexes by slug "todo"
+    sid = reg.register(client)  # must reuse existing id, not add a second entry
+    assert sid == "todo"
+    assert len(reg.status()) == 1  # no duplicate
+
+
+# --- 29-D: registration failure -> 502 + client closed (not orphaned) ---
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_server_register_failure_502(monkeypatch):
+    """29-D: connect succeeds but discover_tools fails -> 502 + client.close() called."""
+    app = _app()
+
+    class _ConnectsButBadDiscover:
+        def __init__(self):
+            self.closed = False
+            self.logger = None
+            self.server_command = []
+            self.server_info = {}
+
+        @property
+        def name(self):
+            return "bad"
+
+        @property
+        def endpoint(self):
+            return "bad"
+
+        @property
+        def transport(self):
+            return "stdio"
+
+        @property
+        def tool_names(self):
+            return []
+
+        def is_connected(self):
+            return not self.closed
+
+        def connect(self):
+            return {"serverInfo": {"name": "bad"}}
+
+        def discover_tools(self):
+            raise RuntimeError("bad tools/list")
+
+        async def call_tool(self, name, arguments):
+            return ""
+
+        def close(self):
+            self.closed = True
+
+    bad = _ConnectsButBadDiscover()
+    monkeypatch.setattr("koboi.facade._create_mcp_client", lambda *a, **k: bad)
+    async with httpx.AsyncClient(base_url="http://t", transport=ASGITransport(app=app)) as c:
+        sid = (await c.post("/v1/sessions")).json()["session_id"]
+        r = await c.post(
+            f"/v1/sessions/{sid}/mcp/servers",
+            json={"transport": "stdio", "command": "python3", "args": []},
+        )
+        assert r.status_code == 502
+        assert r.json()["error"]["code"] == "mcp_register_failed"
+        assert bad.closed is True  # 29-D: client was closed (not orphaned)
+
+
+# --- 29-F: unexpected exception propagates to 500 (not 400) ---
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_server_unexpected_exception_500(monkeypatch):
+    """29-F: an exception NOT in the caught family (TypeError) propagates to 500."""
+    app = _app()
+
+    def _boom(*a, **k):
+        raise TypeError("unexpected server bug")
+
+    monkeypatch.setattr("koboi.facade._create_mcp_client", _boom)
+    async with httpx.AsyncClient(base_url="http://t", transport=ASGITransport(app=app)) as c:
+        sid = (await c.post("/v1/sessions")).json()["session_id"]
+        # 29-F: TypeError is NOT in the caught family -> propagates uncaught (Starlette's
+        # ASGI test transport re-raises; in production ServerErrorMiddleware -> 500).
+        with pytest.raises(TypeError, match="unexpected server bug"):
+            await c.post(
+                f"/v1/sessions/{sid}/mcp/servers",
+                json={"transport": "stdio", "command": "python3", "args": []},
+            )
+
+
+# --- 29-E: delete_session clears the MCP registry ---
+
+
+@pytest.mark.asyncio
+async def test_delete_session_clears_mcp_registry():
+    """29-E: deleting a session removes its entry from app.state.mcp_registries."""
+    app = _app()
+    async with httpx.AsyncClient(base_url="http://t", transport=ASGITransport(app=app)) as c:
+        sid = (await c.post("/v1/sessions")).json()["session_id"]
+        await c.get(f"/v1/sessions/{sid}/mcp/servers")  # creates the registry
+        assert sid in app.state.mcp_registries
+        await c.delete(f"/v1/sessions/{sid}")
+        assert sid not in app.state.mcp_registries  # 29-E: cleaned up

@@ -539,7 +539,7 @@ def _register_routes(
             try:
                 client = _create_mcp_client(conf, transport, agent._logger, agent.config)
                 await asyncio.to_thread(client.connect)
-            except (MCPError, ValueError, OSError, subprocess.SubprocessError, TimeoutError) as e:
+            except (MCPError, ValueError, OSError, subprocess.SubprocessError, TimeoutError, RuntimeError) as e:
                 return _error_response(400, "mcp_connect_failed", f"MCP server failed to connect: {e}", request)
             # 29-D: connect() succeeded -- a registration failure (discover_tools/register)
             #       must not orphan the spawned subprocess/httpx client; close it + 502.
@@ -550,8 +550,10 @@ def _register_routes(
             except Exception as e:  # noqa: BLE001
                 try:
                     client.close()
-                except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
-                    pass
+                except Exception as close_err:  # noqa: BLE001
+                    logging.getLogger(__name__).warning(
+                        "MCP client close failed after registration error for %r: %s", client.name, close_err
+                    )
                 return _error_response(
                     502, "mcp_register_failed", f"MCP server connected but tool discovery failed: {e}", request
                 )
@@ -603,7 +605,7 @@ def _register_routes(
             try:
                 # 29-A: reconnect calls the blocking connect(); offload. 29-F: specific families.
                 await asyncio.to_thread(reg.reconnect, server_id)
-            except (MCPError, ValueError, OSError, subprocess.SubprocessError, TimeoutError) as e:
+            except (MCPError, ValueError, OSError, subprocess.SubprocessError, TimeoutError, RuntimeError) as e:
                 return _error_response(400, "mcp_reconnect_failed", f"MCP reconnect failed: {e}", request)
         entry = next((e for e in reg.status() if e["id"] == server_id), {"id": server_id})
         return McpServerResponse(**entry)  # type: ignore[return-value]

@@ -221,3 +221,35 @@ class TestStreamableHTTP401Retry:
         c._post_json_rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
         sent_headers = mock_client.post.call_args.kwargs["headers"]
         assert sent_headers["Authorization"] == "Bearer Z"
+
+
+# --- 24-E: JSON-decode + non-numeric expires_in wrapping ---
+
+
+def test_token_endpoint_non_json_raises_oautherror(monkeypatch):
+    """24-E: a non-JSON token-endpoint response surfaces as OAuthError, not raw ValueError."""
+    import json
+
+    class _BadJson:
+        status_code = 200
+        text = "not-json"
+        headers = {}
+
+        def json(self):
+            raise json.JSONDecodeError("msg", "doc", 0)
+
+    monkeypatch.setattr("koboi.mcp.auth.httpx.post", lambda *a, **k: _BadJson())
+    auth = OAuthClientCredentialsAuth(token_endpoint="https://idp/token", client_id="c")
+    with pytest.raises(OAuthError, match="non-JSON"):
+        auth.apply({})
+
+
+def test_token_endpoint_bad_expires_in_raises_oautherror(monkeypatch):
+    """24-E: a non-numeric expires_in surfaces as OAuthError, not raw ValueError."""
+    monkeypatch.setattr(
+        "koboi.mcp.auth.httpx.post",
+        lambda *a, **k: _FakeResp(payload={"access_token": "x", "expires_in": "not-a-number"}),
+    )
+    auth = OAuthClientCredentialsAuth(token_endpoint="https://idp/token", client_id="c")
+    with pytest.raises(OAuthError, match="non-numeric"):
+        auth.apply({})
