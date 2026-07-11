@@ -1,0 +1,38 @@
+# Firecrawl search provider demo (Wave 0).
+#
+# Firecrawl's /v1/search returns hits; with scrape_results: true it also embeds each
+# hit's markdown so web_search results carry content (search+fetch fusion -- handy for
+# deep research). The fetch provider (/v1/scrape) and crawl source land in Wave 1.
+#
+# Run:  FIRECRAWL_API_KEY=... koboi run configs/web_firecrawl.yaml -m "Summarize the latest news on X."
+
+agent:
+  name: "firecrawl-search-agent"
+  description: "Web research assistant using the Firecrawl search provider"
+  system_prompt: "You are a web research assistant. Use web_search to find current information, then web_fetch to read a source if you need detail."
+  mode: act
+
+llm:
+  provider: openai
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+
+tools:
+  builtin: [web_search, web_fetch]
+
+web:
+  search:
+    provider: firecrawl
+    max_results: 8
+    firecrawl:
+      api_key: ${FIRECRAWL_API_KEY:}
+      scrape_results: true   # embed markdown into each search result
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace

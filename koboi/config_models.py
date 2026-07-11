@@ -147,6 +147,24 @@ class RagConfig(BaseModel):
     filter: dict | None = None
 
 
+class WebConfig(BaseModel):
+    """Top-level ``web:`` section -- search/fetch provider selection (koboi.web).
+
+    Cosmetic validation only at the top level; runtime resolution reads
+    ``web.search`` / ``web.fetch`` as plain dicts via ``config.get("web", ...)`` in
+    ``_build_tools`` (mirrors how ``RagConfig`` is consumed by ``build_rag``). Defaults
+    are offline-safe (no provider configured -> ``mock`` search).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    search: dict = Field(default_factory=dict)
+    fetch: dict = Field(default_factory=dict)
+    # Dotted module paths imported so @register_search_provider/@register_fetch_provider
+    # decorators fire on import (mirrors rag.custom_modules).
+    custom_modules: list[str] = Field(default_factory=list)
+
+
 class InputGuardrailConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -519,6 +537,7 @@ class KoboiConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     jobs: JobsConfig = Field(default_factory=JobsConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
 
     @model_validator(mode="before")
     @classmethod

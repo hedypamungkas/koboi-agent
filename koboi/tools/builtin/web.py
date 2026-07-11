@@ -1,4 +1,13 @@
-"""koboi/tools/builtin/web -- Web search and URL fetching."""
+"""koboi/tools/builtin/web -- Web search and URL fetching.
+
+``web_search`` delegates to a registry-resolved search provider (``koboi.web``); the
+active provider is injected via the tool registry's dep store (``search_provider``) and
+defaults to ``mock`` for offline safety / back-compat. ``web_fetch`` still uses the
+in-process httpx + SSRF guard here (Wave 1 refactors it onto a fetch-provider registry).
+
+The mock/ddg helpers are migrated to ``koboi.web.providers`` and re-exported below for
+back-compat (tests and the ``WEB_SEARCH_PROVIDER`` env path still import them from here).
+"""
 
 from __future__ import annotations
 
@@ -8,198 +17,72 @@ import os
 import re
 import socket
 import ipaddress
-from html.parser import HTMLParser
-from urllib.parse import quote_plus, urlparse
+from typing import cast
+from urllib.parse import urlparse
 
 import httpx
 
 from koboi.tools.registry import tool
 from koboi.types import RiskLevel
+from koboi.web.base import BaseSearchProvider
+from koboi.web.types import SearchResult
 
 _logger = logging.getLogger(__name__)
 
-# ── web_search helpers ──
+# ── web_search (delegates to the koboi.web search-provider registry) ──
 
 WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "mock")
 
-SEARCH_INDEX: dict[str, list[dict]] = {
-    "python": [
-        {
-            "title": "Python Documentation",
-            "url": "https://docs.python.org/3/",
-            "snippet": "Official Python 3 documentation — tutorials, library reference, and guides.",
-        },
-        {
-            "title": "Real Python",
-            "url": "https://realpython.com/",
-            "snippet": "Python tutorials, guides, and best practices for developers.",
-        },
-    ],
-    "asyncio": [
-        {
-            "title": "Async IO in Python",
-            "url": "https://docs.python.org/3/library/asyncio.html",
-            "snippet": "Coroutines, event loops, tasks, and futures for async programming.",
-        },
-    ],
-    "react": [
-        {
-            "title": "React Documentation",
-            "url": "https://react.dev/",
-            "snippet": "Learn React — components, hooks, state management.",
-        },
-    ],
-    "typescript": [
-        {
-            "title": "TypeScript Handbook",
-            "url": "https://www.typescriptlang.org/docs/handbook/",
-            "snippet": "TypeScript type system, interfaces, generics, and modules.",
-        },
-    ],
-    "fastapi": [
-        {
-            "title": "FastAPI Documentation",
-            "url": "https://fastapi.tiangolo.com/",
-            "snippet": "Modern Python web framework with automatic OpenAPI docs.",
-        },
-    ],
-    "docker": [
-        {
-            "title": "Docker Documentation",
-            "url": "https://docs.docker.com/",
-            "snippet": "Container platform — build, ship, and run applications.",
-        },
-    ],
-    "git": [
-        {
-            "title": "Git Documentation",
-            "url": "https://git-scm.com/doc",
-            "snippet": "Version control system — branching, merging, and collaboration.",
-        },
-    ],
-    "ai": [
-        {
-            "title": "Anthropic API Docs",
-            "url": "https://docs.anthropic.com/",
-            "snippet": "Claude API — messages, tool use, and streaming.",
-        },
-        {
-            "title": "OpenAI API Docs",
-            "url": "https://platform.openai.com/docs",
-            "snippet": "GPT models, embeddings, and fine-tuning.",
-        },
-    ],
-    "agent": [
-        {
-            "title": "LangChain Docs",
-            "url": "https://python.langchain.com/",
-            "snippet": "Framework for building LLM-powered applications and agents.",
-        },
-        {"title": "CrewAI", "url": "https://docs.crewai.com/", "snippet": "Multi-agent orchestration framework."},
-    ],
-    "mcp": [
-        {
-            "title": "Model Context Protocol",
-            "url": "https://modelcontextprotocol.io/",
-            "snippet": "Open standard for connecting AI assistants to external tools and data.",
-        },
-    ],
-}
+# Back-compat re-exports: the mock/ddg logic now lives in koboi.web.providers, but tests
+# and the WEB_SEARCH_PROVIDER env path import these names from koboi.tools.builtin.web.
+from koboi.web.providers.ddg import (  # noqa: E402,F401
+    _DDGResultParser,
+    _search_duckduckgo,
+)
+from koboi.web.providers.mock import (  # noqa: E402,F401
+    SEARCH_INDEX,
+    _format_results,
+    _search_mock,
+)
+
+# Process-wide default provider for direct (no-registry) callers + the WEB_SEARCH_PROVIDER
+# env back-compat path. Lazily built and cached per resolved provider name.
+_DEFAULT_SEARCH_PROVIDER_CACHE: dict[str, BaseSearchProvider] = {}
 
 
-def _format_results(query: str, results: list[dict]) -> str:
+def _default_search_provider() -> BaseSearchProvider:
+    """Build the default search provider from ``WEB_SEARCH_PROVIDER`` (back-compat).
+
+    Direct callers (e.g. unit tests invoking ``await web_search(q)`` with no registry)
+    hit this path. ``WEB_SEARCH_PROVIDER=duckduckgo`` maps to the ``ddg`` provider name.
+    """
+    name = "ddg" if WEB_SEARCH_PROVIDER == "duckduckgo" else WEB_SEARCH_PROVIDER
+    cached = _DEFAULT_SEARCH_PROVIDER_CACHE.get(name)
+    if cached is not None:
+        return cached
+    from koboi.web.registry import search_provider_registry
+
+    entry = search_provider_registry.get(name) or search_provider_registry.get("mock")
+    if entry is None:  # pragma: no cover - builtins always register mock
+        raise RuntimeError("No search providers registered")
+    provider = cast(BaseSearchProvider, entry.cls())
+    _DEFAULT_SEARCH_PROVIDER_CACHE[name] = provider
+    return provider
+
+
+def _format_search_results(query: str, results: list[SearchResult]) -> str:
+    """Format ``SearchResult`` objects as the legacy ``web_search`` output string."""
     lines = [f"Search results for '{query}':"]
-    seen = set()
+    seen: set[str] = set()
     for r in results:
-        if r["url"] not in seen:
-            seen.add(r["url"])
-            lines.append(f"  - {r['title']}: {r['url']}")
-            lines.append(f"    {r['snippet']}")
+        if r.url in seen:
+            continue
+        seen.add(r.url)
+        lines.append(f"  - {r.title}: {r.url}")
+        lines.append(f"    {r.snippet}")
+    if len(lines) == 1:
+        return f"No results found for '{query}'."
     return "\n".join(lines)
-
-
-def _search_mock(query: str) -> str:
-    q = query.lower().strip()
-    results = []
-
-    query_tokens = set(q.split())
-    for key, entries in SEARCH_INDEX.items():
-        key_tokens = set(key.split())
-        if query_tokens & key_tokens:
-            results.extend(entries)
-
-    if not results:
-        available = ", ".join(sorted(SEARCH_INDEX.keys()))
-        return f"No results found for '{query}'. Available topics: {available}"
-
-    return _format_results(query, results)
-
-
-class _DDGResultParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.results: list[dict] = []
-        self._in_title = False
-        self._in_snippet = False
-        self._current_url = ""
-        self._current_title = ""
-        self._current_snippet = ""
-
-    def handle_starttag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        css_class = attrs_dict.get("class", "")
-
-        if tag == "a" and "result__a" in css_class:
-            self._in_title = True
-            self._current_url = attrs_dict.get("href", "")
-            self._current_title = ""
-        elif tag == "a" and "result__snippet" in css_class:
-            self._in_snippet = True
-            self._current_snippet = ""
-
-    def handle_data(self, data):
-        if self._in_title:
-            self._current_title += data
-        elif self._in_snippet:
-            self._current_snippet += data
-
-    def handle_endtag(self, tag):
-        if tag == "a" and self._in_title:
-            self._in_title = False
-        elif tag == "a" and self._in_snippet:
-            self._in_snippet = False
-            if self._current_title.strip() and self._current_url:
-                self.results.append(
-                    {
-                        "title": self._current_title.strip(),
-                        "url": self._current_url.strip(),
-                        "snippet": self._current_snippet.strip() or "(no description)",
-                    }
-                )
-
-
-async def _search_duckduckgo(query: str) -> str:
-    encoded = quote_plus(query)
-    url = f"https://html.duckduckgo.com/html/?q={encoded}"
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=15,
-            headers={"User-Agent": "AI-Agent-Framework/1.0"},
-            follow_redirects=True,
-        ) as client:
-            resp = await client.get(url)
-            html = resp.text[:50000]
-    except Exception as e:
-        return f"Error: search failed — {e}"
-
-    parser = _DDGResultParser()
-    parser.feed(html)
-
-    if not parser.results:
-        return f"No results found for '{query}'"
-
-    return _format_results(query, parser.results[:10])
 
 
 @tool(
@@ -216,11 +99,21 @@ async def _search_duckduckgo(query: str) -> str:
         },
         "required": ["query"],
     },
+    deps=["search_provider"],
 )
-async def web_search(query: str) -> str:
-    if WEB_SEARCH_PROVIDER == "duckduckgo":
-        return await _search_duckduckgo(query)
-    return _search_mock(query)
+async def web_search(query: str, _deps: dict | None = None, _tool_config: dict | None = None) -> str:
+    provider = (_deps or {}).get("search_provider") or _default_search_provider()
+    max_results = 10
+    if _tool_config:
+        try:
+            max_results = int(_tool_config.get("max_results", 10))
+        except (TypeError, ValueError):
+            max_results = 10
+    try:
+        results = await provider.search(query, max_results=max_results)
+    except Exception as e:  # noqa: BLE001 - boundary: any provider failure becomes an error string
+        return f"Error: search failed — {e}"
+    return _format_search_results(query, results)
 
 
 # ── web_fetch helpers ──
