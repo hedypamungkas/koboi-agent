@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import threading
 
+import pytest
+
 from koboi.mcp.tool_server import _make_sync_handler, build_tool_server, select_exposed_tools
 from koboi.tools.registry import ToolRegistry
 from koboi.types import RiskLevel
@@ -86,5 +88,76 @@ class TestBuildToolServer:
             )
             text = written[0]["result"]["content"][0]["text"]
             assert "1+1" in text and "2" in text
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+
+
+# --- 29-B: dep wiring fatal when exposure is escalated ---
+
+
+class TestBuildRegistryRequireDeps:
+    def _config(self, tmp_path):
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text(
+            "agent:\n  name: t\nllm:\n  provider: openai\n  model: gpt-4o-mini\n"
+            "tools:\n  builtin: []\nmemory:\n  backend: in_memory\n"
+        )
+        from koboi.config import Config
+
+        return Config.from_yaml(str(cfg))
+
+    def test_safe_default_swallows_dep_failure(self, tmp_path, monkeypatch):
+        import koboi.mcp.tool_server as ts
+
+        monkeypatch.setattr("koboi.facade._build_sandbox", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+        # require_deps=False (default) -> sandbox failure is a warning, not fatal
+        reg = ts._build_registry(self._config(tmp_path), require_deps=False)
+        assert reg is not None  # did not raise
+
+    def test_escalated_requires_deps_and_raises_on_failure(self, tmp_path, monkeypatch):
+        import koboi.mcp.tool_server as ts
+
+        monkeypatch.setattr("koboi.facade._build_sandbox", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+        with pytest.raises(RuntimeError, match="dependency wiring failed"):
+            ts._build_registry(self._config(tmp_path), require_deps=True)
+
+
+# --- 29-G: bridge timeout cancels the abandoned bg-loop task ---
+
+
+class TestSyncHandlerCancelOnTimeout:
+    def test_timeout_cancels_bg_task(self, monkeypatch):
+        import asyncio
+        import threading
+
+        import koboi.mcp.tool_server as ts
+
+        monkeypatch.setattr(ts, "TOOL_CALL_TIMEOUT", 0.1)
+        completed: list[bool] = []
+        cancelled: list[bool] = []
+
+        class _SlowReg:
+            async def execute(self, name, args_json):  # noqa: ARG002
+                try:
+                    await asyncio.sleep(10)
+                    completed.append(True)  # only reached if NOT cancelled
+                except asyncio.CancelledError:
+                    cancelled.append(True)  # 29-G: verify cancellation actually propagated
+                    raise
+
+        loop = asyncio.new_event_loop()
+        threading.Thread(target=loop.run_forever, daemon=True).start()
+        try:
+            handler = ts._make_sync_handler("slow", _SlowReg(), loop)
+            from concurrent.futures import TimeoutError as FutureTimeoutError
+
+            with pytest.raises(FutureTimeoutError):
+                handler(x=1)
+            # give the cancellation a moment to propagate
+            import time
+
+            time.sleep(0.3)
+            assert cancelled == [True]  # 29-G: fut.cancel() actually cancelled the bg task
+            assert completed == []  # the bg task did NOT complete
         finally:
             loop.call_soon_threadsafe(loop.stop)

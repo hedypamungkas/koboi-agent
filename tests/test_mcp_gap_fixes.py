@@ -467,3 +467,50 @@ class TestG5OrchestrationMcp:
 
         assert OrchestrationConfig().share_mcp is True
         assert OrchestrationConfig(share_mcp=False).share_mcp is False
+
+
+# --- 24-C: reconnect diagnostics (respawn count + logging + stderr capture) ---
+
+
+class TestReconnectDiagnostics24C:
+    def test_stdio_respawn_increments_count_and_logs(self):
+        from unittest.mock import MagicMock
+
+        from koboi.mcp.client import MCPClient
+
+        logger = MagicMock()
+        c = MCPClient(["echo"], logger=logger)
+        dead = MagicMock()
+        dead.poll.return_value = 1  # process exited
+        c._process = dead
+        c.connect = MagicMock()  # avoid a real subprocess spawn
+        c.ensure_connected()
+        assert c._respawn_count == 1
+        assert logger.log.call_count == 1
+        assert "respawn #1" in logger.log.call_args[0][0]
+
+    def test_stdio_stderr_tail_captured_not_discarded(self):
+        from unittest.mock import MagicMock
+
+        from koboi.mcp.client import MCPClient
+
+        c = MCPClient(["echo"])
+        c._process = MagicMock()
+        c._process.stderr = iter([b"crash: bad config\n", b"traceback line\n"])
+        c._drain_stderr()
+        assert "crash: bad config" in c._stderr_tail
+        assert "traceback line" in c._stderr_tail
+
+    def test_http_reconnect_increments_count_and_logs(self):
+        from unittest.mock import MagicMock
+
+        from koboi.mcp.http_client import StreamableHTTPMCPClient
+
+        logger = MagicMock()
+        c = StreamableHTTPMCPClient(url="https://x.example.com/mcp", logger=logger)
+        c._client = None  # session closed -> ensure_connected reconnects
+        c.connect = MagicMock()
+        c.ensure_connected()
+        assert c._respawn_count == 1
+        assert logger.log.call_count == 1
+        assert "reconnect #1" in logger.log.call_args[0][0]

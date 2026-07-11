@@ -44,6 +44,14 @@ class OAuthClientCredentialsAuth(AuthStrategy):
     ):
         if not token_endpoint or not client_id:
             raise ValueError("OAuth requires token_endpoint and client_id")
+        # 24-B: SSRF-gate the token endpoint (it receives POSTs carrying client_secret);
+        #       reuses the web tool's checker for parity with the MCP `url` SSRF gate.
+        from koboi.tools.builtin.web import _check_url_ssrf
+
+        try:
+            _check_url_ssrf(token_endpoint)
+        except (ValueError, OSError) as e:
+            raise ValueError(f"OAuth token_endpoint SSRF-blocked: {e}") from e
         self._token_endpoint = token_endpoint
         self._client_id = client_id
         self._client_secret = client_secret
@@ -53,6 +61,9 @@ class OAuthClientCredentialsAuth(AuthStrategy):
         self._access_token = access_token or ""
         # Absolute expiry epoch seconds; 0 == unknown/expired.
         self._expires_at = (time.monotonic() + expires_in - self.EXPIRY_SAFETY_SECONDS) if expires_in else 0.0
+        # 24-A: monotonic timestamp of the last successful refresh, for double-checked
+        #       locking in StreamableHTTPMCPClient's 401-recovery path.
+        self._last_refresh_at = 0.0
 
     # --- AuthStrategy ---
 
@@ -78,7 +89,11 @@ class OAuthClientCredentialsAuth(AuthStrategy):
 
     def refresh(self, force: bool = True) -> None:
         """Re-acquire a token. With ``refresh_token`` set, uses the refresh grant;
-        otherwise client_credentials. ``force`` is honored for 401 recovery."""
+        otherwise client_credentials. ``force`` is honored for 401 recovery.
+
+        Transport/JSON failures are wrapped as :class:`OAuthError` (24-E) and messages
+        never echo the raw endpoint response body (24-B), to avoid leaking internal
+        service detail into agent logs."""
         data: dict[str, str] = {"client_id": self._client_id}
         if self._client_secret:
             data["client_secret"] = self._client_secret
@@ -90,25 +105,40 @@ class OAuthClientCredentialsAuth(AuthStrategy):
         else:
             data["grant_type"] = "client_credentials"
 
-        resp = httpx.post(self._token_endpoint, data=data, timeout=self._timeout)
+        try:
+            resp = httpx.post(self._token_endpoint, data=data, timeout=self._timeout)
+        except httpx.HTTPError as e:  # 24-E: ConnectError/TimeoutException/etc -> OAuthError
+            raise OAuthError(f"token endpoint request failed: {type(e).__name__}") from e
         if resp.status_code >= 400:
-            raise OAuthError(f"token endpoint returned HTTP {resp.status_code}: {resp.text[:200]}")
-        payload = resp.json()
+            raise OAuthError(f"token endpoint returned HTTP {resp.status_code}")  # 24-B: no body
+        try:
+            payload = resp.json()
+        except ValueError as e:  # JSONDecodeError is a ValueError subclass
+            raise OAuthError("token endpoint returned non-JSON") from e
         token = payload.get("access_token")
         if not token:
-            raise OAuthError(f"token endpoint response missing access_token: {payload}")
+            raise OAuthError("token endpoint response missing access_token")  # 24-B: no payload
         self._access_token = token
         # New refresh_token may be rotated by some providers.
         new_refresh = payload.get("refresh_token")
         if new_refresh:
             self._refresh_token = new_refresh
         expires_in = payload.get("expires_in")
-        self._expires_at = time.monotonic() + float(expires_in) - self.EXPIRY_SAFETY_SECONDS if expires_in else 0.0
+        try:
+            self._expires_at = time.monotonic() + float(expires_in) - self.EXPIRY_SAFETY_SECONDS if expires_in else 0.0
+        except (TypeError, ValueError) as e:
+            raise OAuthError("token endpoint returned non-numeric expires_in") from e
+        self._last_refresh_at = time.monotonic()  # 24-A: for double-checked 401-recovery
 
     @property
     def supports_refresh(self) -> bool:
         """Whether this strategy can attempt recovery on a 401 (always true for OAuth)."""
         return True
+
+    @property
+    def last_refresh_at(self) -> float:
+        """Monotonic timestamp of the last successful refresh (0.0 = never). For 24-A."""
+        return self._last_refresh_at
 
 
 class OAuthError(Exception):
@@ -126,7 +156,16 @@ def build_mcp_auth(auth_config: dict | None) -> AuthStrategy | None:
     auth_type = (cfg.get("type") or "none").lower()
     if auth_type == "bearer":
         token = cfg.get("token", "")
-        return BearerAuth(token) if token else None
+        # 24-D: an explicit type=bearer with an empty token (e.g. a typo'd ${VAR} that
+        #       resolved to "") is a misconfiguration, not a "no auth" intent (use the
+        #       "none" type for that). Surface it loudly instead of silently connecting
+        #       unauthenticated.
+        if not token:
+            raise ValueError(
+                "auth.type 'bearer' requested but 'token' is empty -- fix the config "
+                "(or set type: none to connect unauthenticated)"
+            )
+        return BearerAuth(token)
     if auth_type == "oauth":
         return OAuthClientCredentialsAuth(
             token_endpoint=cfg.get("token_endpoint", ""),

@@ -228,8 +228,8 @@ class KoboiAgent:
         for mcp in self._mcp_clients:
             try:
                 mcp.close()
-            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
-                pass
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).warning("MCP client close failed: %s", e)  # 24-G
         if self._orchestrator is not None:
             shared_client = self._orchestrator.client
             # Clean up orchestrator's sub-agent memories + their dedicated LLM
@@ -271,8 +271,8 @@ class KoboiAgent:
         for mcp in self._mcp_clients:
             try:
                 mcp.close()
-            except Exception:  # nosec B110 - best-effort; intentionally swallows transient errors (cleanup/export/teardown)
-                pass
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).warning("MCP client close failed: %s", e)  # 24-G
         if self._logger is not None:
             try:
                 self._logger.close()
@@ -538,16 +538,19 @@ class KoboiAgent:
         return names
 
     def remove_mcp_client(self, client) -> None:
-        """Disable a client's tools, close it, and drop it (G6 DELETE)."""
+        """Disable a client's tools, close it, and drop it (G6 DELETE).
+
+        29-H: close/disable failures are logged (not silently passed) so a lingering
+        resource is observable."""
         if self._core is not None:
             try:
                 self._core.tools.disable(list(client.tool_names))
-            except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
-                pass
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).warning("MCP tool disable failed for %r: %s", client.name, e)
         try:
             client.close()
-        except Exception:  # noqa: BLE001  # nosec B110 - best-effort cleanup
-            pass
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger(__name__).warning("MCP client close failed for %r: %s", client.name, e)
         if client in self._mcp_clients:
             self._mcp_clients.remove(client)
 
@@ -1302,13 +1305,13 @@ def _connect_mcp_servers(config: Config, logger: AgentLogger) -> list[tuple[Base
         except Exception as e:
             if fail_fast:
                 raise
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "MCP server connection failed for '%s': %s",
-                server_conf.get("url") or server_conf.get("command", "?"),
-                e,
-            )
+            # 24-F: route through the AgentLogger (reaches the session log dir) when
+            #       available; fall back to stdlib only if no logger was passed.
+            msg = f"MCP server connection failed for '{server_conf.get('url') or server_conf.get('command', '?')}': {e}"
+            if logger is not None:
+                logger.log(msg)
+            else:
+                logging.getLogger(__name__).warning("%s", msg)
     return pairs
 
 

@@ -480,6 +480,10 @@ def _register_routes(
     # --- G6: per-session MCP server management ---
 
     def _mcp_registry_for(session_id: str):
+        # 29-E: lazily drop registries for sessions the pool no longer holds (LRU eviction
+        #       that didn't clear app.state) so the dict can't grow unbounded over time.
+        for stale in [s for s in app.state.mcp_registries if s != session_id and pool.get(s) is None]:
+            app.state.mcp_registries.pop(stale, None)
         reg = app.state.mcp_registries.get(session_id)
         if reg is None:
             from koboi.server.mcp_registry import SessionMcpRegistry
@@ -514,7 +518,10 @@ def _register_routes(
         err = _check_owner(ownership, session_id, request)
         if err:
             return err
+        import subprocess
+
         from koboi.facade import _create_mcp_client
+        from koboi.mcp.base import MCPError
         from koboi.types import RiskLevel
 
         conf = body.model_dump()
@@ -526,14 +533,30 @@ def _register_routes(
         }
         risk = risk_map.get(str(conf.get("risk_level", "safe")).lower(), RiskLevel.SAFE)
         async with pool.session_lock(session_id):
+            # 29-A: connect() is sync + blocking (subprocess spawn / HTTP handshake);
+            #       offload so the event loop + every other session isn't frozen.
+            # 29-F: only expected transport/config failures -> 400; anything else -> 500.
             try:
                 client = _create_mcp_client(conf, transport, agent._logger, agent.config)
-                client.connect()
-            except Exception as e:  # noqa: BLE001
+                await asyncio.to_thread(client.connect)
+            except (MCPError, ValueError, OSError, subprocess.SubprocessError, TimeoutError, RuntimeError) as e:
                 return _error_response(400, "mcp_connect_failed", f"MCP server failed to connect: {e}", request)
-            agent.add_mcp_client(client, group=conf.get("group"), risk_level=risk)
-            reg = _mcp_registry_for(session_id)
-            sid = reg.register(client)
+            # 29-D: connect() succeeded -- a registration failure (discover_tools/register)
+            #       must not orphan the spawned subprocess/httpx client; close it + 502.
+            try:
+                agent.add_mcp_client(client, group=conf.get("group"), risk_level=risk)
+                reg = _mcp_registry_for(session_id)
+                sid = reg.register(client)
+            except Exception as e:  # noqa: BLE001
+                try:
+                    client.close()
+                except Exception as close_err:  # noqa: BLE001
+                    logging.getLogger(__name__).warning(
+                        "MCP client close failed after registration error for %r: %s", client.name, close_err
+                    )
+                return _error_response(
+                    502, "mcp_register_failed", f"MCP server connected but tool discovery failed: {e}", request
+                )
         entry = next((e for e in reg.status() if e["id"] == sid), {"id": sid})
         return McpServerResponse(**entry)  # type: ignore[return-value]
 
@@ -553,7 +576,9 @@ def _register_routes(
         entry = next((e for e in reg.status() if e["id"] == server_id), {"id": server_id})
         tools = agent.core.tools if agent.core is not None else None
         async with pool.session_lock(session_id):
-            reg.remove(server_id, tools, list(agent.mcp_clients))
+            # Pass the actual _mcp_clients list (not a copy) so remove() can mutate it;
+            # the mcp_clients property returns list(self._mcp_clients) (a copy).
+            reg.remove(server_id, tools, agent._mcp_clients)
         return McpServerResponse(**entry)  # type: ignore[return-value]
 
     @app.post(
@@ -572,10 +597,15 @@ def _register_routes(
         reg = _mcp_registry_for(session_id)
         if reg.get(server_id) is None:
             raise HTTPException(status_code=404, detail="mcp server not found")
+        import subprocess
+
+        from koboi.mcp.base import MCPError
+
         async with pool.session_lock(session_id):
             try:
-                reg.reconnect(server_id)
-            except Exception as e:  # noqa: BLE001
+                # 29-A: reconnect calls the blocking connect(); offload. 29-F: specific families.
+                await asyncio.to_thread(reg.reconnect, server_id)
+            except (MCPError, ValueError, OSError, subprocess.SubprocessError, TimeoutError, RuntimeError) as e:
                 return _error_response(400, "mcp_reconnect_failed", f"MCP reconnect failed: {e}", request)
         entry = next((e for e in reg.status() if e["id"] == server_id), {"id": server_id})
         return McpServerResponse(**entry)  # type: ignore[return-value]
@@ -600,6 +630,8 @@ def _register_routes(
 
                 db_cleared = SQLiteMemory.delete_session(shared_db, session_id)
             ownership.delete(session_id)
+            # 29-E: drop the session's MCP registry so app.state.mcp_registries can't leak.
+            app.state.mcp_registries.pop(session_id, None)
         if not evicted and not db_cleared:
             raise HTTPException(status_code=404, detail="session not found")
         return SessionDeletedResponse(session_id=session_id, evicted=evicted or db_cleared)  # type: ignore[return-value]

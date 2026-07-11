@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -56,6 +57,7 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         self._session_id: str | None = None
         self._client: httpx.Client | None = None
         self._lock = threading.Lock()
+        self._respawn_count = 0  # 24-C: count of ensure_connected reconnects (parity w/ stdio)
         # G1: build an AuthStrategy (None | BearerAuth | OAuthClientCredentialsAuth).
         # Lazily imported to avoid importing the auth module for the common no-auth case.
         from koboi.mcp.auth import build_mcp_auth
@@ -105,8 +107,14 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         return await asyncio.to_thread(self._call_tool_sync, name, arguments)
 
     def ensure_connected(self) -> None:
-        """Re-establish the HTTP session if it was closed (G4). Single reconnect attempt."""
+        """Re-establish the HTTP session if it was closed (G4). Single reconnect attempt.
+
+        24-C: a reconnect is logged (with count) for parity with the stdio transport,
+        so a session that keeps dying is observable rather than silently re-handshaken."""
         if self._client is None:
+            self._respawn_count += 1
+            if self.logger:
+                self.logger.log(f"MCP HTTP client reconnecting '{self._url}' (reconnect #{self._respawn_count})")
             self.connect()
 
     def _call_tool_sync(self, name: str, arguments: dict) -> str:
@@ -175,6 +183,7 @@ class StreamableHTTPMCPClient(BaseMCPClient):
         if self.logger:
             self.logger.log_mcp_comm("send", message)
 
+        request_started = time.monotonic()  # 24-A: for double-checked 401-refresh
         response = self._post_safe(message, headers)
 
         # Capture session ID from response
@@ -187,9 +196,17 @@ class StreamableHTTPMCPClient(BaseMCPClient):
             return {}
 
         # G1: on 401 with a refresh-capable auth (OAuth), refresh once and retry.
+        # 24-A: serialize refresh under self._lock with a double-check on
+        # ``last_refresh_at`` so concurrent tool calls (e.g. orchestration parallel/DAG
+        # sharing one client) refresh exactly once -- avoids refresh-token reuse
+        # detection revoking the whole grant, and redundant IdP POSTs.
         if response.status_code == 401 and self._auth is not None and getattr(self._auth, "supports_refresh", False):
-            self._auth.refresh(force=True)  # type: ignore[attr-defined]
-            response = self._post_safe(message, self._build_headers())
+            with self._lock:
+                # A sibling thread that hit the same 401 may have already refreshed
+                # during this request; if so, reuse its token instead of refreshing again.
+                if getattr(self._auth, "last_refresh_at", 0.0) <= request_started:
+                    self._auth.refresh(force=True)  # type: ignore[attr-defined]
+                response = self._post_safe(message, self._build_headers())
             new_session_id = response.headers.get("mcp-session-id")
             if new_session_id:
                 self._session_id = new_session_id

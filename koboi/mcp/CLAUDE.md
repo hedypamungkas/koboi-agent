@@ -73,8 +73,11 @@ picks the subclass by `transport` (`"stdio"` default, `"streamable-http"`) -> `c
   `default_risk_heuristic()` (`delete`/`remove`-like names -> DESTRUCTIVE, etc.). A non-SAFE
   level only gates when `guardrails.approval` or `policy.rules` is configured -- otherwise
   it's informational. Wired in `facade.py` (`_build_mcp`).
-- **HTTP auth is Bearer-only** (`auth.type: "bearer"`). No OAuth flow, no token refresh,
-  no 401-retry; enterprise token expiry (~1h) is unsupported.
+- **HTTP auth** supports static Bearer (`auth.type: bearer`) and OAuth2 client-credentials+refresh
+  (`auth.type: oauth` with `token_endpoint`/`client_id`/`client_secret`/`scopes`/`refresh_token`).
+  OAuth refresh is thread-safe (double-checked locking under `self._lock`); on HTTP 401 the token
+  refreshes once and retries. The token_endpoint is SSRF-gated (parity with the MCP `url`).
+  Enterprise token expiry (~1h) is now handled automatically.
 - **stdio runner allow-list** (basename match): `_MCP_DEFAULT_RUNNERS` =
   `{npx, uvx, python, python3, node, uv, deno, bun}`. Other runners raise `ValueError`;
   permit more via `mcp.allowlist_commands`.
