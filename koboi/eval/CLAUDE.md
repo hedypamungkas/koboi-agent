@@ -30,6 +30,9 @@ gaia_scorer.py        GAIA exact-match
 swe_bench_scorer.py   SWE-bench patch-apply
 ragas_scorer.py       RAGAS faithfulness/relevancy
 deepeval_scorer.py    DeepEval integration
+retrieval_metric.py   Mock-safe IR ranking: RetrievalMetricScorer (recall@k/precision@k/mrr/ndcg@k/hit) -- stdlib-only
+citation_grounding.py Mock-safe citation resolution: CitationGroundingScorer (ALCE-style [n]/[Source:x] -> chunk)
+ci.py                 Mock-safe bootstrap CI: BootstrapCIScorer + bootstrap_ci() (95% lower-bound gating)
 skill_scorer.py       Skill scorer: trigger_accuracy only (routing_accuracy + token_overhead were removed)
 ```
 
@@ -54,7 +57,13 @@ Write `evals/**/*.eval.py` files exporting `async def test_*(t)` functions. The
 ```
 t/__init__.py        Public API: run_tests, run_tests_sync, TestContext, Severity, scripted_response/scripted_tool_call/ScriptedClient, matchers (Contains/Equals/Regex/Matches/Truth)
 t/assertions.py      Severity(GATE/SOFT), Matcher ABC + built-ins, RecordedAssertion
-t/context.py         TestContext (the `t`) -- send/calledTool/check/judge (record-and-collect)
+t/context.py         TestContext (the `t`) -- send/calledTool/check/judge (record-and-collect);
+                     RAG assertions: retrievedChunk (substring presence = Hit@k=∞),
+                     rankingMetric (rank-aware recall@k/mrr/ndcg@k/precision@k/hit over
+                     rag_results rank order), citationResolves ([n]/[Source:x]->chunk),
+                     abstains (empty retrieval OR refusal marker). _build_context()
+                     forwards rag_results + rag_augmented so retrieval/citation/noise
+                     scorers work via t.judge.
 t/mock.py            ScriptedClient + scripted_response/scripted_tool_call builders
 t/loader.py          PythonTestLoader -- discover **/*.eval.py, import, collect test_*(t)
 t/runner.py          TestRunner.run_tests -> list[EvalResult] (drives harness directly)

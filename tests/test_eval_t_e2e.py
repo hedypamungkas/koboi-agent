@@ -20,15 +20,17 @@ class TestShippedEvalsGolden:
         results = await run_tests(EVALS_DIR, threshold=0.6)
 
         # All mock-driven (R4 made RAG retrieval mock-safe via t.retrievedChunk).
-        # weather (2) + no_tools (1) + multi_turn (1) + guardrail_block (2)
-        # + mode_blocked (1) + rag_retrieval (2) + guardrail_output_warn (1)
-        # + skill_activation (1).  (mode_blocked dropped its false-positive
-        # placeholder case once R1 made calledTool outcome-aware.)
-        assert len(results) == 11
+        # Core samples (11): weather (2) + no_tools (1) + multi_turn (1)
+        # + guardrail_block (2) + mode_blocked (1) + rag_retrieval (2)
+        # + guardrail_output_warn (1) + skill_activation (1).
+        # RAG production-readiness Tier-1 gate (22): rag_ranking (4)
+        # + rag_ranking_ci (1) + rag_abstention (4) + rag_noise_robustness (2)
+        # + rag_citations (3) + rag_ingestion_fidelity (5) + rag_metadata_filter (3).
+        assert len(results) == 33
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 11
+        assert len(passed) == 33
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing
