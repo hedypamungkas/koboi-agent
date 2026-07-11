@@ -1149,6 +1149,13 @@ class AgentAssembler:
             from koboi.rag.live import LiveCorpus, LiveRetriever
 
             seed = getattr(self.augmentation.retriever, "_chunks", []) or []
+            # W5 B2: optionally seed the live corpus from a research run's persisted findings
+            # (SourceStore.to_corpus_file jsonl) -- the research->corpus convergence.
+            seed_file = self.config.get("rag", "live_seed_file", default=None)
+            if seed_file:
+                seeded = LiveCorpus.from_corpus_file(seed_file)
+                if seeded is not None:
+                    seed = seeded.chunks
             corpus = LiveCorpus(seed)
             self.augmentation.retriever = LiveRetriever(corpus)
             tools = getattr(self, "tools", None)

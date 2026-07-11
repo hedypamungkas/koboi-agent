@@ -392,3 +392,43 @@ class TestWave4Correctness:
         events = [e async for e in orch._run_deep_research("Tell me about X")]
         complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
         assert complete and complete[0].metadata["depth"] == 1  # budget stopped it
+
+
+class TestWave5Tracing:
+    """B4: orchestrator-level LLM calls emit hook events (SESSION_START/END + PRE/POST_LLM_CALL)
+    so Langfuse + other hooks trace them (they bypass AgentCore._emit)."""
+
+    async def test_research_run_emits_session_hooks(self, tmp_path):
+        from koboi.hooks.chain import HookEvent
+
+        class _SpyChain:
+            def __init__(self) -> None:
+                self.events: list = []
+
+            async def emit(self, ctx):
+                self.events.append(ctx.event)
+                return ctx
+
+            def find_hook(self, _pred):
+                return None
+
+        spy = _SpyChain()
+        orch = Orchestrator(
+            client=_FakeClient(plan_needs_workflow=False),  # simple -> fallback path (fast)
+            router=KeywordRouter(),
+            research={"max_depth": 1, "coverage_threshold": 0.7},
+            dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "r.db")),
+            hook_chain=spy,
+        )
+        _ = [e async for e in orch._run_deep_research("hi")]
+        # SESSION_START (open trace) + the plan PRE/POST + SESSION_END (close trace).
+        assert HookEvent.SESSION_START in spy.events
+        assert HookEvent.SESSION_END in spy.events
+        assert HookEvent.PRE_LLM_CALL in spy.events  # the plan_research call is traced
+        assert HookEvent.POST_LLM_CALL in spy.events
+
+    async def test_no_hook_chain_is_safe(self, tmp_path):
+        # No hook_chain -> _emit_research_hook is a no-op; the run still completes.
+        orch = _orch(_FakeClient(plan_needs_workflow=False), {"max_depth": 1, "coverage_threshold": 0.7}, tmp_path)
+        events = [e async for e in orch._run_deep_research("hi")]
+        assert any(isinstance(e, OrchestrationCompleteEvent) for e in events)

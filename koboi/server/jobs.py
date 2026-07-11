@@ -566,6 +566,16 @@ async def _execute_job(
     record = registry.get(job_id)
     agent = await pool.get_or_create(record.session_id)
 
+    # W5 B1: autonomous jobs assume a single agent core (sandbox-mandatory, deny-default
+    # approval, per-iteration caps). Orchestrated configs (dynamic/dag/conditional/deep_research)
+    # build core=None -- their autonomous-job semantics aren't wired (deferred), so refuse at
+    # execution. run_job marks the job failed with this message.
+    if agent._core is None:
+        raise PermissionError(
+            "Autonomous jobs are not supported for orchestrated configs "
+            "(execution.mode: dynamic/dag/conditional/deep_research). Use /v1/chat/stream instead."
+        )
+
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network
     # isolation, so refuse it -- raise before running; run_job marks the job failed.
     sb = agent._core.tools.get_dep("sandbox")

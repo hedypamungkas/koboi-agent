@@ -136,6 +136,9 @@ class RagConfig(BaseModel):
     # W3: opt-in live corpus -- the facade swaps the augmentation retriever for a LiveRetriever
     # over a shared LiveCorpus + injects it as the ``live_corpus`` dep for the ingest_url tool.
     live: bool = False
+    # W5: optional jsonl of a prior research run's findings (SourceStore.to_corpus_file output)
+    # to seed the live corpus -- the research->corpus convergence. Ignored unless ``live: true``.
+    live_seed_file: str | None = None
     # #5: opt-in on-disk embedding cache (JSON) so restarts don't re-embed the corpus.
     embedding_cache_path: str | None = None
     # #1: opt-in on-disk cache for fetched remote documents (avoids re-fetch per session).

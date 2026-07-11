@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from koboi.tokens import estimate_tokens
 from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, RoutingDecision
+from koboi.hooks.chain import AgentInfo, HookContext, HookEvent
 from koboi.events import (
     AgentDispatchEvent,
     AgentResultEvent,
@@ -197,6 +198,20 @@ class Orchestrator:
 
         session_id = f"{self.logger.session_id}_{agent_name}"
         return AgentLogger(log_dir=self.logger.log_dir, session_id=session_id)
+
+    async def _emit_research_hook(self, event: HookEvent, **kwargs) -> None:
+        """W5 B4: emit a hook event for orchestrator-level LLM calls (plan / coverage / synthesis).
+
+        Those calls bypass ``AgentCore._emit`` (no AgentCore), so without this they're invisible to
+        Langfuse + other hooks. No-op without a chain. Mirrors AgentCore._emit minus the memory write
+        (the orchestrator has no conversation memory). Langfuse needs SESSION_START before PRE_LLM_CALL
+        or its PRE/POST handlers no-op, so ``_run_deep_research`` brackets the run with START/END.
+        """
+        if self._hook_chain is None:
+            return
+        info = AgentInfo(model=getattr(self.client, "model", ""), iteration=kwargs.pop("iteration", 0))
+        ctx = HookContext(event=event, agent=info, **kwargs)
+        await self._hook_chain.emit(ctx)
 
     async def _resolve_dynamic_agents(self, query: str, decision: RoutingDecision) -> list[str]:
         if not self._dynamic_builder:
@@ -836,8 +851,18 @@ class Orchestrator:
         search_provider = CountingSearchProvider(build_search_provider(self._web_conf), budget)
         fetch_provider = CountingFetchProvider(build_fetch_provider(self._web_conf), budget)
 
+        # B4: open a trace so orchestrator-level LLM calls (plan/coverage/synthesis) are visible
+        # to Langfuse + other hooks (they bypass AgentCore._emit).
+        await self._emit_research_hook(HookEvent.SESSION_START)
+
         # Initial plan (or answer directly if the request is simple).
+        await self._emit_research_hook(
+            HookEvent.PRE_LLM_CALL, iteration=ctx.depth, messages=[{"role": "user", "content": query}]
+        )
         plan = await plan_research(self.client, query)
+        await self._emit_research_hook(
+            HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=plan.reason or "research plan"
+        )
         if not plan.needs_workflow or not plan.steps:
             # A7: simple request -> one direct node stamped deep_research (do NOT delegate to
             # _run_dynamic, which re-triages via plan_or_skip + mislabels execution_mode).
@@ -894,7 +919,15 @@ class Orchestrator:
                     logger.warning("research context journal failed: %s", e)
 
             # Assess coverage (fail-safe -> score 1.0 -> stop).
+            await self._emit_research_hook(
+                HookEvent.PRE_LLM_CALL,
+                iteration=ctx.depth,
+                messages=[{"role": "user", "content": "coverage evaluation"}],
+            )
             score, follow_ups, covmap = await CoverageEvaluator(self.client, threshold).evaluate(ctx)
+            await self._emit_research_hook(
+                HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=f"coverage={score:.2f}"
+            )
             ctx.coverage_map = covmap
             yield CoverageEvent(depth=ctx.depth, score=score, gaps=follow_ups)
 
@@ -906,7 +939,13 @@ class Orchestrator:
 
             # Re-plan to drill deeper on the gaps (A6: prune to the remaining search budget).
             drill_query = query + "\n\nRemaining gaps to investigate: " + "; ".join(follow_ups)
+            await self._emit_research_hook(
+                HookEvent.PRE_LLM_CALL, iteration=ctx.depth, messages=[{"role": "user", "content": drill_query}]
+            )
             plan = await plan_research(self.client, drill_query)
+            await self._emit_research_hook(
+                HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=plan.reason or "re-plan"
+            )
             if not plan.needs_workflow or not plan.steps:
                 break
             remaining = max(1, budget.max_searches - budget.used_searches)
@@ -917,7 +956,11 @@ class Orchestrator:
         # A1: synthesize a cited report, then verify every [n] resolves (drop unresolvable)
         # and build the Sources footer from referenced ids only. Buffered (not streamed) so
         # the citation check runs before anything is emitted.
+        await self._emit_research_hook(
+            HookEvent.PRE_LLM_CALL, iteration=ctx.depth, messages=[{"role": "user", "content": "research synthesis"}]
+        )
         report = await self._synthesize_research(query, ctx)
+        await self._emit_research_hook(HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=report[:200])
         report, referenced = _verify_citations(report, ctx)
         combined_answer = report + self._sources_footer(ctx, referenced)
         if combined_answer:
@@ -931,6 +974,7 @@ class Orchestrator:
             except Exception as e:  # noqa: BLE001 - persistence is best-effort, never fatal
                 logger.warning("research findings persistence failed: %s", e)
 
+        await self._emit_research_hook(HookEvent.SESSION_END)
         yield OrchestrationCompleteEvent(
             final_answer=combined_answer,
             elapsed_seconds=time.time() - start,
@@ -976,6 +1020,7 @@ class Orchestrator:
             failed=result.failed,
         )
         yield TextDeltaEvent(content=result.answer)
+        await self._emit_research_hook(HookEvent.SESSION_END)
         yield OrchestrationCompleteEvent(
             final_answer=result.answer,
             elapsed_seconds=time.time() - start,

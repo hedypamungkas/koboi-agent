@@ -33,6 +33,46 @@ class LiveCorpus:
     def mark_clean(self) -> None:
         self.dirty = False
 
+    @classmethod
+    def from_corpus_file(cls, path: str) -> LiveCorpus | None:
+        """Load a LiveCorpus from a research-findings jsonl (``SourceStore.to_corpus_file`` output).
+
+        Each row is ``{citation_id, node_id, text}``. Returns None if the file is missing/empty so
+        the caller can fall back to static chunks. Tolerant of malformed rows (skipped). This is the
+        W5 convergence seam: a deep_research run's persisted findings seed a later session's corpus.
+        """
+        import json
+        from pathlib import Path
+
+        p = Path(path)
+        if not p.is_file():
+            return None
+        chunks: list[Chunk] = []
+        for line in p.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            text = str(row.get("text", "")).strip()
+            if not text:
+                continue
+            node_id = str(row.get("node_id", "research"))
+            meta: dict = {"source": node_id}
+            if "citation_id" in row:
+                meta["citation_id"] = row["citation_id"]
+            chunks.append(
+                Chunk(
+                    id=f"src_{row.get('citation_id', len(chunks))}",
+                    doc_id=node_id,
+                    content=text,
+                    metadata=meta,
+                )
+            )
+        return cls(chunks) if chunks else None
+
 
 class LiveRetriever(BaseRetriever):
     """``KeywordRetriever``-backed retriever over a shared mutable ``LiveCorpus``.

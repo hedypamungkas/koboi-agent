@@ -1,6 +1,8 @@
-"""Tests for koboi/rag/live.py -- LiveCorpus + LiveRetriever (W3)."""
+"""Tests for koboi/rag/live.py -- LiveCorpus + LiveRetriever (W3) + corpus-file loader (W5)."""
 
 from __future__ import annotations
+
+import json
 
 from koboi.rag.live import LiveCorpus, LiveRetriever
 from koboi.rag.types import Chunk
@@ -60,3 +62,39 @@ class TestLiveRetriever:
         delegate_before = ret._delegate
         await ret.retrieve("python")  # not dirty -> reuse
         assert ret._delegate is delegate_before
+
+
+class TestLiveCorpusFile:
+    """W5 B2: load a LiveCorpus from a research run's persisted-findings jsonl."""
+
+    def _write_jsonl(self, path, rows):
+        path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    def test_from_corpus_file(self, tmp_path):
+        path = tmp_path / "findings.jsonl"
+        self._write_jsonl(
+            path,
+            [{"citation_id": 1, "node_id": "nA", "text": "alpha"}, {"citation_id": 2, "node_id": "nB", "text": "beta"}],
+        )
+        corpus = LiveCorpus.from_corpus_file(str(path))
+        assert corpus is not None
+        assert len(corpus.chunks) == 2
+        assert corpus.chunks[0].content == "alpha"
+        assert corpus.chunks[0].metadata["source"] == "nA"
+        assert corpus.chunks[0].metadata["citation_id"] == 1
+        assert corpus.dirty is True  # seed needs an initial delegate build
+
+    def test_missing_file_returns_none(self, tmp_path):
+        assert LiveCorpus.from_corpus_file(str(tmp_path / "nope.jsonl")) is None
+
+    def test_empty_file_returns_none(self, tmp_path):
+        (tmp_path / "empty.jsonl").write_text("", encoding="utf-8")
+        assert LiveCorpus.from_corpus_file(str(tmp_path / "empty.jsonl")) is None
+
+    def test_malformed_rows_skipped(self, tmp_path):
+        path = tmp_path / "mixed.jsonl"
+        path.write_text(
+            "not json\n" + json.dumps({"citation_id": 1, "node_id": "nA", "text": "alpha"}) + "\n", encoding="utf-8"
+        )
+        corpus = LiveCorpus.from_corpus_file(str(path))
+        assert corpus is not None and len(corpus.chunks) == 1  # the malformed row skipped

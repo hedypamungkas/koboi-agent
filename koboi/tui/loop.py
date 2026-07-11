@@ -15,8 +15,12 @@ from rich.table import Table
 
 from koboi.events import (
     CompleteEvent,
+    CoverageEvent,
     ErrorEvent,
+    FetchEvent,
     IterationEvent,
+    SearchEvent,
+    SourceEvent,
     TextDeltaEvent,
     ToolCallEvent,
     ToolResultEvent,
@@ -149,6 +153,50 @@ async def _stream_response(agent, user_input: str, console: Console, title: str)
                         border_style="red",
                     )
                 )
+
+            elif isinstance(event, SearchEvent):
+                live.update(
+                    Panel(
+                        Markdown(text_buffer) if text_buffer else "",
+                        subtitle=f"[dim]🔎 search: {event.query} ({event.results_count})[/dim]",
+                        title=title,
+                        border_style="green",
+                    )
+                )
+
+            elif isinstance(event, FetchEvent):
+                live.update(
+                    Panel(
+                        Markdown(text_buffer) if text_buffer else "",
+                        subtitle=f"[dim]⬇ fetch: {event.url} ({event.chars} chars)[/dim]",
+                        title=title,
+                        border_style="green",
+                    )
+                )
+
+            elif isinstance(event, SourceEvent):
+                live.update(
+                    Panel(
+                        Markdown(text_buffer) if text_buffer else "",
+                        subtitle=f"[dim]+ source [{event.citation_id}] {event.node_id}[/dim]",
+                        title=title,
+                        border_style="green",
+                    )
+                )
+
+            elif isinstance(event, CoverageEvent):
+                live.update(
+                    Panel(
+                        Markdown(text_buffer) if text_buffer else "",
+                        subtitle=f"[dim]coverage: {event.score:.2f} (depth {event.depth})[/dim]",
+                        title=title,
+                        border_style="green",
+                    )
+                )
+
+            else:
+                # Unknown event types are ignored -- explicit so future events don't silently regress.
+                pass
 
 
 def _print_summary(console: Console, turns: int, start_time: float, agent=None) -> None:
