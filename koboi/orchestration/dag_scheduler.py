@@ -17,9 +17,10 @@ the executed set are ignored (a routed subgraph runs in its induced order).
 from __future__ import annotations
 
 import sqlite3
+import time
 from uuid import uuid4
 
-from koboi.memory_sqlite import ensure_steps_table
+from koboi.memory_sqlite import ensure_research_context_table, ensure_steps_table
 from koboi.task import TaskManager
 
 
@@ -170,3 +171,46 @@ class DagScheduler:
         finally:
             conn.close()
         return {row[0]: row[1] for row in rows if row[0]}
+
+    @property
+    def db_path(self) -> str | None:
+        return self._db_path
+
+    @classmethod
+    def persist_research_context(cls, db_path: str, graph_run_id: str, context_json: str) -> None:
+        """Journal a ResearchContext for a graph run (W2 deep-research).
+
+        One upsert row per ``graph_run_id``. Called by ``_run_deep_research`` after each
+        depth round so the run state (sub-questions / SourceStore / coverage_map / budget /
+        depth) is inspectable + recoverable. Cross-session rehydrate-on-resume is W2.1.
+        No-op without db_path/graph_run_id.
+        """
+        if not db_path or not graph_run_id:
+            return
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            conn.execute(
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(graph_run_id) DO UPDATE SET "
+                "context_json=excluded.context_json, updated_at=excluded.updated_at",
+                (graph_run_id, context_json, time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @classmethod
+    def load_research_context(cls, db_path: str, graph_run_id: str) -> str | None:
+        """Read the journaled ResearchContext JSON for a graph run, or None."""
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            row = conn.execute(
+                "SELECT context_json FROM research_context WHERE graph_run_id=?",
+                (graph_run_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None

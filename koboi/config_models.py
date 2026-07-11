@@ -165,6 +165,27 @@ class WebConfig(BaseModel):
     custom_modules: list[str] = Field(default_factory=list)
 
 
+class ResearchConfig(BaseModel):
+    """Top-level ``research:`` section -- ``execution.mode: deep_research`` knobs (W2).
+
+    Cosmetic validation only; runtime reads these via ``config.get("research", ...)`` in
+    ``_build_orchestration`` (passed to the Orchestrator's ``research=`` kwarg).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    max_depth: int = Field(default=3, ge=1)
+    max_searches: int = Field(default=15, ge=1)
+    max_fetches: int = Field(default=20, ge=1)
+    max_tokens: int = Field(default=0, ge=0)  # 0 = not enforced
+    coverage_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    citations: str = "numbered"  # numbered | inline | none (W2 ships numbered)
+    # Optional override of the research node tool bundle (default: web_search + web_fetch).
+    tools: dict | None = None
+    search_provider: str | None = None
+    fetch_provider: str | None = None
+
+
 class InputGuardrailConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -538,6 +559,7 @@ class KoboiConfig(BaseModel):
     jobs: JobsConfig = Field(default_factory=JobsConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     web: WebConfig = Field(default_factory=WebConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
 
     @model_validator(mode="before")
     @classmethod

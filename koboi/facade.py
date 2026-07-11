@@ -1665,8 +1665,8 @@ def _build_orchestration(config: Config, verbose: bool = False):
     exec_conf = orch_conf.get("execution", {})
     exec_mode = exec_conf.get("mode", "sequential")
 
-    # Dynamic mode: agents are planned at runtime from the query (no config agents).
-    agent_defs = [] if exec_mode == "dynamic" else _parse_agent_defs(config)
+    # Dynamic / deep_research: agents are planned at runtime from the query (no config agents).
+    agent_defs = [] if exec_mode in ("dynamic", "deep_research") else _parse_agent_defs(config)
     router = _build_router(config, assembler.client, agent_defs)
 
     parent_rag = config.rag
@@ -1723,6 +1723,16 @@ def _build_orchestration(config: Config, verbose: bool = False):
             agents_map=agents_map, deps=deps, db_path=dag_db_path, conditionals=conds, interrupt_nodes=interrupt_nodes
         )
 
+    if exec_mode == "deep_research":
+        # deep_research plans nodes per-query (like dynamic) but needs a DagScheduler for
+        # the db_path used to journal the ResearchContext (W2).
+        from koboi.orchestration.dag_scheduler import DagScheduler
+
+        deep_db_path = None
+        if config.get("memory", "backend", default="sqlite") == "sqlite":
+            deep_db_path = config.get("memory", "db_path", default="koboi_memory.db")
+        dag_scheduler = DagScheduler(agents_map={}, deps={}, db_path=deep_db_path)
+
     orchestrator = Orchestrator(
         client=assembler.client,
         router=router,
@@ -1736,6 +1746,8 @@ def _build_orchestration(config: Config, verbose: bool = False):
         hook_chain=assembler.hook_chain,
         full_graph=exec_conf.get("full_graph", False),
         max_replans=exec_conf.get("max_replans", 0),
+        sandbox=assembler.sandbox,
+        research=config.get("research", default={}),
     )
 
     return KoboiAgent(

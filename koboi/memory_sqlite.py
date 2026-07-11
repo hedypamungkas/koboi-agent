@@ -76,6 +76,25 @@ def ensure_tasks_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)")
 
 
+def ensure_research_context_table(conn: sqlite3.Connection) -> None:
+    """Create the ``research_context`` table (W2) for durable deep-research state.
+
+    One row per ``graph_run_id`` holding the journaled ``ResearchContext`` JSON, so a
+    ``--resume`` rehydrates sub-questions / SourceStore / coverage_map / budget and
+    continues at the recorded depth (no re-bill across completed depth rounds). Mirrors
+    ``ensure_tasks_table`` (CREATE IF NOT EXISTS + index).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS research_context (
+            graph_run_id TEXT PRIMARY KEY,
+            context_json TEXT NOT NULL,
+            updated_at REAL
+        )
+        """
+    )
+
+
 class SQLiteMemory(ConversationMemory):
     """ConversationMemory backed by SQLite. Persists sessions across restarts.
 
@@ -192,6 +211,7 @@ class SQLiteMemory(ConversationMemory):
         """
         ensure_steps_table(conn)
         ensure_tasks_table(conn)
+        ensure_research_context_table(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS session_meta ("
             "session_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, "

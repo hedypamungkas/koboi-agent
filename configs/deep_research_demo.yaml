@@ -1,0 +1,45 @@
+# Deep-research demo -- execution.mode: deep_research (W2).
+#
+# The agent plans a research workflow per query (plan -> search -> fetch -> assess
+# coverage -> drill deeper -> synthesize a cited report). Set web.search.provider to
+# brave/firecrawl (with an API key) for live research; the default mock runs offline.
+#
+# Run:   koboi run configs/deep_research_demo.yaml -m "Research solid-state battery breakthroughs in 2026."
+
+agent:
+  name: "deep-research-agent"
+  description: "Iterative, cited web research (deep_research mode)"
+  system_prompt: "You plan and run iterative, cited web research."
+  mode: act
+
+orchestration:
+  enabled: true
+  execution:
+    mode: deep_research
+
+research:
+  max_depth: 3              # coverage-gated replan rounds
+  max_searches: 15
+  max_fetches: 20
+  coverage_threshold: 0.7   # stop iterating once coverage >= this
+  citations: numbered
+
+web:
+  search:
+    provider: ${WEB_SEARCH_PROVIDER:mock}
+    # brave:
+    #   api_key: ${BRAVE_API_KEY:}
+
+llm:
+  provider: openai
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace

@@ -115,7 +115,17 @@ class OrchestratorResult:
     agent_results: list[AgentResult] = field(default_factory=list)
     final_answer: str = ""
     total_elapsed_seconds: float = 0.0
-    execution_mode: Literal["sequential", "parallel", "sequential+revision", "parallel+revision", "dag"] = "sequential"
+    execution_mode: Literal[
+        "sequential",
+        "parallel",
+        "sequential+revision",
+        "parallel+revision",
+        "dag",
+        "dynamic",
+        "deep_research",
+    ] = "sequential"
+    # W2: deep_research stamps research_sources / coverage / depth; empty for other modes.
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass

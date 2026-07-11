@@ -18,8 +18,10 @@ from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, Routing
 from koboi.events import (
     AgentDispatchEvent,
     AgentResultEvent,
+    CoverageEvent,
     OrchestrationCompleteEvent,
     RoutingDecisionEvent,
+    SourceEvent,
     TextDeltaEvent,
 )
 
@@ -39,6 +41,7 @@ if TYPE_CHECKING:
     from koboi.hooks.chain import HookChain
     from koboi.logger import AgentLogger
     from koboi.orchestration.dag_scheduler import DagScheduler
+    from koboi.orchestration.research import ResearchContext
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +133,10 @@ class Orchestrator:
         hook_chain: HookChain | None = None,
         full_graph: bool = False,
         max_replans: int = 0,
+        # W2: deep_research mode -- sandbox for the planned nodes' web tools + research
+        # config (caps / threshold / citations). Unused by other modes.
+        sandbox: object | None = None,
+        research: dict | None = None,
     ):
         self.client = client
         self.router = router
@@ -154,6 +161,9 @@ class Orchestrator:
         self._full_graph = full_graph
         # #3: max re-plans on node failure in dynamic mode.
         self._max_replans = max_replans
+        # W2: deep_research knobs.
+        self._sandbox = sandbox
+        self._research = research or {}
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -200,6 +210,7 @@ class Orchestrator:
         results: list[AgentResult] = []
         combined_answer = ""
         execution_mode = mode
+        meta: dict = {}
 
         async for event in self._execute_pipeline(query, mode):
             if isinstance(event, RoutingDecisionEvent):
@@ -217,6 +228,7 @@ class Orchestrator:
                 combined_answer += event.content
             elif isinstance(event, OrchestrationCompleteEvent):
                 execution_mode = event.execution_mode
+                meta = dict(event.metadata)
 
         if decision is None:
             decision = RoutingDecision(
@@ -235,6 +247,7 @@ class Orchestrator:
             final_answer=combined_answer,
             total_elapsed_seconds=elapsed,
             execution_mode=execution_mode,  # type: ignore[arg-type]  # str var; one of the Literal execution modes
+            metadata=meta,
         )
         if self.logger:
             self.logger.log_orchestration_summary(orch_result)
@@ -396,6 +409,7 @@ class Orchestrator:
         agent_names: list[str],
         query: str,
         deps: dict[str, list[str]],
+        ctx: ResearchContext | None = None,
     ) -> AsyncGenerator:
         """Run ``agent_names`` as a dependency graph in topological waves WITH EDGE DATA FLOW.
 
@@ -431,6 +445,11 @@ class Orchestrator:
             wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in wave])
             for result in wave_results:
                 outputs[result.agent_name] = result.answer
+                # W2: collect the node's findings into the research context (deep_research).
+                if ctx is not None:
+                    cid = ctx.add_findings(result.agent_name, result.answer)
+                    if cid:
+                        yield SourceEvent(citation_id=cid, node_id=result.agent_name, preview=result.answer[:160])
                 # #2: record durable per-node completion for graph-cursor resume.
                 if self._dag_scheduler:
                     self._dag_scheduler.record_node_completion(result.agent_name, result.answer)
@@ -743,6 +762,157 @@ class Orchestrator:
             routing_confidence=1.0,
         )
 
+    async def _run_deep_research(self, query: str) -> AsyncGenerator:
+        """W2: deep-research orchestration.
+
+        An iterative, cited research loop: ``plan_research`` -> per-node search/fetch waves
+        (each node's findings become a cited source) -> ``CoverageEvaluator`` -> drill deeper
+        on gaps -> synthesize a cited report. Bounded by ``max_depth`` + ``ResearchBudget``.
+        NOT ``max_replans`` (which rarely fires) -- the coverage score drives iteration.
+        Falls back to ``_run_dynamic`` if the planner deems the request simple.
+        """
+        from uuid import uuid4
+
+        from koboi.orchestration.factory import AgentFactory
+        from koboi.orchestration.planner import plan_research
+        from koboi.orchestration.research import (
+            CoverageEvaluator,
+            ResearchBudget,
+            ResearchContext,
+            RESEARCH_TOOLS_CONFIG,
+        )
+        from koboi.types import AgentDef
+
+        start = time.time()
+        rc = self._research or {}
+        budget = ResearchBudget(
+            max_searches=int(rc.get("max_searches", 15)),
+            max_fetches=int(rc.get("max_fetches", 20)),
+            max_depth=int(rc.get("max_depth", 3)),
+            max_tokens=int(rc.get("max_tokens", 0)),
+        )
+        threshold = float(rc.get("coverage_threshold", 0.7))
+        tools_config = rc.get("tools") or RESEARCH_TOOLS_CONFIG
+
+        ctx = ResearchContext(budget=budget)
+        # Journaling: mint a run id + reuse the scheduler's db_path so the run state is
+        # inspectable. Cross-session rehydrate-on-resume is W2.1.
+        run_id = str(uuid4())
+        db_path = self._dag_scheduler.db_path if self._dag_scheduler else None
+
+        # Initial plan (or answer directly if the request is simple).
+        plan = await plan_research(self.client, query)
+        if not plan.needs_workflow or not plan.steps:
+            async for event in self._run_dynamic(query):  # simple request -> direct answer
+                yield event
+            return
+
+        ctx.sub_questions = [s.instruction for s in plan.steps]
+        results: list[AgentResult] = []
+        routing_agents: list[str] = []
+        score = 0.0
+
+        while True:
+            step_ids = [s.id for s in plan.steps]
+            if not routing_agents:
+                yield RoutingDecisionEvent(
+                    agents=step_ids,
+                    confidence=1.0,
+                    method="dynamic",
+                    reasoning=plan.reason or "deep research plan",
+                    domain_label=None,
+                )
+            # Build per-node agents WITH the research tool bundle + sandbox (closes the
+            # blocker: planned nodes currently get no tools).
+            self._agents_map = {
+                s.id: AgentFactory.create_configured_agent(
+                    AgentDef(
+                        name=s.id,
+                        system_prompt=s.instruction or s.id,
+                        tools_config=dict(tools_config),
+                    ),
+                    self.client,
+                    hook_chain=self._hook_chain,
+                    sandbox=self._sandbox,
+                )
+                for s in plan.steps
+            }
+            # Proxy budget metering: charge one search per node carrying seed queries.
+            budget.record_searches(sum(1 for s in plan.steps if s.search_queries))
+
+            async for event in self._run_dag_waves_with_flow(step_ids, query, plan.deps, ctx=ctx):
+                if isinstance(event, _AgentCompletedEvent):
+                    results.append(event.agent_result)
+                yield event
+            routing_agents = list({r.agent_name for r in results}) or step_ids
+
+            # Journal the run state after each round (observability; W2.1 adds rehydrate).
+            if db_path:
+                try:
+                    from koboi.orchestration.dag_scheduler import DagScheduler
+
+                    DagScheduler.persist_research_context(db_path, run_id, ctx.to_json())
+                except Exception as e:  # noqa: BLE001 - journaling is best-effort
+                    logger.warning("research context journal failed: %s", e)
+
+            # Assess coverage (fail-safe -> score 1.0 -> stop).
+            score, follow_ups, covmap = await CoverageEvaluator(self.client, threshold).evaluate(ctx)
+            ctx.coverage_map = covmap
+            yield CoverageEvent(depth=ctx.depth, score=score, gaps=follow_ups)
+
+            ctx.depth += 1
+            if score >= threshold or ctx.depth >= budget.max_depth or not budget.remaining():
+                break
+            if not follow_ups:
+                break
+
+            # Re-plan to drill deeper on the gaps.
+            drill_query = query + "\n\nRemaining gaps to investigate: " + "; ".join(follow_ups)
+            plan = await plan_research(self.client, drill_query)
+            if not plan.needs_workflow or not plan.steps:
+                break
+            ctx.sub_questions.extend(s.instruction for s in plan.steps)
+
+        # Synthesize a cited report from the gathered findings.
+        combined_answer = ""
+        async for event in self._synthesize_research_stream(query, ctx):
+            if isinstance(event, TextDeltaEvent):
+                combined_answer += event.content
+            yield event
+
+        yield OrchestrationCompleteEvent(
+            final_answer=combined_answer,
+            elapsed_seconds=time.time() - start,
+            agent_results=results,
+            execution_mode="deep_research",
+            routing_agents=routing_agents,
+            routing_confidence=1.0,
+            metadata={
+                "research_sources": ctx.source_store.sources_list(),
+                "coverage": score,
+                "depth": ctx.depth,
+                "run_id": run_id,
+            },
+        )
+
+    async def _synthesize_research_stream(self, query: str, ctx: ResearchContext) -> AsyncGenerator:
+        """W2: stream a cited research report built from the gathered findings + Sources footer."""
+        from koboi.orchestration.research import build_research_synthesis_prompt
+
+        prompt = build_research_synthesis_prompt(query, ctx)
+        try:
+            async for event in self.client.complete_stream(messages=[{"role": "user", "content": prompt}], tools=None):
+                yield event
+        except Exception as e:  # noqa: BLE001 - synthesis is best-effort
+            logger.warning("research synthesis streaming failed; using findings concatenation: %s", e)
+            yield TextDeltaEvent(content=ctx.source_store.format_for_synthesis())
+            return
+        # Append a Sources footer listing every citation.
+        sources = ctx.source_store.sources_list()
+        if sources:
+            footer = "\n\n## Sources\n" + "\n".join(f"[{s['citation_id']}] {s['node_id']}" for s in sources)
+            yield TextDeltaEvent(content=footer)
+
     async def _execute_pipeline(
         self,
         query: str,
@@ -756,6 +926,11 @@ class Orchestrator:
 
         if mode == "dynamic":
             async for event in self._run_dynamic(query):
+                yield event
+            return
+
+        if mode == "deep_research":
+            async for event in self._run_deep_research(query):
                 yield event
             return
 
