@@ -28,6 +28,18 @@ _logger = logging.getLogger(__name__)
 # Tool bundle every planned research node receives (web I/O). Override via config.
 RESEARCH_TOOLS_CONFIG: dict = {"builtin": ["web_search", "web_fetch"]}
 
+# A2: preamble prepended to every research node's system_prompt so the LLM actually uses the
+# web tools + reports sourced findings (without this, the bare step instruction under-invokes
+# tools -- the repo's known tool-nudge gap).
+RESEARCH_NODE_PREAMBLE = (
+    "You are a research agent. To answer your assigned sub-question:\n"
+    "1. ALWAYS call web_search first with focused queries.\n"
+    "2. web_fetch the most relevant result URLs to read the actual content.\n"
+    "3. Report concrete findings with the source URL for each fact.\n"
+    "4. Never fabricate sources or facts -- if you couldn't find something, say so.\n"
+    "Be concise and specific."
+)
+
 # response_format schema for the coverage judge.
 COVERAGE_SCHEMA: dict = {
     "type": "object",

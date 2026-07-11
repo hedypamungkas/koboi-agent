@@ -16,7 +16,7 @@ from koboi.orchestration.research import (
     SourceStore,
 )
 from koboi.orchestration.router import KeywordRouter
-from koboi.types import AgentResponse
+from koboi.types import AgentResponse, ToolCall
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +25,12 @@ from koboi.types import AgentResponse
 
 
 class _FakeClient:
-    """Duck-typed LLM client dispatching on prompt content (planner / coverage / node)."""
+    """Duck-typed LLM client dispatching on prompt content (planner / coverage / synthesis / node).
+
+    ``emit_search_call``: when True, a node's first turn emits a ``web_search`` tool_call (so the
+    injected CountingProvider meters a real call); the next turn (with the tool result) returns
+    ``node_answer``. Used to exercise real per-call budget metering + provider wiring (A0/A4).
+    """
 
     def __init__(
         self,
@@ -33,11 +38,18 @@ class _FakeClient:
         coverage_score: float = 0.4,
         follow_ups: list[str] | None = None,
         plan_needs_workflow: bool = True,
+        synthesis: str = "## Report\nThe topic is X [1] and Y [1].",
+        emit_search_call: bool = False,
     ) -> None:
         self.node_answer = node_answer
         self.coverage_score = coverage_score
         self.follow_ups = follow_ups if follow_ups is not None else ["deeper query"]
         self.plan_needs_workflow = plan_needs_workflow
+        self.synthesis = synthesis
+        self.emit_search_call = emit_search_call
+        # AgentCore's SESSION_START hook emit reads client.model; the duck-typed fake needs it.
+        self.model = "fake-model"
+        self.provider = "fake"
 
     async def complete(self, messages, tools=None, response_format=None):
         text = " ".join(m.get("content", "") for m in messages)
@@ -75,10 +87,18 @@ class _FakeClient:
                 ),
                 tool_calls=[],
             )
+        if "synthesizing a cited research report" in text:
+            return AgentResponse(content=self.synthesis, tool_calls=[])
+        # Node turn: optionally emit one web_search call before the final answer.
+        if self.emit_search_call and not any(m.get("role") == "tool" for m in messages):
+            return AgentResponse(
+                content="",
+                tool_calls=[ToolCall(id="tc_search", name="web_search", arguments=json.dumps({"query": "python"}))],
+            )
         return AgentResponse(content=self.node_answer, tool_calls=[])
 
     async def complete_stream(self, messages, tools=None):
-        yield TextDeltaEvent(content="## Report\nThe topic is X [1] and Y [1].")
+        yield TextDeltaEvent(content=self.synthesis)
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +266,11 @@ class TestRunDeepResearch:
         assert complete and complete[0].metadata["depth"] == 1  # one round, covered
 
     async def test_budget_hard_stop(self, tmp_path):
-        # max_searches=1 -> after the first round's 1 search, budget exhausted -> stop.
+        # W4: real per-call metering -- the node actually calls web_search (emit_search_call),
+        # the CountingProvider charges it, and after 1 search (max_searches=1) the budget is
+        # exhausted -> the loop stops after round 1.
         orch = _orch(
-            _FakeClient(coverage_score=0.1),
+            _FakeClient(coverage_score=0.1, emit_search_call=True),
             {"max_depth": 5, "coverage_threshold": 0.9, "max_searches": 1, "max_fetches": 50},
             tmp_path,
         )
@@ -292,3 +314,81 @@ class TestRunDeepResearch:
         rows = [json.loads(line) for line in open(out_path, encoding="utf-8") if line.strip()]
         assert rows  # at least one finding row
         assert {"citation_id", "node_id", "text"} <= set(rows[0])
+
+
+class TestWave4Correctness:
+    """A1/A3/A5/A7/A8 — the W4 correctness fixes."""
+
+    async def test_a1_verify_citations_drops_unresolvable(self):
+        # A1: [1] resolves -> kept; [99] does not -> stripped.
+        from koboi.orchestration.orchestrator import _verify_citations
+        from koboi.orchestration.research import ResearchContext
+
+        ctx = ResearchContext()
+        ctx.add_findings("node_a", "real finding")
+        cleaned, referenced = _verify_citations("see [1] and [99] for details", ctx)
+        assert "[1]" in cleaned
+        assert "[99]" not in cleaned
+        assert referenced == [1]
+
+    async def test_a3_error_answer_not_a_finding(self, tmp_path):
+        # A3: a node whose answer is "Error: ..." must NOT become a cited finding.
+        orch = _orch(
+            _FakeClient(node_answer="Error: connection failed", coverage_score=0.95),
+            {"max_depth": 1, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete
+        assert complete[0].metadata["research_sources"] == []  # no findings from the error node
+
+    async def test_a5_agent_results_dedup_across_rounds(self, tmp_path):
+        # A5: two rounds reusing the same step id -> one agent_results entry (not duplicated).
+        orch = _orch(
+            _FakeClient(coverage_score=0.1),  # < 0.9 -> iterate
+            {"max_depth": 2, "coverage_threshold": 0.9},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete
+        names = [r.agent_name for r in complete[0].agent_results]
+        assert names.count("research_topic") == 1  # deduped, not duplicated across rounds
+
+    async def test_a7_simple_fallback_stamps_deep_research(self, tmp_path):
+        # A7: a simple request (plan_needs_workflow=False) -> execution_mode="deep_research"
+        # (not "dynamic" from the old _run_dynamic fallback).
+        orch = _orch(
+            _FakeClient(plan_needs_workflow=False),
+            {"max_depth": 3, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("hi")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete and complete[0].execution_mode == "deep_research"
+
+    async def test_a8_max_depth_zero_clamped(self, tmp_path):
+        # A8: max_depth=0 is clamped to 1 -> exactly one round (no crash).
+        orch = _orch(
+            _FakeClient(coverage_score=0.1),
+            {"max_depth": 0, "coverage_threshold": 0.9},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete and complete[0].metadata["depth"] == 1
+
+    async def test_a0_node_reaches_configured_provider(self, tmp_path):
+        # A0/A4: a node that calls web_search (emit_search_call) must go through the
+        # CountingProvider (which enforces the budget). max_searches=1 -> one search ->
+        # budget exhausted -> loop stops after round 1 (proves the node reached the wired
+        # provider, not the default mock which wouldn't be counted).
+        orch = _orch(
+            _FakeClient(coverage_score=0.1, emit_search_call=True),
+            {"max_depth": 5, "coverage_threshold": 0.9, "max_searches": 1},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete and complete[0].metadata["depth"] == 1  # budget stopped it

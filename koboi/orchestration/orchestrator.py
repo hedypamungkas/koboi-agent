@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -31,6 +32,26 @@ class _AgentCompletedEvent:
     """Internal event carrying full AgentResult for run() collection."""
 
     agent_result: AgentResult
+
+
+def _verify_citations(text: str, ctx: ResearchContext) -> tuple[str, list[int]]:
+    """A1: drop ``[n]`` markers that don't resolve to a SourceStore source.
+
+    Returns the cleaned text + the sorted list of referenced (resolvable) citation ids.
+    Hallucinated markers (e.g. ``[99]`` with no matching source) are stripped, so the final
+    report only ever cites real findings.
+    """
+    referenced: set[int] = set()
+
+    def _replace(match: re.Match[str]) -> str:
+        n = int(match.group(1))
+        if ctx.source_store.resolve(n) is not None:
+            referenced.add(n)
+            return match.group(0)
+        return ""  # unresolvable -> drop the marker
+
+    cleaned = re.sub(r"\[(\d+)\]", _replace, text)
+    return cleaned, sorted(referenced)
 
 
 from koboi.orchestration.router import BaseRouter
@@ -137,6 +158,9 @@ class Orchestrator:
         # config (caps / threshold / citations). Unused by other modes.
         sandbox: object | None = None,
         research: dict | None = None,
+        # W4: web config so deep_research nodes get the CONFIGURED search/fetch providers
+        # (Brave/Firecrawl), not the mock/inline default.
+        web_conf: dict | None = None,
     ):
         self.client = client
         self.router = router
@@ -164,6 +188,7 @@ class Orchestrator:
         # W2: deep_research knobs.
         self._sandbox = sandbox
         self._research = research or {}
+        self._web_conf = web_conf or {}
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -445,8 +470,10 @@ class Orchestrator:
             wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in wave])
             for result in wave_results:
                 outputs[result.agent_name] = result.answer
-                # W2: collect the node's findings into the research context (deep_research).
-                if ctx is not None:
+                # W2/W4 A3: collect the node's findings into the research context -- but skip
+                # failed/error nodes (the _run_single path returns failed=False with an
+                # "Error: ..." answer, so check both signals) so junk never becomes a citation.
+                if ctx is not None and not (result.failed or (result.answer or "").startswith("Error:")):
                     cid = ctx.add_findings(result.agent_name, result.answer)
                     if cid:
                         yield SourceEvent(citation_id=cid, node_id=result.agent_name, preview=result.answer[:160])
@@ -776,19 +803,22 @@ class Orchestrator:
         from koboi.orchestration.factory import AgentFactory
         from koboi.orchestration.planner import plan_research
         from koboi.orchestration.research import (
+            RESEARCH_NODE_PREAMBLE,
+            RESEARCH_TOOLS_CONFIG,
             CoverageEvaluator,
             ResearchBudget,
             ResearchContext,
-            RESEARCH_TOOLS_CONFIG,
         )
         from koboi.types import AgentDef
+        from koboi.web import build_fetch_provider, build_search_provider
+        from koboi.web.providers.counting import CountingFetchProvider, CountingSearchProvider
 
         start = time.time()
         rc = self._research or {}
         budget = ResearchBudget(
             max_searches=int(rc.get("max_searches", 15)),
             max_fetches=int(rc.get("max_fetches", 20)),
-            max_depth=int(rc.get("max_depth", 3)),
+            max_depth=max(1, int(rc.get("max_depth", 3))),  # A8: defensive clamp (>=1 round)
             max_tokens=int(rc.get("max_tokens", 0)),
         )
         threshold = float(rc.get("coverage_threshold", 0.7))
@@ -800,15 +830,23 @@ class Orchestrator:
         run_id = str(uuid4())
         db_path = self._dag_scheduler.db_path if self._dag_scheduler else None
 
+        # A0/A4: build the configured providers ONCE, wrap each in a budget-counting proxy,
+        # and inject into every node's tools so web_search/web_fetch reach Brave/Firecrawl
+        # (not the mock/inline default) and respect the run's hard caps (real per-call metering).
+        search_provider = CountingSearchProvider(build_search_provider(self._web_conf), budget)
+        fetch_provider = CountingFetchProvider(build_fetch_provider(self._web_conf), budget)
+
         # Initial plan (or answer directly if the request is simple).
         plan = await plan_research(self.client, query)
         if not plan.needs_workflow or not plan.steps:
-            async for event in self._run_dynamic(query):  # simple request -> direct answer
+            # A7: simple request -> one direct node stamped deep_research (do NOT delegate to
+            # _run_dynamic, which re-triages via plan_or_skip + mislabels execution_mode).
+            async for event in self._research_direct_answer(query, start, run_id):
                 yield event
             return
 
         ctx.sub_questions = [s.instruction for s in plan.steps]
-        results: list[AgentResult] = []
+        results_by_name: dict[str, AgentResult] = {}  # A5: dedup across re-plan rounds
         routing_agents: list[str] = []
         score = 0.0
 
@@ -822,29 +860,29 @@ class Orchestrator:
                     reasoning=plan.reason or "deep research plan",
                     domain_label=None,
                 )
-            # Build per-node agents WITH the research tool bundle + sandbox (closes the
-            # blocker: planned nodes currently get no tools).
+            # Build per-node agents WITH the tool bundle + sandbox + CONFIGURED providers.
+            # A2: prepend a research-method preamble so nodes actually call web_search/web_fetch.
             self._agents_map = {
                 s.id: AgentFactory.create_configured_agent(
                     AgentDef(
                         name=s.id,
-                        system_prompt=s.instruction or s.id,
+                        system_prompt=f"{RESEARCH_NODE_PREAMBLE}\n\n{s.instruction or s.id}",
                         tools_config=dict(tools_config),
                     ),
                     self.client,
                     hook_chain=self._hook_chain,
                     sandbox=self._sandbox,
+                    search_provider=search_provider,
+                    fetch_provider=fetch_provider,
                 )
                 for s in plan.steps
             }
-            # Proxy budget metering: charge one search per node carrying seed queries.
-            budget.record_searches(sum(1 for s in plan.steps if s.search_queries))
 
             async for event in self._run_dag_waves_with_flow(step_ids, query, plan.deps, ctx=ctx):
                 if isinstance(event, _AgentCompletedEvent):
-                    results.append(event.agent_result)
+                    results_by_name[event.agent_result.agent_name] = event.agent_result  # A5 dedup
                 yield event
-            routing_agents = list({r.agent_name for r in results}) or step_ids
+            routing_agents = list(results_by_name) or step_ids
 
             # Journal the run state after each round (observability; W2.1 adds rehydrate).
             if db_path:
@@ -866,19 +904,24 @@ class Orchestrator:
             if not follow_ups:
                 break
 
-            # Re-plan to drill deeper on the gaps.
+            # Re-plan to drill deeper on the gaps (A6: prune to the remaining search budget).
             drill_query = query + "\n\nRemaining gaps to investigate: " + "; ".join(follow_ups)
             plan = await plan_research(self.client, drill_query)
             if not plan.needs_workflow or not plan.steps:
                 break
+            remaining = max(1, budget.max_searches - budget.used_searches)
+            if len(plan.steps) > remaining:
+                plan.steps = plan.steps[:remaining]
             ctx.sub_questions.extend(s.instruction for s in plan.steps)
 
-        # Synthesize a cited report from the gathered findings.
-        combined_answer = ""
-        async for event in self._synthesize_research_stream(query, ctx):
-            if isinstance(event, TextDeltaEvent):
-                combined_answer += event.content
-            yield event
+        # A1: synthesize a cited report, then verify every [n] resolves (drop unresolvable)
+        # and build the Sources footer from referenced ids only. Buffered (not streamed) so
+        # the citation check runs before anything is emitted.
+        report = await self._synthesize_research(query, ctx)
+        report, referenced = _verify_citations(report, ctx)
+        combined_answer = report + self._sources_footer(ctx, referenced)
+        if combined_answer:
+            yield TextDeltaEvent(content=combined_answer)
 
         # W3: persist the gathered findings (best-effort) for cross-session corpus reuse.
         persist_path = self._research.get("persist_findings")
@@ -891,7 +934,7 @@ class Orchestrator:
         yield OrchestrationCompleteEvent(
             final_answer=combined_answer,
             elapsed_seconds=time.time() - start,
-            agent_results=results,
+            agent_results=list(results_by_name.values()),
             execution_mode="deep_research",
             routing_agents=routing_agents,
             routing_confidence=1.0,
@@ -903,23 +946,71 @@ class Orchestrator:
             },
         )
 
-    async def _synthesize_research_stream(self, query: str, ctx: ResearchContext) -> AsyncGenerator:
-        """W2: stream a cited research report built from the gathered findings + Sources footer."""
+    async def _research_direct_answer(self, query: str, start: float, run_id: str) -> AsyncGenerator:
+        """A7: simple-request fallback -- one assistant node, stamped deep_research.
+
+        Used when ``plan_research`` deems the request simple (``needs_workflow=False``); does
+        NOT delegate to ``_run_dynamic`` (which re-triages via ``plan_or_skip`` + mislabels
+        ``execution_mode="dynamic"``).
+        """
+        from koboi.orchestration.factory import AgentFactory
+        from koboi.types import AgentDef
+
+        self._agents_map = {
+            "assistant": AgentFactory.create_configured_agent(
+                AgentDef(name="assistant", system_prompt="You are a helpful research assistant."),
+                self.client,
+                hook_chain=self._hook_chain,
+                sandbox=self._sandbox,
+            )
+        }
+        yield AgentDispatchEvent(agent_name="assistant", agent_index=0, total_agents=1, mode="deep_research")
+        result = await self._run_single("assistant", query)
+        yield AgentResultEvent(
+            agent_name=result.agent_name,
+            answer=result.answer[:200],
+            elapsed_seconds=result.elapsed_seconds,
+            tokens_used=result.tokens_used,
+            is_dynamic=result.is_dynamic,
+            domain_label=result.domain_label,
+            failed=result.failed,
+        )
+        yield TextDeltaEvent(content=result.answer)
+        yield OrchestrationCompleteEvent(
+            final_answer=result.answer,
+            elapsed_seconds=time.time() - start,
+            agent_results=[result],
+            execution_mode="deep_research",
+            routing_agents=["assistant"],
+            routing_confidence=1.0,
+            metadata={"research_sources": [], "coverage": 1.0, "depth": 0, "run_id": run_id},
+        )
+
+    async def _synthesize_research(self, query: str, ctx: ResearchContext) -> str:
+        """A1: synthesize a cited report from the gathered findings.
+
+        Non-streaming (``client.complete``) so the result can be citation-verified before
+        emit. Falls back to findings concatenation on any failure.
+        """
         from koboi.orchestration.research import build_research_synthesis_prompt
 
         prompt = build_research_synthesis_prompt(query, ctx)
         try:
-            async for event in self.client.complete_stream(messages=[{"role": "user", "content": prompt}], tools=None):
-                yield event
+            resp = await self.client.complete(messages=[{"role": "user", "content": prompt}], tools=None)
+            if resp.content and resp.content.strip():
+                return resp.content
         except Exception as e:  # noqa: BLE001 - synthesis is best-effort
-            logger.warning("research synthesis streaming failed; using findings concatenation: %s", e)
-            yield TextDeltaEvent(content=ctx.source_store.format_for_synthesis())
-            return
-        # Append a Sources footer listing every citation.
-        sources = ctx.source_store.sources_list()
-        if sources:
-            footer = "\n\n## Sources\n" + "\n".join(f"[{s['citation_id']}] {s['node_id']}" for s in sources)
-            yield TextDeltaEvent(content=footer)
+            logger.warning("research synthesis failed; using findings concatenation: %s", e)
+        return ctx.source_store.format_for_synthesis()
+
+    @staticmethod
+    def _sources_footer(ctx: ResearchContext, referenced: list[int]) -> str:
+        """A1: build the Sources footer from referenced citation ids only (not all stored)."""
+        if not referenced:
+            return ""
+        by_id = {s["citation_id"]: s["node_id"] for s in ctx.source_store.sources_list()}
+        lines = [f"[{cid}] {by_id.get(cid, '?')}" for cid in referenced]
+        return "\n\n## Sources\n" + "\n".join(lines)
 
     async def _execute_pipeline(
         self,

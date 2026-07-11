@@ -1761,6 +1761,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         max_replans=exec_conf.get("max_replans", 0),
         sandbox=assembler.sandbox,
         research=config.get("research", default={}),
+        web_conf=config.get("web", default={}),
     )
 
     return KoboiAgent(
