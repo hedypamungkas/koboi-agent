@@ -275,28 +275,39 @@ cause and re-measures honestly:
 - **N=128** qrels with bootstrap 95%-CI lower-bound gating (`evals/ragas_ir_suite.eval.py`).
 - **Adversarial hard strata** on a controlled KB (`evals/ragas_ir_adversarial.eval.py`).
 
-**Measured (N=25, decoupled judge gpt-5.4, MS MARCO 2987-passage corpus, + stopwords) —
-keyword vs BM25 (hybrid pending):**
+**Measured (N=128, BM25, decoupled judge gpt-5.4, MS MARCO 2987-passage corpus, parallel
+RAGAS concurrency=5) — the FULL defensible baseline:**
 
-| Metric | keyword (mean/CI-lo) | **BM25** (mean/CI-lo) | Target (gen/high) | Best verdict |
-|---|---|---|---|---|
-| faithfulness | 0.976 / 0.949 | 0.927 / 0.879 | ≥0.8/≥0.9 | ✅✅ |
-| context_recall | 0.840 / 0.680 | **0.920 / 0.800** | ≥0.8/≥0.9 | ✅ (BM25) |
-| answer_relevancy | 0.647 / 0.510 | 0.647 / 0.504 | ≥0.7/≥0.8 | ❌ |
-| context_precision | 0.609 / 0.489 | **0.712 / 0.606** | ≥0.7/≥0.8 | ✅ (BM25 crosses 0.7!) |
-| factual_correctness | 0.372 / 0.253 | **0.455 / 0.317** | ≥0.75/≥0.85 | ❌ (improving) |
-| retrieval recall@10 | 0.920 / 0.800 | 0.920 / 0.800 | ≥0.8 | ✅ |
-| MRR | 0.367 / 0.260 | 0.374 / 0.266 | ≥0.6 | ❌ |
-| nDCG@10 | 0.500 / 0.399 | 0.506 / 0.408 | ≥0.7 | ❌ |
-| precision@1 | 0.120 / 0.000 | 0.120 / 0.000 | ≥0.5 | ❌❌ |
+| Metric | N=128 mean | 95% CI | hw | Target (gen/high) | Verdict |
+|---|---|---|---|---|---|
+| faithfulness | 0.898 | [0.867, 0.927] | 0.030 | ≥0.8/≥0.9 | ✅ gen / ⚠ high |
+| recall@10 | 0.898 | [0.844, 0.945] | 0.051 | ≥0.8 | ✅ |
+| answer_relevancy | 0.685 | [0.633, 0.733] | 0.050 | ≥0.7 | ❌ borderline |
+| context_precision | 0.589 | [0.529, 0.648] | 0.059 | ≥0.7 | ❌ |
+| context_recall | 0.781 | [0.711, 0.852] | 0.070 | ≥0.8 | ❌ |
+| factual_correctness | 0.279 | [0.228, 0.336] | 0.054 | ≥0.75 | ❌❌ |
+| MRR | 0.442 | [0.384, 0.505] | 0.060 | ≥0.6 | ❌ |
+| nDCG@10 | 0.552 | [0.501, 0.607] | 0.053 | ≥0.7 | ❌ |
+| precision@1 | 0.242 | [0.172, 0.320] | 0.074 | ≥0.5 | ❌ |
 
-**BM25 is a strict improvement on the answer-quality metrics** (context_precision crosses
-≥0.7, context_recall ↑, factual ↑) — its saturation + length-normalization surfaces more
-relevant context even though the single-gold-passage rank is similar at N=25. The strict
-ranking targets (MRR ≥0.6, nDCG ≥0.7, precision@1 ≥0.5) are **MS MARCO-SOTA territory**
-(single-stage BM25/dense ~MRR 0.2–0.5 on dev); closing them needs **hybrid (semantic)
-+ a cross-encoder rerank** (koboi's `RerankerRetriever` is heuristic → a real reranker is
-the feature gap).
+**The N=128 picture is the defensible truth.** (N=25 over-estimated: faithfulness 0.93→0.90,
+context_precision 0.71→0.59 — the full distribution shows the true rates.) BM25 on MS MARCO
+is mediocre on answer-quality because **ranking is mediocre**: gold is reachable
+(recall@10=0.90) but buried mid-rank (MRR=0.44, precision@1=0.24) → noisy context fed to
+the model → context_precision/recall/relevancy/factual all depressed.
+
+**Root cause = ranking quality.** ALL 7 missing metrics trace to this single root: if the
+gold passage ranked higher, context would be cleaner → precision/recall/relevancy/factual
+all rise. The lever: **cross-encoder rerank (L3)** — the ONE change that lifts
+MRR/nDCG/precision@1 (→ cascading improvement). koboi's `RerankerRetriever` is heuristic;
+a real reranker (Cohere/Jina API or `bge-reranker-v2-m3` local model) is a **feature gap**.
+Hybrid (semantic) + a stronger answer model (gpt-5.4 full) would help but alone won't hit
+the strict ranking targets (MS MARCO-SOTA territory).
+
+**Multi-hop (decision):** documented as a **model-capability gap** (gpt-5.4-mini doesn't
+reliably chain 2-hop inferences even with both facts retrieved). Closing it needs multi-query
+retrieval (query decomposition → retrieve per sub-query → merge) + a stronger model —
+both feature work, beyond config-level iteration. Accepted as a documented limitation.
 
 **Adversarial hard strata (the cases §7a never tested), after Path C:** negation ✅,
 conflicting-evidence ✅ (prefers authoritative value / flags conflict), **near-miss-
