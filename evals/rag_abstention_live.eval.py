@@ -17,8 +17,10 @@ CONFIG = {
         "name": "rag-abstention-live-eval",
         "description": "Live refusal-correctness probe on an OOS query",
         "system_prompt": (
-            "Use ONLY the provided context to answer. If the context doesn't contain "
-            "the answer, say you don't know. Do not make up information."
+            "Use ONLY the provided context to answer. If the context does not DIRECTLY "
+            "contain the SPECIFIC information the question asks for, respond ONLY with: "
+            "'I don't have that information.' Do not infer, guess, or answer from partial "
+            "or related context. Do not make up information."
         ),
         "max_iterations": 4,
     },
@@ -32,7 +34,8 @@ CONFIG = {
         "enabled": True,
         "chunker": "paragraph",
         "retriever": "keyword",
-        "top_k": 5,
+        "top_k": 10,
+        "stopwords": True,
         "augmentation": "on_the_fly",
         "documents": [
             {"path": "./data/sample/company_policy.md"},

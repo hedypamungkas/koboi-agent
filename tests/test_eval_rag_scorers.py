@@ -6,11 +6,20 @@ and the t.rankingMetric / t.citationResolves / t.abstains primitives.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from koboi.eval.scorers.ci import BootstrapCIScorer, bootstrap_ci
 from koboi.eval.scorers.citation_grounding import CitationGroundingScorer, citation_precision
-from koboi.eval.scorers.ragas_scorer import _composite_weighted, _extract_ragas_score, _judge_openai_creds
+from koboi.eval.scorers.ragas_scorer import (
+    _composite_weighted,
+    _extract_ragas_score,
+    _factual_correctness_fallback,
+    _judge_openai_creds,
+)
+from koboi.rag.retriever import KeywordRetriever
+from koboi.rag.types import Chunk
 from koboi.eval.scorers.retrieval_metric import (
     RetrievalMetricScorer,
     compute_ranking_metric,
@@ -520,3 +529,60 @@ class TestJudgeDecouple:
         with caplog.at_level(logging.WARNING, logger="koboi.eval.scorers.ragas_scorer"):
             _judge_openai_creds()
         assert not any("self-preference bias" in r.message for r in caplog.records)
+
+
+# --------------------------------------------------------------------------
+# Path C1: opt-in stopword filter + C3: factual_correctness fallback
+# --------------------------------------------------------------------------
+
+
+class TestStopwordFilter:
+    """Opt-in stopword filtering on the lexical retriever (default off = unchanged)."""
+
+    def _chunks(self):
+        return [Chunk(id="c1", doc_id="d", content="The notice period for resignation is thirty days.")]
+
+    def test_default_off_preserves_behavior(self):
+        r = KeywordRetriever(self._chunks())
+        # stopwords are tokens by default
+        assert "the" in r._tokenize("the of and")
+
+    def test_opt_in_filters_builtins(self):
+        r = KeywordRetriever(self._chunks(), stopwords=True)
+        toks = r._tokenize("the notice of and the period")
+        assert "the" not in toks and "of" not in toks and "and" not in toks
+        assert "notice" in toks and "period" in toks
+
+    def test_opt_in_drops_stopword_only_query(self):
+        # A query of only stopwords retrieves nothing when filtering is on.
+        r = KeywordRetriever(self._chunks(), stopwords=True)
+        results = asyncio.run(r.retrieve("the of and a is", top_k=5))
+        assert results == []
+        # ...but default-off would match (the query terms hit the doc's stopwords).
+        r0 = KeywordRetriever(self._chunks())
+        results0 = asyncio.run(r0.retrieve("the of and a is", top_k=5))
+        assert len(results0) > 0
+
+    def test_custom_set(self):
+        r = KeywordRetriever(self._chunks(), stopwords={"notice", "period"})
+        assert "notice" not in r._tokenize("notice period days")
+
+
+class TestFactualCorrectnessFallback:
+    """Deterministic fallback when RAGAS factual_correctness is flaky (0/None)."""
+
+    def test_hit(self):
+        val, _ = _factual_correctness_fallback("The notice period is 30 days.", "30 days")
+        assert val == 1.0
+
+    def test_miss(self):
+        val, _ = _factual_correctness_fallback("The notice period is ninety days.", "30 days")
+        assert val == 0.0
+
+    def test_no_expected(self):
+        val, reason = _factual_correctness_fallback("anything", "")
+        assert val == 0.0 and "no expected" in reason
+
+    def test_case_insensitive(self):
+        val, _ = _factual_correctness_fallback("RESULT: 12 Days", "12 days")
+        assert val == 1.0

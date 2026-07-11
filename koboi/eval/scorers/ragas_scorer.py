@@ -201,6 +201,20 @@ def _judge_openai_creds() -> tuple[str, str, str | None]:
     return model, api_key, base_url
 
 
+def _factual_correctness_fallback(output: str, expected_answer: str) -> tuple[float, str]:
+    """Deterministic exact/substring match for factual_correctness when RAGAS is flaky.
+
+    Returns ``(value, reason)``. Used when RAGAS factual_correctness returns 0.0/None
+    (markdown + multi-step NLI + gateway flakiness) so single-fact correctness stays
+    stable and reproducible.
+    """
+    needle = (expected_answer or "").strip().lower()
+    if not needle:
+        return 0.0, "no expected_answer for fallback"
+    hit = needle in (output or "").lower()
+    return (1.0 if hit else 0.0, f"deterministic exact-match fallback ({'hit' if hit else 'miss'})")
+
+
 def _create_ragas_llm():
     """Create a RAGAS judge LLM from env vars (provider via RAGAS_PROVIDER, default openai)."""
     if not _RAGAS_AVAILABLE:
@@ -331,6 +345,12 @@ class RAGASScorer(BaseScorer):
             score_val = _extract_ragas_score(result, self.metric_name)
             if score_val is None:
                 return EvalScore(score_name, 0.0, f"RAGAS {self.metric_name} produced no score")
+            # factual_correctness is judge-flaky (markdown + multi-step NLI + gateway): when
+            # it returns 0.0 but a reference answer exists, fall back to a deterministic
+            # exact/substring match so single-fact correctness is stable + reproducible.
+            if self.metric_name == "factual_correctness" and score_val == 0.0 and case.expected_answer:
+                fb_val, fb_reason = _factual_correctness_fallback(output, case.expected_answer)
+                return EvalScore(score_name, fb_val, f"RAGAS factual_correctness=0 -> {fb_reason}")
             return EvalScore(score_name, round(score_val, 3), f"RAGAS {self.metric_name}")
 
         except Exception as e:

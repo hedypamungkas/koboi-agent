@@ -16,6 +16,31 @@ _logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from koboi.llm.base import LLMClient
 
+# Compact English stopword set (stdlib only; ~50 high-frequency function words).
+# Opt-in via ``rag.stopwords: true`` (or a custom set) on lexical retrievers so common
+# words stop producing spurious matches on out-of-scope queries. Default off (preserves
+# pre-existing behavior).
+_STOPWORDS: frozenset[str] = frozenset(
+    """
+    a an and are as at be by for from has have in is it its of on or that the to was
+    were will with this these those they them their there here which who whom whose what
+    when where why how all any both each few more most other some such no nor not only
+    own same so than too very can do does did doing would should could about into over
+    under again further then once
+    """.split()
+)
+
+
+def _normalize_stopwords(stopwords: bool | set[str] | frozenset[str] | None) -> set[str] | None:
+    """Resolve the ``stopwords`` arg to a set (or None = no filtering)."""
+    if stopwords is None:
+        return None
+    if stopwords is True:
+        return set(_STOPWORDS)
+    if stopwords is False:
+        return None
+    return {str(w).lower() for w in stopwords}
+
 
 def resolve_retriever(config: dict, chunks: list[Chunk], client: LLMClient | None = None) -> BaseRetriever:
     """Build a retriever from a RAG config dict.
@@ -60,7 +85,12 @@ class BaseRetriever(ABC):
 
 
 class KeywordRetriever(BaseRetriever):
-    def __init__(self, chunks: list[Chunk], synonyms: dict[str, list[str]] | None = None):
+    def __init__(
+        self,
+        chunks: list[Chunk],
+        synonyms: dict[str, list[str]] | None = None,
+        stopwords: bool | set[str] | frozenset[str] | None = None,
+    ):
         self._chunks = chunks
         # Optional lexical-bridge map (e.g. {"dog": ["pet"]}) applied to the
         # QUERY only, so vocabulary that differs from the document (synonyms /
@@ -69,12 +99,19 @@ class KeywordRetriever(BaseRetriever):
         # replace -- semantic retrieval, which is the general fix but needs an
         # embedding endpoint.
         self._synonyms: dict[str, list[str]] = {k.lower(): v for k, v in (synonyms or {}).items()}
+        # Optional stopword filter (opt-in via ``rag.stopwords: true`` or a custom set).
+        # Applied to BOTH index and query tokens so common function words ("the"/"of")
+        # stop producing spurious matches on out-of-scope queries. None = off (default).
+        self._stopwords: set[str] | None = _normalize_stopwords(stopwords)
         self._tfidf_index: dict[str, dict[str, float]] = {}
         self._idf: dict[str, float] = {}
         self._build_index()
 
     def _tokenize(self, text: str) -> list[str]:
-        return re.findall(r"\w+", text.lower())
+        tokens = re.findall(r"\w+", text.lower())
+        if self._stopwords:
+            tokens = [t for t in tokens if t not in self._stopwords]
+        return tokens
 
     def _build_index(self) -> None:
         doc_freq: dict[str, int] = {}
@@ -153,11 +190,13 @@ class BM25Retriever(BaseRetriever):
         k1: float = 1.5,
         b: float = 0.75,
         synonyms: dict[str, list[str]] | None = None,
+        stopwords: bool | set[str] | frozenset[str] | None = None,
     ):
         self._chunks = chunks
         self._k1 = k1
         self._b = b
         self._synonyms = {k.lower(): v for k, v in (synonyms or {}).items()}
+        self._stopwords: set[str] | None = _normalize_stopwords(stopwords)
         self._doc_tokens = [self._tokenize(c.content) for c in chunks]
         self._doc_len = [len(t) for t in self._doc_tokens]
         self._avgdl = (sum(self._doc_len) / len(self._doc_len)) if self._doc_len else 0.0
@@ -173,7 +212,10 @@ class BM25Retriever(BaseRetriever):
         self._idf = {term: math.log((n_docs - freq + 0.5) / (freq + 0.5) + 1) for term, freq in doc_freq.items()}
 
     def _tokenize(self, text: str) -> list[str]:
-        return re.findall(r"\w+", text.lower())
+        tokens = re.findall(r"\w+", text.lower())
+        if self._stopwords:
+            tokens = [t for t in tokens if t not in self._stopwords]
+        return tokens
 
     async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
         query_terms = self._tokenize(query)

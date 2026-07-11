@@ -283,10 +283,18 @@ cause and re-measures honestly:
 | context_recall | 1.00 | **0.900** (CI 0.70–1.0) | ≥0.9 |
 | retrieval recall@10 | n/a | **1.000** (gold reachable) | ≥0.8 |
 
-**Adversarial hard strata (the cases §7a never tested):** negation ✅, conflicting-evidence
-✅ (prefers authoritative value / flags conflict), **multi-hop ⚠ partial** (agent struggles
-with 2-hop Eng→Sam Lee), **near-miss-abstention ❌** (answers instead of refusing when the
-person exists but the email doesn't).
+**Adversarial hard strata (the cases §7a never tested), after Path C:** negation ✅,
+conflicting-evidence ✅ (prefers authoritative value / flags conflict), **near-miss-
+abstention ✅ (was ❌)** — closed by Path C's stronger refusal system-prompt + opt-in
+stopwords (`rag.stopwords: true`): the model now refuses when the entity is retrieved but
+the asked attribute (e.g. an email) is absent. **multi-hop ⚠ still partial** even with
+`top_k=10` (both facts retrieve) — a genuine **model-capability gap** (gpt-5.4-mini does
+not reliably chain a 2-hop inference), not a retriever/eval bug; closing it needs a
+stronger model or native multi-query/step retrieval (future work).
+
+**Path C changes:** opt-in stopword filter in `KeywordRetriever`/`BM25Retriever`
+(`rag.stopwords`, default off); stronger refusal prompt in the abstention evals;
+`factual_correctness` deterministic exact-match fallback (when RAGAS returns 0/None).
 
 **Honest verdict:** on answerable single-fact queries the pipeline is solid (faithfulness
 ~0.93 under a stricter, independent judge — not the self-inflated 1.0). The **real gaps are

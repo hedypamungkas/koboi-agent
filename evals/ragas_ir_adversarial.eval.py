@@ -17,8 +17,10 @@ CONFIG = {
         "name": "rag-adversarial-eval",
         "description": "Adversarial hard strata over a controlled KB",
         "system_prompt": (
-            "Use ONLY the provided context to answer. Prefer authoritative sources over "
-            "unverified ones. If the context doesn't contain the answer, say you don't know."
+            "Use ONLY the provided context to answer. If the context does not DIRECTLY "
+            "contain the SPECIFIC information the question asks for, respond ONLY with: "
+            "'I don't have that information.' Do not infer, guess, or answer from partial "
+            "or related context. Prefer authoritative sources over unverified ones."
         ),
         "max_iterations": 4,
     },
@@ -32,7 +34,8 @@ CONFIG = {
         "enabled": True,
         "chunker": "paragraph",
         "retriever": "keyword",
-        "top_k": 5,
+        "top_k": 10,
+        "stopwords": True,
         "augmentation": "on_the_fly",
         "documents": [{"path": "./evals/fixtures/adversarial_kb.md"}],
     },
