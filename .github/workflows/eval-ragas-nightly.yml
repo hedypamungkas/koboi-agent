@@ -1,0 +1,49 @@
+name: eval-ragas-nightly
+
+# Tier-2 live-LLM RAG evals (faithfulness + answer-correctness). Runs the
+# `live`-tagged evals against a REAL model + the RAGAS judge -- the two CRITICAL
+# production-readiness dimensions (weights 0.18 + 0.13) the mock PR gate cannot
+# evidence. Separate from the per-push mock gate on purpose: this is non-deterministic
+# and needs the [eval-ragas] extra + an LLM key, so it must never block a PR.
+#
+# Report-only today (no --strict): thresholds are PROVISIONAL and need calibration
+# against real runs. Add `--strict` once faithfulness >= 0.9 / recall >= 0.8 hold
+# stably across several nightly runs.
+#
+# If OPENAI_API_KEY (or ANTHROPIC_*) is not configured, the evals self-skip via
+# t.require_live() and the job exits 0 -- set the secret to run them for real.
+
+on:
+  schedule:
+    - cron: "27 4 * * *"  # 04:27 UTC daily (off-peak)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-ragas-nightly
+  cancel-in-progress: true
+
+jobs:
+  eval-ragas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o-mini' }}
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,eval-ragas]"
+      - name: Run live RAGAS evals (report-only; --tags live)
+        run: koboi eval-test evals/ --tags live

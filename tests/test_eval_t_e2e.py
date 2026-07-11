@@ -17,27 +17,30 @@ EVALS_DIR = Path(__file__).resolve().parent.parent / "evals"
 
 class TestShippedEvalsGolden:
     async def test_evals_directory_outcomes(self):
-        results = await run_tests(EVALS_DIR, threshold=0.6)
+        results = await run_tests(EVALS_DIR, threshold=0.6, mock=True)
 
         # All mock-driven (R4 made RAG retrieval mock-safe via t.retrievedChunk).
         # Core samples (11): weather (2) + no_tools (1) + multi_turn (1)
         # + guardrail_block (2) + mode_blocked (1) + rag_retrieval (2)
         # + guardrail_output_warn (1) + skill_activation (1).
-        # RAG production-readiness Tier-1 gate (22): rag_ranking (4)
+        # RAG production-readiness Tier-1 mock gate (22): rag_ranking (4)
         # + rag_ranking_ci (1) + rag_abstention (4) + rag_noise_robustness (2)
         # + rag_citations (3) + rag_ingestion_fidelity (5) + rag_metadata_filter (3).
-        assert len(results) == 33
+        # Tier-2 live evals (5): ragas_faithfulness (2) + rag_answer_correctness (3)
+        # -- self-skip under mock via t.require_live() (live_skip), so they pass here
+        # and run for real on the eval-ragas-nightly job.
+        assert len(results) == 38
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 33
+        assert len(passed) == 38
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing
         # the gate (so `koboi eval-test --strict` stays green).
 
     async def test_multi_turn_sample_recorded_two_turns(self):
-        results = await run_tests(EVALS_DIR, threshold=0.6)
+        results = await run_tests(EVALS_DIR, threshold=0.6, mock=True)
         multi = next(r for r in results if "multi_turn_conversation" in r.case_name)
 
         assert multi.passed is True

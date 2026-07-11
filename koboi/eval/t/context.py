@@ -137,6 +137,60 @@ class TestContext:
                 total.completion_tokens += result.token_usage.completion_tokens
         return total
 
+    def live_ready(self, *, extra: str = "ragas") -> bool:
+        """True only when a live LLM judge can actually run.
+
+        Live (Tier-2) evals call this to self-skip under ``--mock`` or a bare
+        install, so the mock PR gate (``eval-test evals/ --mock --strict``) stays
+        green regardless of the live evals' presence. The separate
+        ``eval-ragas-nightly`` job (``[eval-ragas]`` install + a real key, no
+        ``--mock``) is where these actually run.
+
+        Returns False when: the agent's client is a :class:`ScriptedClient`
+        (``--mock``), the optional ``extra`` (default ``ragas``) is not importable,
+        or no real (non-dummy) LLM key is set.
+        """
+        import importlib.util
+        import os
+
+        from koboi.eval.t.mock import ScriptedClient
+
+        client = getattr(getattr(self._agent, "core", None), "client", None)
+        if isinstance(client, ScriptedClient):
+            return False
+        if importlib.util.find_spec(extra) is None:
+            return False
+        key = (
+            os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+            or ""
+        )
+        return bool(key) and key != "dummy"
+
+    def require_live(self, *, extra: str = "ragas") -> bool:
+        """Live-eval guard: returns True if ready, else records a passing SOFT skip note.
+
+        Idiomatic for Tier-2 live evals::
+
+            async def test_faithfulness(t):
+                if not t.require_live():
+                    return
+                await t.send(...)
+                await t.judge("ragas_faithfulness", ...)
+
+        Under ``--mock`` / bare install this records a SOFT pass (so the test does not
+        gate-fail or drop below threshold) and the live path is skipped.
+        """
+        if self.live_ready(extra=extra):
+            return True
+        self._record(
+            "live_skip",
+            Severity.SOFT,
+            lambda e=extra: AssertionOutcome(True, 1.0, f"skipped: needs live LLM + [{e}] (run via eval-ragas-nightly)"),
+        )
+        return False
+
     # --------------------------------------------------------------- assertions
     def calledTool(self, name: str, *, severity: Severity | None = None) -> None:
         """Assert a tool named ``name`` was called at least once (gate by default)."""

@@ -315,3 +315,41 @@ class TestAbstainsPrimitive:
         ctx = _ctx_with_rag(_rag(["12 days"]), reply="The answer is 12 days.")
         ctx.abstains()
         assert not _outcome(ctx, 0).passed
+
+
+# --------------------------------------------------------------------------
+# live_ready / require_live (Tier 2 self-skip)
+# --------------------------------------------------------------------------
+
+
+def _ctx_scripted(rag_results=None, reply="reply") -> TestContext:
+    """Build a TestContext whose agent uses a ScriptedClient (mimics --mock)."""
+    from koboi.facade import KoboiAgent
+    from koboi.loop import AgentCore
+    from koboi.memory import ConversationMemory
+    from koboi.eval.t.mock import ScriptedClient, scripted_response
+    from tests.conftest import make_tool_registry
+
+    core = AgentCore(
+        client=ScriptedClient([scripted_response(reply)]),
+        memory=ConversationMemory(),
+        tools=make_tool_registry(),
+    )
+    ctx = TestContext(KoboiAgent(core=core))
+    ctx._turns.append(RunResult(content=reply, metadata={"rag_results": rag_results or []}, success=True))  # noqa: SLF001
+    return ctx
+
+
+class TestLiveReady:
+    def test_live_ready_false_under_scripted_client(self):
+        # ScriptedClient => mock mode => never live-ready (deterministic branch).
+        assert _ctx_scripted().live_ready() is False
+
+    async def test_require_live_skips_and_records(self):
+        ctx = _ctx_scripted()
+        assert ctx.require_live() is False
+        names = [a.name for a in ctx.collect()]
+        assert "live_skip" in names
+        skip = [a for a in ctx.collect() if a.name == "live_skip"][0]
+        out = skip.outcome()
+        assert out.passed is True and out.value == 1.0  # SOFT pass, not a gate failure

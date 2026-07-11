@@ -26,9 +26,9 @@ change; "Tier" is where it closes.
 
 | # | Dimension | w | Pre-change coverage | Target (industry) | Tier |
 |---|---|---|---|---|---|
-| 1 | Grounding / anti-hallucination (faithfulness) | 0.18 | **none** — `RAGASScorer` shipped but never invoked | Ragas Faithfulness ≥0.9 (high-stakes) / ≥0.8 | 2 |
+| 1 | Grounding / anti-hallucination (faithfulness) | 0.18 | eval shipped (uncalibrated) — `ragas_faithfulness` via `t.judge`, runs nightly | Ragas Faithfulness ≥0.9 (high-stakes) / ≥0.8 | 2 ⏳ |
 | 2 | Retrieval ranking quality | 0.17 | binary substring only (Hit@k=∞); no Recall@k/MRR/nDCG/qrels | Recall@10 ≥0.8, MRR ≥0.6, nDCG@10 ≥0.7 | **0+1** ✅ |
-| 3 | Answer correctness & relevance (end-to-end) | 0.13 | **none** — the one RAG eval explicitly skips the answer | FactualCorrectness F1 ≥0.75, Relevancy ≥0.7 | 2 |
+| 3 | Answer correctness & relevance (end-to-end) | 0.13 | eval shipped (uncalibrated) — `ragas_recall`/`relevancy` via `t.judge`, nightly | FactualCorrectness F1 ≥0.75, Relevancy ≥0.7 | 2 ⏳ |
 | 4 | Ingestion fidelity (parsing/chunking/format) | 0.10 | component pytest only; no real-format extraction gate | 100% in-scope formats parse; chunk-boundary Hit@k overlap≥1 | **0+1** ✅ |
 | 5 | Negative rejection / abstention | 0.09 | **none** | abstain-rate ≥0.9 (OOS); answerable acc ≥0.8 | **0+1** ✅ |
 | 6 | Noise robustness | 0.09 | `RAGNoiseScorer` shipped, never used | Noise Sensitivity ≤0.2; faithfulness drop ≤5% | **1** (mock) / 2 (live) ✅ |
@@ -107,6 +107,27 @@ Pre-change: ~2 of 9 well-evidenced (robustness + ingestion-format); the 3 heavie
 
 **Totals:** 22 new mock-safe tests (33/33 with the existing samples), all GATE-green.
 
+### Tier 2 — live-LLM evals (shipped; thresholds uncalibrated)
+- `koboi/eval/t/context.py` — `t.live_ready(extra="ragas")` + `t.require_live()`: live
+  evals self-skip under `--mock` / bare install (records a passing SOFT note) so the
+  mock PR gate stays green; they run for real only on the nightly job.
+- `evals/ragas_faithfulness.eval.py` (CRITICAL, w0.18) — `ragas_faithfulness` ≥0.9 +
+  `ragas_composite` ≥0.8 via `t.judge`, reusing the shipped `RAGASScorer`.
+- `evals/rag_answer_correctness.eval.py` (CRITICAL, w0.13) — `ragas_recall` ≥0.8 +
+  `ragas_relevancy` ≥0.7 + a contract-vs-permanent disambiguation case.
+- `.github/workflows/eval-ragas-nightly.yml` — daily report-only job: installs
+  `[eval-ragas]`, runs `koboi eval-test evals/ --tags live` (no `--mock`). Self-skips
+  (exit 0) if no LLM key secret is set; flip on `--strict` once thresholds calibrate.
+
+**Caveat (honest):** these run only with a real LLM key + `[eval-ragas]`, which the
+author could not exercise here — the `min_score` thresholds are PROVISIONAL and need
+calibration against real nightly runs. Judge severity is SOFT until then.
+
+**Remaining Tier 2:** `rag_semantic_hybrid_ranking.eval.py` (semantic/hybrid/HyDE with
+real embeddings — needs an `embedding:` config + endpoint; the facade wiring exists
+via `_build_embedding_client`) and the live legs of noise (faithfulness drop ≤5%),
+abstention (refusal correctness), and citation (ALCE precision).
+
 ### Threshold table (Tier 1, provisional — calibrate after first real run)
 | Dimension | Metric | Target |
 |---|---|---|
@@ -152,8 +173,11 @@ external production assertion.
 
 ## 7. Verification (2026-07-11)
 
-- `koboi eval-test evals/ --mock --strict` → **33/33 passed**.
-- `pytest` → **3197 passed / 0 failed / 178 skipped**, coverage **83%**.
+- `koboi eval-test evals/ --mock --strict` → **38/38 passed** (33 mock + 5 live self-skips).
+- `pytest` → **3199 passed / 0 failed / 178 skipped**, coverage **83%**.
 - `ruff check koboi/ evals/` → clean.
 - `mypy koboi/` → clean (205 files).
 - `bandit -r koboi/ -c pyproject.toml` → 0 issues (neutral vs main).
+- Tier-2 live evals **self-skip under `--mock`** (`live_skip`, verified) — they run
+  for real only on `eval-ragas-nightly` (needs `[eval-ragas]` + LLM key; thresholds
+  uncalibrated until then).
