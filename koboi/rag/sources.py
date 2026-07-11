@@ -30,26 +30,41 @@ from koboi.tools.builtin.web import (  # noqa: E402
 )
 
 _SECRET_KEYS = frozenset({"access_key_id", "secret_access_key", "headers", "token"})
+_MAX_REDIRECTS = 5
 
 
 def fetch_http(url: str, *, headers: dict | None = None, timeout: int | None = None) -> bytes:
-    """Fetch a single HTTP(S) document. Raises on non-retryable failure."""
+    """Fetch a single HTTP(S) document. Raises on failure.
+
+    SSRF-checked on EVERY redirect hop (follow_redirects=False + manual loop, mirroring
+    web_fetch). Retries on transient failures (RETRYABLE_STATUS + transport errors).
+    """
     import httpx  # hard dependency (pyproject)
 
-    _check_url_ssrf(url)
     timeout_s = max(1, min(int(timeout or MAX_TIMEOUT), MAX_TIMEOUT))
-    last_exc: Exception | None = None
-    with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                resp = client.get(url, headers=headers)
-                if resp.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
-                    continue
-                resp.raise_for_status()
-                return resp.content
-            except httpx.HTTPError as exc:
-                last_exc = exc
-    raise last_exc or RuntimeError(f"HTTP fetch failed for {url}")
+    with httpx.Client(timeout=timeout_s, follow_redirects=False) as client:
+        current_url = url
+        for _ in range(_MAX_REDIRECTS + 1):
+            _check_url_ssrf(str(current_url))
+            resp = None
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    resp = client.get(current_url, headers=headers)
+                    if resp.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
+                        continue
+                    break
+                except httpx.HTTPError:
+                    if attempt >= MAX_RETRIES:
+                        raise
+            if resp.status_code in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("location")
+                if not loc:
+                    raise RuntimeError(f"HTTP {resp.status_code} from {current_url} had no Location header")
+                current_url = str(httpx.URL(current_url).join(loc))
+                continue
+            resp.raise_for_status()
+            return resp.content
+    raise RuntimeError(f"too many redirects for {url}")
 
 
 def name_from_url(url: str) -> str:
@@ -83,7 +98,10 @@ def fetch_http_entry(entry: dict, doc_cache: DocumentCache | None) -> Iterator[t
         return
     name = name_from_url(url)
     if doc_cache:
-        doc_cache.put(key, name, data)
+        try:  # I3: protect cache write -> never crash agent build on disk error
+            doc_cache.put(key, name, data)
+        except OSError as exc:
+            _logger.warning("DocumentCache write failed for %s: %s", url, exc)
     yield name, data
 
 
@@ -99,16 +117,19 @@ def fetch_s3_entry(entry: dict, doc_cache: DocumentCache | None) -> Iterator[tup
     if not bucket:
         _logger.warning("s3 document source missing 'bucket'; skipping")
         return
+    endpoint = entry.get("endpoint_url") or ""
+    region = entry.get("region", "auto")
     try:
         client = boto3.client(
             "s3",
-            endpoint_url=entry.get("endpoint_url") or None,
-            region_name=entry.get("region", "auto"),
+            endpoint_url=endpoint or None,
+            region_name=region,
             aws_access_key_id=entry.get("access_key_id"),
             aws_secret_access_key=entry.get("secret_access_key"),
         )
         paginator = client.get_paginator("list_objects_v2")
         found = False
+        skipped = 0
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
                 okey = obj["Key"]
@@ -116,17 +137,32 @@ def fetch_s3_entry(entry: dict, doc_cache: DocumentCache | None) -> Iterator[tup
                     continue
                 found = True
                 name = okey.rsplit("/", 1)[-1] or okey
-                ckey = source_key({"source": "s3", "bucket": bucket, "key": okey})
+                # I2: include endpoint_url + region in the key so two backends with
+                # the same bucket+key don't collide in a shared cache dir.
+                ckey = source_key(
+                    {"source": "s3", "bucket": bucket, "key": okey, "endpoint_url": endpoint, "region": region}
+                )
                 cached = doc_cache.get(ckey) if doc_cache else None
                 if cached is not None:
                     yield cached
                     continue
-                data = client.get_object(Bucket=bucket, Key=okey)["Body"].read()
+                # I1: per-object try so one bad object doesn't kill the rest.
+                try:
+                    data = client.get_object(Bucket=bucket, Key=okey)["Body"].read()
+                except Exception as exc:
+                    _logger.warning("s3: skipping object %r (bucket=%s): %s", okey, bucket, exc)
+                    skipped += 1
+                    continue
                 if doc_cache:
-                    doc_cache.put(ckey, name, data)
+                    try:
+                        doc_cache.put(ckey, name, data)
+                    except OSError as exc:
+                        _logger.warning("DocumentCache write failed for s3://%s/%s: %s", bucket, okey, exc)
                 yield name, data
         if not found:
             _logger.warning("s3 bucket=%s prefix=%r returned no objects", bucket, prefix)
+        if skipped:
+            _logger.warning("s3: %d object(s) skipped due to errors (bucket=%s)", skipped, bucket)
     except Exception as exc:  # credentials / endpoint / network -> skip, keep building
         _logger.warning("s3 fetch failed (bucket=%s): %s", bucket, exc)
 
@@ -152,7 +188,18 @@ class DocumentCache:
         return None
 
     def put(self, key: str, name: str, data: bytes) -> None:
+        """I3: atomic writes (temp-rename, matching _EmbeddingIndexCache._save_disk)."""
         self.dir.mkdir(parents=True, exist_ok=True)
         data_f, name_f = self._paths(key)
-        data_f.write_bytes(data)
-        name_f.write_text(name)
+        self._atomic_write(data_f, data)
+        self._atomic_write(name_f, name.encode())
+
+    @staticmethod
+    def _atomic_write(path: Path, data: bytes) -> None:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise

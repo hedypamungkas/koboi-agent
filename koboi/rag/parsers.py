@@ -94,7 +94,8 @@ class HtmlParser(BaseParser):
         try:
             stripper.feed(raw)
             text = stripper.get_text() or raw
-        except Exception:  # malformed html -> fall back to the raw decode
+        except Exception as exc:  # malformed html -> fall back to the raw decode
+            _logger.warning("HtmlParser tag-strip failed on '%s' (%s); using raw decode", name, exc)
             text = raw
         return text, {"source_format": "html"}
 
@@ -220,7 +221,9 @@ def dispatch_parser(name: str, data: bytes, format_hint: str | None = None) -> t
     try:
         return entry.cls().extract(name, data)
     except Exception as exc:  # corrupt / unsupported variant
-        _logger.warning("Parser '%s' failed on '%s' (%s); falling back to raw text", fmt, name, exc)
+        _logger.warning("Parser '%s' failed on '%s' (%s); skipping", fmt, name, exc)
+        if _looks_binary(data):
+            return "", {"source_format": "binary-parse-error"}
         return data.decode("utf-8", errors="replace"), {}
 
 

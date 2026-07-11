@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from abc import ABC
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,8 @@ from koboi.tokens import estimate_single
 if TYPE_CHECKING:
     from koboi.llm.base import LLMClient
     from koboi.logger import AgentLogger
+
+_logger = logging.getLogger(__name__)
 
 
 class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods have default no-op impls
@@ -44,6 +47,11 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
             from koboi.rag.rewrite import QueryRewriter
 
             self._rewriter = QueryRewriter(client=rewrite_client, config=rewrite_config)
+        elif (self._query_rewrite or self._hyde) and rewrite_client is None:
+            _logger.warning(
+                "query_rewrite/hyde is enabled but no chat client was provided "
+                "(build_rag chat_client=...); rewriting is silently disabled."
+            )
         self.last_rewrite: dict | None = None
 
     async def _maybe_rewrite(self, query: str) -> str:

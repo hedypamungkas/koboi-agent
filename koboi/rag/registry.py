@@ -326,10 +326,18 @@ def _load_documents(
     def _resolve_files(path: str) -> list[PathlibPath]:
         # #3: expand glob patterns and directories into a concrete file list.
         if any(ch in path for ch in "*?["):
-            return sorted(PathlibPath(p) for p in _glob.glob(path, recursive=True) if PathlibPath(p).is_file())
+            matches = sorted(PathlibPath(p) for p in _glob.glob(path, recursive=True) if PathlibPath(p).is_file())
+            if not matches:
+                _logger.warning("RAG glob pattern %r matched no files", path)
+            return matches
         p = PathlibPath(path)
         if p.is_dir():
-            return sorted(f for f in p.rglob("*") if f.is_file())
+            matches = sorted(f for f in p.rglob("*") if f.is_file())
+            if not matches:
+                _logger.warning("RAG directory %r contains no files", path)
+            return matches
+        if not p.is_file():
+            _logger.warning("RAG document path does not exist: %s", path)
         return [p] if p.is_file() else []
 
     def _resolve_entry(entry: Any):
@@ -338,7 +346,8 @@ def _load_documents(
             for fp in _resolve_files(entry):
                 try:
                     yield fp.name, fp.read_bytes()
-                except OSError:
+                except OSError as exc:
+                    _logger.warning("RAG: skipping unreadable file %s: %s", fp, exc)
                     continue
             return
         if not isinstance(entry, dict):
@@ -350,7 +359,8 @@ def _load_documents(
                 for fp in _resolve_files(path):
                     try:
                         yield fp.name, fp.read_bytes()
-                    except OSError:
+                    except OSError as exc:
+                        _logger.warning("RAG: skipping unreadable file %s: %s", fp, exc)
                         continue
             return
         if source == "http" or "url" in entry:
@@ -372,7 +382,9 @@ def _load_documents(
                 continue
             text, meta = dispatch_parser(name, data, format_hint=fmt_hint)
             if not text or not text.strip():
-                # binary / unreadable / empty -> skip (never ingest mojibake)
+                _logger.info(
+                    "RAG: skipping %s (parsed to empty text; source_format=%s)", name, meta.get("source_format")
+                )
                 continue
             stem = PathlibPath(name).stem or name
             doc = Document(id=stem, title=stem, content=text)
