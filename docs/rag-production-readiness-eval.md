@@ -130,12 +130,24 @@ Pre-change: ~2 of 9 well-evidenced (robustness + ingestion-format); the 3 heavie
   and golden qrels can match by stable id.
 - `t.live_ready(extra=None)` — retrieval-only live evals (no judge dep) skip cleanly.
 
+**Tier 2 polish — remaining live legs:**
+- `evals/rag_abstention_live.eval.py` (w0.09) — OOS query whose stopwords retrieve
+  spurious chunks: the MODEL must still refuse (GATE via `t.abstains`). Answer leg of
+  the Tier-1 mock abstention eval (which covers the retrieval leg).
+- `evals/rag_noise_faithfulness.eval.py` (w0.09) — Acme corpus + an off-topic
+  distractor fixture (`evals/fixtures/distractor_noise.md`) whose vocabulary overlaps
+  real policy terms; asserts `ragas_faithfulness` holds (lost-in-the-middle guard).
+- `evals/rag_hyde_recall.eval.py` (w0.17) — `rag.hyde: true` on a hybrid retriever;
+  asserts `rag_rewrite` is populated (HyDE ran) and the target is retrieved. A paired
+  recall-lift measurement (hyde:true vs false over a query set) is a future refinement.
+- ALCE citation precision (NLI per cited span) is intentionally NOT added separately:
+  `ragas_faithfulness` already NLI-checks claims against context, subsuming it; the
+  mock citation-resolution gate (Tier 1) covers format correctness.
+
 **Caveat (honest):** all live evals run only with a real LLM key (+ `[eval-ragas]` for
-the RAGAS judges, + an `embedding:` endpoint for semantic/hybrid), which the author
+the RAGAS judges, + an `embedding:` endpoint for semantic/hybrid/HyDE), which the author
 could not exercise here — `min_score` thresholds are PROVISIONAL and need calibration
-against real nightly runs. Judge severity is SOFT until then. The live legs of noise
-(faithfulness drop ≤5%) / abstention (refusal correctness) / citation (ALCE precision)
-remain future polish; their retrieval/format legs are already mock-gated in Tier 1.
+against real nightly runs. Judge severity is SOFT until then.
 
 ### Tier 3 — statistical-confidence gate (live; shipped, uncalibrated)
 - `evals/ragas_golden_suite.eval.py` (CRITICAL, w0.08) — runs `ragas_faithfulness` over
@@ -196,7 +208,7 @@ external production assertion.
 
 ## 7. Verification (2026-07-11)
 
-- `koboi eval-test evals/ --mock --strict` → **41/41 passed** (33 mock + 8 live self-skips).
+- `koboi eval-test evals/ --mock --strict` → **44/44 passed** (33 mock + 11 live self-skips).
 - `pytest` → **3201 passed / 0 failed / 178 skipped**, coverage **83%**.
 - `ruff check koboi/ evals/` → clean.
 - `mypy koboi/` → clean (205 files).
