@@ -46,10 +46,11 @@ class TyDiQAIDLoader(DatasetLoader):
     ) -> list[EvalCase]:
         if not _AVAILABLE:
             raise ImportError(
-                "The `datasets` package is required for the TyDi-QA-id loader: "
-                "pip install -e '.[eval-ragas]'"
+                "The `datasets` package is required for the TyDi-QA-id loader: pip install -e '.[eval-ragas]'"
             )
-        ds = hf_load_dataset(source, "secondary_task", split=split)
+        # Trusted public benchmark (Google TyDi QA, Apache-2.0); unpinned load matches the
+        # existing gaia/swe loader pattern. Pin `revision=` only if supply-chain hardening is required.
+        ds = hf_load_dataset(source, "secondary_task", split=split)  # nosec B615
         cases: list[EvalCase] = []
         for row in ds:
             if not str(row.get("id", "")).startswith(ID_PREFIX):
