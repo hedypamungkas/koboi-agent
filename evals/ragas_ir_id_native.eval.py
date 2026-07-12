@@ -127,8 +127,11 @@ async def test_id_native_ranking(t):
         name="id_native_means",
         severity=Severity.SOFT,
     )
-    # Provisional gates (calibrate after the first live run; native text expected harder than translated).
-    _gate(t, rec, "recall_at_10", 0.80)
-    _gate(t, mrr, "MRR", 0.50)
-    _gate(t, ndcg, "nDCG_at_10", 0.60)
-    _gate(t, p1, "precision_at_1", 0.30)
+    # Calibrated gates (N=128 native-ID TyDi QA measurement, 2026-07-13; stopwords=id config, no
+    # stemmer -- stemmer is opt-in for build speed). Baseline measured recall .938/MRR .878/nDCG .893/
+    # p1 .836; these gates sit below the CI lower bounds to catch regressions while passing the
+    # measured working level.
+    _gate(t, rec, "recall_at_10", 0.85)
+    _gate(t, mrr, "MRR", 0.78)
+    _gate(t, ndcg, "nDCG_at_10", 0.80)
+    _gate(t, p1, "precision_at_1", 0.70)
