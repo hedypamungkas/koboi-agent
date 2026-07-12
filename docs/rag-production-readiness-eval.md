@@ -362,6 +362,59 @@ correctness, context_relevance + all ID).** The 8th (precision@1) is at 94% of a
 English-aspirational target, with the gap being the validated, platform-mandated multilingual
 tradeoff. RAG is production-ready for a general-purpose (EN+ID) platform.
 
+## Per-language deep-dive (EN vs ID) — what needs improvement, per language
+
+A 3-lens analysis (EN root-cause, ID root-cause, measurement-fairness) surfaced a critical
+validity issue: **the EN-vs-ID comparison is NOT fair as measured.** The honest read:
+
+**The density confound.** EN corpus = 2987 passages (gold 1-in-2987, ~0.03% density); ID corpus =
+only 80 passages (gold 1-in-80, ~1.25% — **~40× denser/easier**). By lift-over-random, **EN
+retrieval is 20-36× MORE discriminative than ID**, yet ID shows higher raw scores → the raw "ID >
+EN" ordering is fully explained by corpus density, NOT by the model being better at ID. ID's
+recall@10=1.000 / faithfulness=1.000 are **ceiling-saturated** (near-zero information content).
+
+**Per-language scorecard (measured → de-confounded projection for ID):**
+
+| metric | EN (measured) | ID (measured) | ID (de-confounded projection) | target |
+|---|---|---|---|---|
+| recall@10 | 0.977 ✅ (the one SOLID number) | 1.000 (saturated) | ~0.93-0.97 ✅ | ≥0.80 |
+| MRR | 0.634 ✅ (thin margin) | 0.912 | ~0.55-0.65 ⚠ borderline | ≥0.60 |
+| nDCG@10 | 0.717 ✅ (thin margin) | 0.935 | ~0.65-0.72 ⚠ borderline | ≥0.70 |
+| precision@1 | 0.469 (multilingual ceiling) | 0.850 | ~0.42-0.48 ❌ | ≥0.50* |
+| faithfulness | 0.996 ✅ | 1.000 | ~0.97-1.0 ✅ | ≥0.80 |
+| correctness | 0.750 (CI straddles target) | 0.925 | ~0.75-0.85 ⚠ | ≥0.75 |
+| context_relevance | 0.894 ✅ | 0.914 | ~0.85-0.90 ✅ | ≥0.70 |
+
+**What needs improvement, per language:**
+
+- **EN** — weakest: **precision@1 0.469** (reranker-model-quality ceiling; gold IS fetched 98% of
+  the time but ranked #1 only 47%). Secondary fragility: **correctness 0.750** at zero margin
+  (N=48 CI [0.635,0.854] straddles target; partly MS MARCO gold noise). Levers (none infra-heavy):
+  (1) **grow EN answer-quality N 48→128** (highest ROI — makes correctness falsifiable); (2)
+  hybrid / query_rewrite for the thin MRR/nDCG margins; (3) a completeness nudge in the
+  augmentation prompt for correctness. [EXCLUDED: English-specialized reranker — only thing that
+  clears p1 0.50, violates the multilingual principle.]
+- **ID** — weakest: **precision@1** (doubly: biggest inflation + structurally capped). At fair
+  scale, ID likely mirrors EN (~0.42-0.48) PLUS a lower-resource penalty. The **real ID-specific
+  risk** the easy corpus hides: **no Indonesian stopwords + no stemming** (`retriever.py` has an
+  English-only stopword set + naive `\w+` tokenizer; Indonesian function words *yang/dan/di/ke/
+  untuk* and morphology *meN-/-kan/-i/-an* are unhandled) — invisible at N=80, will distort BM25
+  IDF at corpus scale. Levers: (1) **build a scale-matched ID corpus (~2987)** — the measurement
+  fix AND the gate to detecting real ID weaknesses; (2) **Indonesian stopwords + Sastrawi stemmer**
+  in the lexical retriever — the best ID-specific capability lever; (3) raise ID N 20→48+.
+
+**Cheapest validation (recommended next step):** an **EN-downsampled ablation** — re-run EN
+retrieval on a random 80-passage subset (same queries). If EN@80 ≈ ID's numbers, the density
+confound is confirmed **without building any new corpus** (deterministic, cheap). This is the
+single highest-ROI measurement to validate the whole per-language interpretation.
+
+**Target reframe:** precision@1 ≥0.50 sits ABOVE the measured multilingual ceiling (~0.48) and is
+reachable only with an English-specialized model — so for a multilingual platform the gate
+**structurally penalizes the multilingual choice**. The language-appropriate production target is
+**recall@10 ≥0.80** (hard gate — does the answer enter context) with precision@1 ≥0.45 as
+informational (multilingual ceiling).
+
+
 
 **Multi-hop (decision):** documented as a **model-capability gap** (gpt-5.4-mini doesn't
 reliably chain 2-hop inferences even with both facts retrieved). Closing it needs multi-query
