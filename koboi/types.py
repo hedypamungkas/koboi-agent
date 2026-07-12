@@ -106,6 +106,7 @@ class AgentResult:
     is_dynamic: bool = False
     domain_label: str | None = None
     failed: bool = False
+    tool_calls: list = field(default_factory=list)
 
 
 @dataclass

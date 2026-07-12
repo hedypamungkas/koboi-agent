@@ -214,3 +214,14 @@ class DagScheduler:
         finally:
             conn.close()
         return row[0] if row else None
+
+    @classmethod
+    def load_latest_research_context(cls, db_path: str) -> str | None:
+        """Read the latest journaled ResearchContext JSON for a DB (W5.1 resume)."""
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            row = conn.execute("SELECT context_json FROM research_context ORDER BY updated_at DESC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None

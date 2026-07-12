@@ -179,6 +179,18 @@ class KoboiAgent:
         from koboi.exceptions import AgentError
 
         if self._orchestrator is not None:
+            # W5.1: deep_research can resume (rehydrate-and-finish from the journal).
+            if getattr(self._orchestrator, "default_mode", None) == "deep_research":
+                db_path = self._orchestrator._dag_scheduler.db_path if self._orchestrator._dag_scheduler else None
+                if not db_path:
+                    raise AgentError("Cannot resume deep_research: no db_path (memory.backend must be sqlite)")
+                from koboi.orchestration.dag_scheduler import DagScheduler
+
+                ctx_json = DagScheduler.load_latest_research_context(db_path)
+                if not ctx_json:
+                    raise AgentError("No research context found to resume (run deep_research first)")
+                self._orchestrator._resume_ctx_json = ctx_json
+                return await self._run_orchestrator(self._orchestrator, "")
             # Issue #10b: clearer message. Orchestration mode runs N per-agent
             # memories with no single shared conversation/journal to resume; full
             # resume support requires orchestration-mode redesign (deferred).

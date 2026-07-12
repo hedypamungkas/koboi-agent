@@ -219,6 +219,7 @@ class ResearchContext:
     budget: ResearchBudget = field(default_factory=ResearchBudget)
     depth: int = 0
     graph_run_id: str | None = None
+    query: str = ""  # W5.1: original user query for resume synthesis
 
     def add_findings(self, node_id: str, text: str) -> int:
         return self.source_store.add_findings(node_id, text)
@@ -243,6 +244,7 @@ class ResearchContext:
                 },
                 "depth": self.depth,
                 "graph_run_id": self.graph_run_id,
+                "query": self.query,
             }
         )
 
@@ -269,6 +271,7 @@ class ResearchContext:
         )
         ctx.depth = int(obj.get("depth", 0))
         ctx.graph_run_id = obj.get("graph_run_id")
+        ctx.query = str(obj.get("query", ""))
         return ctx
 
 

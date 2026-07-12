@@ -7,6 +7,7 @@ QualityEvaluator: LLM-based answer quality evaluation with revision support.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -21,8 +22,10 @@ from koboi.events import (
     AgentDispatchEvent,
     AgentResultEvent,
     CoverageEvent,
+    FetchEvent,
     OrchestrationCompleteEvent,
     RoutingDecisionEvent,
+    SearchEvent,
     SourceEvent,
     TextDeltaEvent,
 )
@@ -418,10 +421,12 @@ class Orchestrator:
             agent = AgentFactory.create_agent(agent_name, self.client, agent_logger)
 
         start = time.time()
+        tool_calls_made: list = []
 
         try:
             result = await agent.run(query)
             answer = result.content if hasattr(result, "content") else str(result)
+            tool_calls_made = getattr(result, "tool_calls_made", [])
         except Exception as e:
             logger.error("Agent %s failed: %s", agent_name, e, exc_info=True)
             answer = f"Error: {e}"
@@ -442,6 +447,7 @@ class Orchestrator:
             tokens_used=tokens,
             is_dynamic=is_dynamic,
             domain_label=domain_label,
+            tool_calls=tool_calls_made,
         )
 
     async def _run_dag_waves_with_flow(
@@ -492,6 +498,18 @@ class Orchestrator:
                     cid = ctx.add_findings(result.agent_name, result.answer)
                     if cid:
                         yield SourceEvent(citation_id=cid, node_id=result.agent_name, preview=result.answer[:160])
+                # Token metering (W-deferred item 3) + fine-grained progress events (item 4).
+                if ctx is not None:
+                    ctx.budget.record_tokens(result.tokens_used)
+                for tc in getattr(result, "tool_calls", []):
+                    try:
+                        _args = json.loads(tc.arguments) if tc.arguments else {}
+                    except (ValueError, TypeError):
+                        _args = {}
+                    if tc.name == "web_search":
+                        yield SearchEvent(query=str(_args.get("query", "")), results_count=0)
+                    elif tc.name == "web_fetch":
+                        yield FetchEvent(url=str(_args.get("url", "")), status=200, chars=0)
                 # #2: record durable per-node completion for graph-cursor resume.
                 if self._dag_scheduler:
                     self._dag_scheduler.record_node_completion(result.agent_name, result.answer)
@@ -840,6 +858,7 @@ class Orchestrator:
         tools_config = rc.get("tools") or RESEARCH_TOOLS_CONFIG
 
         ctx = ResearchContext(budget=budget)
+        ctx.query = query  # W5.1: store for resume synthesis
         # Journaling: mint a run id + reuse the scheduler's db_path so the run state is
         # inspectable. Cross-session rehydrate-on-resume is W2.1.
         run_id = str(uuid4())
@@ -854,6 +873,40 @@ class Orchestrator:
         # B4: open a trace so orchestrator-level LLM calls (plan/coverage/synthesis) are visible
         # to Langfuse + other hooks (they bypass AgentCore._emit).
         await self._emit_research_hook(HookEvent.SESSION_START)
+
+        # W5.1: rehydrate-and-finish (resume path) -- skip plan + research loop, load the
+        # journaled ResearchContext + go straight to synthesis from the gathered findings.
+        if getattr(self, "_resume_ctx_json", None):
+            ctx = ResearchContext.from_json(self._resume_ctx_json)
+            await self._emit_research_hook(
+                HookEvent.PRE_LLM_CALL,
+                iteration=ctx.depth,
+                messages=[{"role": "user", "content": ctx.query or query}],
+            )
+            report = await self._synthesize_research(ctx.query or query, ctx)
+            await self._emit_research_hook(HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=report[:200])
+            report, referenced = _verify_citations(report, ctx)
+            combined_answer = report + self._sources_footer(ctx, referenced)
+            if combined_answer:
+                yield TextDeltaEvent(content=combined_answer)
+            await self._emit_research_hook(HookEvent.SESSION_END)
+            yield OrchestrationCompleteEvent(
+                final_answer=combined_answer,
+                elapsed_seconds=time.time() - start,
+                agent_results=[],
+                execution_mode="deep_research",
+                routing_agents=[],
+                routing_confidence=1.0,
+                metadata={
+                    "research_sources": ctx.source_store.sources_list(),
+                    "research_sources_with_text": ctx.source_store.sources_with_text(),
+                    "coverage": 0.0,
+                    "depth": ctx.depth,
+                    "run_id": run_id,
+                    "resumed": True,
+                },
+            )
+            return
 
         # Initial plan (or answer directly if the request is simple).
         await self._emit_research_hook(
