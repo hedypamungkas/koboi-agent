@@ -160,6 +160,14 @@ class TestBuildRerankClient:
         with pytest.raises(LLMInvalidRequestError, match="Unknown rerank provider"):
             build_rerank_client({"provider": "voyageai", "api_key": "k"})
 
+    def test_empty_string_model_falls_back_to_default(self):
+        # `${RERANK_MODEL:}` env interpolation resolves to "" -- must NOT pass an empty
+        # model to the provider (would 400 -> fail-soft -> silent bare BM25). Empty string
+        # falls back to the provider default, same as a missing key.
+        backend = build_rerank_client({"provider": "jina", "api_key": "k", "model": "", "base_url": ""})
+        assert isinstance(backend, JinaRerankBackend)
+        assert backend._model == "jina-reranker-v2-base-multilingual"
+
 
 # --------------------------------------------------------------------------- #
 # CrossEncoderReranker wrapper

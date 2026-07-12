@@ -178,9 +178,9 @@ def build_rerank_client(rerank_config: dict | None, logger: AgentLogger | None =
     timeout = float(cfg.get("timeout", 30.0))
 
     if provider == "local":
-        return LocalBGERerankBackend(model=cfg.get("model", "BAAI/bge-reranker-v2-m3"))
+        return LocalBGERerankBackend(model=cfg.get("model") or "BAAI/bge-reranker-v2-m3")
 
-    api_key = cfg.get("api_key", "")
+    api_key = cfg.get("api_key") or ""
     if not api_key:
         _logger.warning(
             "rerank provider %r has no api_key; cross-encoder rerank disabled (falling back).",
@@ -191,15 +191,15 @@ def build_rerank_client(rerank_config: dict | None, logger: AgentLogger | None =
     if provider == "jina":
         return JinaRerankBackend(
             api_key=api_key,
-            model=cfg.get("model", "jina-reranker-v2-base-multilingual"),
-            base_url=cfg.get("base_url", "https://api.jina.ai/v1"),
+            model=cfg.get("model") or "jina-reranker-v2-base-multilingual",
+            base_url=cfg.get("base_url") or "https://api.jina.ai/v1",
             timeout=timeout,
         )
     if provider == "cohere":
         return CohereRerankBackend(
             api_key=api_key,
-            model=cfg.get("model", "rerank-multilingual-v3.0"),
-            base_url=cfg.get("base_url", "https://api.cohere.com/v2"),
+            model=cfg.get("model") or "rerank-multilingual-v3.0",
+            base_url=cfg.get("base_url") or "https://api.cohere.com/v2",
             timeout=timeout,
         )
 
