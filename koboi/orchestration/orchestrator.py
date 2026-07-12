@@ -988,7 +988,15 @@ class Orchestrator:
             if score >= threshold or ctx.depth >= budget.max_depth or not budget.remaining():
                 break
             if not follow_ups:
-                break
+                if score < threshold:
+                    # Coverage is insufficient but the evaluator can't suggest follow-ups.
+                    # Don't give up -- generate generic drill queries from the sub-questions
+                    # so the loop continues researching instead of producing a shallow report.
+                    follow_ups = [
+                        f"Find more specific details and evidence about: {sq}" for sq in ctx.sub_questions[:3]
+                    ]
+                else:
+                    break  # coverage >= threshold, no follow-ups needed -- correct stop
 
             # Re-plan to drill deeper on the gaps (A6: prune to the remaining search budget).
             drill_query = query + "\n\nRemaining gaps to investigate: " + "; ".join(follow_ups)

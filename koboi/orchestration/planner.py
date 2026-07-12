@@ -118,7 +118,9 @@ needs_workflow=false and leave steps empty.
 - Otherwise set needs_workflow=true and list the research steps. Each step needs: a short \
 snake_case id, a one-sentence instruction (the sub-question to investigate), depends_on (ids \
 that must complete first; model parallel branches with a shared dependency), and 2-4 \
-search_queries (the web searches this step should run first). Prefer fewer, well-scoped steps.
+search_queries (the web searches this step should run first). Aim for 4-7 focused research \
+steps that cover the topic from multiple angles (e.g. scientific, commercial, technical, \
+competitive). Each step should investigate a distinct aspect.
 
 Request: {instruction}"""
 

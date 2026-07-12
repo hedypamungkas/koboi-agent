@@ -89,7 +89,9 @@ Findings:
 Score overall coverage in [0,1] (1.0 = every sub-question is well answered), give a per \
 sub-question coverage map, and list targeted follow-up search queries for any sub-question \
 scored below ~0.7. If the findings fully cover the sub-questions, return overall_score=1.0 \
-and an empty follow_up_queries list."""
+and an empty follow_up_queries list. IMPORTANT: If overall_score < 0.7, you MUST provide at \
+least one follow_up_query describing what specific information is still missing. Never return \
+an empty follow_up_queries list when coverage is insufficient."""
 
 
 # ---------------------------------------------------------------------------

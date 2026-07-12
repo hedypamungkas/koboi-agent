@@ -619,18 +619,36 @@ class TestMedium7CoverageMalformed:
 
 
 class TestMedium8EmptyFollowupsStops:
-    """M8: coverage < threshold but follow_ups=[] -> loop breaks after 1 round."""
+    """M8: coverage < threshold but follow_ups=[] -> loop generates generic follow-ups + continues.
 
-    async def test_stops_when_no_follow_ups_despite_low_coverage(self, tmp_path):
+    After Fix 3: the loop NO LONGER breaks when follow_ups is empty but coverage is below
+    threshold. It generates generic drill queries from the sub-questions and continues.
+    """
+
+    async def test_continues_when_no_follow_ups_but_low_coverage(self, tmp_path):
+        # coverage 0.3 < threshold 0.9 BUT follow_ups=[] -> Fix 3 generates generic follow-ups
+        # from sub_questions -> the loop continues to depth 2 (not depth 1).
         orch = _orch(
-            _FakeClient(coverage_score=0.3, follow_ups=[]),  # below 0.9 but no drill queries
+            _FakeClient(coverage_score=0.3, follow_ups=[]),
             {"max_depth": 5, "coverage_threshold": 0.9},
             tmp_path,
         )
         events = [e async for e in orch._run_deep_research("Tell me about X")]
         complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
         assert complete
-        assert complete[0].metadata["depth"] == 1  # stopped -- no follow_ups to drill
+        assert complete[0].metadata["depth"] >= 2  # iterated at least once more (Fix 3 safety net)
+
+    async def test_stops_when_no_follow_ups_but_good_coverage(self, tmp_path):
+        # coverage 0.95 >= threshold 0.7 AND follow_ups=[] -> correct stop (no Fix 3 needed).
+        orch = _orch(
+            _FakeClient(coverage_score=0.95, follow_ups=[]),
+            {"max_depth": 5, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete
+        assert complete[0].metadata["depth"] == 1  # coverage >= threshold -> correct stop
 
 
 class TestMedium11WebConfProviderWiring:
