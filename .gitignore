@@ -74,3 +74,5 @@ docs/eve-impact-effort-analysis.md
 
 # === Path B: real IR eval corpus (MS MARCO passages; research-use, built by scripts/build_ir_corpus.py) ===
 data/ir_corpus/
+# Indonesian validation corpus (translated MS MARCO subset; derived, regenerable via the ID build script)
+data/id_corpus/

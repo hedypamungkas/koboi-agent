@@ -1,0 +1,104 @@
+{
+  "qrels": [
+    {
+      "query": ". apa itu korporasi?",
+      "gold_doc": "p39601aecae02",
+      "expected_answer": "A corporation is a company or group of people authorized to act as a single entity and recognized as such in law."
+    },
+    {
+      "query": "mengapa rachel carson menulis an obligation to endure",
+      "gold_doc": "p5834c5854b00",
+      "expected_answer": "Rachel Carson writes The Obligation to Endure because believes that as man tries to eliminate unwanted insects and weeds, however he is actually causing more problems by polluting the environment."
+    },
+    {
+      "query": "gejala tikus yang sekarat",
+      "gold_doc": "p4fe3a2f93f71",
+      "expected_answer": "The symptoms of a dying mouse are runny eyes, sneezing, wheezing, shaking, fluctuating body temperature, tiredness, loss of appetite, and dull coat."
+    },
+    {
+      "query": "jumlah rata-rata sambaran petir per hari",
+      "gold_doc": "p59a71274643a",
+      "expected_answer": "Globally 8,640,000 lightning strikes per day."
+    },
+    {
+      "query": "bisakah Anda membakar halaman rumput Anda dengan pupuk",
+      "gold_doc": "p8a8ea796735a",
+      "expected_answer": "Yes, over fertilizing can burn lawn."
+    },
+    {
+      "query": "arti goch",
+      "gold_doc": "pc547c914aa59",
+      "expected_answer": "The meaning of the name Goch is red."
+    },
+    {
+      "query": "gejala tukak lambung pada wanita",
+      "gold_doc": "pb39600dde416",
+      "expected_answer": "acidic and extremely painful is symptom of a gastric ulcer in women."
+    },
+    {
+      "query": "seberapa sering ativan dapat diminum",
+      "gold_doc": "p0df75f91b71a",
+      "expected_answer": "For anxiety treatment is 1 mg two to three times daily and for insomnia is 2 mg to 4 mg once daily at bedtime."
+    },
+    {
+      "query": "berapa tahun william bradford menjabat sebagai gubernur koloni plymouth?",
+      "gold_doc": "pf8f79d86fe2d",
+      "expected_answer": "William Bradford served thirty years as Governor of Plymouth colony."
+    },
+    {
+      "query": "jumlah penduduk albany mn",
+      "gold_doc": "p937f167f88e3",
+      "expected_answer": "2,662"
+    },
+    {
+      "query": "definisikan preventif",
+      "gold_doc": "pc345cedacfbb",
+      "expected_answer": "It means preventing, hindering, or acting as an obstacle to."
+    },
+    {
+      "query": "penyebab akalasia",
+      "gold_doc": "pf8fa712a334f",
+      "expected_answer": "An infection, heredity or an abnormality of the immune system"
+    },
+    {
+      "query": "cuaca saat ini di Volcano, CA",
+      "gold_doc": "pb225f66de01f",
+      "expected_answer": "The Volcano forecast for Apr 12 is 52 degrees and Patchy light rain."
+    },
+    {
+      "query": "berapa hari setelah ovulasi saya bisa tahu bahwa saya hamil",
+      "gold_doc": "pe0ce3e730792",
+      "expected_answer": "6 to 10 days"
+    },
+    {
+      "query": "berapa harga perangko sekarang",
+      "gold_doc": "p89ee686da75c",
+      "expected_answer": "The cost of a first-class postage stamp is now 49 cents."
+    },
+    {
+      "query": "overlay warna photoshop",
+      "gold_doc": "p5ddc1249b20b",
+      "expected_answer": "A great way to add a touch of color without making your photo look like you’ve edited the heck out of it or to add a little life to B&W photos."
+    },
+    {
+      "query": "gejala paparan polusi udara",
+      "gold_doc": "pc4243c572564",
+      "expected_answer": "High air pollution levels can cause immediate health problems including: 1 Aggravated cardiovascular and respiratory illness. 2 Added stress to heart and lungs, which must work harder to supply the body with oxygen. 3 Damaged cells in the respiratory system."
+    },
+    {
+      "query": "suhu rata-rata cardiff wales",
+      "gold_doc": "p3bdb9199824d",
+      "expected_answer": "It has a mild humid temperate climate with warm summers and no dry season."
+    },
+    {
+      "query": "subspesialisasi dengan bayaran tertinggi dalam ortopedi",
+      "gold_doc": "p83ba440ffa0d",
+      "expected_answer": "The highest paying subspecialty in orthopedics are Spine surgeons."
+    },
+    {
+      "query": "____________________ dianggap sebagai bapak kedokteran modern.",
+      "gold_doc": "p7a138930fa34",
+      "expected_answer": "Hippocrates"
+    }
+  ]
+}
