@@ -13,7 +13,7 @@ globs: ["koboi/tools/builtin/**/*.py"]
 - Tool config can be passed via `set_config()` if the module defines it
 - Dependency injection: declare `_deps` and `_tool_config` params, injected at call time
 
-## Built-in tools (9)
+## Built-in tools (10)
 - `calculator.py` -- math expression evaluator (SAFE)
 - `filesystem.py` -- read/write/list files (MODERATE)
 - `shell.py` -- execute shell commands (DESTRUCTIVE)
@@ -23,3 +23,4 @@ globs: ["koboi/tools/builtin/**/*.py"]
 - `git.py` -- git operations (MODERATE)
 - `subagent.py` -- spawn parallel sub-agents (MODERATE)
 - `task.py` -- structured task management (SAFE)
+- `ingest.py` -- fetch a URL + chunk into the live knowledge corpus (MODERATE)

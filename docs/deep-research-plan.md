@@ -4,7 +4,7 @@
 > koboi's existing `execution.mode: dynamic` + DAG + durability. Everything else in this plan
 > — fixing `web_search`, improving fetch, runtime RAG ingest — exists **only to serve that goal.**
 
-**Status:** design / not yet implemented · **Verdict:** ✅ highly feasible, fully additive · **Date:** 2026-07-11
+**Status:** ✅ SHIPPED (W0–W6.1 + deferred items, PR #37) · **Verdict:** ✅ highly feasible, fully additive · **Date:** 2026-07-11
 
 ---
 

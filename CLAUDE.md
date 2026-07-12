@@ -48,15 +48,16 @@ koboi/              Main package (207 .py files)
   notifications.py  Notification system
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
-  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
+  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest)
   hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 20 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
-  rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid + BM25), cross-encoder rerank (jina/cohere/local -- rerank.py), augmentation, query-rewrite/HyDE, metadata filters, Indonesian stopwords/stemmer, registry
+  rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid + BM25), cross-encoder rerank (jina/cohere/local -- rerank.py), augmentation, query-rewrite/HyDE, metadata filters, Indonesian stopwords/stemmer, registry, live (LiveCorpus/LiveRetriever), sources (file/http/s3/firecrawl)
+  web/              Web I/O: search/fetch provider registries (@register_search_provider/@register_fetch_provider, Brave/Firecrawl/httpx/mock/ddg), types, base ABCs, providers/, counting (budget metering)
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
   harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
   sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry
   server/           FastAPI HTTP/SSE serving layer: app, jobs, pool, auth, ownership, idempotency, approvals, keys_cli, schema, sse, health, middleware, protocols
-  orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator (sequential/parallel/dag/conditional/dynamic), factory, dynamic agent builder, dag_scheduler (wave-parallel DAG), planner (LLM plan-or-skip), workflow_graph (programmatic builder)
+  orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator (sequential/parallel/dag/conditional/dynamic/deep_research), factory, dynamic agent builder, dag_scheduler (wave-parallel DAG), planner (LLM plan-or-skip + plan_research), workflow_graph (programmatic builder), research (ResearchBudget/SourceStore/ResearchContext/CoverageEvaluator -- deep_research mode)
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
