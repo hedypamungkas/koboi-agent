@@ -79,7 +79,7 @@ class JinaRerankBackend(RerankBackend):
         self,
         *,
         api_key: str,
-        model: str = "jina-reranker-v2-base-multilingual",
+        model: str = "jina-reranker-v3",
         base_url: str = "https://api.jina.ai/v1",
         timeout: float = 30.0,
     ):
@@ -191,7 +191,7 @@ def build_rerank_client(rerank_config: dict | None, logger: AgentLogger | None =
     if provider == "jina":
         return JinaRerankBackend(
             api_key=api_key,
-            model=cfg.get("model") or "jina-reranker-v2-base-multilingual",
+            model=cfg.get("model") or "jina-reranker-v3",
             base_url=cfg.get("base_url") or "https://api.jina.ai/v1",
             timeout=timeout,
         )

@@ -317,32 +317,34 @@ that fail-soft preserves retrieval. A live Tier-2 suite (`evals/ragas_ir_rerank.
 gates MRR≥0.60 / nDCG@10≥0.70 / precision@1≥0.50 / recall@10≥0.80) is wired and self-skips
 under `--mock`; it runs once a rerank API key is provided.
 
-**✅ L3 MEASURED LIVE (N=128, jina-reranker-v2-base-multilingual, 2026-07-12).** The cross-encoder
-delivered **large, real ranking lifts** — but the v2-base model on BM25-only candidates comes up
-just short of the strict MS MARCO-SOTA targets. Honest before→after (same 128 MS MARCO qrels):
+**✅ L3 MEASURED LIVE (N=128, BM25 candidates, 2026-07-12).** The cross-encoder delivered **large,
+real ranking lifts**. A/B-testing two Jina models over the same qrels made `jina-reranker-v3` the
+new default — it is a **strict improvement** over v2-base and **crosses the MRR target**:
 
-| metric | BM25 baseline | BM25 + Jina rerank | Δ | target | verdict |
-|---|---|---|---|---|---|
-| recall@10 | 0.898 | **0.945** | +0.047 | ≥0.80 | ✅ (rerank did NOT drop gold; it slightly improved recall) |
-| MRR | 0.442 | **0.596** | **+0.154 (+35%)** | ≥0.60 | ⚠ 0.004 shy (CI [0.533, 0.660]) |
-| nDCG@10 | 0.552 | **0.682** | **+0.130 (+24%)** | ≥0.70 | ⚠ 0.018 shy (CI [0.628, 0.733]) |
-| precision@1 | 0.242 | **0.414** | **+0.172 (+71%)** | ≥0.50 | ❌ short (CI [0.328, 0.500]) |
+| metric | BM25 baseline | + v2-base rerank | + v3 rerank (default) | v3 vs BM25 | target | verdict |
+|---|---|---|---|---|---|---|
+| recall@10 | 0.898 | 0.945 | **0.945** | +0.047 | ≥0.80 | ✅ (rerank didn't drop gold) |
+| MRR | 0.442 | 0.596 | **0.615** | **+39%** | **≥0.60** | **✅ MET** (CI [0.548, 0.679]) |
+| nDCG@10 | 0.552 | 0.682 | **0.695** | **+26%** | ≥0.70 | ⚠ 0.005 shy (CI [0.639, 0.748]) |
+| precision@1 | 0.242 | 0.414 | **0.461** | **+91%** | ≥0.50 | ❌ short (CI [0.375, 0.547]) |
 
 Rerank engaged on **126/128 (98%)** queries (the 2 misses hit Jina's free-tier 100k-tok/min limit
 and fail-softed to BM25 — pacing eliminates this; a paid tier removes it entirely). The eval's
 gates (`evals/ragas_ir_rerank.eval.py`) are calibrated as honest **regression thresholds**
-(MRR≥0.50 / nDCG≥0.60 / p1≥0.30 / recall≥0.88) — pass at the measured working level, FAIL if
+(MRR≥0.52 / nDCG≥0.60 / p1≥0.36 / recall≥0.88) — pass at the measured working level, FAIL if
 rerank regresses or breaks; the aspirational targets remain documented above.
 
-**Verdict: the lever worked — large lift, near-targets.** precision@1 (rank-1 placement) is the
-remaining gap; it's a rerank-**model-quality** issue (not candidate-pool — more fetch candidates
-aids recall, not rank-1 placement). Closing the last mile needs:
-1. **A stronger rerank model** (e.g. a larger cross-encoder, or per-domain fine-tune) — the
-   biggest remaining lever for precision@1;
-2. **Hybrid pre-retrieval** (semantic + BM25 candidates fed to the reranker) — more/better
-   candidates, especially for vocabulary-mismatched queries;
-3. **Batched embeddings** (P1-2) to make hybrid tractable at this corpus scale.
-These are additive feature work on top of the now-shipped rerank stage.
+**Verdict: the lever worked — large lift; MRR target met, nDCG@10 essentially at target.**
+`jina-reranker-v3` (the stronger model) is now the default and closed MRR (0.596→0.615) — exactly
+the "stronger model" lever the analysis predicted. **precision@1 (rank-1 placement) is the one
+remaining gap** (0.461 vs 0.50): it improved another +11% with v3 but a single-stage reranker on
+BM25-only candidates appears near its ceiling here. Closing the last mile needs:
+1. **Hybrid pre-retrieval** (semantic + BM25 candidates fed to the reranker) — more/better
+   candidates, especially for vocabulary-mismatched queries; the likely lever for the precision@1
+   remainder;
+2. **Batched embeddings** (P1-2) to make hybrid tractable at this corpus scale (today's serial
+   embedding build is too slow on 2987 passages).
+These are additive feature work on top of the now-shipped, v3-default rerank stage.
 
 **Multi-hop (decision):** documented as a **model-capability gap** (gpt-5.4-mini doesn't
 reliably chain 2-hop inferences even with both facts retrieved). Closing it needs multi-query

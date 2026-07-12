@@ -5,20 +5,19 @@ The N=128 MS MARCO baseline (commit be73931, BM25, no rerank) showed gold is rea
 Cross-encoder rerank is the identified lever. This suite re-measures the SAME qrels WITH
 rerank enabled and gates on the ranking-metric CI lower bounds.
 
-**Calibrated thresholds (N=128, jina-reranker-v2-base-multilingual, 2026-07-12).** Rerank
-delivered large lifts but the v2-base model on BM25-only candidates comes up just short of
-the strict MS MARCO-SOTA targets, so the gates are set as honest REGRESSION thresholds --
-they pass at the measured working level and FAIL if rerank regresses or breaks (e.g. silent
-fail-soft to BM25 collapses MRR toward 0.44 < 0.50):
+**Calibrated thresholds (N=128, default jina-reranker-v3, BM25 candidates, 2026-07-12).** v3
+is a strict improvement over v2-base (A/B over the same qrels) and CROSSES the MRR target:
 
-    metric        measured   gate (CI-lower - margin)   aspirational
-    recall@10     0.945      >= 0.88                    >= 0.80 (met)
-    MRR           0.596      >= 0.50                    >= 0.60 (0.004 shy)
-    nDCG@10       0.682      >= 0.60                    >= 0.70 (0.018 shy)
-    precision@1   0.414      >= 0.30                    >= 0.50 (short)
+    metric        BM25   v2-base   v3 (default)   gate (CI-lower - margin)   aspirational
+    recall@10     0.898  0.945     0.945          >= 0.88                    >= 0.80 (met)
+    MRR           0.442  0.596     0.615          >= 0.52                    >= 0.60 (MET)
+    nDCG@10       0.552  0.682     0.695          >= 0.60                    >= 0.70 (0.005 shy)
+    precision@1   0.242  0.414     0.461          >= 0.36                    >= 0.50 (short)
 
-Closing the remaining gap needs a stronger rerank model or hybrid pre-retrieval -- documented
-in docs/rag-production-readiness-eval.md.
+The gates are honest REGRESSION thresholds -- pass at the measured working level, FAIL if
+rerank regresses or breaks (e.g. silent fail-soft to BM25 collapses MRR toward 0.44 < 0.52).
+precision@1 (rank-1 placement) remains the one stubborn gap -- closing it fully likely needs
+hybrid pre-retrieval (more/better candidates), documented in docs/rag-production-readiness-eval.md.
 
 Metrics are exact doc_id rank (gold_doc pid vs rag_results[].doc_id rank). Gated on the
 bootstrap 95% CI lower bound. LIVE ONLY; self-skips under --mock via t.require_live().
@@ -144,7 +143,7 @@ async def test_rerank_closes_ranking_gap(t):
         name="rerank_means",
         severity=Severity.SOFT,
     )
-    _gate(t, mrr, "MRR", 0.50)  # measured 0.596 CI[0.533,0.660]; gate = regression threshold
-    _gate(t, ndcg, "nDCG_at_10", 0.60)  # measured 0.682 CI[0.628,0.733]
-    _gate(t, p1, "precision_at_1", 0.30)  # measured 0.414 CI[0.328,0.500]
-    _gate(t, rec, "recall_at_10", 0.88)  # measured 0.945; rerank must not drop reachable gold
+    _gate(t, mrr, "MRR", 0.52)  # v3 measured 0.615 CI[0.548,0.679]; gate = regression threshold
+    _gate(t, ndcg, "nDCG_at_10", 0.60)  # v3 measured 0.695 CI[0.639,0.748]
+    _gate(t, p1, "precision_at_1", 0.36)  # v3 measured 0.461 CI[0.375,0.547]
+    _gate(t, rec, "recall_at_10", 0.88)  # v3 measured 0.945; rerank must not drop reachable gold
