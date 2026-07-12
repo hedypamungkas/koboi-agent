@@ -452,3 +452,95 @@ class TestWave6MetadataPropagation:
         assert "coverage" in result.metadata
         assert "depth" in result.metadata
         assert result.metadata["execution_mode"] == "deep_research"
+
+
+class TestHigh3Resume:
+    """HIGH-3: W5.1 resume-and-finish -- journal a ctx, then resume from it."""
+
+    async def test_resume_synthesizes_from_journaled_ctx(self, tmp_path):
+        from koboi.orchestration.dag_scheduler import DagScheduler as _DS
+
+        db_path = str(tmp_path / "resume.db")
+        # Step 1: run deep_research once -> journals a ctx with findings.
+        orch = _orch(
+            _FakeClient(coverage_score=0.95, synthesis="## Report\nFound [1] something."),
+            {"max_depth": 1, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        # Override the db_path to our test file.
+        orch._dag_scheduler = _DS(agents_map={}, deps={}, db_path=db_path)
+        # Override the db_path to our test file.
+        orch._dag_scheduler = DagScheduler(agents_map={}, deps={}, db_path=db_path)
+        _ = [e async for e in orch._run_deep_research("Research Python")]
+
+        # Step 2: load the latest journaled ctx.
+        ctx_json = _DS.load_latest_research_context(db_path)
+        assert ctx_json is not None, "expected a journaled research context"
+
+        # Step 3: set _resume_ctx_json + run again -> resume branch fires.
+        orch2 = _orch(
+            _FakeClient(plan_needs_workflow=True, coverage_score=0.95, synthesis="## Report\nResumed [1] finding."),
+            {"max_depth": 1, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        orch2._dag_scheduler = DagScheduler(agents_map={}, deps={}, db_path=db_path)
+        orch2._resume_ctx_json = ctx_json
+        events = [e async for e in orch2._run_deep_research("Research Python")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete, "expected OrchestrationCompleteEvent from resume"
+        assert complete[0].metadata.get("resumed") is True
+        assert "[1]" in complete[0].final_answer
+
+
+class TestHigh5SynthesisFallback:
+    """HIGH-5: _synthesize_research falls back to raw findings on LLM failure."""
+
+    async def test_synthesis_fallback_on_llm_error(self, tmp_path):
+        class _SynthesisBoomClient(_FakeClient):
+            async def complete(self, messages, tools=None, response_format=None):
+                text = " ".join(m.get("content", "") for m in messages)
+                if "synthesizing a cited research report" in text:
+                    raise RuntimeError("LLM down")
+                return await super().complete(messages, tools, response_format)
+
+        orch = _orch(
+            _SynthesisBoomClient(coverage_score=0.95),
+            {"max_depth": 1, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Research Python")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete
+        # Fallback: the report is the raw format_for_synthesis() output (numbered findings),
+        # NOT a crash. The findings contain the node_answer text.
+        assert "Found: the topic is X and Y" in complete[0].final_answer
+
+
+class TestHigh6LoadLatestOrdering:
+    """HIGH-6: load_latest_research_context returns the most recent row by updated_at."""
+
+    def test_returns_latest_by_updated_at(self, tmp_path):
+        import time as _time
+
+        from koboi.orchestration.dag_scheduler import DagScheduler
+        from koboi.orchestration.research import ResearchContext
+
+        db_path = str(tmp_path / "ordering.db")
+        ctx_a = ResearchContext(query="query_A")
+        ctx_a.add_findings("nodeA", "finding A")
+        ctx_b = ResearchContext(query="query_B")
+        ctx_b.add_findings("nodeB", "finding B")
+
+        DagScheduler.persist_research_context(db_path, "run_A", ctx_a.to_json())
+        _time.sleep(0.02)  # ensure updated_at is strictly later
+        DagScheduler.persist_research_context(db_path, "run_B", ctx_b.to_json())
+
+        latest = DagScheduler.load_latest_research_context(db_path)
+        assert latest is not None
+        restored = ResearchContext.from_json(latest)
+        assert restored.query == "query_B"  # the later run, not the earlier
+
+    def test_returns_none_when_empty(self, tmp_path):
+        from koboi.orchestration.dag_scheduler import DagScheduler
+
+        assert DagScheduler.load_latest_research_context(str(tmp_path / "empty.db")) is None

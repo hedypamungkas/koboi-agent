@@ -1062,6 +1062,13 @@ class Orchestrator:
                 sandbox=self._sandbox,
             )
         }
+        yield RoutingDecisionEvent(
+            agents=["assistant"],
+            confidence=1.0,
+            method="dynamic",
+            reasoning="simple request",
+            domain_label=None,
+        )
         yield AgentDispatchEvent(agent_name="assistant", agent_index=0, total_agents=1, mode="deep_research")
         result = await self._run_single("assistant", query)
         yield AgentResultEvent(

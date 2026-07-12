@@ -1,8 +1,8 @@
 # Deep-research demo -- execution.mode: deep_research (W2).
 #
 # The agent plans a research workflow per query (plan -> search -> fetch -> assess
-# coverage -> drill deeper -> synthesize a cited report). Set web.search.provider to
-# brave/firecrawl (with an API key) for live research; the default mock runs offline.
+# coverage -> drill deeper -> synthesize a cited report). Set WEB_SEARCH_PROVIDER to
+# firecrawl/brave (with an API key in .env) for live research; the default mock runs offline.
 #
 # Run:   koboi run configs/deep_research_demo.yaml -m "Research solid-state battery breakthroughs in 2026."
 
@@ -19,20 +19,31 @@ orchestration:
 
 research:
   max_depth: 3              # coverage-gated replan rounds
-  max_searches: 15
-  max_fetches: 20
+  max_searches: 30          # total across all depth rounds (complex topics need more)
+  max_fetches: 40
   coverage_threshold: 0.7   # stop iterating once coverage >= this
   citations: numbered
+  persist_findings: ./research_findings.jsonl   # W3: dump findings for later corpus reuse
 
 web:
   search:
     provider: ${WEB_SEARCH_PROVIDER:mock}
+    max_results: 8
+    # firecrawl:
+    #   api_key: ${FIRECRAWL_API_KEY:}
+    #   scrape_results: true   # search+fetch fusion (embed markdown into each result)
     # brave:
     #   api_key: ${BRAVE_API_KEY:}
+    #   country: "US"
+  fetch:
+    provider: ${WEB_FETCH_PROVIDER:httpx}   # httpx (readability, default) or firecrawl (JS rendering)
+    # firecrawl:
+    #   api_key: ${FIRECRAWL_API_KEY:}
+    #   only_main_content: true
 
 llm:
   provider: openai
-  model: ${OPENAI_MODEL:gpt-4o-mini}
+  model: ${OPENAI_MODEL:gpt-5.4}
   api_key: ${OPENAI_API_KEY:}
   base_url: ${OPENAI_BASE_URL:}
 

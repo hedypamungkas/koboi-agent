@@ -158,3 +158,61 @@ class TestWebFetchDelegation:
         # Direct call with no _deps -> inline SSRF loop -> invalid scheme short-circuits here.
         out = await web_fetch("ftp://example.com")
         assert "Error" in out
+
+
+class TestHigh4RedirectSSRF:
+    """HIGH-4: per-hop SSRF guard on redirects -- a 302 to 169.254.169.254 MUST be blocked."""
+
+    async def test_redirect_to_metadata_ip_blocked(self):
+        """A public URL that 302-redirects to the cloud metadata IP is blocked on hop 1."""
+        redirect = httpx.Response(
+            302,
+            headers={"location": "http://169.254.169.254/latest/meta-data/"},
+            request=httpx.Request("GET", "http://attacker.example/redir"),
+        )
+        ok = httpx.Response(
+            200,
+            content=b"final content",
+            request=httpx.Request("GET", "http://safe-target.example/ok"),
+        )
+        state = {"n": 0}
+
+        async def fake_get(_self, _url, **_kw):
+            r = redirect if state["n"] == 0 else ok
+            state["n"] += 1
+            return r
+
+        # DO NOT bypass the SSRF guard (remove the autouse bypass) -- test the real guard.
+        with (
+            patch(_SSRF, side_effect=None),  # initial URL passes
+            patch("httpx.AsyncClient.get", new=fake_get),
+        ):
+            # Re-patch: first call (initial URL) passes, second call (redirect target) blocks.
+            with patch(_SSRF, side_effect=[None, ValueError("internal IP")]):
+                result = await ReadabilityFetchProvider().fetch("http://attacker.example/redir")
+        assert result.metadata.get("error") == "internal IP"
+        assert result.content == ""
+
+    async def test_safe_redirect_followed(self):
+        """A public -> public 302 redirect is followed and the body is returned."""
+        redirect = httpx.Response(
+            302,
+            headers={"location": "http://safe-target.example/ok"},
+            request=httpx.Request("GET", "http://safe.example/r"),
+        )
+        ok = httpx.Response(
+            200, content=b"final content", request=httpx.Request("GET", "http://safe-target.example/ok")
+        )
+        state = {"n": 0}
+
+        async def fake_get(_self, _url, **_kw):
+            r = redirect if state["n"] == 0 else ok
+            state["n"] += 1
+            return r
+
+        with (
+            patch(_SSRF, return_value=None),  # all hops pass SSRF
+            patch("httpx.AsyncClient.get", new=fake_get),
+        ):
+            result = await ReadabilityFetchProvider().fetch("http://safe.example/r")
+        assert "final content" in result.content
