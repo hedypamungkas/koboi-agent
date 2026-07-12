@@ -76,3 +76,5 @@ docs/eve-impact-effort-analysis.md
 data/ir_corpus/
 # Indonesian validation corpus (translated MS MARCO subset; derived, regenerable via the ID build script)
 data/id_corpus/
+# EN@80 ablation corpus (derived subset of ir_corpus; regenerable via the EN@80 script)
+data/en80_corpus/

@@ -408,6 +408,16 @@ retrieval on a random 80-passage subset (same queries). If EN@80 ≈ ID's number
 confound is confirmed **without building any new corpus** (deterministic, cheap). This is the
 single highest-ROI measurement to validate the whole per-language interpretation.
 
+**✅ Step 1 DONE — density confound CONFIRMED (EN@80 ablation, 2026-07-12).** Ran the 20 ORIGINAL
+EN queries + BM25/rerank over the EXACT same 80 pids as the ID corpus (only difference = language;
+density held at 1-in-80). Result: **EN@80 ≈ ID@8**0 — recall 0.950/1.000, precision@1 **0.900/0.850**,
+MRR 0.917/0.912, nDCG 0.925/0.935. EN gets the same high numbers at the same density → the high ID
+numbers are **density-driven, not language-driven**. Decisive: **EN precision@1 = 0.900 at 1-in-80
+but 0.469 at 1-in-2987** (same model, same language, only corpus density) → ID's true precision@1
+at production scale ≈ **0.47** (EN's level), not 0.85. And at equal density EN≈ID → the multilingual
+model has **no ID-specific retrieval penalty** (good for the platform claim). Implication: a
+scale-matched ID corpus (Step 3) is required for ID's true numbers; expect ID ≈ EN (~0.47 p1).
+
 **Target reframe:** precision@1 ≥0.50 sits ABOVE the measured multilingual ceiling (~0.48) and is
 reachable only with an English-specialized model — so for a multilingual platform the gate
 **structurally penalizes the multilingual choice**. The language-appropriate production target is
