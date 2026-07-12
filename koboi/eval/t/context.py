@@ -190,7 +190,9 @@ class TestContext:
         self._record(
             "live_skip",
             Severity.SOFT,
-            lambda e=extra: AssertionOutcome(True, 1.0, f"skipped: needs live LLM + [{e}] (run via eval-ragas-nightly)"),
+            lambda e=extra: AssertionOutcome(
+                True, 1.0, f"skipped: needs live LLM + [{e}] (run via eval-ragas-nightly)"
+            ),
         )
         return False
 

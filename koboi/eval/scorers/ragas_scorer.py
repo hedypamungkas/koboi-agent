@@ -39,6 +39,7 @@ def _apply_langchain_community_shim() -> None:
 
     try:
         import langchain_community.chat_models.vertexai  # type: ignore[import-not-found]  # noqa: F401
+
         return
     except Exception:
         pass  # nosec B110 - intentional: detecting the missing import decides whether to shim
@@ -415,9 +416,7 @@ class RAGASCompositeScorer(BaseScorer):
                     scores[name] = None
 
             weighted = _composite_weighted(self.weights, scores)
-            details = ", ".join(
-                f"{m}={'None' if v is None else f'{v:.2f}'}" for m, v in scores.items()
-            )
+            details = ", ".join(f"{m}={'None' if v is None else f'{v:.2f}'}" for m, v in scores.items())
 
             return EvalScore("ragas_composite", round(weighted, 3), details)
 

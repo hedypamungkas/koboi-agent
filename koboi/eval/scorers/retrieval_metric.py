@@ -130,7 +130,9 @@ class RetrievalMetricScorer(BaseScorer):
         if not retrieved:
             return EvalScore(name, 0.0, f"no rag_results in context ({len(rag)} chunks)")
         value = compute_ranking_metric(self.metric, retrieved, gold, self.k)
-        reason = f"{self.metric}@{self.k}={value:.3f} over {len(retrieved)} chunks, {len(_needles(gold))} gold needle(s)"
+        reason = (
+            f"{self.metric}@{self.k}={value:.3f} over {len(retrieved)} chunks, {len(_needles(gold))} gold needle(s)"
+        )
         return EvalScore(name, round(value, 3), reason)
 
 
