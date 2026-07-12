@@ -178,6 +178,17 @@ class TestRunner:
             # only the LLM transport. AgentCore.client is a public attribute
             # (loop.py), so this stays off the hot path and off private API.
             agent = self._build_live_agent(cfg)
+            # W6.1: orchestration configs (deep_research) have core=None but orchestrator set.
+            # Swap the orchestrator's LLM client with a content-dispatching mock (not ScriptedClient,
+            # which is sequential and can't handle deep_research's variable call sequence).
+            if agent.orchestrator is not None:
+                mock_client = getattr(test, "mock_client", None)
+                if mock_client is None:
+                    from koboi.eval.t.mock import DispatchingClient, deep_research_dispatch
+
+                    mock_client = DispatchingClient(deep_research_dispatch())
+                agent.orchestrator.client = mock_client
+                return agent
             if agent.core is None:
                 # Orchestration configs build a KoboiAgent with _core=None
                 # (facade._build_orchestration); the client swap below is then

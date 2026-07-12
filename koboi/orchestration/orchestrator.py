@@ -984,6 +984,7 @@ class Orchestrator:
             routing_confidence=1.0,
             metadata={
                 "research_sources": ctx.source_store.sources_list(),
+                "research_sources_with_text": ctx.source_store.sources_with_text(),
                 "coverage": score,
                 "depth": ctx.depth,
                 "run_id": run_id,

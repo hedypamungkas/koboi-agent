@@ -182,6 +182,12 @@ class SourceStore:
     def sources_list(self) -> list[dict]:
         return [{"citation_id": s.citation_id, "node_id": s.node_id} for s in self._sources]
 
+    def sources_with_text(self) -> list[dict]:
+        """Like :meth:`sources_list` but includes the source ``text`` — for RAGAS faithfulness
+        (the scorer needs source TEXT as context, not just citation ids). Mirrors the
+        ``to_corpus_file`` serialization shape."""
+        return [{"citation_id": s.citation_id, "node_id": s.node_id, "text": s.text} for s in self._sources]
+
     def to_corpus_file(self, path: str) -> None:
         """Write findings as jsonl (``{citation_id, node_id, text}`` per row) for later reuse.
 

@@ -631,4 +631,8 @@ class TestContext:
             if rag:
                 context["rag_results"] = rag
                 context["rag_augmented"] = True
+            # W6.1: surface deep_research sources (with text) for faithfulness scoring.
+            sources = (self._turns[-1].metadata or {}).get("research_sources_with_text", [])
+            if sources:
+                context["research_sources"] = sources
         return context
