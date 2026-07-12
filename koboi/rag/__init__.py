@@ -24,6 +24,14 @@ from koboi.rag.augmentation import (
     OnTheFlyAugmentation,
     RerankerRetriever,
 )
+from koboi.rag.rerank import (
+    RerankBackend,
+    JinaRerankBackend,
+    CohereRerankBackend,
+    LocalBGERerankBackend,
+    CrossEncoderReranker,
+    build_rerank_client,
+)
 from koboi.rag.registry import (
     ComponentRegistry,
     ComponentEntry,
@@ -71,6 +79,13 @@ __all__ = [
     "InMemoryAugmentation",
     "OnTheFlyAugmentation",
     "RerankerRetriever",
+    # Cross-encoder rerank (jina/cohere/local-bge)
+    "RerankBackend",
+    "JinaRerankBackend",
+    "CohereRerankBackend",
+    "LocalBGERerankBackend",
+    "CrossEncoderReranker",
+    "build_rerank_client",
     # Registry
     "ComponentRegistry",
     "ComponentEntry",

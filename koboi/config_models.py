@@ -129,8 +129,10 @@ class RagConfig(BaseModel):
     top_k: int = Field(default=3, ge=1)
     augmentation: str = "on_the_fly"
     documents: list[str | dict] = Field(default_factory=list)
-    # #11a: wrap the chosen retriever in the lightweight RerankerRetriever.
-    rerank: bool = False
+    # #11a: rerank stage. ``True`` (legacy) wraps the retriever in the lightweight
+    # heuristic RerankerRetriever; a DICT selects a true cross-encoder backend, e.g.
+    # ``{provider: jina|cohere|local, api_key, model, ...}`` (see koboi/rag/rerank.py).
+    rerank: bool | dict = False
     # #5: opt-in on-disk embedding cache (JSON) so restarts don't re-embed the corpus.
     embedding_cache_path: str | None = None
     # #1: opt-in on-disk cache for fetched remote documents (avoids re-fetch per session).
