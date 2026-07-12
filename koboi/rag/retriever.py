@@ -7,6 +7,8 @@ import math
 import re
 from abc import ABC, abstractmethod
 from collections import Counter
+from collections.abc import Callable
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from koboi.rag.types import Chunk, RetrievalResult
@@ -30,16 +32,68 @@ _STOPWORDS: frozenset[str] = frozenset(
     """.split()
 )
 
+# Compact Indonesian stopword set (~80 high-frequency function words). Opt-in via
+# ``rag.stopwords: id``. Indonesian function words (yang/dan/di/ke/untuk/...) otherwise
+# dominate BM25/TF-IDF scores at corpus scale and produce spurious matches -- invisible on
+# small corpora but distorts IDF on a production-scale ID corpus. Default off.
+_STOPWORDS_ID: frozenset[str] = frozenset(
+    """
+    yang dan di ke dari pada untuk dengan dalam atau juga karena maka jika kalau agar
+    supaya sehingga tetapi tapi namun oleh ada adalah akan bisa dapat sudah telah saya
+    aku kami kita kamu anda ia dia mereka ini itu tersebut satu sebuah seorang setiap
+    beberapa banyak lebih sedikit sangat paling hanya masih belum tidak bukan tanpa
+    tentang antara hingga sampai bagi sama menjadi sebagai saat ketika waktu tahun hari
+    orang nya lah kah pun per para ada atas saya anda
+    """.split()
+)
 
-def _normalize_stopwords(stopwords: bool | set[str] | frozenset[str] | None) -> set[str] | None:
-    """Resolve the ``stopwords`` arg to a set (or None = no filtering)."""
-    if stopwords is None:
+
+def _normalize_stopwords(stopwords: bool | set[str] | frozenset[str] | str | None) -> set[str] | None:
+    """Resolve the ``stopwords`` arg to a set (or None = no filtering).
+
+    Accepts: ``True`` (English, back-compat), ``"en"``/``"id"`` (language sets),
+    a custom ``set``/``frozenset``, or ``None``/``False`` (off).
+    """
+    if stopwords is None or stopwords is False:
         return None
     if stopwords is True:
         return set(_STOPWORDS)
-    if stopwords is False:
-        return None
+    if stopwords == "en":
+        return set(_STOPWORDS)
+    if stopwords == "id":
+        return set(_STOPWORDS_ID)
     return {str(w).lower() for w in stopwords}
+
+
+def _normalize_stemmer(stemmer: str | bool | None) -> Callable[[str], str] | None:
+    """Resolve a ``stemmer`` spec to a cached stem function (or None = no stemming).
+
+    Currently supports ``"id"`` (Indonesian, via the optional ``[indo-nlp]`` extra / Sastrawi),
+    which normalizes morphology (meN-, ber-, -kan, -i, -an) so inflected forms match their
+    root. Applied to BOTH index and query tokens (consistent). Falls back to None (no stemming)
+    with a warning if the extra is absent, so retrieval never breaks. Default off.
+    """
+    if stemmer is None or stemmer is False:
+        return None
+    if stemmer == "id":
+        try:
+            from Sastrawi.Stemmer.StemmerFactory import StemmerFactory  # optional [indo-nlp] extra
+        except ImportError:
+            _logger.warning(
+                "rag.stemmer 'id' needs the [indo-nlp] extra (Sastrawi): "
+                "pip install 'koboi-agent[indo-nlp]'. Skipping stemming."
+            )
+            return None
+
+        sastrawi = StemmerFactory().create_stemmer()
+
+        @lru_cache(maxsize=200_000)
+        def _stem(word: str) -> str:
+            return sastrawi.stem(word)
+
+        return _stem
+    _logger.warning("Unknown stemmer %r; skipping. Supported: 'id'.", stemmer)
+    return None
 
 
 def resolve_retriever(config: dict, chunks: list[Chunk], client: LLMClient | None = None) -> BaseRetriever:
@@ -89,7 +143,8 @@ class KeywordRetriever(BaseRetriever):
         self,
         chunks: list[Chunk],
         synonyms: dict[str, list[str]] | None = None,
-        stopwords: bool | set[str] | frozenset[str] | None = None,
+        stopwords: bool | set[str] | frozenset[str] | str | None = None,
+        stemmer: str | bool | None = None,
     ):
         self._chunks = chunks
         # Optional lexical-bridge map (e.g. {"dog": ["pet"]}) applied to the
@@ -99,10 +154,15 @@ class KeywordRetriever(BaseRetriever):
         # replace -- semantic retrieval, which is the general fix but needs an
         # embedding endpoint.
         self._synonyms: dict[str, list[str]] = {k.lower(): v for k, v in (synonyms or {}).items()}
-        # Optional stopword filter (opt-in via ``rag.stopwords: true`` or a custom set).
-        # Applied to BOTH index and query tokens so common function words ("the"/"of")
-        # stop producing spurious matches on out-of-scope queries. None = off (default).
+        # Optional stopword filter (opt-in via ``rag.stopwords: true``/``"en"``/``"id"`` or
+        # a custom set). Applied to BOTH index and query tokens so common function words
+        # ("the"/"of"/"yang"/"dan") stop producing spurious matches on out-of-scope queries.
+        # None = off (default).
         self._stopwords: set[str] | None = _normalize_stopwords(stopwords)
+        # Optional morphological stemmer (opt-in via ``rag.stemmer: id``); normalizes
+        # inflected forms to their root on BOTH index and query. Currently Indonesian
+        # (Sastrawi, the [indo-nlp] extra). None = off (default).
+        self._stemmer: Callable[[str], str] | None = _normalize_stemmer(stemmer)
         self._tfidf_index: dict[str, dict[str, float]] = {}
         self._idf: dict[str, float] = {}
         self._build_index()
@@ -111,6 +171,8 @@ class KeywordRetriever(BaseRetriever):
         tokens = re.findall(r"\w+", text.lower())
         if self._stopwords:
             tokens = [t for t in tokens if t not in self._stopwords]
+        if self._stemmer:
+            tokens = [self._stemmer(t) for t in tokens]
         return tokens
 
     def _build_index(self) -> None:
@@ -190,13 +252,15 @@ class BM25Retriever(BaseRetriever):
         k1: float = 1.5,
         b: float = 0.75,
         synonyms: dict[str, list[str]] | None = None,
-        stopwords: bool | set[str] | frozenset[str] | None = None,
+        stopwords: bool | set[str] | frozenset[str] | str | None = None,
+        stemmer: str | bool | None = None,
     ):
         self._chunks = chunks
         self._k1 = k1
         self._b = b
         self._synonyms = {k.lower(): v for k, v in (synonyms or {}).items()}
         self._stopwords: set[str] | None = _normalize_stopwords(stopwords)
+        self._stemmer: Callable[[str], str] | None = _normalize_stemmer(stemmer)
         self._doc_tokens = [self._tokenize(c.content) for c in chunks]
         self._doc_len = [len(t) for t in self._doc_tokens]
         self._avgdl = (sum(self._doc_len) / len(self._doc_len)) if self._doc_len else 0.0
@@ -215,6 +279,8 @@ class BM25Retriever(BaseRetriever):
         tokens = re.findall(r"\w+", text.lower())
         if self._stopwords:
             tokens = [t for t in tokens if t not in self._stopwords]
+        if self._stemmer:
+            tokens = [self._stemmer(t) for t in tokens]
         return tokens
 
     async def retrieve(self, query: str, top_k: int = 3, metadata_filter: dict | None = None) -> list[RetrievalResult]:
