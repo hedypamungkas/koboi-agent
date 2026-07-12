@@ -1,0 +1,1031 @@
+{
+  "_comment": "NATIVE Indonesian RAG eval qrels from TyDi QA (secondary_task, id) -- natively collected by Indonesian speakers (NOT translated). Built by scripts/build_id_native_corpus.py. Apache-2.0. License-light: query/answer/gold-id/snippet only. gold_doc is the data/id_native_corpus/<pid>.txt chunk doc_id.",
+  "corpus_dir": "data/id_native_corpus",
+  "source": "google-research-datasets/tydiqa#secondary_task language=indonesian",
+  "qrels": [
+    {
+      "query": "Kapan Perang Boshin dimulai ?",
+      "gold_doc": "p6831c02e8065",
+      "gold_needles": [
+        "1868"
+      ],
+      "expected_answer": "1868"
+    },
+    {
+      "query": "Apa maksud kata shogun?",
+      "gold_doc": "p2af0dc49983a",
+      "gold_needles": [
+        "jenderal"
+      ],
+      "expected_answer": "jenderal"
+    },
+    {
+      "query": "Kapankah hari pancasila diperingati ?",
+      "gold_doc": "pa96be6947beb",
+      "gold_needles": [
+        "1 Juni"
+      ],
+      "expected_answer": "1 Juni"
+    },
+    {
+      "query": "Berapa luas Samudera Pasifik?",
+      "gold_doc": "pedcb322a38f0",
+      "gold_needles": [
+        "179,7 juta km²"
+      ],
+      "expected_answer": "179,7 juta km²"
+    },
+    {
+      "query": "apakah nama mata uang jerman?",
+      "gold_doc": "p8c63094c02c5",
+      "gold_needles": [
+        "euro"
+      ],
+      "expected_answer": "euro"
+    },
+    {
+      "query": "suku arab manakah yang pertama kali datang ke indonesia?",
+      "gold_doc": "p62be19d39598",
+      "gold_needles": [
+        "Orang Hadhrami"
+      ],
+      "expected_answer": "Orang Hadhrami"
+    },
+    {
+      "query": "berapakah laus pulau jawa?",
+      "gold_doc": "p0917a33e6d13",
+      "gold_needles": [
+        "138.793,6 km2"
+      ],
+      "expected_answer": "138.793,6 km2"
+    },
+    {
+      "query": "mengapa kultur dan manusia tak dapat dipisahkan?",
+      "gold_doc": "p7b71cd1923cd",
+      "gold_needles": [
+        "Setiap tindakan manusia pasti bermuatan kultural dan setiap kultural merupakan"
+      ],
+      "expected_answer": "Setiap tindakan manusia pasti bermuatan kultural dan setiap kultural merupakan hasil tindakan manusia"
+    },
+    {
+      "query": "Kapan Italia menjadi negara Republik ?",
+      "gold_doc": "p94158d9b3d20",
+      "gold_needles": [
+        "2 Juni 1946"
+      ],
+      "expected_answer": "2 Juni 1946"
+    },
+    {
+      "query": "Kapan Zaman Keemasan Islam berakhir?",
+      "gold_doc": "p468b8a0587d7",
+      "gold_needles": [
+        "1258 M"
+      ],
+      "expected_answer": "1258 M"
+    },
+    {
+      "query": "dimanakah Fiber optik pertama kali diciptakan?",
+      "gold_doc": "p643e99eacc49",
+      "gold_needles": [
+        "1970"
+      ],
+      "expected_answer": "1970"
+    },
+    {
+      "query": "kapankah dinosaurus punah?",
+      "gold_doc": "p26e2f74ca5d4",
+      "gold_needles": [
+        "sebelum Era Mesozoikum"
+      ],
+      "expected_answer": "sebelum Era Mesozoikum"
+    },
+    {
+      "query": "Apakah nama ilmiah pohon mangga?",
+      "gold_doc": "p8cae03e6a7f8",
+      "gold_needles": [
+        "Mangifera indica"
+      ],
+      "expected_answer": "Mangifera indica"
+    },
+    {
+      "query": "Berapa ketinggian Burj Khalifa?",
+      "gold_doc": "pc102e7729d36",
+      "gold_needles": [
+        "828 meter"
+      ],
+      "expected_answer": "828 meter"
+    },
+    {
+      "query": "Kapankah manga muncul pertama di Jepang ?",
+      "gold_doc": "pc0bbef0c04aa",
+      "gold_needles": [
+        "abad ke-19"
+      ],
+      "expected_answer": "abad ke-19"
+    },
+    {
+      "query": "Berapakah jumlah provinsi di Sulawesi ?",
+      "gold_doc": "p29a84e70987c",
+      "gold_needles": [
+        "enam"
+      ],
+      "expected_answer": "enam"
+    },
+    {
+      "query": "siapakah pencipta Kamen Rider?",
+      "gold_doc": "pfe2a28054143",
+      "gold_needles": [
+        "Shotaro Ishinomori"
+      ],
+      "expected_answer": "Shotaro Ishinomori"
+    },
+    {
+      "query": "Siapa pemenang SUCI 1 ?",
+      "gold_doc": "pbe33d02ecc75",
+      "gold_needles": [
+        "Ryan"
+      ],
+      "expected_answer": "Ryan"
+    },
+    {
+      "query": "dimanakah letak Nigeria?",
+      "gold_doc": "pa77a33ae758a",
+      "gold_needles": [
+        "Afrika Barat"
+      ],
+      "expected_answer": "Afrika Barat"
+    },
+    {
+      "query": "Dimanakah letak Iwo Jima?",
+      "gold_doc": "pea2e5d6187ac",
+      "gold_needles": [
+        "Jepang, bagian dari Kepulauan Ogasawara"
+      ],
+      "expected_answer": "Jepang, bagian dari Kepulauan Ogasawara"
+    },
+    {
+      "query": "dimanakah Fadli Zon dilahirkan?",
+      "gold_doc": "p7c8cd98518b5",
+      "gold_needles": [
+        "Jakarta"
+      ],
+      "expected_answer": "Jakarta"
+    },
+    {
+      "query": "Apa nama video game pertama di dunia ?",
+      "gold_doc": "pf81b5f8c6089",
+      "gold_needles": [
+        "OXO"
+      ],
+      "expected_answer": "OXO"
+    },
+    {
+      "query": "Kapan televisi pertama kali masuk ke Indonesia?",
+      "gold_doc": "pab4847ab4d78",
+      "gold_needles": [
+        "saat Pameran Perayaan 200 tahun Kota Yogyakarta"
+      ],
+      "expected_answer": "saat Pameran Perayaan 200 tahun Kota Yogyakarta"
+    },
+    {
+      "query": "Siapa arsitek Memorial Lincoln?",
+      "gold_doc": "pe04d5c28d8a7",
+      "gold_needles": [
+        "Henry Bacon"
+      ],
+      "expected_answer": "Henry Bacon"
+    },
+    {
+      "query": "Pada umur berapa Muhammad SAW diangkat menjadi nabi?",
+      "gold_doc": "p486cddea987a",
+      "gold_needles": [
+        "40"
+      ],
+      "expected_answer": "40"
+    },
+    {
+      "query": "Apakah yang dimaksud dengan organisasi non pemerintah?",
+      "gold_doc": "p0f32125abb6f",
+      "gold_needles": [
+        "sebuah organisasi yang didirikan oleh perorangan ataupun sekelompok orang yang"
+      ],
+      "expected_answer": "sebuah organisasi yang didirikan oleh perorangan ataupun sekelompok orang yang secara sukarela yang memberikan pelayanan kepada masyarakat umum tanpa bertujuan untuk memperoleh keuntungan dari kegiatannya"
+    },
+    {
+      "query": "Dimana menara Eiffel  terletak ?",
+      "gold_doc": "p2b2a45e8b5c2",
+      "gold_needles": [
+        "tepi Sungai Seine di Paris"
+      ],
+      "expected_answer": "tepi Sungai Seine di Paris"
+    },
+    {
+      "query": "berapakah kode telepon Lithuania?",
+      "gold_doc": "pbf3c3aa5fdc7",
+      "gold_needles": [
+        "452"
+      ],
+      "expected_answer": "452"
+    },
+    {
+      "query": "Dimana ajang NASCAR pertama kali diadakan ?",
+      "gold_doc": "peb9e0d481c45",
+      "gold_needles": [
+        "Charlotte Speedway"
+      ],
+      "expected_answer": "Charlotte Speedway"
+    },
+    {
+      "query": "Apa nama ibukota Argentina?",
+      "gold_doc": "p78d1aafe6709",
+      "gold_needles": [
+        "Buenos Aires"
+      ],
+      "expected_answer": "Buenos Aires"
+    },
+    {
+      "query": "siapakah pendiri lembaga survei Indonesia?",
+      "gold_doc": "p2d7b28a63fd0",
+      "gold_needles": [
+        "YAYASAN PENGEMBANGAN DEMOKRASI INDONESIA"
+      ],
+      "expected_answer": "YAYASAN PENGEMBANGAN DEMOKRASI INDONESIA"
+    },
+    {
+      "query": "Siapa raja pertama Kekaisaran Persia?",
+      "gold_doc": "p4aa2856480f8",
+      "gold_needles": [
+        "Koresh Agung"
+      ],
+      "expected_answer": "Koresh Agung"
+    },
+    {
+      "query": "Kapan Serbuan Yuan-Mongol ke Jawa terjadi?",
+      "gold_doc": "p1614932918a8",
+      "gold_needles": [
+        "1293"
+      ],
+      "expected_answer": "1293"
+    },
+    {
+      "query": "Apa agama mayoritas penduduk Tiongkok ?",
+      "gold_doc": "p5c886ccc3708",
+      "gold_needles": [
+        "Konghucu dan Tao, ditambah Buddha"
+      ],
+      "expected_answer": "Konghucu dan Tao, ditambah Buddha"
+    },
+    {
+      "query": "ada berapakah jumlah Planet kebumian yang telah ditemukan?",
+      "gold_doc": "pc14df8548316",
+      "gold_needles": [
+        "empat"
+      ],
+      "expected_answer": "empat"
+    },
+    {
+      "query": "Siapa nama arsitek Stade Roland Garros ?",
+      "gold_doc": "p83b63189f328",
+      "gold_needles": [
+        "Bruno Moinard"
+      ],
+      "expected_answer": "Bruno Moinard"
+    },
+    {
+      "query": "siapakah karakter utama dalam Avatar: The Legend of aang?",
+      "gold_doc": "pdd6c22415a33",
+      "gold_needles": [
+        "Aang"
+      ],
+      "expected_answer": "Aang"
+    },
+    {
+      "query": "Kapan Antonie Aris van de Loosdrecht masuk ke Indonesia ?",
+      "gold_doc": "p6b37dee6003b",
+      "gold_needles": [
+        "1913"
+      ],
+      "expected_answer": "1913"
+    },
+    {
+      "query": "Berapakah suhu rata-rata kota Bandung ?",
+      "gold_doc": "p678616332a74",
+      "gold_needles": [
+        "23.5°C"
+      ],
+      "expected_answer": "23.5°C"
+    },
+    {
+      "query": "Kapan Johann Friedrich Blumenbach lahir ?",
+      "gold_doc": "pd95c8c732a08",
+      "gold_needles": [
+        "11 Mei 1752"
+      ],
+      "expected_answer": "11 Mei 1752"
+    },
+    {
+      "query": "Apa nama album pertama Justin Timberlake ?",
+      "gold_doc": "p1b8243ec3d5c",
+      "gold_needles": [
+        "Justified"
+      ],
+      "expected_answer": "Justified"
+    },
+    {
+      "query": "Siap raja pertama Kesultanan Serdang?",
+      "gold_doc": "p46abbc72d384",
+      "gold_needles": [
+        "Tuanku Umar"
+      ],
+      "expected_answer": "Tuanku Umar"
+    },
+    {
+      "query": "siapakah ibu Utsman bin Affan?",
+      "gold_doc": "pa5331f8a9452",
+      "gold_needles": [
+        "Arwa binti Kurayz"
+      ],
+      "expected_answer": "Arwa binti Kurayz"
+    },
+    {
+      "query": "Kapan Dion Momongan lahir ?",
+      "gold_doc": "p8435db81991e",
+      "gold_needles": [
+        "29 Oktober"
+      ],
+      "expected_answer": "29 Oktober"
+    },
+    {
+      "query": "Kapan Formula 1 pertama kali diselenggarakan ?",
+      "gold_doc": "p324dee834b75",
+      "gold_needles": [
+        "1950"
+      ],
+      "expected_answer": "1950"
+    },
+    {
+      "query": "berapakah luas Pulau Jawa?",
+      "gold_doc": "pb1087cb4138f",
+      "gold_needles": [
+        "160 juta"
+      ],
+      "expected_answer": "160 juta"
+    },
+    {
+      "query": "Ada berapa serial komik Detektif Conan?",
+      "gold_doc": "pd1cb6b2c7d60",
+      "gold_needles": [
+        "1006"
+      ],
+      "expected_answer": "1006"
+    },
+    {
+      "query": "Apa yang dimaksud depresi ?",
+      "gold_doc": "pfc8190e5c3ce",
+      "gold_needles": [
+        "kondisi medis berupa perasaan sedih yang berdampak negatif terhadap pikiran,"
+      ],
+      "expected_answer": "kondisi medis berupa perasaan sedih yang berdampak negatif terhadap pikiran, tindakan, perasaan, dan kesehatan mental seseorang"
+    },
+    {
+      "query": "Berapa luas negara Denmark ?",
+      "gold_doc": "p16560df353a2",
+      "gold_needles": [
+        "43.094km2"
+      ],
+      "expected_answer": "43.094km2"
+    },
+    {
+      "query": "Siapa raja pertama kerajaan Banjar ?",
+      "gold_doc": "p599afeb4a267",
+      "gold_needles": [
+        "Pangeran Samudra"
+      ],
+      "expected_answer": "Pangeran Samudra"
+    },
+    {
+      "query": "berapakah luas negara Jerman ?",
+      "gold_doc": "p1786be044812",
+      "gold_needles": [
+        "357.021 kilometer persegi"
+      ],
+      "expected_answer": "357.021 kilometer persegi"
+    },
+    {
+      "query": "Apakah bunyi hukum penawaran dalam ilmu ekonomi?",
+      "gold_doc": "p1c876ec04a79",
+      "gold_needles": [
+        "\"Semakin tinggi harga, semakin banyak jumlah barang yang bersedia ditawarkan."
+      ],
+      "expected_answer": "\"Semakin tinggi harga, semakin banyak jumlah barang yang bersedia ditawarkan. Sebaliknya, semakin rendah tingkat harga, semakin sedikit jumlah barang yang bersedia ditawarka"
+    },
+    {
+      "query": "siapakah pendiri Naughty Dog?",
+      "gold_doc": "p6a2b69de18b1",
+      "gold_needles": [
+        "Andy Gavin dan Jason Rubin"
+      ],
+      "expected_answer": "Andy Gavin dan Jason Rubin"
+    },
+    {
+      "query": "Tahun berapa Moritz Kaposi menemukan Sarkoma Kaposi?",
+      "gold_doc": "pcce8707d30d4",
+      "gold_needles": [
+        "1872"
+      ],
+      "expected_answer": "1872"
+    },
+    {
+      "query": "siapakah penggagas Teori kesempurnaan media?",
+      "gold_doc": "p9795d0b7119b",
+      "gold_needles": [
+        "Richard L. Daft dan Robert H. Lengel"
+      ],
+      "expected_answer": "Richard L. Daft dan Robert H. Lengel"
+    },
+    {
+      "query": "Dimana kantor pusat Walt Disney Animation Studios?",
+      "gold_doc": "pc22a49177713",
+      "gold_needles": [
+        "Burbank, California"
+      ],
+      "expected_answer": "Burbank, California"
+    },
+    {
+      "query": "Apakah yang dimaksud dengan radar?",
+      "gold_doc": "p820d06ebf153",
+      "gold_needles": [
+        "o) adalah suatu sistem gelombang elektromagnetik yang berguna untuk mendeteksi,"
+      ],
+      "expected_answer": "o) adalah suatu sistem gelombang elektromagnetik yang berguna untuk mendeteksi, mengukur jarak dan membuat map benda-benda seperti pesawat terbang, berbagai kendaraan bermotor dan informa"
+    },
+    {
+      "query": "Kapan Santo Petrus meninggal?",
+      "gold_doc": "p374d43306844",
+      "gold_needles": [
+        "tahun ke-14 kaisar Nero"
+      ],
+      "expected_answer": "tahun ke-14 kaisar Nero"
+    },
+    {
+      "query": "dimanakah  Al-Fadhil Al-Alim Syekh Haji Hasanuddin bin Muhammad Ma'shum dilahirkan?",
+      "gold_doc": "p96c643479a63",
+      "gold_needles": [
+        "Labuhan Deli, Sumatera"
+      ],
+      "expected_answer": "Labuhan Deli, Sumatera"
+    },
+    {
+      "query": "Dimana letak sungai Sungai Yordan?",
+      "gold_doc": "p5ead2a56c64e",
+      "gold_needles": [
+        "Asia Barat Daya yang berhulu di utara Israel dekat kibbutz"
+      ],
+      "expected_answer": "Asia Barat Daya yang berhulu di utara Israel dekat kibbutz Sede Nehemya dan mengalir lewat Laut Galilea ke Laut Mati"
+    },
+    {
+      "query": "Dimana Yu Qian meninggal?",
+      "gold_doc": "pcc42e5ff3018",
+      "gold_needles": [
+        "Hangzhou"
+      ],
+      "expected_answer": "Hangzhou"
+    },
+    {
+      "query": "Siapa yang mendirikan MIS Miftahul Jannah?",
+      "gold_doc": "pea30ce745a51",
+      "gold_needles": [
+        "H. Momon rusman, H. Entong Sadeli, H. Uuh Sumantri, Drs."
+      ],
+      "expected_answer": "H. Momon rusman, H. Entong Sadeli, H. Uuh Sumantri, Drs. H. Sutia Angga Dihardja, H. Enung Nursan (Mantan Lurah Cijantung), H. Endang Darwis, BA, Zambreto Tanjung, H.Amil, Prof. Dr.Ir. H.M. Amin Aziz, M.Sc., Drs. H. Aos Hasan Rosyid, KH.M.A. Badruddin dan beberapa tokoh masyarakat Cijantung lainya"
+    },
+    {
+      "query": "negara manakah yang melakukan Revolusi Industri pertama kali?",
+      "gold_doc": "pc13f500fb308",
+      "gold_needles": [
+        "Inggris"
+      ],
+      "expected_answer": "Inggris"
+    },
+    {
+      "query": "apa yang dimaksud dengan Etnografi ?",
+      "gold_doc": "p4ed5260a0211",
+      "gold_needles": [
+        "bidang penelitian ilmiah yang sering digunakan dalam ilmu sosial, terutama"
+      ],
+      "expected_answer": "bidang penelitian ilmiah yang sering digunakan dalam ilmu sosial, terutama dalam antropologi dan beberapa cabang sosiologi"
+    },
+    {
+      "query": "apakah definisi dari teknologi?",
+      "gold_doc": "pdff4b44b7671",
+      "gold_needles": [
+        "keseluruhan sarana untuk menyediakan barang-barang yang diperlukan bagi kelangsungan dan"
+      ],
+      "expected_answer": "keseluruhan sarana untuk menyediakan barang-barang yang diperlukan bagi kelangsungan dan kenyamanan hidup manusia"
+    },
+    {
+      "query": "Apa itu plasma nutfah?",
+      "gold_doc": "p3bb654c66945",
+      "gold_needles": [
+        "substansi pembawa sifat keturunan yang dapat berupa organ utuh atau"
+      ],
+      "expected_answer": "substansi pembawa sifat keturunan yang dapat berupa organ utuh atau bagian dari tumbuhan atau hewan serta jasad renik"
+    },
+    {
+      "query": "negara manakah yang memiliki pemeluk agama Yahudi terbesar kedua di dunia?",
+      "gold_doc": "p84d5f26e4f81",
+      "gold_needles": [
+        "Palestine"
+      ],
+      "expected_answer": "Palestine"
+    },
+    {
+      "query": "Kapan Salahuddin Ayyubi lahir ?",
+      "gold_doc": "p7ab5547f99af",
+      "gold_needles": [
+        "532 H"
+      ],
+      "expected_answer": "532 H"
+    },
+    {
+      "query": "Apakah bahaya cahaya laser pada mata?",
+      "gold_doc": "p4231581fe81c",
+      "gold_needles": [
+        "dapat mengakibatkan mata seseorang yang terkena mengalami kebutaan dalam sesaat"
+      ],
+      "expected_answer": "dapat mengakibatkan mata seseorang yang terkena mengalami kebutaan dalam sesaat atau tetap"
+    },
+    {
+      "query": "Kapan Afrahat meninggal?",
+      "gold_doc": "p928a4c08f959",
+      "gold_needles": [
+        "345"
+      ],
+      "expected_answer": "345"
+    },
+    {
+      "query": "Apa yang dimaksud dengan Prokariota ?",
+      "gold_doc": "pd44c04177d70",
+      "gold_needles": [
+        "makhluk hidup yang tidak memiliki membran inti sel (= karyon)"
+      ],
+      "expected_answer": "makhluk hidup yang tidak memiliki membran inti sel (= karyon)"
+    },
+    {
+      "query": "Kapan William Shakespeare mulai menulis naskah teater ?",
+      "gold_doc": "p216d93085713",
+      "gold_needles": [
+        "1585"
+      ],
+      "expected_answer": "1585"
+    },
+    {
+      "query": "Berapa kapasitas CD pertama ?",
+      "gold_doc": "p1cc2689c7f28",
+      "gold_needles": [
+        "CD berdiameter 120mm dapat memuat audio selama 80 menit atau"
+      ],
+      "expected_answer": "CD berdiameter 120mm dapat memuat audio selama 80 menit atau data sebesar 650-870 MB, sedangkan mini cd yang memiliki diameter mulai dari 60mm sampai dengan 80mm dapat memuat audio selama 24 menit atau data sebesar 185-210 MB"
+    },
+    {
+      "query": "Apa nama bandara di Kepulauan Bangka ?",
+      "gold_doc": "pfccd4499aba4",
+      "gold_needles": [
+        "Bandar Udara Internasional H.A.S. Hanandjoeddin"
+      ],
+      "expected_answer": "Bandar Udara Internasional H.A.S. Hanandjoeddin"
+    },
+    {
+      "query": "kapankah ilmu kimia dipelajari oleh manusia?",
+      "gold_doc": "p761e487fc0dd",
+      "gold_needles": [
+        "dahulu kala"
+      ],
+      "expected_answer": "dahulu kala"
+    },
+    {
+      "query": "Siapa pendiri Dinasti Tang?",
+      "gold_doc": "p56903e254f68",
+      "gold_needles": [
+        "keluarga Li"
+      ],
+      "expected_answer": "keluarga Li"
+    },
+    {
+      "query": "apakah agama mayoritas di Jepang ?",
+      "gold_doc": "pfd7c19e15261",
+      "gold_needles": [
+        "Shinto"
+      ],
+      "expected_answer": "Shinto"
+    },
+    {
+      "query": "Bagaimanakah sistem keturunan dalam budaya sunda ?",
+      "gold_doc": "p07f4a4dea40c",
+      "gold_needles": [
+        "garis keturunan ditarik dari pihak bapak dan ibu"
+      ],
+      "expected_answer": "garis keturunan ditarik dari pihak bapak dan ibu"
+    },
+    {
+      "query": "berapakah luas Baghdad?",
+      "gold_doc": "p1f27dcbb6322",
+      "gold_needles": [
+        "254 mil persegi"
+      ],
+      "expected_answer": "254 mil persegi"
+    },
+    {
+      "query": "diamanakah kantor pusat Google ?",
+      "gold_doc": "p209627f8fd68",
+      "gold_needles": [
+        "Mountain View, California"
+      ],
+      "expected_answer": "Mountain View, California"
+    },
+    {
+      "query": "Pada tahun berapa bangsa Eropa mulai masuk ke Indonesia?",
+      "gold_doc": "p67f8f364044a",
+      "gold_needles": [
+        "1453"
+      ],
+      "expected_answer": "1453"
+    },
+    {
+      "query": "Kapan Toei Animation berdiri ?",
+      "gold_doc": "p16e6342413aa",
+      "gold_needles": [
+        "1956"
+      ],
+      "expected_answer": "1956"
+    },
+    {
+      "query": "kapankah Singapura diresmikan menjadi negara?",
+      "gold_doc": "p2f9683b13a9f",
+      "gold_needles": [
+        "9 Agustus 1965"
+      ],
+      "expected_answer": "9 Agustus 1965"
+    },
+    {
+      "query": "Kapan buku komik Iron man dirilis?",
+      "gold_doc": "pd922559632de",
+      "gold_needles": [
+        "Maret 1963"
+      ],
+      "expected_answer": "Maret 1963"
+    },
+    {
+      "query": "Kapan SMK Negeri 9 dibangun ?",
+      "gold_doc": "p3c5854cdb98e",
+      "gold_needles": [
+        "3 April 1997"
+      ],
+      "expected_answer": "3 April 1997"
+    },
+    {
+      "query": "Kapan Jagatara Oharu lahir?",
+      "gold_doc": "pf528112ab33d",
+      "gold_needles": [
+        "1625"
+      ],
+      "expected_answer": "1625"
+    },
+    {
+      "query": "Dari daerah mana asal musik keroncong berasal ?",
+      "gold_doc": "p7054859de0b4",
+      "gold_needles": [
+        "Portugis"
+      ],
+      "expected_answer": "Portugis"
+    },
+    {
+      "query": "Siapa ketua Pers Mahasiswa Balairung Universitas Gadjah Mada yang pertama?",
+      "gold_doc": "p03959ca6bc13",
+      "gold_needles": [
+        "Aried Wicaksono"
+      ],
+      "expected_answer": "Aried Wicaksono"
+    },
+    {
+      "query": "Kapan Haile Selassie I menjadi kaisar Ethiopia?",
+      "gold_doc": "pdd9790340f1d",
+      "gold_needles": [
+        "1930"
+      ],
+      "expected_answer": "1930"
+    },
+    {
+      "query": "Kapan pembunuhan Ngô Đình Diệm terjadi ?",
+      "gold_doc": "p9c4c241916a9",
+      "gold_needles": [
+        "2 November 1963"
+      ],
+      "expected_answer": "2 November 1963"
+    },
+    {
+      "query": "Apa nama ilmiah dari kelapa ?",
+      "gold_doc": "pac42d803c7b3",
+      "gold_needles": [
+        "Cocos nucifera"
+      ],
+      "expected_answer": "Cocos nucifera"
+    },
+    {
+      "query": "Siapa juri Britain's Got Talent pertama ?",
+      "gold_doc": "pb3da96a5f77f",
+      "gold_needles": [
+        "Simon Cowell, Amanda Holden dan Piers Morgan. Kelly Brook"
+      ],
+      "expected_answer": "Simon Cowell, Amanda Holden dan Piers Morgan. Kelly Brook"
+    },
+    {
+      "query": "Berapa luas kecamatan Poso Kota Utara?",
+      "gold_doc": "pf790f7be90de",
+      "gold_needles": [
+        "20,04km2"
+      ],
+      "expected_answer": "20,04km2"
+    },
+    {
+      "query": "berapakah luas provinsi Jawa Tengah?",
+      "gold_doc": "p738f6c802b7f",
+      "gold_needles": [
+        "32.548km²"
+      ],
+      "expected_answer": "32.548km²"
+    },
+    {
+      "query": "Apakah nama tujuh kepala badan pengambil keputusan dari Uni Eropa?",
+      "gold_doc": "p7c1f889dcd33",
+      "gold_needles": [
+        "Parlemen Eropa, Dewan Eropa, Dewan Uni Eropa, Komisi Eropa, Pengadilan"
+      ],
+      "expected_answer": "Parlemen Eropa, Dewan Eropa, Dewan Uni Eropa, Komisi Eropa, Pengadilan Kehakiman Uni Eropa, Bank Sentral Eropa dan Pengadilan Auditor"
+    },
+    {
+      "query": "Dimana Kerusuhan Stonewall terjadi?",
+      "gold_doc": "p8fdca0e6d728",
+      "gold_needles": [
+        "Stonewall Inn, kawasan Greenwich Village, New York City"
+      ],
+      "expected_answer": "Stonewall Inn, kawasan Greenwich Village, New York City"
+    },
+    {
+      "query": "Dari manakah perusahaan Nissan Motors berasal ?",
+      "gold_doc": "p73d3c5198842",
+      "gold_needles": [
+        "Jepang"
+      ],
+      "expected_answer": "Jepang"
+    },
+    {
+      "query": "Apa nama tempat bersejarah yang paling terkenal di Jerman ?",
+      "gold_doc": "pef92eea75ea2",
+      "gold_needles": [
+        "Heidelberg"
+      ],
+      "expected_answer": "Heidelberg"
+    },
+    {
+      "query": "Di ketinggian berapa tumbuhan jambu keling bisa hidup ?",
+      "gold_doc": "p09246da9449c",
+      "gold_needles": [
+        "1800 mdpl"
+      ],
+      "expected_answer": "1800 mdpl"
+    },
+    {
+      "query": "Kapan Kompas berdiri?",
+      "gold_doc": "p156eb891ef22",
+      "gold_needles": [
+        "1965"
+      ],
+      "expected_answer": "1965"
+    },
+    {
+      "query": "Kapan internet pertama kali ditemukan ?",
+      "gold_doc": "p8ae8e3cf8e14",
+      "gold_needles": [
+        "1969"
+      ],
+      "expected_answer": "1969"
+    },
+    {
+      "query": "Siapa yang menyebarkan agama Children of God?",
+      "gold_doc": "pe835e97f5c8e",
+      "gold_needles": [
+        "Jesus Movement"
+      ],
+      "expected_answer": "Jesus Movement"
+    },
+    {
+      "query": "Kapan Dirgantara Air Service Penerbangan 3130 pertama kali terbang?",
+      "gold_doc": "p04d9f8f00fdb",
+      "gold_needles": [
+        "18 November 2000"
+      ],
+      "expected_answer": "18 November 2000"
+    },
+    {
+      "query": "Kapan Golda Meir mendirikan Israel?",
+      "gold_doc": "p1e8579a8ae84",
+      "gold_needles": [
+        "14 Mei 1948"
+      ],
+      "expected_answer": "14 Mei 1948"
+    },
+    {
+      "query": "Berapa Luas kota Cirebon?",
+      "gold_doc": "pb9cfbaf57a46",
+      "gold_needles": [
+        "37,54 km2"
+      ],
+      "expected_answer": "37,54 km2"
+    },
+    {
+      "query": "kapankah Pesan suara diciptakan pertama kali?",
+      "gold_doc": "p174e6b651060",
+      "gold_needles": [
+        "1871"
+      ],
+      "expected_answer": "1871"
+    },
+    {
+      "query": "Berapa luas Kabupaten Blora?",
+      "gold_doc": "pf6194da3b0df",
+      "gold_needles": [
+        "3.000 karya"
+      ],
+      "expected_answer": "3.000 karya"
+    },
+    {
+      "query": "kapankah Internet  masuk ke Indonesia pertama kali?",
+      "gold_doc": "p943ed951c079",
+      "gold_needles": [
+        "24 Juni 1988"
+      ],
+      "expected_answer": "24 Juni 1988"
+    },
+    {
+      "query": "Apa yang dimaksud dengan molekul ?",
+      "gold_doc": "pcaf94de4b6ff",
+      "gold_needles": [
+        "gugusan yang secara elektris netral yang tersusun dari dua atau"
+      ],
+      "expected_answer": "gugusan yang secara elektris netral yang tersusun dari dua atau lebih atom yang saling berikatan melalui ikatan kimia"
+    },
+    {
+      "query": "Kapan Peperangan Romawi Timur-Bulgaria dimulai?",
+      "gold_doc": "pfac0edfcb2e6",
+      "gold_needles": [
+        "abad ke-5 M"
+      ],
+      "expected_answer": "abad ke-5 M"
+    },
+    {
+      "query": "Berapa luas Danau Toba?",
+      "gold_doc": "p9a164f0715d9",
+      "gold_needles": [
+        "panjang 100 kilometres (62 miles), lebar 30 kilometres (19mi), dan"
+      ],
+      "expected_answer": "panjang 100 kilometres (62 miles), lebar 30 kilometres (19mi), dan kedalaman 505 metres"
+    },
+    {
+      "query": "dari manakah asal kata vegetasi ?",
+      "gold_doc": "pcfdfc4d55309",
+      "gold_needles": [
+        "bahasa Inggris"
+      ],
+      "expected_answer": "bahasa Inggris"
+    },
+    {
+      "query": "Berapa lama masa pemerintahan Dinasti Han?",
+      "gold_doc": "p56e6b1a06d73",
+      "gold_needles": [
+        "202 SM - 220"
+      ],
+      "expected_answer": "202 SM - 220"
+    },
+    {
+      "query": "Kapan Bandar Udara Internasional Palmaseca dibuka?",
+      "gold_doc": "p16c161ee0ffd",
+      "gold_needles": [
+        "24 Juli 1971"
+      ],
+      "expected_answer": "24 Juli 1971"
+    },
+    {
+      "query": "Kapan Pangeran Wallachia lahir ?",
+      "gold_doc": "p1296471f697a",
+      "gold_needles": [
+        "c. 143"
+      ],
+      "expected_answer": "c. 143"
+    },
+    {
+      "query": "kapankah Lumpur Lapindo di Sidoarjo pertama kali muncul?",
+      "gold_doc": "pf3a81c57f435",
+      "gold_needles": [
+        "29 Mei 2006"
+      ],
+      "expected_answer": "29 Mei 2006"
+    },
+    {
+      "query": "Kapan Galileo Galilei lahir?",
+      "gold_doc": "p5fe30e1dc330",
+      "gold_needles": [
+        "15 Februari 1564"
+      ],
+      "expected_answer": "15 Februari 1564"
+    },
+    {
+      "query": "Di ketinggian berapa Paro Taktsang terletak ?",
+      "gold_doc": "p4caec9b638b7",
+      "gold_needles": [
+        "3,120 metres"
+      ],
+      "expected_answer": "3,120 metres"
+    },
+    {
+      "query": "Kapan PT Kereta Api Indonesia didirikan?",
+      "gold_doc": "pf9c632e86572",
+      "gold_needles": [
+        "Mei 2010"
+      ],
+      "expected_answer": "Mei 2010"
+    },
+    {
+      "query": "Apa yang dimaksud dengan otentisitas ?",
+      "gold_doc": "p7815da5f6582",
+      "gold_needles": [
+        "konsep dalam psikologi (khususnya psikiatri eksistensial), serta juga filsafat eksistensialis"
+      ],
+      "expected_answer": "konsep dalam psikologi (khususnya psikiatri eksistensial), serta juga filsafat eksistensialis dan estetika (sehubungan dengan berbagai seni dan genre musik)"
+    },
+    {
+      "query": "dimanakah pablo picasso dilahirkan?",
+      "gold_doc": "pea52b19c6811",
+      "gold_needles": [
+        "Malaga, Spanyol"
+      ],
+      "expected_answer": "Malaga, Spanyol"
+    },
+    {
+      "query": "Perusahaan apa yang mengembangkan Windows pertama kali ?",
+      "gold_doc": "p37f70ef25c56",
+      "gold_needles": [
+        "Microsoft Corporation"
+      ],
+      "expected_answer": "Microsoft Corporation"
+    },
+    {
+      "query": "Siapa Viz Media?",
+      "gold_doc": "pb3650859fd51",
+      "gold_needles": [
+        "perusahaan manga, anime, dan hiburan Jepang yang didirikan pada tahun"
+      ],
+      "expected_answer": "perusahaan manga, anime, dan hiburan Jepang yang didirikan pada tahun 1986 sebagai Viz, LLC"
+    },
+    {
+      "query": "Apa mata uang Israel ?",
+      "gold_doc": "p83f40d199344",
+      "gold_needles": [
+        "Shekel baru Israel"
+      ],
+      "expected_answer": "Shekel baru Israel"
+    },
+    {
+      "query": "Siapa penemu paham Marxisme?",
+      "gold_doc": "p767c99de41b5",
+      "gold_needles": [
+        "paham yang berdasar pada pandangan-pandangan Karl Marx"
+      ],
+      "expected_answer": "paham yang berdasar pada pandangan-pandangan Karl Marx"
+    },
+    {
+      "query": "berapakah luas Benua Asia?",
+      "gold_doc": "p7279ef9f1463",
+      "gold_needles": [
+        "8,7% dari total luas permukaan bumi dan terdiri dari 30%"
+      ],
+      "expected_answer": "8,7% dari total luas permukaan bumi dan terdiri dari 30% dari luas daratannya"
+    },
+    {
+      "query": "Dimanakah letak danau Toba?",
+      "gold_doc": "p9a164f0715d9",
+      "gold_needles": [
+        "kaldera Gunung Berapi Super"
+      ],
+      "expected_answer": "kaldera Gunung Berapi Super"
+    },
+    {
+      "query": "Apa yang dimaksud dengan Kesusasteraan ?",
+      "gold_doc": "p625cb622d1fd",
+      "gold_needles": [
+        "jenis tulisan yang memiliki arti atau keindahan tertentu"
+      ],
+      "expected_answer": "jenis tulisan yang memiliki arti atau keindahan tertentu"
+    }
+  ]
+}

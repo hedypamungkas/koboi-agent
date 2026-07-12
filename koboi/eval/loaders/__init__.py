@@ -130,3 +130,11 @@ def register_default_loaders() -> None:
         LoaderRegistry.register("swe-bench", SWEBenchLoader())
     except ImportError:
         pass
+
+    # TyDi QA (Indonesian) - native ID benchmark, needs `datasets` package
+    try:
+        from koboi.eval.loaders.tydiqa_id_loader import TyDiQAIDLoader
+
+        LoaderRegistry.register("tydiqa-id", TyDiQAIDLoader())
+    except ImportError:
+        pass

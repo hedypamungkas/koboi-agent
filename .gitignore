@@ -80,3 +80,5 @@ data/id_corpus/
 data/en80_corpus/
 # Scale-matched ID corpus (translated MS MARCO full; derived, regenerable)
 data/id_corpus_full/
+# Native Indonesian corpus (TyDi QA; Apache-2.0, derived, regenerable via scripts/build_id_native_corpus.py)
+data/id_native_corpus/

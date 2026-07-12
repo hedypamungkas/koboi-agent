@@ -16,9 +16,9 @@ rerank enabled and gates on the ranking-metric CI lower bounds.
 
 The gates are honest REGRESSION thresholds -- pass at the measured working level, FAIL if
 rerank regresses or breaks (e.g. silent fail-soft to BM25 collapses MRR toward 0.44 < 0.52).
-*\*precision@1 ~0.47 is the MULTILINGUAL-model ceiling on MS MARCO; 0.50 needs an English-specialized
+precision@1 ~0.47 is the MULTILINGUAL-model ceiling on MS MARCO; 0.50 needs an English-specialized
 model, deliberately excluded (koboi is a general-purpose EN+ID platform -- one multilingual model
-serves both; ID validation scored precision@1 0.850). See docs/rag-production-readiness-eval.md.*
+serves both; ID validation scored precision@1 0.850). See docs/rag-production-readiness-eval.md.
 
 Metrics are exact doc_id rank (gold_doc pid vs rag_results[].doc_id rank). Gated on the
 bootstrap 95% CI lower bound. LIVE ONLY; self-skips under --mock via t.require_live().
