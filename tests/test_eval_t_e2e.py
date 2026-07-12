@@ -23,20 +23,22 @@ class TestShippedEvalsGolden:
         # Core samples (11): weather (2) + no_tools (1) + multi_turn (1)
         # + guardrail_block (2) + mode_blocked (1) + rag_retrieval (2)
         # + guardrail_output_warn (1) + skill_activation (1).
-        # RAG production-readiness Tier-1 mock gate (22): rag_ranking (4)
+        # RAG production-readiness Tier-1 mock gate (24): rag_ranking (4)
         # + rag_ranking_ci (1) + rag_abstention (4) + rag_noise_robustness (2)
-        # + rag_citations (3) + rag_ingestion_fidelity (5) + rag_metadata_filter (3).
-        # Tier-2/3 live evals (18): ragas_faithfulness (2) + rag_answer_correctness (5)
+        # + rag_citations (3) + rag_ingestion_fidelity (5) + rag_metadata_filter (3)
+        # + rag_rerank_wiring (2) -- cross-encoder rerank wiring (wrapper invoked +
+        #   fail-soft preserves retrieval; zero-egress fast-fail probe).
+        # Tier-2/3 live evals (19): ragas_faithfulness (2) + rag_answer_correctness (5)
         # + rag_semantic_ranking (1) + rag_hybrid_ranking (1) + ragas_golden_suite (1)
         # + rag_abstention_live (1) + rag_noise_faithfulness (1) + rag_hyde_recall (1)
-        # + ragas_ir_suite (1) + ragas_ir_adversarial (4)
+        # + ragas_ir_suite (1) + ragas_ir_adversarial (4) + ragas_ir_rerank (1)
         # -- self-skip under mock via t.require_live() (live_skip), so they pass here
         # and run for real on the eval-ragas-nightly job.
-        assert len(results) == 51
+        assert len(results) == 54
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 51
+        assert len(passed) == 54
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing

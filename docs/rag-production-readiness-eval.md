@@ -299,10 +299,29 @@ the model → context_precision/recall/relevancy/factual all depressed.
 **Root cause = ranking quality.** ALL 7 missing metrics trace to this single root: if the
 gold passage ranked higher, context would be cleaner → precision/recall/relevancy/factual
 all rise. The lever: **cross-encoder rerank (L3)** — the ONE change that lifts
-MRR/nDCG/precision@1 (→ cascading improvement). koboi's `RerankerRetriever` is heuristic;
-a real reranker (Cohere/Jina API or `bge-reranker-v2-m3` local model) is a **feature gap**.
-Hybrid (semantic) + a stronger answer model (gpt-5.4 full) would help but alone won't hit
-the strict ranking targets (MS MARCO-SOTA territory).
+MRR/nDCG/precision@1 (→ cascading improvement).
+
+**✅ L3 SHIPPED — pluggable cross-encoder rerank (`koboi/rag/rerank.py`).** The heuristic
+`RerankerRetriever` is now joined by a true cross-encoder stage, mirroring the LLM/embedding
+stack (reuses `HttpTransport` + `BearerAuth` + the `LLMError` hierarchy). Three backends share
+one `RerankBackend` ABC: **jina** (default), **cohere**, **local** (BGE via the opt-in
+`[rerank-local]` extra — the no-egress/sovereignty path). `build_rerank_client()` returns None
+when unconfigured → caller falls back (mirrors `build_embedding_client`); unknown providers
+raise at build (fail-fast). The `CrossEncoderReranker` wraps any base retriever, over-fetches,
+re-scores, and is **fail-soft** (any backend hiccup → base results returned, retrieval never
+breaks). Backward-compatible config: `rag.rerank` is now `bool | dict` — `true` keeps the
+heuristic, a dict selects the cross-encoder (e.g. `{provider: jina, api_key: ${JINA_API_KEY:}}`).
+A mock-safe HARD gate (`evals/rag_rerank_wiring.eval.py`, 2/2 green under `--mock --strict`)
+proves the wrapper is wired + invoked end-to-end (zero cost/egress, via a fast-fail probe) and
+that fail-soft preserves retrieval. A live Tier-2 suite (`evals/ragas_ir_rerank.eval.py`, N=128,
+gates MRR≥0.60 / nDCG@10≥0.70 / precision@1≥0.50 / recall@10≥0.80) is wired and self-skips
+under `--mock`; it runs once a rerank API key is provided.
+
+**⏳ Remaining: live N=128 before→after measurement.** Re-running the BM25 baseline vs BM25+rerank
+over `evals/fixtures/ir_qrels.json` (with a real Jina/Cohere key) is the step that proves the
+ranking targets are met and records the cascading answer-quality lift. Pending a `RERANK_API_KEY`.
+Hybrid (semantic) + a stronger answer model (gpt-5.4 full) would add further gains but the
+cross-encoder alone is expected to clear the strict ranking targets.
 
 **Multi-hop (decision):** documented as a **model-capability gap** (gpt-5.4-mini doesn't
 reliably chain 2-hop inferences even with both facts retrieved). Closing it needs multi-query
