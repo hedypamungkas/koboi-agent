@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from koboi.orchestration.research import ResearchBudget
 from koboi.web.base import BaseFetchProvider, BaseSearchProvider
 from koboi.web.providers.counting import CountingFetchProvider, CountingSearchProvider
@@ -62,3 +64,33 @@ class TestCountingFetchProvider:
         result = await provider.fetch("https://x.example")
         assert result.metadata.get("error") == "research budget exhausted"
         assert inner.calls == 0
+
+
+class TestMedium10BudgetChargedBeforeFailure:
+    """M10: when the inner provider raises, the budget is consumed (charged) but NOT refunded.
+
+    This LOCKS the current behavior so a future refund implementation doesn't silently change
+    semantics. A flaky provider eating budget is a known tradeoff documented in the code.
+    """
+
+    async def test_search_budget_consumed_on_inner_failure(self):
+        class _BoomSearch(BaseSearchProvider):
+            async def search(self, query: str, *, max_results: int = 10):
+                raise RuntimeError("provider down")
+
+        budget = ResearchBudget(max_searches=5)
+        provider = CountingSearchProvider(_BoomSearch(), budget)
+        with pytest.raises(RuntimeError, match="provider down"):
+            await provider.search("q")
+        assert budget.used_searches == 1  # charged before delegation, NOT refunded on failure
+
+    async def test_fetch_budget_consumed_on_inner_failure(self):
+        class _BoomFetch(BaseFetchProvider):
+            async def fetch(self, url: str, *, render: str = "auto", timeout: int = 15):
+                raise RuntimeError("provider down")
+
+        budget = ResearchBudget(max_fetches=5)
+        provider = CountingFetchProvider(_BoomFetch(), budget)
+        with pytest.raises(RuntimeError, match="provider down"):
+            await provider.fetch("https://example.com")
+        assert budget.used_fetches == 1  # charged before delegation, NOT refunded

@@ -216,3 +216,18 @@ class TestHigh4RedirectSSRF:
         ):
             result = await ReadabilityFetchProvider().fetch("http://safe.example/r")
         assert "final content" in result.content
+
+
+class TestMedium9FirecrawlHttpError:
+    """M9: Firecrawl scrape returns a structured error on HTTP 4xx/5xx."""
+
+    async def test_firecrawl_402_returns_error(self):
+        """FirecrawlFetchProvider returns FetchResult(metadata={'error': 'HTTP 402'}), not a crash."""
+        error_resp = httpx.Response(402, request=httpx.Request("POST", "https://api.firecrawl.dev/v1/scrape"))
+        with patch(
+            "koboi.web.providers.firecrawl.httpx.AsyncClient",
+            return_value=_mock_async_client(error_resp),
+        ):
+            result = await FirecrawlFetchProvider(api_key="k").fetch("https://example.com")
+        assert result.status == 402
+        assert result.metadata.get("error", "").startswith("HTTP")

@@ -544,3 +544,128 @@ class TestHigh6LoadLatestOrdering:
         from koboi.orchestration.dag_scheduler import DagScheduler
 
         assert DagScheduler.load_latest_research_context(str(tmp_path / "empty.db")) is None
+
+
+class TestMedium7CoverageMalformed:
+    """M7: CoverageEvaluator defensive branches for malformed LLM responses."""
+
+    async def test_non_dict_response_defaults_to_stop(self):
+        # LLM returns a JSON array (not an object) -> score 1.0 (stop iterating).
+        from koboi.orchestration.research import CoverageEvaluator, ResearchContext
+
+        class _ArrayClient:
+            model = "fake"
+
+            async def complete(self, messages, tools=None, response_format=None):
+                return AgentResponse(content='["not", "an", "object"]', tool_calls=[])
+
+        ctx = ResearchContext()
+        ctx.add_findings("n", "finding")
+        score, follow_ups, covmap = await CoverageEvaluator(_ArrayClient()).evaluate(ctx)
+        assert score == 1.0
+        assert follow_ups == []
+
+    async def test_string_score_value_error_defaults_to_stop(self):
+        from koboi.orchestration.research import CoverageEvaluator, ResearchContext
+
+        class _StringScoreClient:
+            model = "fake"
+
+            async def complete(self, messages, tools=None, response_format=None):
+                return AgentResponse(
+                    content='{"overall_score": "high", "coverage": {}, "follow_up_queries": []}',
+                    tool_calls=[],
+                )
+
+        ctx = ResearchContext()
+        ctx.add_findings("n", "finding")
+        score, _, _ = await CoverageEvaluator(_StringScoreClient()).evaluate(ctx)
+        assert score == 1.0  # float("high") -> ValueError -> default 1.0
+
+    async def test_coverage_as_list_not_dict(self):
+        from koboi.orchestration.research import CoverageEvaluator, ResearchContext
+
+        class _ListCovClient:
+            model = "fake"
+
+            async def complete(self, messages, tools=None, response_format=None):
+                return AgentResponse(
+                    content='{"overall_score": 0.5, "coverage": [1, 2, 3], "follow_up_queries": []}',
+                    tool_calls=[],
+                )
+
+        ctx = ResearchContext(sub_questions=["q1"])  # must have sub_questions + findings
+        ctx.add_findings("n", "finding")
+        score, _, covmap = await CoverageEvaluator(_ListCovClient()).evaluate(ctx)
+        assert score == 0.5
+        assert covmap == {}  # list not dict -> empty covmap
+
+    async def test_score_out_of_range_clamped(self):
+        from koboi.orchestration.research import CoverageEvaluator, ResearchContext
+
+        class _HighScoreClient:
+            model = "fake"
+
+            async def complete(self, messages, tools=None, response_format=None):
+                return AgentResponse(
+                    content='{"overall_score": 1.5, "coverage": {}, "follow_up_queries": []}',
+                    tool_calls=[],
+                )
+
+        ctx = ResearchContext()
+        ctx.add_findings("n", "finding")
+        score, _, _ = await CoverageEvaluator(_HighScoreClient()).evaluate(ctx)
+        assert score == 1.0  # clamped from 1.5
+
+
+class TestMedium8EmptyFollowupsStops:
+    """M8: coverage < threshold but follow_ups=[] -> loop breaks after 1 round."""
+
+    async def test_stops_when_no_follow_ups_despite_low_coverage(self, tmp_path):
+        orch = _orch(
+            _FakeClient(coverage_score=0.3, follow_ups=[]),  # below 0.9 but no drill queries
+            {"max_depth": 5, "coverage_threshold": 0.9},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete
+        assert complete[0].metadata["depth"] == 1  # stopped -- no follow_ups to drill
+
+
+class TestMedium11WebConfProviderWiring:
+    """M11: web_conf with a spy provider proves the configured provider reaches nodes."""
+
+    async def test_configured_provider_reaches_node(self, tmp_path):
+        from koboi.web.base import BaseSearchProvider
+        from koboi.web.registry import search_provider_registry
+        from koboi.web.types import SearchResult
+
+        # Class-level call tracking (build_search_provider creates a NEW instance from the class,
+        # so instance-level tracking won't work -- must track at class scope).
+        class _SpySearch(BaseSearchProvider):
+            calls: list[str] = []  # class-level -- shared across instances
+
+            def __init__(self) -> None:
+                pass  # no instance state needed
+
+            async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]:
+                _SpySearch.calls.append(query)
+                return [SearchResult(title="spy", url="https://spy.example", snippet="s")]
+
+        _SpySearch.calls = []  # reset before the run
+        search_provider_registry.register("__spy_test__", _SpySearch, description="spy")
+        try:
+            orch = Orchestrator(
+                client=_FakeClient(coverage_score=0.95, emit_search_call=True),
+                router=KeywordRouter(),
+                research={"max_depth": 1, "coverage_threshold": 0.7, "max_searches": 5},
+                dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "spy.db")),
+                web_conf={"search": {"provider": "__spy_test__"}},
+            )
+            _ = [e async for e in orch._run_deep_research("Research Python")]
+            # The spy was called through the CountingProvider chain (A0 wiring proven end-to-end).
+            assert len(_SpySearch.calls) > 0, "spy provider should have been called by a research node"
+        finally:
+            if "__spy_test__" in search_provider_registry._entries:
+                del search_provider_registry._entries["__spy_test__"]

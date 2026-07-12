@@ -146,3 +146,26 @@ class TestWebSearchWrapper:
             "python", _deps={"search_provider": MockSearchProvider()}, _tool_config={"max_results": 2}
         )
         assert "Python Documentation" in result
+
+
+class TestMedium9BraveHttpError:
+    """M9: Brave raise_for_status() propagates; web_search wraps it as an error string."""
+
+    async def test_brave_401_raises_http_status_error(self):
+        error_resp = httpx.Response(401, request=httpx.Request("GET", "https://api.search.brave.com"))
+        with patch("koboi.web.providers.brave.httpx.AsyncClient", return_value=_mock_async_client(error_resp)):
+            with pytest.raises(httpx.HTTPStatusError):
+                await BraveSearchProvider(api_key="bad-key").search("q")
+
+    async def test_web_search_wraps_http_error(self):
+        """The web_search tool catches the HTTPStatusError and returns an error string."""
+        from koboi.tools.builtin.web import web_search
+
+        error_resp = httpx.Response(429, request=httpx.Request("GET", "https://api.search.brave.com"))
+
+        class _BoomProvider:
+            async def search(self, *_a, **_kw):
+                raise httpx.HTTPStatusError("rate limited", request=error_resp.request, response=error_resp)
+
+        result = await web_search("q", _deps={"search_provider": _BoomProvider()})
+        assert "Error: search failed" in result
