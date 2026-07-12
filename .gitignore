@@ -78,3 +78,5 @@ data/ir_corpus/
 data/id_corpus/
 # EN@80 ablation corpus (derived subset of ir_corpus; regenerable via the EN@80 script)
 data/en80_corpus/
+# Scale-matched ID corpus (translated MS MARCO full; derived, regenerable)
+data/id_corpus_full/

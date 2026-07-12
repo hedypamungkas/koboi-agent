@@ -424,6 +424,36 @@ reachable only with an English-specialized model — so for a multilingual platf
 **recall@10 ≥0.80** (hard gate — does the answer enter context) with precision@1 ≥0.45 as
 informational (multilingual ceiling).
 
+### Step 3 — scale-matched ID corpus (1-in-1000) + stopwords/stemmer effect (2026-07-13)
+
+Translated ~1000 MS MARCO passages EN→ID (1-in-1000 density — production-like vs the misleading
+80-passage validation corpus) and re-measured ID retrieval baseline vs +stopwords+stemmer (Step 2):
+
+| metric | ID@1000 baseline | ID@1000 +stopwords=id+stemmer=id | EN@2987 | target |
+|---|---|---|---|---|
+| recall@10 | 0.900 | **0.950** ↑ | 0.977 | ≥0.80 ✅ |
+| MRR | 0.790 | 0.756 | 0.634 | ≥0.60 ✅ |
+| nDCG@10 | 0.816 | 0.804 | 0.717 | ≥0.70 ✅ |
+| precision@1 | **0.750** | 0.650 | 0.469 | ≥0.50 ✅ |
+
+**Findings:**
+1. **ID at scale PASSES ALL targets — including precision@1** (0.65–0.75 ≫ 0.50, unlike EN's 0.469).
+   The deep-dive projection "ID≈EN ~0.47 p1" was WRONG: ID scores higher even at comparable/harder
+   density. Likely cause: **translation normalization** (machine translation picks one rendering →
+   query⇔doc vocabulary is more consistent → easier lexical match). So **native (non-translated) ID
+   is still unmeasured** — the remaining gap for an unqualified ID production claim.
+2. **Stopwords+stemmer (Step 2) trades recall↔precision@1**: recall@10 0.900→**0.950** (+0.05, more
+   gold fetched — stemming matches inflected forms; stopwords cuts noise) but precision@1 0.750→0.650.
+   Net **positive for RAG** (recall = gold enters context = the production priority), not a free win.
+3. The density confound (Step 1) holds, but ID does not simply mirror EN — translated text is
+   lexically easier. A native ID benchmark (TyDi-QA-id / XQuAD-id) is the recommended next
+   measurement for a defensible per-language ID claim.
+
+**Net per-language verdict:** EN — production-ready, recall/faithfulness strong, precision@1 at the
+multilingual ceiling (documented tradeoff). ID — passes all targets on translated MS MARCO at scale,
+**stopwords+stemmer now shipped as the ID capability lever (+recall)**; the open item is a native ID
+benchmark to confirm the translated-text advantage holds for real Indonesian.
+
 
 
 **Multi-hop (decision):** documented as a **model-capability gap** (gpt-5.4-mini doesn't
