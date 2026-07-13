@@ -248,6 +248,16 @@ class KoboiAgent:
             if hasattr(self._core, "audit_trail") and self._core.audit_trail:
                 if hasattr(self._core.audit_trail, "close"):
                     self._core.audit_trail.close()
+            # Close the augmentation's retriever chain if it owns resources (e.g. the
+            # cross-encoder rerank HTTP transport). Duck-typed: only transport-bearing
+            # retrievers (CrossEncoderReranker) override close().
+            aug = getattr(self._core, "augmentation", None)
+            retriever = getattr(aug, "retriever", None) if aug is not None else None
+            if hasattr(retriever, "close"):
+                try:
+                    await retriever.close()
+                except Exception as e:  # nosec B110 - best-effort teardown; logged for diagnostics
+                    logging.getLogger(__name__).debug("Augmentation retriever close failed: %s", e, exc_info=True)
             await self._core.client.close()
         # Clean up logger
         if self._logger is not None:

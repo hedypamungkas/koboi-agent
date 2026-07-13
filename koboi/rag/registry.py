@@ -439,9 +439,23 @@ def build_rag(
 
     retriever = _build_retriever(all_chunks, rag_conf, client=client)
 
-    # #11a: opt-in reranker -- wrap the chosen retriever (RerankerRetriever is a
-    # wrapper, so it is enabled via a flag rather than selected by name).
-    if rag_conf.get("rerank"):
+    # #11a: opt-in rerank stage. A DICT selects a true cross-encoder backend
+    # (jina/cohere/local -- see koboi/rag/rerank.py); the legacy ``True`` bool keeps
+    # the lightweight heuristic RerankerRetriever. Both wrap the chosen retriever.
+    rerank_conf = rag_conf.get("rerank")
+    if isinstance(rerank_conf, dict):
+        from koboi.rag.rerank import CrossEncoderReranker, build_rerank_client
+
+        backend = build_rerank_client(rerank_conf)
+        if backend is not None:
+            retriever = CrossEncoderReranker(
+                retriever,
+                backend,
+                fetch_multiplier=rerank_conf.get("fetch_multiplier", 3),
+                score_threshold=rerank_conf.get("score_threshold"),
+            )
+        # else: build_rerank_client already warned; base retriever used unwrapped.
+    elif rerank_conf:
         from koboi.rag.augmentation import RerankerRetriever
 
         retriever = RerankerRetriever(retriever)

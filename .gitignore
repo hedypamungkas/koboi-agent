@@ -71,3 +71,13 @@ MagicMock/
 
 # === Local analysis docs (not for commit) ===
 docs/eve-impact-effort-analysis.md
+
+# === Path B: real IR eval corpus (MS MARCO passages; research-use, built by scripts/build_ir_corpus.py) ===
+data/ir_corpus/
+# Native Indonesian corpus (TyDi QA; Apache-2.0, derived, regenerable via scripts/build_id_native_corpus.py)
+data/id_native_corpus/
+# One-off measurement/ablation corpora (built by /tmp experiment scripts: build_and_measure_id.py,
+# measure_en80.py, measure_id_full.py -- NOT committed scripts; gitignored so they don't land in the repo).
+data/id_corpus/
+data/en80_corpus/
+data/id_corpus_full/

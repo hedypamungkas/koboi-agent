@@ -89,6 +89,25 @@ def register_default_scorers() -> None:
     ScorerRegistry.register("tool_selection", lambda: ToolSelectionScorer())
     ScorerRegistry.register("token_efficiency", lambda **kw: TokenEfficiencyScorer(**kw))
 
+    # Mock-safe RAG retrieval/citation/CI scorers (stdlib-only; no optional dep).
+    from koboi.eval.scorers.retrieval_metric import RetrievalMetricScorer
+    from koboi.eval.scorers.citation_grounding import CitationGroundingScorer
+    from koboi.eval.scorers.ci import BootstrapCIScorer
+
+    ScorerRegistry.register("retrieval_metric", lambda **kw: RetrievalMetricScorer(**kw))
+
+    def _retrieval_factory(metric_name: str):
+        def _factory(**kw: Any) -> RetrievalMetricScorer:
+            kw.pop("metric", None)
+            return RetrievalMetricScorer(metric=metric_name, **kw)
+
+        return _factory
+
+    for _metric in ("recall", "precision", "hit", "mrr", "ndcg"):
+        ScorerRegistry.register(f"retrieval_{_metric}", _retrieval_factory(_metric))
+    ScorerRegistry.register("citation_grounding", lambda **kw: CitationGroundingScorer(**kw))
+    ScorerRegistry.register("bootstrap_ci", lambda **kw: BootstrapCIScorer(**kw))
+
     # Skill-specific scorers
     try:
         from koboi.eval.scorers.skill_scorer import SkillTriggerAccuracyScorer
@@ -116,6 +135,7 @@ def register_framework_scorers() -> None:
         ScorerRegistry.register("ragas_relevancy", lambda **kw: RAGASScorer("answer_relevancy", **kw))
         ScorerRegistry.register("ragas_precision", lambda **kw: RAGASScorer("context_precision", **kw))
         ScorerRegistry.register("ragas_recall", lambda **kw: RAGASScorer("context_recall", **kw))
+        ScorerRegistry.register("ragas_factual_correctness", lambda **kw: RAGASScorer("factual_correctness", **kw))
         ScorerRegistry.register("ragas_composite", lambda **kw: RAGASCompositeScorer(**kw))
     except ImportError:
         pass

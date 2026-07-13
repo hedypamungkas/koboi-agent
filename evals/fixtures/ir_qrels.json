@@ -1,0 +1,1030 @@
+{
+  "_comment": "Real RAG eval qrels from MS MARCO v2.1 (validation). Built by scripts/build_ir_corpus.py. License-light: only query/answer/gold-id/snippet (no passage body). gold_doc is the data/ir_corpus/<pid>.txt chunk doc_id.",
+  "corpus_dir": "data/ir_corpus",
+  "qrels": [
+    {
+      "query": ". what is a corporation?",
+      "gold_doc": "p39601aecae02",
+      "gold_needles": [
+        "McDonald's Corporation is one of the most recognizable corporations in"
+      ],
+      "expected_answer": "A corporation is a company or group of people authorized to act as a single entity and recognized as such in law."
+    },
+    {
+      "query": "why did rachel carson write an obligation to endure",
+      "gold_doc": "p5834c5854b00",
+      "gold_needles": [
+        "The Obligation to Endure by Rachel Carson Rachel Carson's essay"
+      ],
+      "expected_answer": "Rachel Carson writes The Obligation to Endure because believes that as man tries to eliminate unwanted insects and weeds, however he is actually causing more problems by polluting the environment."
+    },
+    {
+      "query": "symptoms of a dying mouse",
+      "gold_doc": "p4fe3a2f93f71",
+      "gold_needles": [
+        "The symptoms are similar but the mouse will be in"
+      ],
+      "expected_answer": "The symptoms of a dying mouse are runny eyes, sneezing, wheezing, shaking, fluctuating body temperature, tiredness, loss of appetite, and dull coat."
+    },
+    {
+      "query": "average number of lightning strikes per day",
+      "gold_doc": "p59a71274643a",
+      "gold_needles": [
+        "Although many lightning flashes are simply cloud-to-cloud, there are as"
+      ],
+      "expected_answer": "Globally 8,640,000 lightning strikes per day."
+    },
+    {
+      "query": "can you burn your lawn with fertilizer",
+      "gold_doc": "p8a8ea796735a",
+      "gold_needles": [
+        "Fertilizer burn is the result of over fertilizing plants or"
+      ],
+      "expected_answer": "Yes, over fertilizing can burn lawn."
+    },
+    {
+      "query": "goch meaning",
+      "gold_doc": "pc547c914aa59",
+      "gold_needles": [
+        "The name Goch is derived from the Welsh word coch,"
+      ],
+      "expected_answer": "The meaning of the name Goch is red."
+    },
+    {
+      "query": "symptoms of a gastric ulcer in women",
+      "gold_doc": "pb39600dde416",
+      "gold_needles": [
+        "Symptoms Of Stomach Ulcer In Women. stomach ulcer. A peptic"
+      ],
+      "expected_answer": "acidic and extremely painful is symptom of a gastric ulcer in women."
+    },
+    {
+      "query": "how often can ativan be taken",
+      "gold_doc": "p0df75f91b71a",
+      "gold_needles": [
+        "The recommended starting dosage of Ativan for anxiety treatment is"
+      ],
+      "expected_answer": "For anxiety treatment is 1 mg two to three times daily and for insomnia is 2 mg to 4 mg once daily at bedtime."
+    },
+    {
+      "query": "how many years did william bradford serve as governor of plymouth colony?",
+      "gold_doc": "pf8f79d86fe2d",
+      "gold_needles": [
+        "http://en.wikipedia.org/wiki/William_Bradford_(Plymouth_Colony_governor) William Bradford (c.1590 – 1657) was an English Separatist"
+      ],
+      "expected_answer": "William Bradford served thirty years as Governor of Plymouth colony."
+    },
+    {
+      "query": "albany mn population",
+      "gold_doc": "p937f167f88e3",
+      "gold_needles": [
+        "Albany, Minnesota, as per 2017 US Census estimate, has a"
+      ],
+      "expected_answer": "2,662"
+    },
+    {
+      "query": "define preventive",
+      "gold_doc": "pc345cedacfbb",
+      "gold_needles": [
+        "Adjective[edit] preventive ‎(comparative more preventive, superlative most preventive) 1 Preventing,"
+      ],
+      "expected_answer": "It means preventing, hindering, or acting as an obstacle to."
+    },
+    {
+      "query": "causes of achalasia",
+      "gold_doc": "pf8fa712a334f",
+      "gold_needles": [
+        "The cause of achalasia is unknown. Theories on causation invoke"
+      ],
+      "expected_answer": "An infection, heredity or an abnormality of the immune system"
+    },
+    {
+      "query": "current weather in volcano, ca",
+      "gold_doc": "pb225f66de01f",
+      "gold_needles": [
+        "Volcano 10 Day Weather. Sunday:The Volcano forecast for Apr 09"
+      ],
+      "expected_answer": "The Volcano forecast for Apr 12 is 52 degrees and Patchy light rain."
+    },
+    {
+      "query": "how many days after ovulation can i tell i'm pregnant",
+      "gold_doc": "pe0ce3e730792",
+      "gold_needles": [
+        "Each woman and each pregnancy is different but there are"
+      ],
+      "expected_answer": "6 to 10 days"
+    },
+    {
+      "query": "how much are postage stamps right now",
+      "gold_doc": "p89ee686da75c",
+      "gold_needles": [
+        "Price for first-class stamp rises to 49 cents. It's going"
+      ],
+      "expected_answer": "The cost of a first-class postage stamp is now 49 cents."
+    },
+    {
+      "query": "color overlay photoshop",
+      "gold_doc": "p5ddc1249b20b",
+      "gold_needles": [
+        "Photoshop: color overlay. In my sunlight touch up tutorial, I"
+      ],
+      "expected_answer": "A great way to add a touch of color without making your photo look like you’ve edited the heck out of it or to add a little life to B&W photos."
+    },
+    {
+      "query": "symptoms of air pollution exposure",
+      "gold_doc": "pc4243c572564",
+      "gold_needles": [
+        "Your actual risk of adverse effects depends on your current"
+      ],
+      "expected_answer": "High air pollution levels can cause immediate health problems including: 1 Aggravated cardiovascular and respiratory illness. 2 Added stress to heart and lungs, which must work harder to supply the body with oxygen. 3 Damaged cells in the respiratory system."
+    },
+    {
+      "query": "average temperature cardiff wales",
+      "gold_doc": "p3bdb9199824d",
+      "gold_needles": [
+        "Cardiff has a mild humid temperate climate with warm summers"
+      ],
+      "expected_answer": "It has a mild humid temperate climate with warm summers and no dry season."
+    },
+    {
+      "query": "highest paying subspecialty in orthopedics",
+      "gold_doc": "p83ba440ffa0d",
+      "gold_needles": [
+        "Orthopedic spine surgeons were compensated more than other orthopedic specialties."
+      ],
+      "expected_answer": "The highest paying subspecialty in orthopedics are Spine surgeons."
+    },
+    {
+      "query": "____________________ is considered the father of modern medicine.",
+      "gold_doc": "p7a138930fa34",
+      "gold_needles": [
+        "TRUE. Hippocrates is considered the father of modern medicine because"
+      ],
+      "expected_answer": "Hippocrates"
+    },
+    {
+      "query": "does xpress bet charge to deposit money in your account",
+      "gold_doc": "p311d6ab7026e",
+      "gold_needles": [
+        "How to create a PaySlip using a printer: 1 Log"
+      ],
+      "expected_answer": "Yes"
+    },
+    {
+      "query": "how far is faribault from winona?",
+      "gold_doc": "p2b7ca043e0fd",
+      "gold_needles": [
+        "Distance from Faribault, MN to Winona, MN is 95Miles or"
+      ],
+      "expected_answer": "The distance from Faribault to Winona is 95Miles or 154 Km."
+    },
+    {
+      "query": "how many days is an appraisal good for a fannie loan",
+      "gold_doc": "p16ff3e979054",
+      "gold_needles": [
+        "In no case may the appraisal be dated more than"
+      ],
+      "expected_answer": "120 days from the date of the Note."
+    },
+    {
+      "query": "dynamics crm outlook synchronization process",
+      "gold_doc": "pa94498e30b4d",
+      "gold_needles": [
+        "The CRM/Outlook synchronization process can occur in one of two"
+      ],
+      "expected_answer": "The CRM/Outlook synchronization process can occur in one of two ways: 1) manually clicking the “Synchronize with CRM” option, or 2) scheduled background synchronization. The actual CRM/Outlook sync process looks like this when kicked off: 1 Prepare sync is called to query the server to prepare all the entities which should be synchronized down from the CRM server. 2 Subscription table = Specifies the SyncEntryTable name for each user that has been created."
+    },
+    {
+      "query": "symptoms of an intolerance to barley",
+      "gold_doc": "p0365b5bec5f9",
+      "gold_needles": [
+        "IgE-mediated reactions. Barley may commonly induce symptoms of food allergy"
+      ],
+      "expected_answer": "The symptoms of an intolerance to barley are gastrointestinal distress, atopic dermatitis and urticaria, angioedema, anaphylaxis and food-dependant, exercise-induced anaphylaxis, wheezing and baker's asthma."
+    },
+    {
+      "query": "how long to recover from wisdom teeth removal",
+      "gold_doc": "p331f2f8c97a6",
+      "gold_needles": [
+        "You shouldn't even brush your teeth for the first day"
+      ],
+      "expected_answer": "Wisdom teeth recovery time is three to four days."
+    },
+    {
+      "query": "average pharmacy tech salary",
+      "gold_doc": "p61060a17346b",
+      "gold_needles": [
+        "What can a pharmacy technician really expect to earn in"
+      ],
+      "expected_answer": "From $26,000 to $39,000 a year"
+    },
+    {
+      "query": "benefits of lymphatic drainage facial",
+      "gold_doc": "p423ef0c5a24c",
+      "gold_needles": [
+        "Major Benefits of Lymphatic Drainage. 1 Skin care: For a"
+      ],
+      "expected_answer": "1 Skin care: For a clearer complexion and to lessen the appearance of fine lines and wrinkles in facial tissue, as well as reducing puffiness around the eyes. 2 Old scar tissue can be reduced while the appearance of new scars can be minimized."
+    },
+    {
+      "query": "symptoms of an uti sensation",
+      "gold_doc": "p8257cb681b23",
+      "gold_needles": [
+        "Urinary tract infection (UTI) symptoms may include burning sensation, strong"
+      ],
+      "expected_answer": "The symptoms of Urinary tract infection is burning sensation, strong urge to urinate, pain, urinary frequency, difficulty urinating, and sometimes, blood in the urine."
+    },
+    {
+      "query": "english is the official state language in some states like california",
+      "gold_doc": "pa5039d8f9004",
+      "gold_needles": [
+        "In total, there were 36,995,602 people aged five or older"
+      ],
+      "expected_answer": "Half of the country's Spanish-speakers reside in California"
+    },
+    {
+      "query": "how long is a voe valid",
+      "gold_doc": "pcefbcf472c1a",
+      "gold_needles": [
+        "NOTE: The VOE form verifies the applicant is enrolled in"
+      ],
+      "expected_answer": "The forms are valid for 30 days after issuance in the for spring and fall  semesters and for 90 days during the summer."
+    },
+    {
+      "query": "how many carbohydrates in asparagus",
+      "gold_doc": "pcf7e95216663",
+      "gold_needles": [
+        "Asparagus is a low-calorie, low carbohydrate, and high fiber food"
+      ],
+      "expected_answer": "3.7 grams carbohydrate in asparagus."
+    },
+    {
+      "query": "different types of memory of a computer",
+      "gold_doc": "pa74716171ad0",
+      "gold_needles": [
+        "DRAM (Dynamic Random Access Memory) The most common type of"
+      ],
+      "expected_answer": "DRAM (Dynamic Random Access Memory) and SODIMM (Small Outline Dual In-Line Memory Module)."
+    },
+    {
+      "query": "how many calories in average apple",
+      "gold_doc": "p6a612feefaac",
+      "gold_needles": [
+        "Small to medium in size, gala apples, like all apples,"
+      ],
+      "expected_answer": "80 calories"
+    },
+    {
+      "query": "how much would graduate marketers make?",
+      "gold_doc": "pfa7496732e29",
+      "gold_needles": [
+        "At present, the average starting salary for MBA graduates can"
+      ],
+      "expected_answer": "$110,000 to $130,000 per year."
+    },
+    {
+      "query": "can you set google chrome as your default web browser",
+      "gold_doc": "p01368396632a",
+      "gold_needles": [
+        "While you can set Chrome as a default browser through"
+      ],
+      "expected_answer": "Yes, While you can set Chrome as a default browser through the settings, it's much more reliable to use the system settings to ensure the change sticks."
+    },
+    {
+      "query": "how much fat is in a bubba burger",
+      "gold_doc": "peb4e38a8a8fa",
+      "gold_needles": [
+        "There are 340 calories in a 1 burger serving of"
+      ],
+      "expected_answer": "340 calories in a 1 burger serving out of which 70% fat."
+    },
+    {
+      "query": "how much is a cost to run disneyland",
+      "gold_doc": "p78bb8a34cefc",
+      "gold_needles": [
+        "Disney's Theme Parks had an operating cost of 571 million"
+      ],
+      "expected_answer": "Around $355,000 per day."
+    },
+    {
+      "query": "how long should a central air conditioner last",
+      "gold_doc": "pe293757cc97c",
+      "gold_needles": [
+        "10 to 20 years - sometimes longer. You should have"
+      ],
+      "expected_answer": "10 to 20 years"
+    },
+    {
+      "query": "botulinum definition",
+      "gold_doc": "pdeb8e37b0070",
+      "gold_needles": [
+        "medical Definition of botulinum toxin : a very powerful neurotoxin"
+      ],
+      "expected_answer": "The definition of botulinum is a very powerful neurotoxin that causes botulism and is produced by the botulinum bacterium."
+    },
+    {
+      "query": "can thinning vocal cords cause hoarseness",
+      "gold_doc": "pcbe631fe927f",
+      "gold_needles": [
+        "Laryngologists are ENT doctors that spend an additional year studying"
+      ],
+      "expected_answer": "Yes, thinning vocal cords cause hoarseness."
+    },
+    {
+      "query": "can lorazepam cause tinnitus",
+      "gold_doc": "pd4b7413bb09d",
+      "gold_needles": [
+        "The following medications are used in treatment of tinnitus: 1"
+      ],
+      "expected_answer": "Yes, lorazepam can cause tinnitus."
+    },
+    {
+      "query": "how many minutes a pound should you roast a chicken",
+      "gold_doc": "p95f8e087666f",
+      "gold_needles": [
+        "Preheat oven to 450 degrees F (230 degrees C) and"
+      ],
+      "expected_answer": "20 minutes per pound to roast a chicken."
+    },
+    {
+      "query": "can h. pylori cause vomiting",
+      "gold_doc": "pe0b395faa829",
+      "gold_needles": [
+        "Some 30 to 40 percent of Americans, most of them"
+      ],
+      "expected_answer": "Yes, H. pylori can cause vomiting."
+    },
+    {
+      "query": "animal rescue league hours",
+      "gold_doc": "p6d0cd7985dcc",
+      "gold_needles": [
+        "The Animal Rescue League has the following summer and winter"
+      ],
+      "expected_answer": "Summer Hours: (April through October) Monday: 11am – 5pm. Tuesday: 11am – 8pm. Wednesday: Closed. Thursday: 11am – 8pm. Friday: 11am – 5pm. Saturday: 11am – 4pm."
+    },
+    {
+      "query": "do physicians pay for insurance from their salaries?",
+      "gold_doc": "p075f852f715f",
+      "gold_needles": [
+        "Active-duty physicians and their dependents will receive free or discounted"
+      ],
+      "expected_answer": "No, active duty physicians and their dependents will receive free or discounted health care coverage and dental coverage."
+    },
+    {
+      "query": "symptoms of cannabinoid hyperemesis syndrome",
+      "gold_doc": "peb443e643a48",
+      "gold_needles": [
+        "PRACTICAL GASTROENTEROLOGY • SEPTEMBER 2008 79. Cannabinoid Hyperemesis Syndrome: Cyclic"
+      ],
+      "expected_answer": "Vomiting is one of the systems in cannabinoid hyperemesis syndrome."
+    },
+    {
+      "query": "coffee bean stock price",
+      "gold_doc": "p5d92d0baff75",
+      "gold_needles": [
+        "3 Best Coffee Stocks for 2017. Share. The price of"
+      ],
+      "expected_answer": "$1.65 per pound."
+    },
+    {
+      "query": "complex variable functions",
+      "gold_doc": "pe08cb7f02451",
+      "gold_needles": [
+        "As a differentiable function of a complex variable is equal"
+      ],
+      "expected_answer": "A complex variable is equal to the sum of its Taylor series, complex analysis is particularly concerned with analytic functions of a complex variable."
+    },
+    {
+      "query": "ellianna name meaning",
+      "gold_doc": "p614bf0050f39",
+      "gold_needles": [
+        "Origin and meaning of Ellianna. The meaning of Ellianna is"
+      ],
+      "expected_answer": "My lord has answered."
+    },
+    {
+      "query": "how long is the flight from dfw to punta cana",
+      "gold_doc": "p2e8128fbb3b5",
+      "gold_needles": [
+        "Flying time from DFW to PUJ. The total flight duration"
+      ],
+      "expected_answer": "4 hours, 34 minutes."
+    },
+    {
+      "query": "can stress cause skin rashes",
+      "gold_doc": "p6108a1959a04",
+      "gold_needles": [
+        "A stress rash or stress hives on the skin can"
+      ],
+      "expected_answer": "Yes, a stress rash or stress hives on the skin can develop when a person is under stress."
+    },
+    {
+      "query": "great lakes cruise",
+      "gold_doc": "pa4e349e4dfbe",
+      "gold_needles": [
+        "Never mind sailing the seven seas -- here's your chance"
+      ],
+      "expected_answer": "It is ann arbor based cruise co."
+    },
+    {
+      "query": "how much does teeth deep cleaning cost",
+      "gold_doc": "p9f60a76ec931",
+      "gold_needles": [
+        "Deep cleaning is only done to one fourth of the"
+      ],
+      "expected_answer": "Dental deep cleaning cost ranges from $100 to $400 per quadrant."
+    },
+    {
+      "query": "how many days of no sleep until insane",
+      "gold_doc": "p394fd248e535",
+      "gold_needles": [
+        "Although there are many articles stating one can be declared"
+      ],
+      "expected_answer": "After 3 days"
+    },
+    {
+      "query": "how much does an outdoor kitchen increase value of home",
+      "gold_doc": "p8a2f9d4c989f",
+      "gold_needles": [
+        "But a landscaper designer comes into play when there is"
+      ],
+      "expected_answer": "$20,000"
+    },
+    {
+      "query": "how do I get from DC to alexandria va",
+      "gold_doc": "p90c20d53f03d",
+      "gold_needles": [
+        "In addition to the King St-Old Town Metrorail station, Alexandria"
+      ],
+      "expected_answer": "Braddock Road, Eisenhower Ave, and Van Dorn Street. To get to downtown DC from Alexandria, take the Yellow Line toward Greenbelt or Fort Totten, or take the Blue Line toward Largo Town Center or Stadium-Armory."
+    },
+    {
+      "query": "here there be dragons comic",
+      "gold_doc": "p6f8d0a26aec9",
+      "gold_needles": [
+        "James A. Owen is an American comic book illustrator, publisher"
+      ],
+      "expected_answer": "Here there be dragons is a comic book series by James A. Owen who is an American comic book illustrator, publisher and writer."
+    },
+    {
+      "query": "how is alkali made",
+      "gold_doc": "p71f4c606b698",
+      "gold_needles": [
+        "Bases are substances that react with acids and neutralise them."
+      ],
+      "expected_answer": "It is made by reaction with water if the base dissolve in water it is alkali."
+    },
+    {
+      "query": "botz etf price",
+      "gold_doc": "p39e081bf2bb6",
+      "gold_needles": [
+        "Global X Robotics & Artfcl Intllgnc ETF has a Price"
+      ],
+      "expected_answer": "Global X Robotics & Artfcl Intllgnc ETF has a Price of 24.79."
+    },
+    {
+      "query": "benefits of hemp oil",
+      "gold_doc": "p99121efd6f60",
+      "gold_needles": [
+        "Hemp Oil Regenerates and Energizes The Skin’s Protective Layer: Due"
+      ],
+      "expected_answer": "It helps in moisturizer.It is especially useful for dry, tired or dehydrated skin and nails.It helps Maintain a Hormonal Balance."
+    },
+    {
+      "query": "how do i achieve my sphr certificate",
+      "gold_doc": "p03d8ad78aaa7",
+      "gold_needles": [
+        "If you’re an experienced, senior level human resources professional, who"
+      ],
+      "expected_answer": "By passing the SPHR certification exam."
+    },
+    {
+      "query": "city guide definition",
+      "gold_doc": "p4009d3fde39a",
+      "gold_needles": [
+        "guide. 1. to assist (a person) to travel through, or"
+      ],
+      "expected_answer": "To assist (a person) to travel through, or reach a destination in, an unfamiliar area, as by accompanying or giving directions to the person."
+    },
+    {
+      "query": "day of the dead skulls tattoo designs",
+      "gold_doc": "p2c348d59e1bc",
+      "gold_needles": [
+        "Tattoo designs - D >> Day of the Dead. Day"
+      ],
+      "expected_answer": "It is a holiday celebrated in Mexico and by Latin Americans living in the United States and Canada."
+    },
+    {
+      "query": "blood diseases that are sexually transmitted",
+      "gold_doc": "pcc39526401df",
+      "gold_needles": [
+        "A sexually transmitted infection (STI) is an infection that can"
+      ],
+      "expected_answer": "Hepatitis B, Hepatitis C and HIV."
+    },
+    {
+      "query": "symptoms of congenital heart block",
+      "gold_doc": "p33d84acfbf47",
+      "gold_needles": [
+        "Summary Summary. Congenital heart block is a rare condition that"
+      ],
+      "expected_answer": "Congenital heart block is a rare condition that affects the heart's electrical system, which controls and coordinates its pumping function."
+    },
+    {
+      "query": "how much does a parenting plan cost",
+      "gold_doc": "pa4ab19c99239",
+      "gold_needles": [
+        "A typical Parenting evaluation will cost between $2000 and $5000"
+      ],
+      "expected_answer": "A typical Parenting evaluation will cost between $2000 and $5000 dollars."
+    },
+    {
+      "query": "against which organisms are disinfectants effective",
+      "gold_doc": "p3ff1b33d5d40",
+      "gold_needles": [
+        "Against which organisms are disinfectants effective? Against which type of"
+      ],
+      "expected_answer": "Disinfectants are effective against vegetative cells."
+    },
+    {
+      "query": "are termite season?",
+      "gold_doc": "pc76ba189e2da",
+      "gold_needles": [
+        "Termites, like ants and bees, are social insects and live"
+      ],
+      "expected_answer": "Live in colonies."
+    },
+    {
+      "query": "can you break dogs chasing cars",
+      "gold_doc": "p3bc0bd66e825",
+      "gold_needles": [
+        "Attention and Exercise. Sometimes dogs are more inclined to chase"
+      ],
+      "expected_answer": "Yes"
+    },
+    {
+      "query": "symptoms of cvid",
+      "gold_doc": "p6ba937f46cbd",
+      "gold_needles": [
+        "What causes CVID? The cause of CVID is unknown. The"
+      ],
+      "expected_answer": "The symptoms of Common Variable Immune Deficiency are recurrent infections that can affect the eyes, skin, ears, sinuses and lungs, inflammation in the joints of the knees, ankles, elbows or wrists and stomach and bowel disorders."
+    },
+    {
+      "query": "can you deduct child care expenses",
+      "gold_doc": "p49870a490aa4",
+      "gold_needles": [
+        "You can only take a deduction up to $3,000 for"
+      ],
+      "expected_answer": "Yes, you can only take a deduction up to $3,000 for one qualifying child"
+    },
+    {
+      "query": "symptoms of descending aorta problems",
+      "gold_doc": "pfead737bd0fa",
+      "gold_needles": [
+        "These symptoms are related to afflictions of the organ: Descending"
+      ],
+      "expected_answer": "The symptoms of descending aorta are chest pain, Back pain, Hypotension, Shock, Fatigue, Changes in level of consciousness, Coma, Absent pulses and Cyanosis."
+    },
+    {
+      "query": "are rabbits social animals",
+      "gold_doc": "p5f68c148452c",
+      "gold_needles": [
+        "Living with a Companion Rabbit. Download. Rabbits are very loving,"
+      ],
+      "expected_answer": "Yes,rabbits are social animals."
+    },
+    {
+      "query": "define asiatic cholera bacteria",
+      "gold_doc": "p867476d5a1a1",
+      "gold_needles": [
+        "cholera. any of various intestinal diseases; specif., an acute, severe,"
+      ],
+      "expected_answer": "It is caused by bacteria and characterized by profuse diarrhea, intestinal pain, and dehydration."
+    },
+    {
+      "query": "define bona fides",
+      "gold_doc": "p6898e36c80b0",
+      "gold_needles": [
+        "For other uses, see Bona fide (disambiguation). Good faith (Latin:"
+      ],
+      "expected_answer": "It is a sincere intention to be fair, open, and honest, regardless of the outcome of the interaction."
+    },
+    {
+      "query": "foods to firm up stool",
+      "gold_doc": "pb79605063bbc",
+      "gold_needles": [
+        "Insoluble fibre helps speed up bowel motions. This means bowel"
+      ],
+      "expected_answer": "Multi grain or whole grain wheat, corn and rice cereals, bran, fibrous vegetables (carrots, celery), skins of fruit and vegetables, oats, barley, rye, legumes (lentils, kidney beans), peeled fruits and vegetables."
+    },
+    {
+      "query": "effects of detox juice cleanse",
+      "gold_doc": "p6e3038598b3a",
+      "gold_needles": [
+        "Unhealthy Weight Loss. One of the positive side effects of"
+      ],
+      "expected_answer": "Diarrhea is a common side effect of a detox cleanse, positive side effects is weight loss."
+    },
+    {
+      "query": "symptoms of dopamine producing tumor",
+      "gold_doc": "pa8f866275a75",
+      "gold_needles": [
+        "Dopamine excess is not routinely measured in patients with head"
+      ],
+      "expected_answer": "Dopamine excess in patients with pheochromocytomas and PGLs has been linked to atypical symptoms such as nausea and weight loss. Moreover, catecholamine excess can lead to hemodynamic instability, particularly during diagnostic and surgical interventions of these tumors."
+    },
+    {
+      "query": "how long to freeze chicken",
+      "gold_doc": "pa3a620ea202a",
+      "gold_needles": [
+        "Times are based on a freezer set at 0 degrees"
+      ],
+      "expected_answer": "Nine months."
+    },
+    {
+      "query": "definition of placenta accreta",
+      "gold_doc": "pdfde2b5b206a",
+      "gold_needles": [
+        "Placenta accreta is a serious pregnancy condition that occurs when"
+      ],
+      "expected_answer": "A serious pregnancy condition that occurs when blood vessels and other parts of the placenta grow too deeply into the uterine wall."
+    },
+    {
+      "query": "age for bladder control for boys",
+      "gold_doc": "p3823828d9814",
+      "gold_needles": [
+        "There are various causes of poor bladder control and many"
+      ],
+      "expected_answer": "age of 40."
+    },
+    {
+      "query": "ebay returns phone number",
+      "gold_doc": "p7e03fa41f711",
+      "gold_needles": [
+        "This phone number is eBay's Best Phone Number because 299,406"
+      ],
+      "expected_answer": "The phone number for ebay returns is 866 540 3229."
+    },
+    {
+      "query": "does chocolate soothe cramps",
+      "gold_doc": "pbe0dde7fab49",
+      "gold_needles": [
+        "Yes you read that right! Chocolate can even reduce pain"
+      ],
+      "expected_answer": "Yes, chocolate can even reduce pain from menstrual cramps."
+    },
+    {
+      "query": "symptoms of extreme urinary frequency with ovarian cancer?",
+      "gold_doc": "p04348bfc1367",
+      "gold_needles": [
+        "Other Symptoms of Ovarian Cancer: Fatigue, Upset Stomach, Back Pain,"
+      ],
+      "expected_answer": "Symptoms of extreme urinary frequency with ovarian cancer isFatigue, Upset Stomach, Back Pain, Pain During Sex, Constipation, Menstrual Changes, and Abdominal Swelling With Wight Loss."
+    },
+    {
+      "query": "employee turnover types",
+      "gold_doc": "pbcfa00b28dbf",
+      "gold_needles": [
+        "Employee turnover is calculated by dividing separations by the total"
+      ],
+      "expected_answer": "Voluntary and involuntary turnover."
+    },
+    {
+      "query": "charcot's syndrome definition",
+      "gold_doc": "p1838d6e26912",
+      "gold_needles": [
+        "Charcot arthropathy, also known as Charcot foot and ankle, is"
+      ],
+      "expected_answer": "It is a syndrome in patients who have neuropathy or loss of sensation."
+    },
+    {
+      "query": "how to cook sausage peppers onions",
+      "gold_doc": "p88caf8ded181",
+      "gold_needles": [
+        "Place the sausage in a large skillet over medium heat,"
+      ],
+      "expected_answer": "Place the sausage in a large skillet over medium heat, and brown on all sides. Remove from skillet, and slice. Melt butter in the skillet. Stir in the yellow onion, red onion, and garlic, and cook 2 to 3 minutes. Mix in red bell pepper and green bell pepper. Season with basil, and oregano. Stir in white wine."
+    },
+    {
+      "query": "definition of jape",
+      "gold_doc": "pd315cf9959f6",
+      "gold_needles": [
+        "Freebase(0.00 / 0 votes)Rate this definition: Jape. Jape is a"
+      ],
+      "expected_answer": "It is a configurable, graphical proof assistant, originally developed at the University of Oxford."
+    },
+    {
+      "query": "how ounces in cup",
+      "gold_doc": "p171593cf7ba0",
+      "gold_needles": [
+        "8 ounces. 8 ounces in a cup. In the US,"
+      ],
+      "expected_answer": "There are 8 ounces in a cup."
+    },
+    {
+      "query": "boudinaged in geology define",
+      "gold_doc": "pfe432310eb20",
+      "gold_needles": [
+        "Boudinaged objects, such as fossils, large mineral grains and clasts"
+      ],
+      "expected_answer": "Boudinaged objects, such as fossils, large mineral grains and clasts in deformed rocks can be used for determination of extensional strain."
+    },
+    {
+      "query": "how long does the apple watch in power reserve",
+      "gold_doc": "pea3a3b161289",
+      "gold_needles": [
+        "Power Reserve mode. The official Apple Watch recharge time is"
+      ],
+      "expected_answer": "1.5 hours to 80% and and 2.5 hours to 100%."
+    },
+    {
+      "query": "how much salary for mpf",
+      "gold_doc": "p805792b67e0e",
+      "gold_needles": [
+        "An employee received annual salaries of $180,000 from his principal"
+      ],
+      "expected_answer": "An employee received annual salaries of $180,000 from his principal employment. He made mandatory contributions of $9,000 and voluntary. contributions of $6,000 to a MPF scheme during the year."
+    },
+    {
+      "query": "how long does a woman's cycle last",
+      "gold_doc": "p62a57165007b",
+      "gold_needles": [
+        "The typical length for the menstrual portion of the cycle"
+      ],
+      "expected_answer": "3-5 days"
+    },
+    {
+      "query": "a joule is equal to what",
+      "gold_doc": "p24e48165fa19",
+      "gold_needles": [
+        "At the top, the apple would have gained about one"
+      ],
+      "expected_answer": "1 joule = 1 Newton ⋅ meter"
+    },
+    {
+      "query": "how caitriona balfe got role in outlander",
+      "gold_doc": "p7bc36e08156e",
+      "gold_needles": [
+        "Caitriona Balfe’s role in Outlander has brought her critical acclaim"
+      ],
+      "expected_answer": "Caitriona Balfe’s role in Outlander has brought her critical acclaim and several awards over the last two years. She’s a two-time time winner of the Favourite Cable Sci-Fi/Fantasy TV Actress award at the People’s Choice Awards and a two-time winner at the EWwy Awards for Best Actress in a Drama Series"
+    },
+    {
+      "query": "how long is a boxing match",
+      "gold_doc": "pe50181ec63b4",
+      "gold_needles": [
+        "How long is a round in boxing? The length of"
+      ],
+      "expected_answer": "For men is 3 mins and women are 2 mins"
+    },
+    {
+      "query": "symptoms of flat feet",
+      "gold_doc": "p7f8fd3d83baa",
+      "gold_needles": [
+        "The list of signs and symptoms mentioned in various sources"
+      ],
+      "expected_answer": "The symptoms of flat feet are Lowered foot arch, Flat foot arch."
+    },
+    {
+      "query": "how long to get nys tax refund",
+      "gold_doc": "p50ac570dabbe",
+      "gold_needles": [
+        "Any refund due you should be processed approximately 10 weeks"
+      ],
+      "expected_answer": "10 weeks"
+    },
+    {
+      "query": "how strong is hemp",
+      "gold_doc": "p0a56765a538d",
+      "gold_needles": [
+        "The plant is a Schedule 1 controlled substance in the"
+      ],
+      "expected_answer": "It produces about 200% – 250% more fibre in the same amount of land compared to cotton."
+    },
+    {
+      "query": "difference between guitar and bass guitar",
+      "gold_doc": "p6db55695d990",
+      "gold_needles": [
+        "The Difference Between Guitar and Bass. The simplest difference between"
+      ],
+      "expected_answer": "The simplest difference between guitar and bass guitar is the pitch range of the instruments."
+    },
+    {
+      "query": "how many seasons does longmire have?",
+      "gold_doc": "p8deb6dce0d30",
+      "gold_needles": [
+        "Longmire will ride again. Netflix announced on Friday that they"
+      ],
+      "expected_answer": "Season 5"
+    },
+    {
+      "query": "causes of hyperaerated lungs",
+      "gold_doc": "p3f309d1fb654",
+      "gold_needles": [
+        "If the cause is known such as cops/emphysema it is"
+      ],
+      "expected_answer": "In asthma exacerbation, air trapping."
+    },
+    {
+      "query": "do prince harry and william have last names",
+      "gold_doc": "p67b35551d2e9",
+      "gold_needles": [
+        "Asker's rating. 1 Prince Harry Full Name. 2 This Site"
+      ],
+      "expected_answer": "No, Prince Willam and Harry do have a last name."
+    },
+    {
+      "query": "symptoms of gas pains in your chest",
+      "gold_doc": "p12612cd6186c",
+      "gold_needles": [
+        "Stabbing pain, tingling sensation and dull feeling are just few"
+      ],
+      "expected_answer": "Stabbing pain,tingling sensation and dull feeling are just few of the many symptoms of gas pains in the chest."
+    },
+    {
+      "query": "how much does a pint of blood weigh in lbs",
+      "gold_doc": "pc330eb7b2fe3",
+      "gold_needles": [
+        "How much does one pint of water weigh? 1 US"
+      ],
+      "expected_answer": "A pint of blood will weigh 1.044 pounds."
+    },
+    {
+      "query": "how to get rid of mosquitoes in yard naturally",
+      "gold_doc": "p11f344a28e2c",
+      "gold_needles": [
+        "Repelling Them From Your Yard. 1 1. Use citronella products"
+      ],
+      "expected_answer": "Grow some garlic in your yard."
+    },
+    {
+      "query": "how batting average is calculated in baseball",
+      "gold_doc": "pc8dbbeaab6df",
+      "gold_needles": [
+        "In baseball, the batting average (BA) is defined by the"
+      ],
+      "expected_answer": "It is defined by the number of hits divided by at bats."
+    },
+    {
+      "query": "how much is a video editor?",
+      "gold_doc": "p561f20883a8e",
+      "gold_needles": [
+        "Average Film and Video Editor Hourly Wage in the United"
+      ],
+      "expected_answer": "$26,270 to $155,840."
+    },
+    {
+      "query": "can laser kill you",
+      "gold_doc": "pb883a8adcb6c",
+      "gold_needles": [
+        "Confidence votes 32. In a sence you can in fact"
+      ],
+      "expected_answer": "Yes"
+    },
+    {
+      "query": "how long before you see results for body weight squats",
+      "gold_doc": "p06c61542745c",
+      "gold_needles": [
+        "Beginners will see results in four to eight weeks of"
+      ],
+      "expected_answer": "Four to eight weeks"
+    },
+    {
+      "query": "how long does a small munsterlander live?",
+      "gold_doc": "p9f3b8dc5c67b",
+      "gold_needles": [
+        "Things You Should Know. The Large Munsterlander can live as"
+      ],
+      "expected_answer": "Large 12 years, Small 13 years"
+    },
+    {
+      "query": "can a tenant in common sell their share",
+      "gold_doc": "pefa6fca86fdf",
+      "gold_needles": [
+        "This means that both own the whole of the home."
+      ],
+      "expected_answer": "Yes"
+    },
+    {
+      "query": "how long do seagulls live",
+      "gold_doc": "pdefa415112c3",
+      "gold_needles": [
+        "Seagulls live anywhere between 5 to 15 years depending on"
+      ],
+      "expected_answer": "7 to 10 years"
+    },
+    {
+      "query": "how big is an ancient pyramids",
+      "gold_doc": "p321277193050",
+      "gold_needles": [
+        "As of 2008, some 135 pyramids have been discovered in"
+      ],
+      "expected_answer": "52,600 square metres of The Great Pyramid of Giza."
+    },
+    {
+      "query": "how many extinctions have occurred",
+      "gold_doc": "p5d56c829c282",
+      "gold_needles": [
+        "Estimates of the number of major mass extinctions in the"
+      ],
+      "expected_answer": "Five to more than twenty"
+    },
+    {
+      "query": "can hives be a sign of pregnancy",
+      "gold_doc": "p04a9deafbd1b",
+      "gold_needles": [
+        "Hives are caused by allergic reactions. The dryness and stretching"
+      ],
+      "expected_answer": "Yes, hives can be a sign of pregnancy."
+    },
+    {
+      "query": "definition of a dancer",
+      "gold_doc": "p07ff3bae43a9",
+      "gold_needles": [
+        "A dancer is someone who dances for fun, as a"
+      ],
+      "expected_answer": "A dancer is someone who dances for fun, as a hobby, or for a job."
+    },
+    {
+      "query": "cost of repainting cabinets",
+      "gold_doc": "p6be713493305",
+      "gold_needles": [
+        "The average cost to repaint kitchen cabinets is about $1,000,"
+      ],
+      "expected_answer": "Kitchen cabinets is about $1,000."
+    },
+    {
+      "query": "how much teaspoons is one cup",
+      "gold_doc": "p569e2189a60f",
+      "gold_needles": [
+        "Common Cooking Conversions. 3 teaspoons = 1 tablespoon. 4 tablespoons"
+      ],
+      "expected_answer": "16 tablespoons"
+    },
+    {
+      "query": "how many lbs to take off for clothes when you weigh yourself",
+      "gold_doc": "p1deb25bc637f",
+      "gold_needles": [
+        "Jeans And Jumper. Contrary to what you may believe, clothes"
+      ],
+      "expected_answer": "You should take off 7 lbs for clothes when you weigh yourself."
+    },
+    {
+      "query": "how can I build wealth",
+      "gold_doc": "p6d29b5872dc7",
+      "gold_needles": [
+        "The truth behind how to build wealth is public domain"
+      ],
+      "expected_answer": "Make more than you spend and invest the difference wisely.You can adopt wealth building habits."
+    },
+    {
+      "query": "are you losing weight if your stomach sore",
+      "gold_doc": "pbe8bf794ff53",
+      "gold_needles": [
+        "Elderly people are also often subject to abdominal pain due"
+      ],
+      "expected_answer": "Yes, The abdominal pain due to medications they may be taking. The pain can lead to unintentional weight loss."
+    },
+    {
+      "query": "symptoms of intense hot flashes",
+      "gold_doc": "p3816f775b072",
+      "gold_needles": [
+        "Symptoms of Hot Flashes. Hot flashes are very distinct, and"
+      ],
+      "expected_answer": "The symptoms of intense hot flashes are feeling of warmth going through her upper body and her face."
+    },
+    {
+      "query": "how long do tubes last",
+      "gold_doc": "p636e15e77d3f",
+      "gold_needles": [
+        "Of course the answer is, it depends. Smaller signal tubes,"
+      ],
+      "expected_answer": "Smaller signal tubes, such as the 6DJ8 are rated to last about 5,000 hours and the more durable versions will last incrementally longer. An output tube is typically thought to last 2,000 hours."
+    },
+    {
+      "query": "how many calories and fat are in cream of mushroom soup",
+      "gold_doc": "pdabf3ed98896",
+      "gold_needles": [
+        "There are 138 calories in 1 cup of Cream of"
+      ],
+      "expected_answer": "138 calories,56% fat"
+    },
+    {
+      "query": "define dislocated knee",
+      "gold_doc": "pfbd64357dd18",
+      "gold_needles": [
+        "Dislocation, Patella (Kneecap). Overview &COPY; Reed Group A patellar dislocation"
+      ],
+      "expected_answer": "It is a patellar dislocation is a shifting of the kneecap (patella) out of its normal position."
+    },
+    {
+      "query": "causes of petechial hemorrhage",
+      "gold_doc": "p247d88491c6d",
+      "gold_needles": [
+        "Causes and Symptoms. The causes of petechial hemorrhages are injury"
+      ],
+      "expected_answer": "Injury to the brain and trauma."
+    }
+  ]
+}

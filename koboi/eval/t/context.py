@@ -137,6 +137,65 @@ class TestContext:
                 total.completion_tokens += result.token_usage.completion_tokens
         return total
 
+    def live_ready(self, *, extra: str = "ragas") -> bool:
+        """True only when a live LLM judge can actually run.
+
+        Live (Tier-2) evals call this to self-skip under ``--mock`` or a bare
+        install, so the mock PR gate (``eval-test evals/ --mock --strict``) stays
+        green regardless of the live evals' presence. They run for real on a
+        **manual** ``--tags live`` invocation (``[eval-ragas]`` install + a real
+        key, no ``--mock``); there is no automated nightly job today.
+
+        Returns False when: the agent's client is a :class:`ScriptedClient`
+        (``--mock``), the optional ``extra`` (default ``ragas``) is not importable,
+        or no real (non-dummy) LLM key is set.
+        """
+        import importlib.util
+        import os
+
+        from koboi.eval.t.mock import ScriptedClient
+
+        client = getattr(getattr(self._agent, "core", None), "client", None)
+        if isinstance(client, ScriptedClient):
+            return False
+        # ``extra`` gates judge-LLM deps (e.g. "ragas" for faithfulness). Pass
+        # ``extra=None`` for retrieval-only live evals (semantic/hybrid ranking) that
+        # need the embedding endpoint but no judge framework.
+        if extra is not None and importlib.util.find_spec(extra) is None:
+            return False
+        key = (
+            os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+            or ""
+        )
+        return bool(key) and key != "dummy"
+
+    def require_live(self, *, extra: str = "ragas") -> bool:
+        """Live-eval guard: returns True if ready, else records a passing SOFT skip note.
+
+        Idiomatic for Tier-2 live evals::
+
+            async def test_faithfulness(t):
+                if not t.require_live():
+                    return
+                await t.send(...)
+                await t.judge("ragas_faithfulness", ...)
+
+        Under ``--mock`` / bare install this records a SOFT pass (so the test does not
+        gate-fail or drop below threshold) and the live path is skipped.
+        """
+        if self.live_ready(extra=extra):
+            return True
+        self._record(
+            "live_skip",
+            Severity.SOFT,
+            lambda e=extra: AssertionOutcome(
+                True, 1.0, f"skipped: needs live LLM + [{e}] (run manually with a live LLM)"
+            ),
+        )
+        return False
+
     # --------------------------------------------------------------- assertions
     def calledTool(self, name: str, *, severity: Severity | None = None) -> None:
         """Assert a tool named ``name`` was called at least once (gate by default)."""
@@ -208,6 +267,118 @@ class TestContext:
             return binary_outcome(sev, count > 0, f"retrievedChunk({needle!r}) -> {count} match(es)")
 
         self._record(f"retrievedChunk:{needle}", sev, _evaluate)
+
+    def rankingMetric(
+        self,
+        gold: str | list[str],
+        k: int = 10,
+        metric: str = "recall",
+        *,
+        min_score: float = 1.0,
+        severity: Severity | None = None,
+    ) -> None:
+        """Assert an IR ranking metric over the last turn's ``rag_results`` (gate by default).
+
+        The rank-aware counterpart to :meth:`retrievedChunk` (which is Hit@k=infinity:
+        it passes whenever the gold appears *anywhere*). Reads the retrieved chunks in
+        RANK ORDER from ``RunResult.metadata['rag_results']`` and computes one of
+        ``recall|precision|hit|mrr|ndcg`` against ``gold`` (a needle, or list of
+        needles -- a chunk is relevant if it contains any). ``passed`` is ``value >=
+        min_score``; the metric value itself feeds ``overall_score``.
+
+        Mock-safe (no LLM). Example::
+
+            await t.send("annual leave for permanent staff?")
+            t.rankingMetric("12 days", k=10, metric="recall", min_score=1.0)
+            t.rankingMetric("12 days", k=10, metric="mrr", min_score=0.5)  # rank <= 2
+        """
+        sev = self._sev(severity)
+        gold_list = [gold] if isinstance(gold, str) else list(gold)
+
+        def _evaluate() -> AssertionOutcome:
+            from koboi.eval.scorers.retrieval_metric import compute_ranking_metric
+
+            if not self._turns:
+                return AssertionOutcome(False, 0.0, f"rankingMetric({metric}) -> no turns recorded")
+            rag = (self.last.metadata or {}).get("rag_results", []) or []
+            retrieved = [str(c.get("content", "")) for c in rag if isinstance(c, dict)]
+            if not retrieved:
+                return AssertionOutcome(False, 0.0, f"rankingMetric({metric}) -> no rag_results retrieved")
+            value = compute_ranking_metric(metric, retrieved, gold_list, k)
+            passed = value >= min_score
+            cmp = ">=" if passed else "<"
+            reason = f"{metric}@{k}={value:.3f} {cmp} {min_score} (gold={gold_list!r}) over {len(retrieved)} chunk(s)"
+            return AssertionOutcome(passed, round(value, 3), reason)
+
+        self._record(f"rankingMetric:{metric}:{gold_list}", sev, _evaluate)
+
+    def citationResolves(self, n: int | None = None, *, severity: Severity | None = None) -> None:
+        """Assert the reply's citation markers resolve to retrieved chunks (gate by default).
+
+        With ``n``: asserts the reply cites ``[n]`` and ``1 <= n <= len(rag_results)``
+        (the citation points at a real retrieved chunk, not a hallucinated source).
+        Without ``n``: asserts EVERY ``[k]`` marker in the reply is in range. Reads
+        ``[Source: x]`` markers too. Mock-safe format-vs-correctness check.
+        """
+        sev = self._sev(severity)
+
+        def _evaluate() -> AssertionOutcome:
+            from koboi.eval.scorers.citation_grounding import citation_precision
+
+            if not self._turns:
+                return AssertionOutcome(False, 0.0, "citationResolves -> no turns recorded")
+            rag = (self.last.metadata or {}).get("rag_results", []) or []
+            reply = self.reply or ""
+            if n is not None:
+                present = f"[{n}]" in reply
+                resolves = present and 1 <= n <= len(rag)
+                reason = f"citationResolves({n}) -> cited={present}, resolves={1 <= n <= len(rag)} ({len(rag)} chunks)"
+                return AssertionOutcome(resolves, 1.0 if resolves else 0.0, reason)
+            precision, resolved, total = citation_precision(reply, rag)
+            passed = precision >= 1.0
+            reason = f"citationResolves(all) -> {resolved}/{total} resolve (precision={precision:.2f})"
+            return AssertionOutcome(passed, round(precision, 3), reason)
+
+        label = f"citationResolves:{n}" if n is not None else "citationResolves:all"
+        self._record(label, sev, _evaluate)
+
+    def abstains(self, *, markers: list[str] | None = None, severity: Severity | None = None) -> None:
+        """Assert the reply abstains on insufficient evidence (gate by default).
+
+        Passes when retrieval was empty OR the reply contains a refusal marker -- the
+        coverage/abstention partner to in-corpus answers. ``markers`` overrides the
+        default refusal phrases ("i don't know", "not found", ...).
+        """
+        sev = self._sev(severity)
+        default_markers = (
+            "i don't know",
+            "i do not know",
+            "don't have",
+            "do not have",
+            "not found",
+            "no information",
+            "couldn't find",
+            "could not find",
+            "not in the",
+            "not covered",
+            "does not contain",
+            "doesn't contain",
+            "unable to",
+        )
+        phrases = tuple(markers) if markers else default_markers
+
+        def _evaluate() -> AssertionOutcome:
+            if not self._turns:
+                return AssertionOutcome(False, 0.0, "abstains -> no turns recorded")
+            rag = (self.last.metadata or {}).get("rag_results", []) or []
+            reply = (self.reply or "").lower()
+            empty = len(rag) == 0
+            refused = any(m in reply for m in phrases)
+            ok = empty or refused
+            reason = f"abstains -> empty_rag={empty}, refused={refused}"
+            return AssertionOutcome(ok, 1.0 if ok else 0.0, reason)
+
+        self._record("abstains", sev, _evaluate)
 
     def blocked(self, direction: str | None = None, *, severity: Severity | None = None) -> None:
         """Assert a guardrail BLOCKED the turn at least once (gate by default).
@@ -423,4 +594,12 @@ class TestContext:
         calls = self.all_tool_calls
         if calls:
             context["tool_calls"] = calls
+        # R5: forward the last turn's retrieved chunks (rank order) so
+        # RetrievalMetricScorer / CitationGroundingScorer work via t.judge, and flag
+        # rag_augmented so the existing RAGNoiseScorer detects RAG context was added.
+        if self._turns:
+            rag = (self._turns[-1].metadata or {}).get("rag_results", []) or []
+            if rag:
+                context["rag_results"] = rag
+                context["rag_augmented"] = True
         return context
