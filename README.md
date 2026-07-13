@@ -16,7 +16,7 @@ koboi-agent's defensible position is the integration of five assets that are rar
 - **Crash/redeploy resume** — the SQLite `StepJournal` eagerly writes a `running` marker *before* each LLM call (WAL), so a SIGKILL/redeploy leaves a resumable state; `koboi run --resume <session>` rehydrates and continues, re-executing **only the missing tool calls**. Reproducible proof + wall-clock: `python benchmarks/crash_recovery/run.py`. (LangGraph markets "durable execution" only at the platform/LangSmith tier.)
 - **Seccomp HARD network isolation without a container** — the restricted sandbox denies egress at the syscall layer (`connect`/`connectat`/`sendto`/`sendmsg`, inherited across `execve`) plus rlimits + PATH allowlist + secret-stripped env, on Linux + the `python3-seccomp` system package. No peer ships this without spinning up a container.
 - **Self-hostable REST/SSE + autonomous-jobs server with a real security contract** — `koboi serve` exposes interactive SSE chat (human-in-the-loop approvals) + autonomous background jobs behind Bearer keys, per-session ownership, idempotency, and a graceful drain. The **C3 contract**: autonomous destructive jobs are *refused unless* `sandbox.backend='restricted'`, and approvals are deny-by-default without a Trust-DB rule.
-- **CI-native agent evaluation you treat like code** — the eve-style `t` authoring DSL (`koboi eval-test`) drives an agent and asserts outcomes (`calledTool`/`toolWasBlocked`/`retrievedChunk`/`blocked`/`warned`/`activatedSkill`/`completed`) with mock determinism (no API key burned on commit) and gate/soft severity, routed through 12 built-in scorers.
+- **CI-native agent evaluation you treat like code** — the eve-style `t` authoring DSL (`koboi eval-test`) drives an agent and asserts outcomes (`calledTool`/`toolWasBlocked`/`retrievedChunk`/`blocked`/`warned`/`activatedSkill`/`completed`) with mock determinism (no API key burned on commit) and gate/soft severity, routed through 15 built-in scorers.
 - **Supply-chain-hardened Skills** — agentskills.io-aligned, 3-tier progressive disclosure, with a shell-injection deny-list on SKILL.md `!cmd` preprocessing (the "ClawHavoc" ~1,200-malicious-skills marketplace attack is a real, documented threat).
 
 Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-only; auto-resolves `pending_approval` events) against `koboi serve configs/hitl_demo.yaml`.
@@ -29,14 +29,14 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **YAML-driven config** with `${ENV_VAR}` interpolation
 - **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task
 - **Hook lifecycle**: 15 event types for logging, guardrails, telemetry, plus declarative external-command hooks (`hooks:` YAML — no Python required)
-- **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/semantic/hybrid + reranking), augmentation, query rewriting/HyDE, metadata filtering, remote sources (HTTP/S3)
+- **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/BM25/semantic/hybrid), cross-encoder rerank (jina/cohere/local), augmentation, query rewriting/HyDE, metadata filtering, Indonesian stopwords/stemmer, remote sources (HTTP/S3)
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, and dynamic (LLM-planned) execution
 - **Context management**: truncation, smart truncation, key facts, sliding window
 - **Sandboxed execution**: pluggable passthrough/restricted backends (per-session workdir, network/rlimit isolation)
 - **MCP** client (stdio + HTTP) and server support
 - **HTTP/SSE server & jobs**: `koboi serve` — interactive SSE chat (HITL) + autonomous background jobs; API keys, ownership, idempotency, durable resume, HMAC-signed job webhooks
-- **Evaluation**: BFCL, GAIA, SWE-bench, RAGAS, DeepEval scorers
+- **Evaluation**: BFCL, GAIA, SWE-bench, RAGAS, DeepEval + mock-safe IR scorers (recall@k/MRR/nDCG, citation grounding, bootstrap-CI gating); multilingual EN/ID production-readiness suite — see [docs/rag-production-readiness-eval.md](docs/rag-production-readiness-eval.md)
 - **Terminal UI** (Textual): chat, command palette, diff view, session management
 
 ## Quickstart
@@ -49,6 +49,8 @@ pip install koboi-agent            # bare install: --help, validate, run, sessio
 #   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
 #   pip install koboi-agent[api]   # `koboi serve` (HTTP/SSE server; `koboi keys` works on bare install)
 #   pip install koboi-agent[tokenizer]  # accurate OpenAI token counts (tiktoken); chars/3 heuristic is the fallback
+#   pip install koboi-agent[rerank-local]  # local BGE cross-encoder rerank (sentence-transformers); jina/cohere are API, no extra needed
+#   pip install koboi-agent[indo-nlp]      # Indonesian stemmer (Sastrawi) for lexical RAG retrieval
 #   pip install koboi-agent[dev,tui,api]  # everything (contributors)
 ```
 

@@ -91,7 +91,7 @@ Pre-change: ~2 of 9 well-evidenced (robustness + ingestion-format); the 3 heavie
   new scorers **and** the existing `RAGNoiseScorer` work via `t.judge`.
 
 ### Frozen golden set
-- `evals/fixtures/acme_qrels.json` — 24 needle-verified queries over the shipped Acme
+- `evals/fixtures/acme_qrels.json` — 45 needle-verified queries over the shipped Acme
   corpus (hand-authored; no generation-time LLM).
 
 ### Mock-safe eval files (`evals/`, run under `--mock --strict`)
@@ -111,8 +111,12 @@ Pre-change: ~2 of 9 well-evidenced (robustness + ingestion-format); the 3 heavie
 - `koboi/eval/t/context.py` — `t.live_ready(extra="ragas")` + `t.require_live()`: live
   evals self-skip under `--mock` / bare install (records a passing SOFT note) so the
   mock PR gate stays green; they run for real when invoked manually with a key.
-- `evals/ragas_faithfulness.eval.py` (CRITICAL, w0.18) — `ragas_faithfulness` ≥0.9 +
-  `ragas_composite` ≥0.8 via `t.judge`, reusing the shipped `RAGASScorer`.
+- `evals/ragas_ir_suite.eval.py` (LIVE; Path B3) — the trustworthy IR suite: a real ~3000-passage
+  MS MARCO corpus (built by `scripts/build_ir_corpus.py`), a DECOUPLED judge (`RAGAS_JUDGE_MODEL`),
+  N≈128 queries with bootstrap 95% CI lower-bound gating on retrieval recall@10 + `ragas_faithfulness`
+  + context_recall.
+- `evals/rag_noise_faithfulness.eval.py` (LIVE, w0.09) — faithfulness-under-noise: asserts
+  `ragas_faithfulness` clears the gate despite an off-topic distractor fixture competing for retrieval.
 - `evals/rag_answer_correctness.eval.py` (CRITICAL, w0.13) — `ragas_recall` ≥0.8 +
   `ragas_relevancy` ≥0.7 + a contract-vs-permanent disambiguation case.
 

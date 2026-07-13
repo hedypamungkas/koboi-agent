@@ -13,8 +13,9 @@ See `docs/architecture.md` ("RAG Pipeline") for the end-to-end flow.
 types.py            Chunk, Document, RetrievalResult dataclasses
 registry.py         ComponentRegistry + ComponentEntry, @register_* decorators, build_rag(), load_custom_components()
 chunker.py          BaseChunker ABC + Fixed/Sentence/Paragraph/Semantic chunkers; resolve_chunker()
-retriever.py        BaseRetriever ABC + Keyword/Semantic/Hybrid retrievers; embedding cache; resolve_retriever()
-augmentation.py     AugmentationStrategy ABC + InMemory/OnTheFly; RerankerRetriever wrapper
+retriever.py        BaseRetriever ABC + Keyword/BM25/Semantic/Hybrid retrievers; embedding cache; Indonesian stopwords/stemmer (id); resolve_retriever()
+augmentation.py     AugmentationStrategy ABC + InMemory/OnTheFly; heuristic RerankerRetriever wrapper
+rerank.py           Cross-encoder rerank stage (PR #38): RerankBackend ABC + jina/cohere/local-BGE backends; CrossEncoderReranker wrapper; build_rerank_client() factory
 rewrite.py          Query rewriting + HyDE backing module (#9); needs a chat client, output is ephemeral
 filters.py          Metadata pre-filter operators (#10); NOT a security/ACL boundary
 parsers.py          parser_registry -- text/html/pdf/docx document parsing ([rag] extra for PDF/DOCX)
@@ -65,13 +66,32 @@ kwargs and validates `config_aliases` targets exist (raises `ValueError` otherwi
   (relevance scoping -- freshness/source/type), e.g. `{year: {$gte: 2024}, source: {$in: [policy, handbook]}}`.
   Operators: scalar (equality), `$gte`/`$gt`/`$lte`/`$lt`, `$in`. Applied as a pre-filter in each
   retriever (so top_k isn't shrunk). **NOT a security/ACL boundary** -- see `koboi/rag/filters.py`.
+- **Cross-encoder rerank (`rerank.py`, PR #38)**: `rag.rerank` is `bool | dict`. `true` (legacy)
+  wraps the retriever in the heuristic keyword-overlap `RerankerRetriever`. A **dict**
+  `{provider: jina|cohere|local, api_key, model, fetch_multiplier, score_threshold}` selects a
+  true cross-encoder: `CrossEncoderReranker` over-fetches (`fetch_multiplier` × `top_k`, clamped
+  to the provider batch cap — jina 2048 / cohere 100 / local 10000), re-scores, and stamps a
+  distinctive `retrieval_method` (e.g. `rerank:jina(bm25)`) into `RunResult.metadata['rag_results']`
+  so evals can detect the provider. Defaults: provider `jina`, model `jina-reranker-v3` /
+  `rerank-multilingual-v3.0` (cohere) / `BAAI/bge-reranker-v2-m3` (local). HTTP backends need
+  `api_key` (else warn + no rerank); `local`/BGE needs the `[rerank-local]` extra. **Fail-soft** —
+  on any provider hiccup the wrapper returns the base retriever's results unchanged. Reuses
+  `HttpTransport` + `BearerAuth` + the `LLMError` hierarchy; HTTP transport closed in
+  `KoboiAgent.close()`. Unknown `provider` raises `LLMInvalidRequestError` at build time.
+- **Indonesian NLP (`retriever.py`, PR #38)**: `rag.stopwords: true|en|id` (id = ~80 function
+  words) and `rag.stemmer: id` (Sastrawi via the `[indo-nlp]` extra; **`True` is NOT valid for
+  stemmer** — no English stemmer ships). Applied to BOTH index and query tokens on lexical
+  retrievers (Keyword/BM25/Hybrid) so morphology (`memakan/makanan`→`makan`) normalizes.
 
 ## Gotchas
 - **`SemanticChunker` is effectively `SentenceChunker`**: `_get_embeddings_sync()` has no access
   to the LLM client and always returns None, so it falls back every time. Use the *semantic
   retriever* (not the semantic chunker) for embedding-based behavior.
-- **`RerankerRetriever` is exported but NOT registered**: you cannot select it by name in YAML.
-  It is a manual wrapper -- instantiate it around a base retriever in code.
+- **Two rerank paths**: `rag.rerank: true` (legacy bool) selects the heuristic keyword-overlap
+  `RerankerRetriever` (in `augmentation.py`; also a manual wrapper, NOT registered by name).
+  A **dict** (`{provider: jina|cohere|local, ...}`) selects the true cross-encoder in `rerank.py`
+  (`CrossEncoderReranker`, wired into `build_rag` via `build_rerank_client`). See the Conventions
+  bullet above for backend defaults and batch caps.
 - **Document sources**: `_load_documents` supports `source: file` (default; local
   path/glob/dir), `source: http` (httpx -- presigned URLs work for R2/S3 public-ish
   objects; 0 new dep), and `source: s3` (boto3, the `[rag-cloud]` extra; Cloudflare R2

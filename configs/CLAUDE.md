@@ -45,11 +45,13 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`
+`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`
 
 ### Notable sub-sections (recently added)
 - `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
 - `memory.retention.max_messages` — cap stored message rows (oldest pruned); None = unbounded.
 - `memory.owner` — tenant/owner tag stamped on stored rows (schema prep for multi-tenancy).
 - `context.safety_margin` — tokens of headroom reserved inside `manage()` so one large response can't push an over-budget payload (default 0).
+- `rag.rerank` — `bool | dict`. `true` (legacy) wraps the retriever in the heuristic keyword-overlap `RerankerRetriever`; a **dict** `{provider: jina|cohere|local, api_key, model, base_url, timeout, fetch_multiplier, score_threshold}` selects a true cross-encoder (`koboi/rag/rerank.py`). `provider` defaults `jina`; HTTP backends need `api_key`, `local`/BGE needs the `[rerank-local]` extra. Fail-soft (any hiccup → base results).
+- `rag.stopwords` / `rag.stemmer` — lexical-retriever normalization (Keyword/BM25/Hybrid). `stopwords: true|en|id` (id = ~80 function words); `stemmer: id` (Sastrawi via the `[indo-nlp]` extra; `True` is invalid for stemmer). Applied to both index and query tokens.
 

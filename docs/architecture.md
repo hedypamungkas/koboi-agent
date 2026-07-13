@@ -287,15 +287,16 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (24)
+### Config sections (25)
 
 | Section | Controls |
 |---------|----------|
-| `agent` | Name, system prompt, max iterations, mode |
+| `agent` | Name, system prompt, max iterations, mode (chat/plan/act/auto/yolo) |
+| `mode` | `read_only_tools` — extends the CHAT/PLAN read-only allowlist (distinct from `agent.mode`) |
 | `llm` | Provider, model, API key, base_url, timeout, retries, temperature |
 | `tools` | Builtin list, custom modules, per-tool overrides |
 | `context` | Strategy, max_context_tokens, keep_last, `safety_margin` (response headroom) |
-| `rag` | Chunker, retriever, augmentation, documents |
+| `rag` | Chunker, retriever, rerank (heuristic `true` / cross-encoder dict), augmentation, `stopwords`/`stemmer` (id), documents |
 | `guardrails` | Input/output checks, rate limits, approval mode |
 | `harness` | Telemetry, carryover, doom loop, notifications |
 | `tracing` | Langfuse integration |
@@ -470,7 +471,7 @@ A 5-pass cleanup that fixes message sequences before sending to the LLM:
 
 ## RAG Pipeline
 
-The RAG pipeline has three stages: chunking, retrieval, augmentation.
+The RAG pipeline has three core stages (chunking, retrieval, augmentation) plus an optional cross-encoder rerank stage (`rag.rerank`) that wraps the retriever to over-fetch and re-score.
 
 ```
 Documents (files)
@@ -479,10 +480,13 @@ Documents (files)
 Chunker (fixed / sentence / paragraph / semantic)
      |
      v
-Chunks --> Retriever (keyword / semantic / hybrid)
+Chunks --> Retriever (keyword / bm25 / semantic / hybrid)
+               |
+               v   (optional, rag.rerank dict)
+          CrossEncoderReranker (jina / cohere / local-BGE)  -- over-fetch + re-score; fail-soft
                |
                v
-          RetrievalResult (top_k chunks with scores)
+          RetrievalResult (top_k chunks with scores; retrieval_method stamped)
                |
                v
           AugmentationStrategy
@@ -504,8 +508,10 @@ Chunks --> Retriever (keyword / semantic / hybrid)
 | Retriever | Strategy |
 |-----------|----------|
 | `KeywordRetriever` | TF-IDF cosine similarity |
+| `BM25Retriever` | Okapi BM25 lexical ranking (Indonesian `stopwords`/`stemmer` supported) |
 | `SemanticRetriever` | Embedding-based cosine (requires LLM client for embeddings) |
 | `HybridRetriever` | Reciprocal Rank Fusion of keyword + semantic |
+| `CrossEncoderReranker` | Over-fetch + re-score via jina/cohere/local-BGE (`rag.rerank` dict); wraps any base retriever, stamps `retrieval_method`, fail-soft |
 
 ### Augmentation
 
@@ -520,9 +526,16 @@ Configuration:
 rag:
   enabled: true
   chunker: "paragraph"
-  retriever: "keyword"
+  retriever: "keyword"        # keyword | bm25 | semantic | hybrid
   augmentation: "on_the_fly"
-  top_k: 3
+  top_k: 10                   # >=10 for production-grade recall (see docs/rag-production-readiness-eval.md)
+  rerank:                     # optional cross-encoder (rag.rerank: true = legacy heuristic)
+    provider: jina            # jina (default) | cohere | local (BGE; [rerank-local] extra)
+    api_key: "${RERANK_API_KEY}"
+    model: "jina-reranker-v3"
+    fetch_multiplier: 3       # over-fetch multiplier (clamped to provider batch cap)
+  # stopwords: id             # optional: true | en | id (Indonesian function words)
+  # stemmer: id               # optional: id (Sastrawi, [indo-nlp] extra; NOT True)
   documents:
     - path: "./data/sample/product_catalog.md"
 ```
@@ -868,7 +881,7 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
 
 ### Built-in scorers
 
-`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost`, `RAGNoise`, `ContextEfficiency`, `ToolSelection`, `TokenEfficiency`, `SkillTriggerAccuracy` -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
+`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost`, `RAGNoise`, `ContextEfficiency`, `ToolSelection`, `TokenEfficiency`, `SkillTriggerAccuracy`, `RetrievalMetricScorer` (recall@k/precision@k/MRR/nDCG@k/hit), `CitationGroundingScorer` (ALCE-style citation resolution), `BootstrapCIScorer` (95% CI lower-bound gating) -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
 
 ---
 

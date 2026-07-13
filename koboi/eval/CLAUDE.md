@@ -17,6 +17,7 @@ bfcl_loader.py        BFCL (Berkeley Function Calling Leaderboard)
 gaia_loader.py        GAIA benchmark
 swe_bench_loader.py   SWE-bench
 ragas_generator.py    RAGAS test case generator
+tydiqa_id_loader.py   TyDi QA Indonesian (native secondary_task; registered "tydiqa-id"; needs `datasets`)
 ```
 
 ## Scorers (`scorers/`)

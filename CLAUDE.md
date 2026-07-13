@@ -20,7 +20,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (202 .py files)
+koboi/              Main package (207 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
@@ -49,9 +49,9 @@ koboi/              Main package (202 .py files)
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 19 specialized hooks
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 20 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
-  rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid), augmentation, registry
+  rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid + BM25), cross-encoder rerank (jina/cohere/local -- rerank.py), augmentation, query-rewrite/HyDE, metadata filters, Indonesian stopwords/stemmer, registry
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
   harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
   sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry
@@ -61,15 +61,16 @@ koboi/              Main package (202 .py files)
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (10), widgets/ (12)
-tests/              213 test files (~238 .py incl conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
+tests/              241 .py files (216 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
 configs/            28 YAML agent configs
 examples/           34 numbered example scripts (01-34) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
 data/               Sample documents for RAG demos (Acme Corp)
+scripts/            Reproducible-RAG corpus builders for the IR eval (build_ir_corpus.py, build_id_native_corpus.py, generate_rag_golden.py) + reload-model.sh + run_baseline.py
 benchmarks/         BFCL benchmark data (DO NOT read benchmarks/results.json -- 183MB)
-docs/               Architecture overview, REST/SSE requirements, performance benchmarking, custom command-hooks guide, trustworthy-unattended-autonomy positioning, one-pager, skills/eve research, strategy audits
+docs/               Architecture overview, REST/SSE requirements, performance benchmarking, custom command-hooks guide, RAG production-readiness eval, trustworthy-unattended-autonomy positioning, one-pager, skills/eve research, strategy audits
 ```
 
 ## Code conventions
@@ -122,6 +123,8 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - **Redaction** (`redact.py`): shared value-shape + key-name masking reused by `journal.py`/`server/jobs.py`/`diagnostics.py`. In the step journal it's **fail-safe** (`_safe_redact` masks args wholesale on any error → never aborts the durability write) and `_redact_nested` is **depth-capped** (`_REDACT_MAX_DEPTH=32`, guards `RecursionError` on untrusted nested args).
 - **Schema self-heal**: `SQLiteMemory.list_sessions`/`delete_session`/`fork_session` call `_ensure_schema_on(conn)` on a raw connection (adds steps/tasks/session_meta tables + the `owner` column via `_migrate_add_owner`) — safe to point at a pre-existing/older DB. `delete_session` clears messages+steps+session_meta+tasks+sessions.
 - **Tokenizer extra**: `pip install koboi-agent[tokenizer]` → `tiktoken>=0.7` for accurate OpenAI token counts; `tokens.make_tokenizer(provider, model)` returns a BPE counter (OpenAI only) wired into `ContextManager.tokenizer`, else the chars/3 heuristic. CI installs `.[dev,tui,api]` (no tokenizer) → tiktoken tests `importorskip`.
+- **Cross-encoder rerank** (`rag.rerank`, `koboi/rag/rerank.py`): `True` (legacy bool) wraps the retriever in the heuristic keyword-overlap `RerankerRetriever`; a **dict** `{provider: jina|cohere|local, api_key, model, fetch_multiplier, score_threshold}` selects a true cross-encoder (`CrossEncoderReranker` over-fetches then re-scores, stamps `retrieval_method` like `rerank:jina(bm25)` into `RunResult.metadata['rag_results']` for evals). `provider` defaults `jina`; unknown provider raises `LLMInvalidRequestError` (fail-fast); HTTP backends need `api_key` (else warn + base results, no rerank); `local`/BGE needs the `[rerank-local]` extra (no egress). Fail-soft — any provider hiccup returns base retriever results. HTTP transport closed in `KoboiAgent.close()`.
+- **Indonesian NLP** (`rag.stopwords`/`rag.stemmer`, `koboi/rag/retriever.py`): `stopwords: true|en|id` (id = ~80 function words) and `stemmer: id` (Sastrawi via the `[indo-nlp]` extra; **`True` is NOT valid for stemmer** — no English stemmer ships). Applied to BOTH index and query tokens on lexical retrievers (Keyword/BM25/Hybrid). `stopwords` is cheap/always-on-safe; `stemmer: id` adds ~14min CPU per 3000-passage build.
 - **`ToolDefinition.idempotent: bool = True`** (`types.py`, set via `@tool(..., idempotent=)`): `False` marks side-effecting tools that must not silently double-fire on crash-resume — `_repair_interrupted_turn` skips re-execution (records a synthetic result) for non-idempotent tools. Default `True` preserves prior behavior.
 - New memory/context knobs: `memory.retention.max_messages` (cap stored rows, default None=unbounded), `memory.owner` (tenant tag on stored rows, schema prep for multi-tenancy), `context.safety_margin` (headroom reserved inside `manage()` so one large response can't push an over-budget payload; default 0).
 - **Session REST surface** (`server/app.py`): `GET /v1/sessions` (list, owner-scoped + fails closed 401 when auth on but no caller identity), `POST /v1/sessions/{id}/fork` (rolls back DB+owner rows on any `get_or_create` failure), `DELETE /v1/sessions/{id}` (clears DB rows AND holds `pool.existing_session_lock` so a concurrent `/chat/stream` can't re-insert orphaned rows). `create_app` accepts externalized-state injection kwargs (`session_store`/`job_store`/`event_buffer`/`idempotency_store`/`ownership_store`/`approval_registry`, each default None → in-process impl).
