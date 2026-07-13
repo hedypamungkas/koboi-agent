@@ -271,8 +271,12 @@ embedding endpoint):
 the eval correctly surfaces the one real retrieval gap (rank-6 facts need top_k≥10).
 - Tier-2/3 live evals **self-skip under `--mock`** (`live_skip`, verified) — they run for real
   only on a **manual** `--tags live` invocation (needs `[eval-ragas]` + LLM key, + an
-  `embedding:` endpoint for semantic/hybrid; thresholds uncalibrated until then). No automated
-  nightly job today — see the nightly-removal note in the Tier-2 section above.
+  `embedding:` endpoint for semantic/hybrid). Calibration status: the **rank-metric** live evals
+  (semantic/hybrid ranking, ir_rerank, ir_id_native) are **calibrated + passing** (semantic/hybrid
+  recall@5=1.0, re-verified 2026-07-13); the **RAGAS answer-quality** evals (faithfulness,
+  correctness, golden_suite) remain **provisional** (RAGAS multi-gen hangs on the gateway — the
+  answer-quality numbers in this doc come from a direct decoupled-judge `/tmp` measurement, not
+  from running those eval files). No automated nightly job today — see the nightly-removal note.
 
 ### 7b. Path B recalibration (2026-07-11) — the honest numbers (decoupled judge, real corpus)
 
@@ -357,10 +361,15 @@ intent (grounding / correctness / context relevance) and runs in minutes. A soft
 | answer correctness | 0.734 | **0.750** | ≥0.75 | ✅ (mean at target; CI lower capped by MS MARCO gold noise) |
 | context_relevance | 0.878 | **0.894** | ≥0.70 | ✅ |
 
-**🇮🇩 Indonesian (ID) multilingual validation (N=20, same multilingual v3):** recall@10 **1.000**,
-precision@1 **0.850**, MRR **0.912**, nDCG@10 **0.935** — the multilingual model serves ID fluently
-(translated MS MARCO subset; higher absolute because the ID corpus is smaller/denser). **This
-validates the platform claim: one multilingual model serves both target languages (EN + ID).**
+**🇮🇩 Indonesian (ID) — native TyDi QA (1-in-3000, the caveat-free measurement):**
+- **Retrieval (N=128):** recall@10 **0.938**, precision@1 **0.836**, MRR **0.878**, nDCG@10 **0.893** — all pass.
+- **Answer-quality (N=48, direct gpt-5.4 judge):** faithfulness **0.958**, correctness **0.760**, context_relevance **0.890** — all pass.
+
+(The earlier translated-MS-MARCO numbers — recall 1.000 / p1 0.850 / correctness 0.925 — were
+**inflated by translation normalization**; native TyDi is the honest figure. Notably native-ID
+correctness 0.760 ≪ translated 0.925, confirming translation made the lexical+answer match easier.
+Native still clears all targets.) **The translation caveat is now closed for BOTH retrieval AND
+answer-quality: one multilingual model serves EN + ID on native benchmarks.**
 
 **\*precision@1 — the deliberate multilingual tradeoff.** precision@1 converges to ~0.48 as
 fetch_multiplier scales (0.461→0.469→0.477, diminishing) — that is the **multilingual-model
