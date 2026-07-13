@@ -181,6 +181,16 @@ class TestResearchContext:
         assert restored.coverage_map == {"q1": 0.8}
         assert restored.budget.used_searches == 3
 
+    def test_final_report_round_trip(self):
+        # W7: final_report survives serialization (so GET /v1/sessions/{id} can surface it).
+        ctx = ResearchContext(query="Tell me about X")
+        ctx.final_report = "## Report\nThe topic is X [1].\n\n## Sources\n- [1] node_a"
+        restored = ResearchContext.from_json(ctx.to_json())
+        assert restored.query == "Tell me about X"
+        assert restored.final_report == ctx.final_report
+        # Default is empty string (backward-compatible with older journaled JSON).
+        assert ResearchContext.from_json(ResearchContext().to_json()).final_report == ""
+
 
 # ---------------------------------------------------------------------------
 # CoverageEvaluator
@@ -297,6 +307,38 @@ class TestRunDeepResearch:
         finally:
             conn.close()
         assert count >= 1  # at least one journal row written
+
+    async def test_persists_final_report_session_scoped(self, tmp_path):
+        # W7: after synthesis the final report is journaled, tagged with session_id,
+        # and recoverable via load_research_context_for_session.
+        db_path = str(tmp_path / "r.db")
+        orch = Orchestrator(
+            client=_FakeClient(coverage_score=0.95, synthesis="## Report\nX [1]."),
+            router=KeywordRouter(),
+            research={"max_depth": 1, "coverage_threshold": 0.7},
+            dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=db_path),
+            session_id="sess-123",
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete and complete[0].final_answer  # synthesis produced a report
+
+        ctx_json = DagScheduler.load_research_context_for_session(db_path, "sess-123")
+        assert ctx_json is not None, "session-scoped research context not found"
+        ctx = ResearchContext.from_json(ctx_json)
+        assert ctx.query == "Tell me about X"
+        assert ctx.final_report  # the synthesized report was persisted
+        assert "[1]" in ctx.final_report
+        # A different session has no row.
+        assert DagScheduler.load_research_context_for_session(db_path, "other-session") is None
+
+    async def test_no_session_id_still_journals(self, tmp_path):
+        # Non-server callers (no session_id) still journal -- the column stays NULL,
+        # and load_research_context_for_session returns None (no session tag to match).
+        db_path = str(tmp_path / "r.db")
+        orch = _orch(_FakeClient(coverage_score=0.95), {"max_depth": 1, "coverage_threshold": 0.7}, tmp_path)
+        _ = [e async for e in orch._run_deep_research("Tell me about X")]
+        assert DagScheduler.load_research_context_for_session(db_path, "any") is None  # untagged
 
     async def test_persists_findings_to_corpus_file(self, tmp_path):
         out_path = str(tmp_path / "findings.jsonl")

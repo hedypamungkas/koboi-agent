@@ -53,5 +53,8 @@ memory:
   db_path: ./koboi_memory.db
 
 sandbox:
-  backend: passthrough
+  # 'restricted' (not 'passthrough') so POST /v1/jobs accepts deep_research jobs
+  # (the autonomous-jobs gate refuses passthrough). Web tools are HTTP-only, so node
+  # behavior is unchanged; this only tightens workspace isolation + unblocks jobs.
+  backend: restricted
   workdir: ./workspace

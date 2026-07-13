@@ -80,6 +80,40 @@ def is_safe_session_id(session_id: str) -> bool:
     return bool(_SESSION_ID_RE.fullmatch(session_id))
 
 
+def _deep_research_messages(agent: KoboiAgent, session_id: str) -> list[dict]:
+    """Synthesize a 2-message conversation for a deep_research session (core=None).
+
+    Reads the session-scoped ``research_context`` row persisted by the orchestrator and
+    returns ``[{user: query}, {assistant: final_report | findings}]``. Returns ``[]`` when
+    the session has no research run (e.g. a simple-request direct answer, which is not
+    journaled). Durable: reads the DB, so it survives pool eviction/restart.
+    """
+    orch = getattr(agent, "_orchestrator", None)
+    dag = getattr(orch, "_dag_scheduler", None)
+    db_path = getattr(dag, "db_path", None)
+    if not db_path:
+        return []
+    try:
+        from koboi.orchestration.dag_scheduler import DagScheduler
+        from koboi.orchestration.research import ResearchContext
+
+        ctx_json = DagScheduler.load_research_context_for_session(db_path, session_id)
+        if not ctx_json:
+            return []
+        ctx = ResearchContext.from_json(ctx_json)
+    except Exception:  # noqa: BLE001 - read is best-effort; never crash GET /sessions
+        _logger.debug("deep_research context read failed for %s", session_id, exc_info=True)
+        return []
+    answer = ctx.final_report or ctx.source_store.format_for_synthesis()
+    if not ctx.query and not answer:
+        return []
+    msgs: list[dict] = []
+    if ctx.query:
+        msgs.append({"role": "user", "content": ctx.query})
+    msgs.append({"role": "assistant", "content": answer})
+    return msgs
+
+
 class AgentPool:
     """Lazy, per-session KoboiAgent cache with per-session run serialization."""
 
@@ -154,12 +188,16 @@ class AgentPool:
         if self._config.get("sandbox", "git_init", default=False):
             _git_init_workdir(workdir)
         agent = KoboiAgent.from_dict(data)
-        if self._client_factory is not None:
+        if self._client_factory is not None and agent._core is not None:
             # Test seam: replace the facade-built RetryClient with a MockClient.
             # NOTE: the original RetryClient is orphaned (its httpx pool is not
             # explicitly closed). Acceptable for tests; production passes no
             # client_factory so the real client is reused and close()d on evict.
+            # Guarded: orchestrated configs (execution.mode: dynamic/dag/deep_research)
+            # build with core=None -- the orchestrator manages its own clients.
             agent._core.client = self._client_factory()
+        elif self._client_factory is not None:
+            _logger.debug("client_factory seam skipped for core=None (orchestrated) session")
         # Extensibility (doc §6 Path B): extra tools/hooks + approval handler
         # are attached to each pooled agent. approval_handler is the M2 seam
         # (None in M1 -> base ApprovalHandler's auto behavior).
@@ -176,7 +214,7 @@ class AgentPool:
                 callback = hook_spec[0]
                 events = hook_spec[1] if len(hook_spec) > 1 else None
                 agent.add_hook(callback, events=events)
-        if self._approval_handler is not None:
+        if self._approval_handler is not None and agent._core is not None:
             agent._core.approval_handler = self._approval_handler
         return agent
 
@@ -254,7 +292,15 @@ class AgentPool:
 
     async def get_messages(self, session_id: str) -> list[dict]:
         agent = self._agents.get(session_id)
-        if agent is None or agent._core is None or agent._core.memory is None:
+        if agent is None:
+            return []
+        # Orchestrated configs (execution.mode: dynamic/dag/deep_research) build with
+        # core=None -- there is no AgentCore/ConversationMemory. For deep_research, surface
+        # the session-scoped research context (query + cited report) persisted by the
+        # orchestrator. Returns [] when no research run exists for the session.
+        if agent._core is None:
+            return _deep_research_messages(agent, session_id)
+        if agent._core.memory is None:
             return []
         return agent._core.memory.get_messages()
 

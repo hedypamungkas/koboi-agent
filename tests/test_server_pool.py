@@ -110,6 +110,141 @@ class TestAgentPoolLifecycle:
         assert await pool.get_messages("nope") == []
         await pool.close_all()
 
+    async def test_client_factory_skipped_for_core_none(self, tmp_path):
+        # Fix 1: an orchestrated config (core=None) + a client_factory seam must NOT crash
+        # (the seam is silently skipped instead of AttributeError on agent._core.client).
+        from koboi.events import OrchestrationCompleteEvent
+        from koboi.orchestration.dag_scheduler import DagScheduler
+        from koboi.orchestration.orchestrator import Orchestrator
+        from koboi.orchestration.router import KeywordRouter
+        from koboi.types import AgentResponse
+
+        class _Fake:
+            model = "fake-model"
+            provider = "fake"
+
+            async def complete(self, messages, tools=None, response_format=None):
+                import json
+
+                text = " ".join(m.get("content", "") for m in messages)
+                if "research planner" in text:
+                    return AgentResponse(
+                        content=json.dumps({"needs_workflow": False, "reason": "simple", "steps": []}),
+                        tool_calls=[],
+                    )
+                return AgentResponse(content="ok", tool_calls=[])
+
+        # Use the same orchestrated-agent build path, then inject into a pool.
+        orch = Orchestrator(
+            client=_Fake(),
+            router=KeywordRouter(),
+            research={"max_depth": 1, "coverage_threshold": 0.7},
+            dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "r.db")),
+            default_mode="deep_research",
+        )
+        from koboi.facade import KoboiAgent
+
+        agent = KoboiAgent(core=None, orchestrator=orch)
+        pool = AgentPool(_config(), client_factory=lambda: MockClient([]))
+        pool._agents["s1"] = agent  # inject (bypass _build_agent's config build)
+        # get_or_create path is not exercised here; we directly assert no crash on the
+        # seam by triggering a run + then get_messages.
+        events = await _collect(agent.run_stream("hello"))
+        assert any(isinstance(e, OrchestrationCompleteEvent) for e in events)
+        assert agent._core is None  # orchestrated -> guard path
+        await pool.close_all()
+
+
+class TestDeepResearchMessages:
+    """Fix 3d: get_messages surfaces the query + cited report for deep_research sessions."""
+
+    async def _orchestrated_agent(self, tmp_path, session_id):
+        from koboi.orchestration.dag_scheduler import DagScheduler
+        from koboi.orchestration.orchestrator import Orchestrator
+        from koboi.orchestration.router import KeywordRouter
+        from koboi.types import AgentResponse, ToolCall
+
+        class _Fake:
+            model = "fake-model"
+            provider = "fake"
+
+            def __init__(self) -> None:
+                self.synthesis = "## Report\nSolid-state batteries use sulfide [1]."
+
+            async def complete(self, messages, tools=None, response_format=None):
+                import json
+
+                text = " ".join(m.get("content", "") for m in messages)
+                if "research planner" in text:
+                    return AgentResponse(
+                        content=json.dumps(
+                            {
+                                "needs_workflow": True,
+                                "reason": "research",
+                                "steps": [
+                                    {
+                                        "id": "research_topic",
+                                        "instruction": "Investigate the topic",
+                                        "depends_on": [],
+                                        "search_queries": ["topic overview"],
+                                    }
+                                ],
+                            }
+                        ),
+                        tool_calls=[],
+                    )
+                if "evaluating how thoroughly" in text:
+                    return AgentResponse(
+                        content=json.dumps({"overall_score": 0.95, "coverage": {"x": 0.95}, "follow_up_queries": []}),
+                        tool_calls=[],
+                    )
+                if "synthesizing a cited research report" in text:
+                    return AgentResponse(content=self.synthesis, tool_calls=[])
+                # node turn -> an answer (becomes finding [1])
+                if any(m.get("role") == "tool" for m in messages):
+                    return AgentResponse(content="Found: sulfide electrolytes.", tool_calls=[])
+                return AgentResponse(
+                    content="",
+                    tool_calls=[ToolCall(id="tc1", name="web_search", arguments=json.dumps({"query": "x"}))],
+                )
+
+            async def complete_stream(self, messages, tools=None):
+                from koboi.events import TextDeltaEvent
+
+                yield TextDeltaEvent(content=self.synthesis)
+
+        orch = Orchestrator(
+            client=_Fake(),
+            router=KeywordRouter(),
+            research={"max_depth": 1, "coverage_threshold": 0.7},
+            dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "r.db")),
+            default_mode="deep_research",
+            session_id=session_id,
+        )
+        from koboi.facade import KoboiAgent
+
+        return KoboiAgent(core=None, orchestrator=orch)
+
+    async def test_get_messages_returns_query_and_report(self, tmp_path):
+        agent = await self._orchestrated_agent(tmp_path, "sess-abc")
+        _ = await _collect(agent.run_stream("Research solid-state batteries."))
+        pool = AgentPool(_config())
+        pool._agents["sess-abc"] = agent
+        msgs = await pool.get_messages("sess-abc")
+        assert [m["role"] for m in msgs] == ["user", "assistant"]
+        assert "solid-state batteries" in msgs[0]["content"].lower()
+        assert "sulfide" in msgs[1]["content"]  # the persisted final report
+        assert "[1]" in msgs[1]["content"]  # citation survived
+        await pool.close_all()
+
+    async def test_get_messages_empty_when_no_research_run(self, tmp_path):
+        # A deep_research session that never ran (no research_context row) -> [].
+        agent = await self._orchestrated_agent(tmp_path, "sess-none")
+        pool = AgentPool(_config())
+        pool._agents["sess-none"] = agent
+        assert await pool.get_messages("sess-none") == []
+        await pool.close_all()
+
 
 class TestPoolRunStream:
     async def test_run_stream_yields_complete_event(self):

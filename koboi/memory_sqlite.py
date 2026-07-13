@@ -89,10 +89,22 @@ def ensure_research_context_table(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS research_context (
             graph_run_id TEXT PRIMARY KEY,
             context_json TEXT NOT NULL,
-            updated_at REAL
+            updated_at REAL,
+            session_id TEXT
         )
         """
     )
+    # Additive column for pre-existing DBs created before session scoping (so
+    # GET /v1/sessions/{id} can map a session to its deep-research context).
+    _migrate_research_session_id(conn)
+
+
+def _migrate_research_session_id(conn: sqlite3.Connection) -> None:
+    """Add the ``session_id`` column to an older ``research_context`` table if missing."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+    if "session_id" not in cols:
+        conn.execute("ALTER TABLE research_context ADD COLUMN session_id TEXT")
+        conn.commit()
 
 
 class SQLiteMemory(ConversationMemory):

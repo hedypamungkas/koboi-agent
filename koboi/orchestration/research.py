@@ -226,6 +226,7 @@ class ResearchContext:
     depth: int = 0
     graph_run_id: str | None = None
     query: str = ""  # W5.1: original user query for resume synthesis
+    final_report: str = ""  # the synthesized cited report (set after _synthesize_research)
 
     def add_findings(self, node_id: str, text: str) -> int:
         return self.source_store.add_findings(node_id, text)
@@ -251,6 +252,7 @@ class ResearchContext:
                 "depth": self.depth,
                 "graph_run_id": self.graph_run_id,
                 "query": self.query,
+                "final_report": self.final_report,
             }
         )
 
@@ -278,6 +280,7 @@ class ResearchContext:
         ctx.depth = int(obj.get("depth", 0))
         ctx.graph_run_id = obj.get("graph_run_id")
         ctx.query = str(obj.get("query", ""))
+        ctx.final_report = str(obj.get("final_report", ""))
         return ctx
 
 

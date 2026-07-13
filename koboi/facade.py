@@ -1781,6 +1781,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         sandbox=assembler.sandbox,
         research=config.get("research", default={}),
         web_conf=config.get("web", default={}),
+        session_id=config.get("memory", "session_id", default=None),
     )
 
     return KoboiAgent(

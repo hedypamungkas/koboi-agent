@@ -177,13 +177,16 @@ class DagScheduler:
         return self._db_path
 
     @classmethod
-    def persist_research_context(cls, db_path: str, graph_run_id: str, context_json: str) -> None:
+    def persist_research_context(
+        cls, db_path: str, graph_run_id: str, context_json: str, session_id: str | None = None
+    ) -> None:
         """Journal a ResearchContext for a graph run (W2 deep-research).
 
         One upsert row per ``graph_run_id``. Called by ``_run_deep_research`` after each
         depth round so the run state (sub-questions / SourceStore / coverage_map / budget /
         depth) is inspectable + recoverable. Cross-session rehydrate-on-resume is W2.1.
-        No-op without db_path/graph_run_id.
+        ``session_id`` tags the row so ``GET /v1/sessions/{id}`` can map a session to its
+        latest research context. No-op without db_path/graph_run_id.
         """
         if not db_path or not graph_run_id:
             return
@@ -191,11 +194,13 @@ class DagScheduler:
         try:
             ensure_research_context_table(conn)
             conn.execute(
-                "INSERT INTO research_context (graph_run_id, context_json, updated_at) "
-                "VALUES (?, ?, ?) "
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id) "
+                "VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(graph_run_id) DO UPDATE SET "
-                "context_json=excluded.context_json, updated_at=excluded.updated_at",
-                (graph_run_id, context_json, time.time()),
+                "context_json=excluded.context_json, "
+                "updated_at=excluded.updated_at, "
+                "session_id=COALESCE(excluded.session_id, research_context.session_id)",
+                (graph_run_id, context_json, time.time(), session_id),
             )
             conn.commit()
         finally:
@@ -222,6 +227,26 @@ class DagScheduler:
         try:
             ensure_research_context_table(conn)
             row = conn.execute("SELECT context_json FROM research_context ORDER BY updated_at DESC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
+
+    @classmethod
+    def load_research_context_for_session(cls, db_path: str, session_id: str | None) -> str | None:
+        """Read the latest journaled ResearchContext JSON for a session (GET /v1/sessions/{id}).
+
+        Returns None when the session has no deep-research run (or the column predates
+        session scoping and was never tagged).
+        """
+        if not db_path or not session_id:
+            return None
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            row = conn.execute(
+                "SELECT context_json FROM research_context WHERE session_id=? ORDER BY updated_at DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
         finally:
             conn.close()
         return row[0] if row else None

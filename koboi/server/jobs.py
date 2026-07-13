@@ -561,7 +561,7 @@ async def _execute_job(
     Returns the final content (from ``CompleteEvent``) for ``result_json``
     persistence so completed jobs survive restart.
     """
-    from koboi.events import CompleteEvent
+    from koboi.events import CompleteEvent, OrchestrationCompleteEvent
 
     record = registry.get(job_id)
     agent = await pool.get_or_create(record.session_id)
@@ -593,6 +593,10 @@ async def _execute_job(
                     registry.append_event(job_id, event)
                     if isinstance(event, CompleteEvent):
                         orchestrated_content = event.content
+                    elif isinstance(event, OrchestrationCompleteEvent):
+                        # deep_research/dynamic/dag emit OrchestrationCompleteEvent
+                        # (NOT CompleteEvent); the cited report is in final_answer.
+                        orchestrated_content = event.final_answer
         return orchestrated_content
 
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network

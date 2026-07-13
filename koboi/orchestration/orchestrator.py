@@ -165,6 +165,9 @@ class Orchestrator:
         # W4: web config so deep_research nodes get the CONFIGURED search/fetch providers
         # (Brave/Firecrawl), not the mock/inline default.
         web_conf: dict | None = None,
+        # W7: session_id tags persisted research_context rows so GET /v1/sessions/{id}
+        # can map a session to its deep-research run. None for non-server callers.
+        session_id: str | None = None,
     ):
         self.client = client
         self.router = router
@@ -194,6 +197,7 @@ class Orchestrator:
         self._research = research or {}
         self._web_conf = web_conf or {}
         self._resume_ctx_json: str | None = None
+        self._session_id = session_id
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -968,7 +972,7 @@ class Orchestrator:
                 try:
                     from koboi.orchestration.dag_scheduler import DagScheduler
 
-                    DagScheduler.persist_research_context(db_path, run_id, ctx.to_json())
+                    DagScheduler.persist_research_context(db_path, run_id, ctx.to_json(), session_id=self._session_id)
                 except Exception as e:  # noqa: BLE001 - journaling is best-effort
                     logger.warning("research context journal failed: %s", e)
 
@@ -1027,6 +1031,17 @@ class Orchestrator:
         combined_answer = report + self._sources_footer(ctx, referenced)
         if combined_answer:
             yield TextDeltaEvent(content=combined_answer)
+
+        # W7: persist the final synthesized report so GET /v1/sessions/{id} can surface it
+        # (the report prose is otherwise only streamed as events, never written to DB).
+        ctx.final_report = combined_answer
+        if db_path:
+            try:
+                from koboi.orchestration.dag_scheduler import DagScheduler
+
+                DagScheduler.persist_research_context(db_path, run_id, ctx.to_json(), session_id=self._session_id)
+            except Exception as e:  # noqa: BLE001 - persistence is best-effort, never fatal
+                logger.warning("research final-report journal failed: %s", e)
 
         # W3: persist the gathered findings (best-effort) for cross-session corpus reuse.
         persist_path = self._research.get("persist_findings")
