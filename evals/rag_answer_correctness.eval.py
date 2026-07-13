@@ -6,7 +6,7 @@ skipped ("we assert on retrieval, not the answer") -- nothing evidenced that the
 grounded pipeline produces a *correct* answer.
 
 LIVE ONLY: self-skips under ``--mock`` / bare install via ``t.require_live()``. Runs
-on the ``eval-ragas-nightly`` job (``pip install -e ".[eval-ragas]"`` +
+on a manual run (``pip install -e ".[eval-ragas]"`` +
 ``koboi eval-test evals/ --tags live``). Thresholds PROVISIONAL; SOFT until calibrated.
 """
 

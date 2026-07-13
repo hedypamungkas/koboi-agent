@@ -8,7 +8,7 @@ shipped but never invoked).
 
 LIVE ONLY: self-skips under ``--mock`` or a bare install via ``t.require_live()``, so
 the mock PR gate (``eval-test evals/ --mock --strict``) stays green. Runs for real on
-the ``eval-ragas-nightly`` job::
+a manual run::
 
     pip install -e ".[eval-ragas]"
     koboi eval-test evals/ --tags live

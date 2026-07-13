@@ -142,9 +142,9 @@ class TestContext:
 
         Live (Tier-2) evals call this to self-skip under ``--mock`` or a bare
         install, so the mock PR gate (``eval-test evals/ --mock --strict``) stays
-        green regardless of the live evals' presence. The separate
-        ``eval-ragas-nightly`` job (``[eval-ragas]`` install + a real key, no
-        ``--mock``) is where these actually run.
+        green regardless of the live evals' presence. They run for real on a
+        **manual** ``--tags live`` invocation (``[eval-ragas]`` install + a real
+        key, no ``--mock``); there is no automated nightly job today.
 
         Returns False when: the agent's client is a :class:`ScriptedClient`
         (``--mock``), the optional ``extra`` (default ``ragas``) is not importable,
@@ -191,7 +191,7 @@ class TestContext:
             "live_skip",
             Severity.SOFT,
             lambda e=extra: AssertionOutcome(
-                True, 1.0, f"skipped: needs live LLM + [{e}] (run via eval-ragas-nightly)"
+                True, 1.0, f"skipped: needs live LLM + [{e}] (run manually with a live LLM)"
             ),
         )
         return False

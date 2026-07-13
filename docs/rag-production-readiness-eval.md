@@ -26,9 +26,9 @@ change; "Tier" is where it closes.
 
 | # | Dimension | w | Pre-change coverage | Target (industry) | Tier |
 |---|---|---|---|---|---|
-| 1 | Grounding / anti-hallucination (faithfulness) | 0.18 | eval shipped (uncalibrated) — `ragas_faithfulness` via `t.judge`, runs nightly | Ragas Faithfulness ≥0.9 (high-stakes) / ≥0.8 | 2 ⏳ |
+| 1 | Grounding / anti-hallucination (faithfulness) | 0.18 | eval shipped (uncalibrated) — `ragas_faithfulness` via `t.judge`, run manually | Ragas Faithfulness ≥0.9 (high-stakes) / ≥0.8 | 2 ⏳ |
 | 2 | Retrieval ranking quality | 0.17 | binary substring only (Hit@k=∞); no Recall@k/MRR/nDCG/qrels | Recall@10 ≥0.8, MRR ≥0.6, nDCG@10 ≥0.7 | **0+1** ✅ |
-| 3 | Answer correctness & relevance (end-to-end) | 0.13 | eval shipped (uncalibrated) — `ragas_recall`/`relevancy` via `t.judge`, nightly | FactualCorrectness F1 ≥0.75, Relevancy ≥0.7 | 2 ⏳ |
+| 3 | Answer correctness & relevance (end-to-end) | 0.13 | eval shipped (uncalibrated) — `ragas_recall`/`relevancy` via `t.judge`, run manually | FactualCorrectness F1 ≥0.75, Relevancy ≥0.7 | 2 ⏳ |
 | 4 | Ingestion fidelity (parsing/chunking/format) | 0.10 | component pytest only; no real-format extraction gate | 100% in-scope formats parse; chunk-boundary Hit@k overlap≥1 | **0+1** ✅ |
 | 5 | Negative rejection / abstention | 0.09 | **none** | abstain-rate ≥0.9 (OOS); answerable acc ≥0.8 | **0+1** ✅ |
 | 6 | Noise robustness | 0.09 | `RAGNoiseScorer` shipped, never used | Noise Sensitivity ≤0.2; faithfulness drop ≤5% | **1** (mock) / 2 (live) ✅ |
@@ -107,17 +107,23 @@ Pre-change: ~2 of 9 well-evidenced (robustness + ingestion-format); the 3 heavie
 
 **Totals:** 22 new mock-safe tests (33/33 with the existing samples), all GATE-green.
 
-### Tier 2 — live-LLM evals (shipped; thresholds uncalibrated)
+### Tier 2 — live-LLM evals (shipped; thresholds uncalibrated; run MANUALLY)
 - `koboi/eval/t/context.py` — `t.live_ready(extra="ragas")` + `t.require_live()`: live
   evals self-skip under `--mock` / bare install (records a passing SOFT note) so the
-  mock PR gate stays green; they run for real only on the nightly job.
+  mock PR gate stays green; they run for real when invoked manually with a key.
 - `evals/ragas_faithfulness.eval.py` (CRITICAL, w0.18) — `ragas_faithfulness` ≥0.9 +
   `ragas_composite` ≥0.8 via `t.judge`, reusing the shipped `RAGASScorer`.
 - `evals/rag_answer_correctness.eval.py` (CRITICAL, w0.13) — `ragas_recall` ≥0.8 +
   `ragas_relevancy` ≥0.7 + a contract-vs-permanent disambiguation case.
-- `.github/workflows/eval-ragas-nightly.yml` — daily report-only job: installs
-  `[eval-ragas]`, runs `koboi eval-test evals/ --tags live` (no `--mock`). Self-skips
-  (exit 0) if no LLM key secret is set; flip on `--strict` once thresholds calibrate.
+
+> **No automated nightly job.** A nightly workflow was prototyped and **removed** — it was broken
+> in practice: (1) RAGAS's multi-generation sampling stalls on OpenAI-compatible gateways that
+> return 1-of-3 completions (the live answer-quality evals would hang → timeout); and (2) the IR
+> live evals need the gitignored corpora (`data/ir_corpus/`, `data/id_native_corpus/`) which a CI
+> job would have to build (no build step was wired). Live evidence is instead captured **manually**
+> (the N=128 measurements recorded in this doc) via `pip install -e ".[eval-ragas]" && koboi
+> eval-test evals/ --tags live` with the keys in `.env`. Re-add automation only after switching
+> answer-quality to the direct single-call judge (RAGAS-free) and adding a corpus-build step.
 
 **Tier 2 tail — semantic/hybrid ranking (live):**
 - `evals/rag_semantic_ranking.eval.py` (HIGH, w0.17) — a vocabulary-mismatched
@@ -198,7 +204,7 @@ observations worth tracking:
 | After | Defensible statement |
 |---|---|
 | **Tier 0+1 (this change)** | *"Retrieval ranking, abstention-retrieval, citation resolution, ingestion fidelity, and metadata scoping will not silently regress on any PR — evidenced by a mock-safe HARD gate at zero API cost, with a retrieval-side 95%-CI leg."* |
-| Tier 2 | + *"Faithfulness ≥0.9 and end-to-end answer correctness are evidenced nightly over the Acme corpus (RAGAS), disclosed as non-deterministic until calibrated."* |
+| Tier 2 | + *"Faithfulness ≥0.9 and end-to-end answer correctness are evidenced **manually** over the real MS MARCO / TyDi-QA corpora (N=128, direct decoupled-judge measurements recorded in this doc), not yet automated — see the nightly-removal note above."* |
 | Tier 3 | + *"Statistically defensible at N≥100 with 95%-CI lower bounds per dimension."* |
 | (beyond) | A human-annotated PPI tier is the prerequisite for an **unqualified external** "RAG is production-ready" assertion — N=100 bootstrap half-width (~±0.10) is too wide for high-stakes ≥0.9 claims and judge-LLM determinism is unbounded. |
 
@@ -256,9 +262,10 @@ embedding endpoint):
 **Net:** the live tier now produces production-grade scores on the reliable metrics
 (faithfulness/answer-relevancy/context-precision/context-recall/composite all 1.0) and
 the eval correctly surfaces the one real retrieval gap (rank-6 facts need top_k≥10).
-- Tier-2/3 live evals **self-skip under `--mock`** (`live_skip`, verified) — they run
-  for real only on `eval-ragas-nightly` (needs `[eval-ragas]` + LLM key, + an
-  `embedding:` endpoint for semantic/hybrid; thresholds uncalibrated until then).
+- Tier-2/3 live evals **self-skip under `--mock`** (`live_skip`, verified) — they run for real
+  only on a **manual** `--tags live` invocation (needs `[eval-ragas]` + LLM key, + an
+  `embedding:` endpoint for semantic/hybrid; thresholds uncalibrated until then). No automated
+  nightly job today — see the nightly-removal note in the Tier-2 section above.
 
 ### 7b. Path B recalibration (2026-07-11) — the honest numbers (decoupled judge, real corpus)
 

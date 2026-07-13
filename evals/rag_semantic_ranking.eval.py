@@ -7,7 +7,7 @@ target chunk, AND ``retrieval_method`` must be ``"semantic"`` (not the silent
 ran on mock/None embeddings -- this is the first eval that proves real embedding recall.
 
 LIVE ONLY (needs the embedding endpoint via an ``embedding:`` config): self-skips under
-``--mock`` via ``t.require_live(extra=None)``. Run on eval-ragas-nightly (set
+``--mock`` via ``t.require_live(extra=None)``. Run manually (set
 ``OPENAI_API_KEY`` + ``OPENAI_EMBEDDING_MODEL``). Thresholds PROVISIONAL (uncalibrated).
 """
 

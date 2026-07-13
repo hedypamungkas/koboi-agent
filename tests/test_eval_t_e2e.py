@@ -34,7 +34,7 @@ class TestShippedEvalsGolden:
         # + ragas_ir_suite (1) + ragas_ir_adversarial (4) + ragas_ir_rerank (1)
         # + ragas_ir_id_native (1) -- NATIVE Indonesian (TyDi QA-id), caveat-free ID claim.
         # -- self-skip under mock via t.require_live() (live_skip), so they pass here
-        # and run for real on the eval-ragas-nightly job.
+        # and run for real on a manual `--tags live` run.
         assert len(results) == 55
 
         passed = [r for r in results if r.passed]
