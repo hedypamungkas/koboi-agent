@@ -115,16 +115,17 @@ class TestAccessors:
         assert c.trust_db_path == "koboi_trust.db"
 
     def test_get_nested_default_paths(self):
+        # node becomes None mid-path -> default (the None-check in get())
         c = Config({"a": {"b": None}}, validate=False)
-        # node becomes None mid-path -> default
         assert c.get("a", "b", "c", default="D") == "D"
-        # node not a dict mid-path -> default
-        assert c.get("a", "b", default="D") == "D"
-        # missing top key
-        assert c.get("missing", default="D") == "D"
+        # node becomes a NON-dict mid-path -> default (the isinstance check in get())
+        c2 = Config({"a": 5}, validate=False)
+        assert c2.get("a", "b", default="D") == "D"
+        # missing top key -> default
+        assert c2.get("missing", default="D") == "D"
         # present
-        c2 = Config({"x": 5}, validate=False)
-        assert c2.get("x") == 5
+        present = Config({"x": 5}, validate=False)
+        assert present.get("x") == 5
 
 
 class TestWarnUnknownLlmKeys:

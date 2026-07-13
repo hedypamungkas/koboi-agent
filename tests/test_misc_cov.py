@@ -447,8 +447,9 @@ class TestKeyFactsSkipEmpty:
 
 class TestEnsureToolIntegrityBranches:
     def test_missing_results_with_content_keeps_partial_calls(self):
-        # Assistant has content AND tool_calls where some results are missing:
-        # hits the content-present branch + kept_calls branch.
+        # Assistant has content + two tool_calls; only tc_kept has a tool result,
+        # so tc_gone is "missing" and dropped while tc_kept survives (kept_calls
+        # branch at context/manager.py:58).
         msgs = [
             {
                 "role": "assistant",
@@ -458,12 +459,13 @@ class TestEnsureToolIntegrityBranches:
                     {"id": "tc_gone", "function": {"name": "b"}},
                 ],
             },
+            {"role": "tool", "tool_call_id": "tc_kept", "content": "result-a"},
         ]
         out = ensure_tool_integrity(msgs)
         asst = [m for m in out if m.get("role") == "assistant"][0]
         assert asst["content"] == "partial answer"  # content preserved
-        # tc_kept has no result either, so both are dropped -> no tool_calls survive,
-        # but the content-present branch (line 54) is exercised.
+        # tc_gone had no result -> dropped; tc_kept had a result -> retained
+        assert [tc["id"] for tc in asst["tool_calls"]] == ["tc_kept"]
 
 
 class TestSlidingWindowHydratePersist:

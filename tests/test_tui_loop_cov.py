@@ -63,21 +63,34 @@ class TestHandlers:
 
     def test_run_no_args_notfound_error_success(self, monkeypatch, tmp_path):
         cmds = build_slash_commands(_agent())
-        console = MagicMock()
-        cmds["/run"](_agent(), console)  # no args
-        cmds["/run"](_agent(), console, args="/no/such.yaml")  # not found
+
+        # no args -> usage hint
+        c0 = MagicMock()
+        cmds["/run"](_agent(), c0)
+        assert any("Usage" in str(a) for a in c0.print.call_args_list)
+
+        # file does not exist -> "Config not found" (checked before from_config)
+        c1 = MagicMock()
+        cmds["/run"](_agent(), c1, args="/no/such.yaml")
+        assert any("Config not found" in str(a) for a in c1.print.call_args_list)
+
+        # file EXISTS but from_config raises -> "Error loading config"
+        err_cfg = tmp_path / "err.yaml"
+        err_cfg.write_text("agent: {name: x}\n")
         monkeypatch.setattr("koboi.facade.KoboiAgent.from_config", MagicMock(side_effect=RuntimeError("boom")))
-        cmds["/run"](
-            _agent(), console, args=str(tmp_path / "x.yaml")
-        )  # error (file exists? no) -> not found path actually
+        c2 = MagicMock()
+        cmds["/run"](_agent(), c2, args=str(err_cfg))
+        assert any("Error loading config" in str(a) for a in c2.print.call_args_list)
+
+        # success -> returns the run message and hot-swaps the agent
         cfg = tmp_path / "c.yaml"
         cfg.write_text("agent: {name: x}\n")
         new_agent = MagicMock()
         monkeypatch.setattr("koboi.facade.KoboiAgent.from_config", MagicMock(return_value=new_agent))
         agent = _agent()
-        ret = cmds["/run"](agent, console, args=f"{cfg} hi")  # success
+        ret = cmds["/run"](agent, MagicMock(), args=f"{cfg} hi")
         assert ret == "hi"
-        agent.replace_from.assert_called_once()
+        agent.replace_from.assert_called_once_with(new_agent)
 
     async def test_compact_no_strategy_and_success(self):
         cmds = build_slash_commands(_agent())
@@ -300,7 +313,9 @@ class TestInteractiveLoop:
 
         console = MagicMock()
         console.input = _inp
-        await interactive_loop(agent, console, stream=False)  # error printed, loop continues
+        await interactive_loop(agent, console, stream=False)
+        # the loop must SURFACE the error, not silently swallow it
+        assert any("kaboom" in str(a) for a in console.print.call_args_list)
 
     async def test_extra_commands_dispatch(self, monkeypatch):
         calls = []

@@ -117,11 +117,23 @@ class TestLiveReady:
         t = TestContext(agent)
         assert t.live_ready() is False
 
-    async def test_extra_missing_not_ready(self):
+    async def test_extra_missing_not_ready(self, monkeypatch):
+        import importlib.util
+
         agent = MagicMock()
         agent.core.client = object()  # not a ScriptedClient
         t = TestContext(agent)
-        # "ragas" absent in CI-faithful -> not ready
+        # Force the "extra" dep to be reported missing regardless of the local
+        # install, and strip keys, so this is hermetic (previously it returned
+        # False only by accident of CI's venv lacking ragas + keys).
+        _real_find_spec = importlib.util.find_spec
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name: None if name == "ragas" else _real_find_spec(name),
+        )
+        for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+            monkeypatch.delenv(k, raising=False)
         assert t.live_ready(extra="ragas") is False
 
     async def test_require_live_records_skip(self, monkeypatch):
@@ -198,8 +210,10 @@ class TestRagAssertions:
         t.rankingMetric("alpha", k=10, metric="recall", min_score=1.0)
         t.rankingMetric("missing", k=10, metric="mrr", min_score=0.5)
         outs = _eval_all(t)
-        assert any("recall@10" in o.reason for o in outs)
-        assert any("no rag" not in o.reason for o in outs)
+        # alpha is retrieved at rank 0 -> recall@10 = 1.0 (passes min_score 1.0)
+        assert outs[0].value == 1.0 and "recall@10=1.000" in outs[0].reason
+        # "missing" is in no chunk -> mrr@10 = 0.0 (fails min_score 0.5)
+        assert outs[1].value == 0.0 and "mrr@10=0.000" in outs[1].reason
 
     async def test_ranking_metric_no_turns(self):
         t = TestContext(_agent())

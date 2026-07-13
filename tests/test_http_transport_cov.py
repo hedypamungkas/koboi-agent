@@ -133,8 +133,8 @@ class TestPostStream:
         body = "data: a\n\ndata: b\n\n"
         t = _make_transport(lambda req: httpx.Response(200, text=body))
         lines = [b async for b in t.post_stream("/chat", {"x": 1})]
-        # post_stream sets body["stream"]=True before requesting
-        assert any(b"a" in ln for ln in lines)
+        # non-blank SSE lines, encoded, in order (blank lines stripped)
+        assert lines == [b"data: a", b"data: b"]
 
     async def test_stream_error_status(self):
         t = _make_transport(lambda req: httpx.Response(400, text="bad"))
