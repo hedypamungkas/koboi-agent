@@ -46,6 +46,11 @@ Run: `pytest tests/orchestration/test_deep_research_mechanics.py -q` (no keys ne
 
 Env-gated; self-skip without keys. Provider = Firecrawl (search + fetch).
 
+**LLM timeout:** these configs set `llm.timeout: 300` (5 min/call). The default 120s is too
+short for `gpt-5.4` planning calls via a slow proxy gateway (the planner call timed out at 120s
+in testing, falling the run to the direct-answer path with no research). Raise it further if
+your gateway is slower.
+
 | Scenario | File | Catches |
 |---|---|---|
 | Q1 multi-faceted factual | `evals/deep_research_prod_multifaceted.eval.py` | shallow-report regression (the 1/3 flake) — full bar |

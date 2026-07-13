@@ -30,6 +30,8 @@ CONFIG = {
         "model": os.getenv("OPENAI_MODEL", "gpt-5.4"),
         "api_key": os.getenv("OPENAI_API_KEY", "dummy"),
         "base_url": os.getenv("OPENAI_BASE_URL", ""),
+        "timeout": 300,  # gpt-5.4 planning via a slow gateway can exceed the 120 default
+        "max_retries": 3,
     },
     "orchestration": {"enabled": True, "execution": {"mode": "deep_research"}},
     "research": {
