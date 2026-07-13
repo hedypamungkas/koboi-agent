@@ -26,22 +26,34 @@ from tests.conftest import MockClient, make_mock_response
 class _BlockGuardrail(BaseGuardrail):
     """Always fails with an explicit block action."""
 
-    async def check(self, content: str) -> GuardrailResult:
+    async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
         return GuardrailResult(passed=False, reason="blocked by policy", action="block")
 
 
 class _DefaultActionGuardrail(BaseGuardrail):
     """Fails without specifying action -> GuardrailResult.action defaults to 'block'."""
 
-    async def check(self, content: str) -> GuardrailResult:
+    async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
         return GuardrailResult(passed=False, reason="default-action block")
 
 
 class _WarnGuardrail(BaseGuardrail):
     """Always fails with a warn action (soft flag)."""
 
-    async def check(self, content: str) -> GuardrailResult:
+    async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
         return GuardrailResult(passed=False, reason="soft warning", action="warn")
+
+
+class _AbstainGuardrail(BaseGuardrail):
+    """Fails with an abstain action -> output swapped for a refusal (A3.2)."""
+
+    async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
+        return GuardrailResult(
+            passed=False,
+            reason="grounding coverage 0.33 < 0.8",
+            action="abstain",
+            sanitized_content="I don't have enough grounded information to answer this confidently.",
+        )
 
 
 def _core(guardrails, content: str = "here is the leaked secret"):
@@ -73,6 +85,15 @@ class TestOutputGuardrailHonorsAction:
         # still flags-and-continues; the content is returned with a warning prefix.
         result = await _core([_WarnGuardrail()]).run("show me the data")
         assert "GUARDRAIL WARNING" in result.content
+
+    async def test_abstain_action_swaps_output_for_refusal(self):
+        # A3.2: an abstain-action guardrail REPLACES the output with a refusal
+        # (block is too harsh -- denies the turn; warn is too weak -- prepends).
+        # The original hallucinated content must NOT survive into the result.
+        result = await _core([_AbstainGuardrail()], content="confident hallucination").run("q")
+        assert "I don't have enough grounded information" in result.content
+        assert "confident hallucination" not in result.content
+        assert result.metadata.get("guardrail_outcomes", [{}])[0].get("action") == "abstain"
 
     async def test_block_surfaces_through_run_stream(self):
         # Jobs consume run_stream; the block must propagate so run_job marks the
@@ -122,7 +143,7 @@ class TestOutputGuardrailStreamingG8b:
         # flows to the SSE error frame and the durable jobs.error column). The
         # detail stays in server logs only.
         class _LeakyReasonGuardrail(BaseGuardrail):
-            async def check(self, content: str) -> GuardrailResult:
+            async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
                 return GuardrailResult(passed=False, reason="echoes SECRET-VALUE-123", action="block")
 
         with pytest.raises(AgentGuardrailError) as exc_info:

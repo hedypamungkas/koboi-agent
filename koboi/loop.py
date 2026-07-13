@@ -298,20 +298,41 @@ class AgentCore:
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
         """Run output guardrails, emit POST_OUTPUT, save to memory.
 
-        ``block``/``deny``/``abort`` raises (denies the output); any other action
+        ``block``/``deny``/``abort`` raises (denies the output); ``abstain``
+        swaps the output for a refusal (A3 grounding guardrail); any other action
         (incl. ``warn`` and non-string/absent) prepends a warning and continues.
         The detailed reason is logged server-side only; the raised message carries
         just the guardrail name so a leaky ``reason`` can't re-leak via the error
         frame / durable job error.
         """
+        # A3: thread retrieved context to output guardrails so a grounding
+        # guardrail can judge faithfulness against the retrieved evidence.
+        retrieved_context: list[str] = []
+        if self.augmentation is not None:
+            _results = getattr(self.augmentation, "last_results", None) or []
+            retrieved_context = [r.chunk.content for r in _results]
         for grd in self.output_guardrails:
-            out_result = await grd.check(output)
+            out_result = await grd.check(output, context=retrieved_context)
             self._audit("output_check", details=f"guardrail={type(grd).__name__} passed={out_result.passed}")
             if not out_result.passed:
                 action = out_result.action if isinstance(out_result.action, str) else ""
                 if action.lower() in {"block", "deny", "abort"}:
                     self._log(f"Output blocked by {type(grd).__name__}: {out_result.reason}")
                     raise AgentGuardrailError(f"output blocked by {type(grd).__name__}", direction="output")
+                if action.lower() == "abstain":
+                    # A3.2: swap the output for a refusal. ``block`` is too harsh
+                    # (it denies the whole turn); ``warn`` is too weak (it
+                    # prepends). The guardrail supplies the refusal via
+                    # ``sanitized_content`` (or a default).
+                    self._last_output_guardrail = {
+                        "guardrail": type(grd).__name__,
+                        "reason": out_result.reason,
+                        "action": "abstain",
+                    }
+                    output = out_result.sanitized_content or (
+                        "I don't have enough grounded information to answer this confidently."
+                    )
+                    break
                 self._last_output_guardrail = {
                     "guardrail": type(grd).__name__,
                     "reason": out_result.reason,
