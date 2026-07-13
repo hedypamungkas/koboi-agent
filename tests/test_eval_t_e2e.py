@@ -34,12 +34,14 @@ class TestShippedEvalsGolden:
         # + ragas_ir_id_native (1) -- NATIVE Indonesian (TyDi QA-id), caveat-free ID claim.
         # Deep research mock eval (2): deep_research_mock + deep_research_citations/faithfulness
         # self-skip under mock (DispatchingClient W6.1 + fail-fast OPENAI_API_KEY guard).
+        # Production smoke evals (4): deep_research_prod_{multifaceted,recency,comparative,adversarial}
+        # -- live-only, self-skip under mock (live_ready guard). Real-provider run is pre-release.
         # (ragas_golden_suite + the Acme ragas_faithfulness evals were REMOVED.)
-        assert len(results) == 55
+        assert len(results) == 59
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 55
+        assert len(passed) == 59
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing

@@ -909,6 +909,10 @@ class Orchestrator:
                     "depth": ctx.depth,
                     "run_id": run_id,
                     "resumed": True,
+                    "plan_nodes": len(ctx.sub_questions),
+                    "used_searches": ctx.budget.used_searches,
+                    "used_fetches": ctx.budget.used_fetches,
+                    "nodes_failed": 0,
                 },
             )
             return
@@ -1065,6 +1069,12 @@ class Orchestrator:
                 "coverage": score,
                 "depth": ctx.depth,
                 "run_id": run_id,
+                # Production-smoke bar (docs/deep-research-smoke.md): decomposition,
+                # budget adherence, node health -- all readable via RunResult.metadata.
+                "plan_nodes": len(routing_agents),
+                "used_searches": budget.used_searches,
+                "used_fetches": budget.used_fetches,
+                "nodes_failed": sum(1 for r in results_by_name.values() if getattr(r, "failed", False)),
             },
         )
 
@@ -1127,7 +1137,16 @@ class Orchestrator:
             execution_mode="deep_research",
             routing_agents=["assistant"],
             routing_confidence=1.0,
-            metadata={"research_sources": [], "coverage": 1.0, "depth": 0, "run_id": run_id},
+            metadata={
+                "research_sources": [],
+                "coverage": 1.0,
+                "depth": 0,
+                "run_id": run_id,
+                "plan_nodes": 1,
+                "used_searches": 0,
+                "used_fetches": 0,
+                "nodes_failed": 0,
+            },
         )
 
     async def _synthesize_research(self, query: str, ctx: ResearchContext) -> str:

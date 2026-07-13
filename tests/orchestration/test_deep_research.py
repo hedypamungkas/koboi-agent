@@ -268,6 +268,19 @@ class TestRunDeepResearch:
         assert "[1]" in complete[0].final_answer
         assert "## Sources" in complete[0].final_answer
 
+    async def test_completion_metadata_carries_production_bar_keys(self, tmp_path):
+        # W8: the OrchestrationCompleteEvent carries the production-smoke bar keys
+        # (plan_nodes / budget / node health) so scenarios can assert via RunResult.metadata.
+        orch = _orch(_FakeClient(coverage_score=0.95), {"max_depth": 1, "coverage_threshold": 0.7}, tmp_path)
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)][0]
+        md = complete.metadata
+        for key in ("plan_nodes", "used_searches", "used_fetches", "nodes_failed"):
+            assert key in md, f"missing production-bar key: {key}"
+        assert md["plan_nodes"] >= 1
+        assert md["nodes_failed"] == 0  # no node crashed
+        assert md["used_searches"] >= 0 and md["used_fetches"] >= 0
+
     async def test_stops_early_when_covered(self, tmp_path):
         # coverage 0.95 >= threshold 0.7 -> stop after 1 round.
         orch = _orch(_FakeClient(coverage_score=0.95), {"max_depth": 5, "coverage_threshold": 0.7}, tmp_path)
