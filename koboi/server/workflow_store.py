@@ -42,9 +42,7 @@ class WorkflowStore:
         self._conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_owner ON workflows(owner)")
         self._conn.commit()
 
-    def put(
-        self, name: str, owner: str, bundle_yaml: str, description: str | None = None
-    ) -> None:
+    def put(self, name: str, owner: str, bundle_yaml: str, description: str | None = None) -> None:
         now = time.time()
         # Upsert: keep created_at on overwrite, refresh the bundle + updated_at.
         self._conn.execute(
@@ -58,23 +56,18 @@ class WorkflowStore:
         self._conn.commit()
 
     def get(self, name: str, owner: str) -> dict | None:
-        row = self._conn.execute(
-            "SELECT * FROM workflows WHERE name = ? AND owner = ?", (name, owner)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM workflows WHERE name = ? AND owner = ?", (name, owner)).fetchone()
         return dict(row) if row else None
 
     def list_by_owner(self, owner: str) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT name, description, created_at, updated_at FROM workflows "
-            "WHERE owner = ? ORDER BY name",
+            "SELECT name, description, created_at, updated_at FROM workflows WHERE owner = ? ORDER BY name",
             (owner,),
         ).fetchall()
         return [dict(r) for r in rows]
 
     def delete(self, name: str, owner: str) -> bool:
-        cur = self._conn.execute(
-            "DELETE FROM workflows WHERE name = ? AND owner = ?", (name, owner)
-        )
+        cur = self._conn.execute("DELETE FROM workflows WHERE name = ? AND owner = ?", (name, owner))
         self._conn.commit()
         return cur.rowcount > 0
 

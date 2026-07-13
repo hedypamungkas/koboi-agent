@@ -71,6 +71,9 @@ class FileWorkflowStore:
         if not self._dir.exists():
             return out
         for p in sorted(self._dir.glob("*.yaml")):
+            # Surface unreadable bundles with a marker rather than silently dropping
+            # them (avoids bare pass/continue; matches diagnostics.py's per-section
+            # error-surfacing pattern).
             entry: dict = {"name": p.stem, "path": str(p), "description": ""}
             try:
                 data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
@@ -78,8 +81,8 @@ class FileWorkflowStore:
                 entry["name"] = envelope.get("name", p.stem)
                 entry["description"] = envelope.get("description", "")
                 entry["schema_version"] = envelope.get("schema_version")
-            except Exception:
-                pass
+            except Exception as exc:
+                entry["description"] = f"(unreadable: {type(exc).__name__})"
             out.append(entry)
         return out
 

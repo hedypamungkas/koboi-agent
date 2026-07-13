@@ -42,9 +42,7 @@ class TestDeterminismProfile:
 
 class TestBundleRoundTrip:
     def test_to_bundle_yaml_then_from_bundle_yaml(self):
-        wd = WorkflowDefinition(
-            name="w", description="d", config={"agent": {"name": "x"}, "llm": {"model": "m"}}
-        )
+        wd = WorkflowDefinition(name="w", description="d", config={"agent": {"name": "x"}, "llm": {"model": "m"}})
         text = wd.to_bundle_yaml()
         assert text.lstrip().startswith("workflow:")  # envelope first
         wd2 = WorkflowDefinition.from_bundle_yaml(text)
@@ -55,9 +53,7 @@ class TestBundleRoundTrip:
         assert "workflow" not in wd2.config  # envelope popped on deserialize
 
     def test_determinism_property_reads_config(self):
-        wd = WorkflowDefinition(
-            config={"orchestration": {"determinism": {"temperature": 0.0, "seed": 5}}}
-        )
+        wd = WorkflowDefinition(config={"orchestration": {"determinism": {"temperature": 0.0, "seed": 5}}})
         det = wd.determinism
         assert det is not None
         assert det.temperature == 0.0
@@ -96,9 +92,7 @@ class TestRedactForExport:
 
     def test_provenance_stamps_koboi_version(self, tmp_path):
         cfg = tmp_path / "c.yaml"
-        cfg.write_text(
-            "agent:\n  name: x\nllm:\n  provider: openai\n  model: m\n", encoding="utf-8"
-        )
+        cfg.write_text("agent:\n  name: x\nllm:\n  provider: openai\n  model: m\n", encoding="utf-8")
         wd = build_from_config_path(cfg, name="w")
         assert wd.provenance.koboi_version == koboi.__version__
         assert wd.provenance.captured_at is not None
@@ -107,8 +101,7 @@ class TestRedactForExport:
         # The exported body (envelope popped) must pass Config validation.
         cfg = tmp_path / "c.yaml"
         cfg.write_text(
-            "agent:\n  name: x\nllm:\n  provider: openai\n  model: ${OPENAI_MODEL:m}\n"
-            "  api_key: ${OPENAI_API_KEY:}\n",
+            "agent:\n  name: x\nllm:\n  provider: openai\n  model: ${OPENAI_MODEL:m}\n  api_key: ${OPENAI_API_KEY:}\n",
             encoding="utf-8",
         )
         wd = build_from_config_path(cfg, name="w")
@@ -149,9 +142,7 @@ class TestValidateWorkflow:
         assert any("sliding_window" in w for w in validate_workflow(wd))
 
     def test_no_warnings_for_clean_workflow(self):
-        wd = WorkflowDefinition(
-            config={"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m"}}
-        )
+        wd = WorkflowDefinition(config={"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m"}})
         assert validate_workflow(wd) == []
 
 
@@ -176,9 +167,7 @@ class TestGraphSnapshot:
         assert snap["nodes"] == ["classify", "praise"]
         assert {"from": "classify", "to": "praise"} in snap["edges"]
         # new non-lossy fields
-        assert snap["conditionals"] == [
-            {"from": "classify", "to": "praise", "when": {"contains": "POS"}}
-        ]
+        assert snap["conditionals"] == [{"from": "classify", "to": "praise", "when": {"contains": "POS"}}]
         assert snap["execution_mode"] == "dag"
         assert snap["router"] == {"type": "keyword"}
         assert snap["agents"][0]["name"] == "classify"

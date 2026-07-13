@@ -1,7 +1,6 @@
 """Tests for the /v1/workflows REST surface + workflow_ref job validation (S5)."""
 
 import httpx
-import pytest
 
 from koboi.config import Config  # noqa: E402
 from koboi.server import create_app  # noqa: E402

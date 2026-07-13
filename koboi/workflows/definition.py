@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import yaml
 
@@ -178,7 +178,7 @@ def build_from_config_path(
     from datetime import datetime, timezone
 
     raw = _load_yaml_with_extends(Path(path))
-    body = redact.redact_config_for_export(raw)
+    body = cast("dict", redact.redact_config_for_export(raw))
     provenance = WorkflowProvenance(
         source_run_id=source_run_id,
         captured_at=datetime.now(timezone.utc).isoformat(),
@@ -253,7 +253,7 @@ def build_graph_snapshot(agent_defs: list, config: Config | dict) -> dict:
     edges = [{"from": dep, "to": ad.name} for ad in agent_defs for dep in ad.depends_on]
     conditionals = []
     for ad in agent_defs:
-        for c in (ad.conditionals or []):
+        for c in ad.conditionals or []:
             conditionals.append({"from": ad.name, "to": c.get("to"), "when": c.get("when")})
     orch = _orchestration_view(config)
     exec_mode = (orch.get("execution") or {}).get("mode", "sequential")

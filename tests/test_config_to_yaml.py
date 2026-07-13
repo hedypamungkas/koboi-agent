@@ -27,9 +27,7 @@ class TestConfigToYaml:
     def test_to_dict_still_lossy_unlike_to_yaml(self):
         # Documents the behavior we deliberately did NOT change: to_dict() is the
         # lossy validated-schema view; to_yaml() is the full-fidelity raw view.
-        cfg = Config.from_dict(
-            {"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "seed": 42}}
-        )
+        cfg = Config.from_dict({"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "seed": 42}})
         assert "seed" not in cfg.to_dict().get("llm", {})
         assert cfg.raw["llm"]["seed"] == 42
         assert yaml.safe_load(cfg.to_yaml())["llm"]["seed"] == 42

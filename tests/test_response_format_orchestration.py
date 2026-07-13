@@ -44,7 +44,9 @@ class TestResolveResponseFormat:
         assert _core(response_schema=SCHEMA, force=True, provider="openai")._resolve_response_format(TOOLS) is SCHEMA
 
     def test_schema_tools_force_cloudflare_returns_schema(self):
-        assert _core(response_schema=SCHEMA, force=True, provider="cloudflare")._resolve_response_format(TOOLS) is SCHEMA
+        assert (
+            _core(response_schema=SCHEMA, force=True, provider="cloudflare")._resolve_response_format(TOOLS) is SCHEMA
+        )
 
     def test_schema_tools_force_anthropic_still_suppressed(self):
         # Anthropic emulates RF via forced tool_use -> incompatible with real tools.

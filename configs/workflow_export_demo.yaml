@@ -1,0 +1,72 @@
+# Deterministic workflow export demo (v1).
+#
+# A sentiment-routing workflow with a pinned determinism profile so re-runs
+# narrow output variance (live mode; cache/replay arrive in v2/v3). The
+# `classify` node uses structured output (output_schema) on a tool-less node.
+#
+# Validate: koboi validate configs/workflow_export_demo.yaml
+# Graph:    koboi graph configs/workflow_export_demo.yaml --format json
+# Export:   koboi export configs/workflow_export_demo.yaml --save --name sentiment-route
+# List:     koboi workflows list
+# Run:      koboi run configs/workflow_export_demo.yaml --workflow sentiment-route -m "Review: 'great!'"
+
+agent:
+  name: sentiment-route
+  description: "Deterministic sentiment-routing workflow"
+  system_prompt: "You route a review by sentiment."
+  mode: act
+
+orchestration:
+  enabled: true
+  execution:
+    mode: dag
+    full_graph: true
+  router:
+    type: keyword
+  # Workflow-level determinism default (applies to every node unless a node overrides).
+  determinism:
+    temperature: 0.0
+    seed: 42
+    model_pin: ${OPENAI_MODEL:gpt-4o-mini}
+  agents:
+    - name: classify
+      description: "Classify sentiment"
+      system_prompt: "Classify the sentiment as POSITIVE or NEGATIVE. Reply with one word."
+      keywords: [classify, sentiment, review]
+      # Structured output on a tool-less node (Gap A); conditionals match the text.
+      output_schema:
+        type: object
+        properties:
+          sentiment: {type: string, enum: [POSITIVE, NEGATIVE]}
+        required: [sentiment]
+      conditionals:
+        - to: praise
+          when: {contains: "POSITIVE"}
+        - to: critique
+          when: {contains: "NEGATIVE"}
+
+    - name: praise
+      description: "Handle positive reviews"
+      system_prompt: "In one sentence, explain why this is a great review."
+      keywords: [praise, positive]
+      depends_on: [classify]
+
+    - name: critique
+      description: "Handle negative reviews"
+      system_prompt: "In one sentence, explain why this is a critical review."
+      keywords: [critique, negative]
+      depends_on: [classify]
+
+llm:
+  provider: openai
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace
