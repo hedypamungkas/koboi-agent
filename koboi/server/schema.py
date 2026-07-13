@@ -126,6 +126,38 @@ class JobSubmitRequest(BaseModel):
     # autonomous (no-HITL) run must not drop the approval gate + rate limiter.
     mode: str | None = Field(default=None)
     max_iterations: int | None = Field(default=None, ge=1)
+    # Workflow export/import (v1): run a stored workflow bundle as an autonomous
+    # job instead of the server-level config. Owner-scoped; validated at submit.
+    workflow_ref: str | None = Field(default=None)
+
+
+class WorkflowCreateRequest(BaseModel):
+    """POST /v1/workflows body."""
+
+    model_config = {"extra": "ignore"}
+
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = None
+    bundle: str = Field(min_length=1)  # the workflow bundle YAML text
+
+
+class WorkflowListItem(BaseModel):
+    name: str
+    description: str | None = None
+    created_at: float
+    updated_at: float
+
+
+class WorkflowListResponse(BaseModel):
+    workflows: list[WorkflowListItem]
+
+
+class WorkflowResponse(BaseModel):
+    name: str
+    description: str | None = None
+    owner: str
+    created_at: float
+    updated_at: float
 
 
 class JobStatusResponse(BaseModel):

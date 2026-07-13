@@ -131,6 +131,8 @@ class JobStore:
             self._conn.execute("ALTER TABLE jobs ADD COLUMN mode TEXT")
         if "max_iterations" not in existing:
             self._conn.execute("ALTER TABLE jobs ADD COLUMN max_iterations INTEGER")
+        if "workflow_ref" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN workflow_ref TEXT")
 
     def insert(
         self,
@@ -141,14 +143,15 @@ class JobStore:
         idempotency_key: str | None = None,
         mode: str | None = None,
         max_iterations: int | None = None,
+        workflow_ref: str | None = None,
     ) -> None:
         now = time.time()
         try:
             self._conn.execute(
                 "INSERT INTO jobs (job_id, session_id, owner, status, message, "
-                "idempotency_key, mode, max_iterations, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
-                (job_id, session_id, owner, message, idempotency_key, mode, max_iterations, now, now),
+                "idempotency_key, mode, max_iterations, workflow_ref, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)",
+                (job_id, session_id, owner, message, idempotency_key, mode, max_iterations, workflow_ref, now, now),
             )
             self._conn.commit()
         except sqlite3.IntegrityError as err:
@@ -498,6 +501,8 @@ async def run_job(
     max_iterations: int | None = None,
     resume: bool = False,
     webhooks: list[dict] | None = None,
+    workflow_ref: str | None = None,
+    workflow_store: Any | None = None,
 ) -> None:
     """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events.
 
@@ -513,7 +518,18 @@ async def run_job(
 
     try:
         final_content = await asyncio.wait_for(
-            _execute_job(job_id, pool, registry, store, message, mode, max_iterations, resume=resume),
+            _execute_job(
+                job_id,
+                pool,
+                registry,
+                store,
+                message,
+                mode,
+                max_iterations,
+                resume=resume,
+                workflow_ref=workflow_ref,
+                workflow_store=workflow_store,
+            ),
             timeout=timeout,
         )
         result_json = json.dumps({"content": final_content}) if final_content else None
@@ -546,6 +562,57 @@ async def run_job(
         _emit_job_webhooks(webhooks, store, job_id, "failed")
 
 
+async def _execute_workflow_job(
+    job_id: str,
+    registry: JobRegistry,
+    store: JobStore,
+    message: str,
+    workflow_ref: str,
+    workflow_store: Any | None,
+    owner: str,
+    resume: bool = False,
+) -> str | None:
+    """Run a stored workflow bundle as an autonomous job.
+
+    Builds a fresh :class:`~koboi.facade.KoboiAgent` from the bundle YAML (NOT the
+    pooled server-level agent) and runs it via ``run_stream`` (works for both
+    single-agent and orchestrator-backed bundles). Enforces the C3 floor:
+    ``sandbox.backend='restricted'`` is required.
+
+    v1 limitations: the agent is rebuilt on every run (no pooled session memory),
+    so ``resume`` re-runs from scratch; per-sub-agent ``AutonomousApprovalHandler``
+    is not installed on orchestrator-backed bundles (the restricted sandbox is the
+    safety floor).
+    """
+    from koboi.events import CompleteEvent
+
+    if workflow_store is None:
+        raise ValueError("workflow jobs require a workflow_store")
+    wf = workflow_store.get(workflow_ref, owner)
+    if wf is None:
+        raise ValueError(f"unknown workflow {workflow_ref!r} for this owner")
+    from koboi.config import Config
+    from koboi.facade import KoboiAgent
+
+    bundle_yaml = wf["bundle_yaml"]
+    cfg = Config.from_string(bundle_yaml)
+    if cfg.get("sandbox", "backend", default="passthrough") != "restricted":
+        raise PermissionError(
+            "Autonomous workflow jobs require sandbox.backend='restricted'; 'passthrough' is refused."
+        )
+    agent = KoboiAgent.from_config_string(bundle_yaml)
+    store.update_status(job_id, "running")
+    final_content: str | None = None
+    try:
+        async for event in agent.run_stream(message):
+            registry.append_event(job_id, event)
+            if isinstance(event, CompleteEvent):
+                final_content = event.content
+    finally:
+        await agent.close()
+    return final_content
+
+
 async def _execute_job(
     job_id: str,
     pool: AgentPool,
@@ -555,15 +622,24 @@ async def _execute_job(
     mode: str | None = None,
     max_iterations: int | None = None,
     resume: bool = False,
+    workflow_ref: str | None = None,
+    workflow_store: Any | None = None,
 ) -> str | None:
     """Inner execution: agent setup + run_stream → event buffer.
 
     Returns the final content (from ``CompleteEvent``) for ``result_json``
-    persistence so completed jobs survive restart.
+    persistence so completed jobs survive restart. When ``workflow_ref`` is set,
+    execution is delegated to :func:`_execute_workflow_job` (builds the agent from
+    the stored bundle instead of the pooled server-level agent).
     """
+    record = registry.get(job_id)
+    if workflow_ref:
+        return await _execute_workflow_job(
+            job_id, registry, store, message, workflow_ref, workflow_store, record.owner, resume=resume
+        )
+
     from koboi.events import CompleteEvent
 
-    record = registry.get(job_id)
     agent = await pool.get_or_create(record.session_id)
 
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network
@@ -640,6 +716,7 @@ async def resume_on_startup(
     registry: JobRegistry,
     timeout: float,
     webhooks: list[dict] | None = None,
+    workflow_store: Any | None = None,
 ) -> int:
     """Resume interrupted jobs + requeue pending ones (#5: rehydrate-and-continue).
 
@@ -671,6 +748,8 @@ async def resume_on_startup(
                 job.get("max_iterations"),
                 resume=True,
                 webhooks=webhooks,
+                workflow_ref=job.get("workflow_ref"),
+                workflow_store=workflow_store,
             )
         )
         registry.set_running(job["job_id"], task)
@@ -691,6 +770,8 @@ async def resume_on_startup(
                 job.get("mode"),
                 job.get("max_iterations"),
                 webhooks=webhooks,
+                workflow_ref=job.get("workflow_ref"),
+                workflow_store=workflow_store,
             )
         )
         registry.set_running(job["job_id"], task)

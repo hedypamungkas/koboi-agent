@@ -40,6 +40,7 @@ from koboi.server.jobs import (
 )
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
+from koboi.server.workflow_store import WorkflowStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
 from koboi.server.schema import (
     ApproveRequest,
@@ -60,6 +61,10 @@ from koboi.server.schema import (
     SessionListItem,
     SessionListResponse,
     SessionResponse,
+    WorkflowCreateRequest,
+    WorkflowListItem,
+    WorkflowListResponse,
+    WorkflowResponse,
 )
 from koboi.server.sse import sse_stream
 
@@ -173,6 +178,7 @@ def create_app(
     idempotency_store: Any | None = None,
     ownership_store: Any | None = None,
     approval_registry: Any | None = None,
+    workflow_store: Any | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
 
@@ -209,6 +215,8 @@ def create_app(
     ownership = ownership_store if ownership_store is not None else OwnershipStore(db_path=shared_db)
     if job_store is None:
         job_store = JobStore(db_path=shared_db)
+    if workflow_store is None:
+        workflow_store = WorkflowStore(db_path=shared_db)
 
     # 16.16: warn only in the genuinely-bad case — ephemeral sidecar can't resume.
     if shared_db == ":memory:":
@@ -274,6 +282,8 @@ def create_app(
         await pool.close_all()
         ownership.close()
         job_store.close()
+        if workflow_store is not None:
+            workflow_store.close()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -378,6 +388,7 @@ def create_app(
         memory_backend,
         shared_db,
         job_webhooks,
+        workflow_store,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -439,6 +450,7 @@ def _register_routes(
     memory_backend: str,
     shared_db: str,
     job_webhooks: list[dict] | None = None,
+    workflow_store: Any | None = None,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -476,6 +488,73 @@ def _register_routes(
             return err
         messages = await pool.get_messages(session_id)
         return SessionResponse(session_id=session_id, messages=messages)  # type: ignore[return-value]
+
+    # --- Workflow export/import (v1): owner-scoped CRUD on stored bundles ---
+
+    def _workflow_owner(request: Request) -> tuple[str | None, JSONResponse | None]:
+        """Resolve the caller owner; fail closed (401) when auth on + no identity."""
+        if auth_enabled:
+            owner = getattr(request.state, "api_key_id", None)
+            if not owner:
+                return None, _error_response(401, "unauthenticated", "no caller identity", request)
+            return owner, None
+        return getattr(request.state, "api_key_id", "dev"), None
+
+    @app.post("/v1/workflows", status_code=201, response_model=WorkflowResponse)
+    async def create_workflow(body: WorkflowCreateRequest, request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        # Validate the bundle parses + carries a workflow envelope; reject early.
+        try:
+            from koboi.workflows import WorkflowDefinition
+
+            wd = WorkflowDefinition.from_bundle_yaml(body.bundle)
+        except Exception as exc:
+            return _error_response(400, "invalid_workflow", f"bundle parse failed: {exc}", request)
+        description = body.description or wd.description
+        workflow_store.put(body.name, owner, body.bundle, description=description)
+        stored = workflow_store.get(body.name, owner) or {}
+        return WorkflowResponse(  # type: ignore[return-value]
+            name=body.name,
+            description=description,
+            owner=owner,
+            created_at=stored.get("created_at", time.time()),
+            updated_at=stored.get("updated_at", time.time()),
+        )
+
+    @app.get("/v1/workflows", response_model=WorkflowListResponse)
+    async def list_workflows(request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        items = [WorkflowListItem(**row) for row in workflow_store.list_by_owner(owner)]
+        return WorkflowListResponse(workflows=items)  # type: ignore[return-value]
+
+    @app.get("/v1/workflows/{name}", response_model=WorkflowResponse)
+    async def get_workflow(name: str, request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        wf = workflow_store.get(name, owner)  # owner-scoped; None = missing OR not-owner
+        if wf is None:
+            raise HTTPException(status_code=404, detail="workflow not found")
+        return WorkflowResponse(  # type: ignore[return-value]
+            name=wf["name"],
+            description=wf.get("description"),
+            owner=wf["owner"],
+            created_at=wf["created_at"],
+            updated_at=wf["updated_at"],
+        )
+
+    @app.delete("/v1/workflows/{name}")
+    async def delete_workflow(name: str, request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        if not workflow_store.delete(name, owner):
+            raise HTTPException(status_code=404, detail="workflow not found")
+        return {"deleted": name}  # type: ignore[return-value]
 
     # --- G6: per-session MCP server management ---
 
@@ -898,6 +977,8 @@ def _register_routes(
                 job.get("mode"),
                 job.get("max_iterations"),
                 webhooks=job_webhooks,
+                workflow_ref=job.get("workflow_ref"),
+                workflow_store=workflow_store,
             )
         )
         job_registry.set_running(job_id, task)
@@ -922,6 +1003,12 @@ def _register_routes(
         except ValueError as exc:
             return _error_response(400, "invalid_mode", str(exc), request)
         job_max_iter = min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
+
+        # Workflow export/import (v1): validate the workflow_ref exists (owner-scoped).
+        if body.workflow_ref and workflow_store.get(body.workflow_ref, owner) is None:
+            return _error_response(
+                400, "unknown_workflow", f"workflow {body.workflow_ref!r} not found", request
+            )
 
         # Idempotency: same key within window → return existing job.
         idem_key = request.headers.get("Idempotency-Key")
@@ -982,6 +1069,7 @@ def _register_routes(
                 idempotency_key=idem_key,
                 mode=job_mode.value if job_mode else None,
                 max_iterations=job_max_iter,
+                workflow_ref=body.workflow_ref,
             )
         except DuplicateIdempotencyKey as exc:
             # M1: a concurrent same-key submit won the race -- return the canonical
