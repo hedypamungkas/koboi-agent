@@ -1,4 +1,4 @@
-"""Tests for koboi/web search providers + the web_search tool wrapper.
+"""Tests for koboi/websearch search providers + the web_search tool wrapper.
 
 All provider HTTP is mocked (no network). Mirrors the httpx-mocking style of
 tests/test_web_tools.py.
@@ -12,10 +12,10 @@ import httpx
 import pytest
 
 from koboi.tools.builtin.web import web_search
-from koboi.web.providers.brave import BraveSearchProvider
-from koboi.web.providers.ddg import DDGSearchProvider
-from koboi.web.providers.firecrawl import FirecrawlSearchProvider
-from koboi.web.providers.mock import MockSearchProvider
+from koboi.websearch.providers.brave import BraveSearchProvider
+from koboi.websearch.providers.ddg import DDGSearchProvider
+from koboi.websearch.providers.firecrawl import FirecrawlSearchProvider
+from koboi.websearch.providers.mock import MockSearchProvider
 
 
 def _response(*, status: int = 200, json_payload: dict | None = None, content: bytes | None = None) -> httpx.Response:
@@ -65,7 +65,7 @@ class TestBraveProvider:
             }
         }
         with patch(
-            "koboi.web.providers.brave.httpx.AsyncClient",
+            "koboi.websearch.providers.brave.httpx.AsyncClient",
             return_value=_mock_async_client(_response(json_payload=payload)),
         ):
             results = await BraveSearchProvider(api_key="k").search("query")
@@ -77,7 +77,7 @@ class TestBraveProvider:
     async def test_skips_entries_without_url(self):
         payload = {"web": {"results": [{"title": "No URL"}, {"title": "OK", "url": "https://ok.example"}]}}
         with patch(
-            "koboi.web.providers.brave.httpx.AsyncClient",
+            "koboi.websearch.providers.brave.httpx.AsyncClient",
             return_value=_mock_async_client(_response(json_payload=payload)),
         ):
             results = await BraveSearchProvider(api_key="k").search("q")
@@ -95,7 +95,7 @@ class TestFirecrawlProvider:
     async def test_parses_results(self):
         payload = {"data": [{"title": "FC One", "url": "https://fc.example", "description": "fc desc"}]}
         with patch(
-            "koboi.web.providers.firecrawl.httpx.AsyncClient",
+            "koboi.websearch.providers.firecrawl.httpx.AsyncClient",
             return_value=_mock_async_client(_response(json_payload=payload)),
         ):
             results = await FirecrawlSearchProvider(api_key="k").search("q")
@@ -108,7 +108,7 @@ class TestDDGProvider:
     async def test_parses_html(self):
         html = '<a class="result__a" href="https://ddg.example">DDG Hit</a><a class="result__snippet">a desc</a>'
         with patch(
-            "koboi.web.providers.ddg.httpx.AsyncClient",
+            "koboi.websearch.providers.ddg.httpx.AsyncClient",
             return_value=_mock_async_client(_response(content=html.encode())),
         ):
             results = await DDGSearchProvider().search("q")
@@ -153,7 +153,7 @@ class TestMedium9BraveHttpError:
 
     async def test_brave_401_raises_http_status_error(self):
         error_resp = httpx.Response(401, request=httpx.Request("GET", "https://api.search.brave.com"))
-        with patch("koboi.web.providers.brave.httpx.AsyncClient", return_value=_mock_async_client(error_resp)):
+        with patch("koboi.websearch.providers.brave.httpx.AsyncClient", return_value=_mock_async_client(error_resp)):
             with pytest.raises(httpx.HTTPStatusError):
                 await BraveSearchProvider(api_key="bad-key").search("q")
 

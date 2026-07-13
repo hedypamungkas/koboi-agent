@@ -1,13 +1,13 @@
-"""Tests for koboi/web/providers/counting.py -- budget-metering wrappers (W4 A0/A4)."""
+"""Tests for koboi/websearch/providers/counting.py -- budget-metering wrappers (W4 A0/A4)."""
 
 from __future__ import annotations
 
 import pytest
 
 from koboi.orchestration.research import ResearchBudget
-from koboi.web.base import BaseFetchProvider, BaseSearchProvider
-from koboi.web.providers.counting import CountingFetchProvider, CountingSearchProvider
-from koboi.web.types import FetchResult, SearchResult
+from koboi.websearch.base import BaseFetchProvider, BaseSearchProvider
+from koboi.websearch.providers.counting import CountingFetchProvider, CountingSearchProvider
+from koboi.websearch.types import FetchResult, SearchResult
 
 
 class _InnerSearch(BaseSearchProvider):

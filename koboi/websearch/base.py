@@ -1,4 +1,4 @@
-"""koboi/web/base.py -- provider ABCs for the web I/O layer.
+"""koboi/websearch/base.py -- provider ABCs for the web I/O layer.
 
 Two capabilities, two ABCs (a provider may implement both -- e.g. Firecrawl does
 search + scrape). Mirrors the one-ABC-per-stage shape of ``koboi/rag``.
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from koboi.web.types import FetchResult, SearchResult
+from koboi.websearch.types import FetchResult, SearchResult
 
 
 class BaseSearchProvider(ABC):

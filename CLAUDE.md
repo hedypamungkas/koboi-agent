@@ -52,7 +52,7 @@ koboi/              Main package (207 .py files)
   hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 20 specialized hooks
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid + BM25), cross-encoder rerank (jina/cohere/local -- rerank.py), augmentation, query-rewrite/HyDE, metadata filters, Indonesian stopwords/stemmer, registry, live (LiveCorpus/LiveRetriever), sources (file/http/s3/firecrawl)
-  web/              Web I/O: search/fetch provider registries (@register_search_provider/@register_fetch_provider, Brave/Firecrawl/httpx/mock/ddg), types, base ABCs, providers/, counting (budget metering)
+  websearch/        Web search/fetch provider registries (@register_search_provider/@register_fetch_provider, Brave/Firecrawl/httpx/mock/ddg), types, base ABCs, providers/, counting (budget metering). "websearch" = external-web data I/O backends for the web_search/web_fetch tools -- NOT a web UI.
   guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
   harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
   sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry

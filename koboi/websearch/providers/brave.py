@@ -1,4 +1,4 @@
-"""koboi/web/providers/brave.py -- Brave Search API provider.
+"""koboi/websearch/providers/brave.py -- Brave Search API provider.
 
 REST + JSON, no JS rendering needed for results. Auth via ``X-Subscription-Token``.
 Free tier ~2000 queries/month. Configure under ``web.search.brave``::
@@ -19,9 +19,9 @@ import os
 
 import httpx
 
-from koboi.web.base import BaseSearchProvider
-from koboi.web.registry import register_search_provider
-from koboi.web.types import SearchResult
+from koboi.websearch.base import BaseSearchProvider
+from koboi.websearch.registry import register_search_provider
+from koboi.websearch.types import SearchResult
 
 _logger = logging.getLogger(__name__)
 

@@ -153,13 +153,14 @@ class RagConfig(BaseModel):
     filter: dict | None = None
 
 
-class WebConfig(BaseModel):
-    """Top-level ``web:`` section -- search/fetch provider selection (koboi.web).
+class WebSearchConfig(BaseModel):
+    """Top-level ``websearch:`` section -- search/fetch provider selection (koboi.websearch).
 
     Cosmetic validation only at the top level; runtime resolution reads
-    ``web.search`` / ``web.fetch`` as plain dicts via ``config.get("web", ...)`` in
-    ``_build_tools`` (mirrors how ``RagConfig`` is consumed by ``build_rag``). Defaults
-    are offline-safe (no provider configured -> ``mock`` search).
+    ``websearch.search`` / ``websearch.fetch`` as plain dicts via
+    ``config.get("websearch", ...)`` in ``_build_tools`` (mirrors how ``RagConfig`` is
+    consumed by ``build_rag``). Defaults are offline-safe (no provider configured ->
+    ``mock`` search).
     """
 
     model_config = {"extra": "ignore"}
@@ -566,7 +567,7 @@ class KoboiConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     jobs: JobsConfig = Field(default_factory=JobsConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
-    web: WebConfig = Field(default_factory=WebConfig)
+    websearch: WebSearchConfig = Field(default_factory=WebSearchConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
 
     @model_validator(mode="before")

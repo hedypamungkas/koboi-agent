@@ -1,4 +1,4 @@
-"""Tests for koboi/web fetch providers (ReadabilityFetchProvider + FirecrawlFetchProvider)
+"""Tests for koboi/websearch fetch providers (ReadabilityFetchProvider + FirecrawlFetchProvider)
 and the web_fetch tool's delegation path. All HTTP is mocked (no network)."""
 
 from __future__ import annotations
@@ -9,9 +9,9 @@ import httpx
 import pytest
 
 from koboi.tools.builtin.web import web_fetch
-from koboi.web import build_fetch_provider
-from koboi.web.providers.firecrawl import FirecrawlFetchProvider
-from koboi.web.providers.readability import ReadabilityFetchProvider, _TRAFILATURA_AVAILABLE
+from koboi.websearch import build_fetch_provider
+from koboi.websearch.providers.firecrawl import FirecrawlFetchProvider
+from koboi.websearch.providers.readability import ReadabilityFetchProvider, _TRAFILATURA_AVAILABLE
 
 _SSRF = "koboi.tools.builtin.web._check_url_ssrf"
 
@@ -64,7 +64,7 @@ class TestReadabilityFetchProvider:
     async def test_fetches_and_extracts_static_html(self):
         html = b"<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
         with patch(
-            "koboi.web.providers.readability.httpx.AsyncClient",
+            "koboi.websearch.providers.readability.httpx.AsyncClient",
             return_value=_mock_async_client(_response(status=200, content=html)),
         ):
             result = await ReadabilityFetchProvider().fetch("https://example.com")
@@ -80,7 +80,7 @@ class TestReadabilityFetchProvider:
     async def test_truncates_long_content(self):
         html = b"<html><body><p>" + (b"A" * 50000) + b"</p></body></html>"
         with patch(
-            "koboi.web.providers.readability.httpx.AsyncClient",
+            "koboi.websearch.providers.readability.httpx.AsyncClient",
             return_value=_mock_async_client(_response(status=200, content=html)),
         ):
             result = await ReadabilityFetchProvider(max_chars=100).fetch("https://example.com")
@@ -92,7 +92,7 @@ class TestReadabilityFetchProvider:
         # Only runs when the [web] extra is installed locally; CI exercises the fallback.
         html = b"<html><body><article><p>Real article content here.</p></article></body></html>"
         with patch(
-            "koboi.web.providers.readability.httpx.AsyncClient",
+            "koboi.websearch.providers.readability.httpx.AsyncClient",
             return_value=_mock_async_client(_response(status=200, content=html)),
         ):
             result = await ReadabilityFetchProvider().fetch("https://example.com")
@@ -110,7 +110,7 @@ class TestFirecrawlFetchProvider:
     async def test_parses_scrape(self):
         payload = {"data": {"markdown": "# Title\n\nBody text.", "metadata": {"title": "Title"}}}
         with patch(
-            "koboi.web.providers.firecrawl.httpx.AsyncClient",
+            "koboi.websearch.providers.firecrawl.httpx.AsyncClient",
             return_value=_mock_async_client(_response(status=200, json_payload=payload)),
         ):
             result = await FirecrawlFetchProvider(api_key="k").fetch("https://example.com")
@@ -126,7 +126,7 @@ class TestFirecrawlFetchProvider:
 
     async def test_http_error_returned(self):
         with patch(
-            "koboi.web.providers.firecrawl.httpx.AsyncClient",
+            "koboi.websearch.providers.firecrawl.httpx.AsyncClient",
             return_value=_mock_async_client(_response(status=402)),
         ):
             result = await FirecrawlFetchProvider(api_key="k").fetch("https://example.com")
@@ -140,7 +140,7 @@ class TestWebFetchDelegation:
         provider = ReadabilityFetchProvider()
         html = b"<html><body><p>Delegated content</p></body></html>"
         with patch(
-            "koboi.web.providers.readability.httpx.AsyncClient",
+            "koboi.websearch.providers.readability.httpx.AsyncClient",
             return_value=_mock_async_client(_response(status=200, content=html)),
         ):
             out = await web_fetch("https://example.com", _deps={"fetch_provider": provider})
@@ -225,7 +225,7 @@ class TestMedium9FirecrawlHttpError:
         """FirecrawlFetchProvider returns FetchResult(metadata={'error': 'HTTP 402'}), not a crash."""
         error_resp = httpx.Response(402, request=httpx.Request("POST", "https://api.firecrawl.dev/v1/scrape"))
         with patch(
-            "koboi.web.providers.firecrawl.httpx.AsyncClient",
+            "koboi.websearch.providers.firecrawl.httpx.AsyncClient",
             return_value=_mock_async_client(error_resp),
         ):
             result = await FirecrawlFetchProvider(api_key="k").fetch("https://example.com")

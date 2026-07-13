@@ -675,16 +675,16 @@ def _build_tools(config: Config) -> ToolRegistry:
         from koboi.tools.builtin import register_all
 
         register_all(registry)
-        # W0/W1: inject the registry-resolved web providers (koboi.web). web_search /
+        # W0/W1: inject the registry-resolved web providers (koboi.websearch). web_search /
         # web_fetch read these from their _deps; absent web: config -> mock search and
         # httpx+readability fetch (offline-safe defaults).
-        from koboi.web import build_fetch_provider, build_search_provider, load_custom_components
+        from koboi.websearch import build_fetch_provider, build_search_provider, load_custom_components
 
-        web_conf = config.get("web", default={})
-        if web_conf.get("custom_modules"):
-            load_custom_components(web_conf["custom_modules"])
-        registry.set_dep("search_provider", build_search_provider(web_conf))
-        registry.set_dep("fetch_provider", build_fetch_provider(web_conf))
+        websearch_conf = config.get("websearch", default={})
+        if websearch_conf.get("custom_modules"):
+            load_custom_components(websearch_conf["custom_modules"])
+        registry.set_dep("search_provider", build_search_provider(websearch_conf))
+        registry.set_dep("fetch_provider", build_fetch_provider(websearch_conf))
         # Inject per-agent memory store so agents don't share state
         from koboi.tools.builtin.memory import _MemoryStore
 
@@ -1780,7 +1780,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         max_replans=exec_conf.get("max_replans", 0),
         sandbox=assembler.sandbox,
         research=config.get("research", default={}),
-        web_conf=config.get("web", default={}),
+        websearch_conf=config.get("websearch", default={}),
         session_id=config.get("memory", "session_id", default=None),
     )
 

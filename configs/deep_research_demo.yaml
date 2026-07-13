@@ -26,7 +26,7 @@ research:
   citations: numbered
   persist_findings: ./research_findings.jsonl   # W3: dump findings for later corpus reuse
 
-web:
+websearch:
   search:
     provider: ${WEB_SEARCH_PROVIDER:mock}
     max_results: 8

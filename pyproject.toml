@@ -55,9 +55,9 @@ rerank-local = ["sentence-transformers>=2.7"]
 # Optional Indonesian NLP (stemmer) for the lexical retrievers -- enables `rag.stemmer: id`
 # so inflected forms (meN-/-kan/-i/-an) match their root. Pure-Python, lightweight.
 indo-nlp = ["Sastrawi>=1.0.1"]
-# Web fetch readability extraction (boilerplate removal for web_fetch / RAG html source).
+# Websearch readability extraction (boilerplate removal for web_fetch / RAG html source).
 # Optional -- when absent, web_fetch falls back to the stdlib regex extractor.
-web = ["trafilatura>=1.12"]
+websearch = ["trafilatura>=1.12"]
 # JS-rendered fetch provider (Playwright). NOTE: Playwright's browser engine is a
 # SYSTEM-level install (`playwright install chromium`), not a pure-Python dep -- analogous
 # to the seccomp system package above. Requires sandbox.backend: restricted at runtime.

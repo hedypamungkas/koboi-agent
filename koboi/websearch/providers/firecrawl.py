@@ -1,4 +1,4 @@
-"""koboi/web/providers/firecrawl.py -- Firecrawl search + fetch providers.
+"""koboi/websearch/providers/firecrawl.py -- Firecrawl search + fetch providers.
 
 Search (``/v1/search``) returns hits and (optionally) their scraped markdown in one call
 when ``scrape_results`` is set -- handy for deep research (search + fetch fused). Fetch
@@ -27,9 +27,9 @@ import os
 
 import httpx
 
-from koboi.web.base import BaseFetchProvider, BaseSearchProvider
-from koboi.web.registry import register_fetch_provider, register_search_provider
-from koboi.web.types import FetchResult, SearchResult
+from koboi.websearch.base import BaseFetchProvider, BaseSearchProvider
+from koboi.websearch.registry import register_fetch_provider, register_search_provider
+from koboi.websearch.types import FetchResult, SearchResult
 
 _logger = logging.getLogger(__name__)
 

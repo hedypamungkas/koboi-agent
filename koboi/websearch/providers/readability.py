@@ -1,4 +1,4 @@
-"""koboi/web/providers/readability.py -- default fetch provider (httpx + trafilatura).
+"""koboi/websearch/providers/readability.py -- default fetch provider (httpx + trafilatura).
 
 Static fetch with readability extraction. JS rendering (``render: auto|always``) is a
 Wave 1.5 concern (Playwright); this provider honors only static extraction in Wave 1 and
@@ -7,7 +7,7 @@ logs when a JS renderer is requested but unavailable.
 Reuses the shared SSRF guard + fetch constants from ``koboi.tools.builtin.web`` (the SSRF
 primitives must stay there -- they are imported by dotted path from MCP modules and patched
 by path in several test suites). Those symbols are accessed lazily (``_web()``) rather than
-imported at module top: this provider is imported during ``koboi.web`` package init, which
+imported at module top: this provider is imported during ``koboi.websearch`` package init, which
 ``koboi.tools.builtin.web`` itself triggers at import time, so a top-level back-import would
 be circular. The fetch loop mirrors ``web_fetch``'s per-hop SSRF + redirect + retry semantics
 but returns a structured ``FetchResult`` and applies readability.
@@ -20,9 +20,9 @@ import logging
 
 import httpx
 
-from koboi.web.base import BaseFetchProvider
-from koboi.web.registry import register_fetch_provider
-from koboi.web.types import FetchResult
+from koboi.websearch.base import BaseFetchProvider
+from koboi.websearch.registry import register_fetch_provider
+from koboi.websearch.types import FetchResult
 
 _logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def _web():
     """Lazy accessor for ``koboi.tools.builtin.web`` symbols (SSRF guard + fetch constants).
 
     Imported lazily to avoid a circular import: this module is imported during
-    ``koboi.web`` package init, which ``koboi.tools.builtin.web`` triggers at its own
+    ``koboi.websearch`` package init, which ``koboi.tools.builtin.web`` triggers at its own
     import time. ``import`` is cached after the first call, so this is a dict lookup.
     """
     import koboi.tools.builtin.web as _w  # noqa: PLC0415 - lazy to break a import cycle

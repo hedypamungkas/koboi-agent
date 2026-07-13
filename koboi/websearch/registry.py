@@ -1,13 +1,13 @@
-"""koboi/web/registry.py -- decorator-based web provider registry.
+"""koboi/websearch/registry.py -- decorator-based web provider registry.
 
 Provides ``@register_search_provider`` / ``@register_fetch_provider`` decorators and
 ``build_search_provider`` / ``build_fetch_provider`` resolvers that compose a provider
-from the ``web:`` YAML section. Mirrors ``koboi/rag/registry.py`` (the ComponentRegistry
+from the ``websearch:`` YAML section. Mirrors ``koboi/rag/registry.py`` (the ComponentRegistry
 pattern), with two web-specific differences:
 
 1. **Nested per-provider config.** A provider's kwargs are read from
-   ``web.<stage>.<provider_name>.<key>`` (e.g. ``web.search.brave.api_key``), with
-   shared top-level knobs (e.g. ``web.search.max_results``) as fallback. RAG reads a
+   ``websearch.<stage>.<provider_name>.<key>`` (e.g. ``websearch.search.brave.api_key``), with
+   shared top-level knobs (e.g. ``websearch.search.max_results``) as fallback. RAG reads a
    flat config because only one chunker/retriever is ever selected per build; web keeps
    each provider's credentials isolated in its own sub-dict.
 2. **Secret redaction.** Web providers carry credentials (``api_key``/``token``), so any
@@ -22,7 +22,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from koboi.web.base import BaseFetchProvider, BaseSearchProvider
+from koboi.websearch.base import BaseFetchProvider, BaseSearchProvider
 
 _logger = logging.getLogger(__name__)
 
@@ -238,7 +238,7 @@ def _build_provider(
 ) -> BaseSearchProvider | BaseFetchProvider:
     """Resolve ``parent_conf['provider']`` -> instance, with ``fallback_name`` on miss.
 
-    ``parent_conf`` is the stage section (``web.search`` or ``web.fetch``). The provider's
+    ``parent_conf`` is the stage section (``websearch.search`` or ``websearch.fetch``). The provider's
     kwargs come from ``_merged_provider_conf``.
     """
     provider_name = parent_conf.get("provider", fallback_name)
@@ -261,21 +261,21 @@ def _build_provider(
     return entry.cls(**kwargs)  # type: ignore[no-any-return]
 
 
-def build_search_provider(web_conf: dict[str, Any] | None) -> BaseSearchProvider:
-    """Build a search provider from the ``web:`` config (``web.search.*``).
+def build_search_provider(websearch_conf: dict[str, Any] | None) -> BaseSearchProvider:
+    """Build a search provider from the ``websearch:`` config (``websearch.search.*``).
 
     Defaults to ``mock`` when unset (offline-safe). Unknown provider -> ``mock``.
     """
     return _build_provider(  # type: ignore[return-value]
         search_provider_registry,
         "search",
-        (web_conf or {}).get("search", {}) or {},
+        (websearch_conf or {}).get("search", {}) or {},
         fallback_name="mock",
     )
 
 
-def build_fetch_provider(web_conf: dict[str, Any] | None) -> BaseFetchProvider:
-    """Build a fetch provider from the ``web:`` config (``web.fetch.*``).
+def build_fetch_provider(websearch_conf: dict[str, Any] | None) -> BaseFetchProvider:
+    """Build a fetch provider from the ``websearch:`` config (``websearch.fetch.*``).
 
     Defaults to ``httpx`` (readability extractor) when unset. Fetch providers are
     registered in Wave 1; until then only the default resolves.
@@ -283,7 +283,7 @@ def build_fetch_provider(web_conf: dict[str, Any] | None) -> BaseFetchProvider:
     return _build_provider(  # type: ignore[return-value]
         fetch_provider_registry,
         "fetch",
-        (web_conf or {}).get("fetch", {}) or {},
+        (websearch_conf or {}).get("fetch", {}) or {},
         fallback_name="httpx",
     )
 
@@ -298,7 +298,7 @@ def load_custom_components(custom_modules: list[str]) -> None:
 
     YAML config example::
 
-        web:
+        websearch:
           custom_modules:
             - mycorp.web_providers.bing
     """

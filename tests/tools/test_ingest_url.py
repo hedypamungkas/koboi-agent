@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from koboi.rag.live import LiveCorpus
 from koboi.tools.builtin.ingest import ingest_url
-from koboi.web.types import FetchResult
+from koboi.websearch.types import FetchResult
 
 
 class _FakeProvider:

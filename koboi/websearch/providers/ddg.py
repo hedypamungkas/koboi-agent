@@ -1,4 +1,4 @@
-"""koboi/web/providers/ddg.py -- DuckDuckGo HTML scrape (fallback search provider).
+"""koboi/websearch/providers/ddg.py -- DuckDuckGo HTML scrape (fallback search provider).
 
 Migrated verbatim from ``koboi/tools/builtin/web.py`` (``_DDGResultParser`` +
 ``_search_duckduckgo``). Unreliable by nature -- the html.duckduckgo.com endpoint is
@@ -13,10 +13,10 @@ from urllib.parse import quote_plus
 
 import httpx
 
-from koboi.web.base import BaseSearchProvider
-from koboi.web.providers.mock import _format_results
-from koboi.web.registry import register_search_provider
-from koboi.web.types import SearchResult
+from koboi.websearch.base import BaseSearchProvider
+from koboi.websearch.providers.mock import _format_results
+from koboi.websearch.registry import register_search_provider
+from koboi.websearch.types import SearchResult
 
 _DDGG_ENDPOINT = "https://html.duckduckgo.com/html/"
 _DDGG_HTML_CAP = 50000

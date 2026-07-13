@@ -20,7 +20,7 @@ llm:
 tools:
   builtin: [web_search, web_fetch]
 
-web:
+websearch:
   search:
     provider: brave
     max_results: 8

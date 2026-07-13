@@ -21,7 +21,7 @@ llm:
 tools:
   builtin: [web_search, web_fetch]
 
-web:
+websearch:
   search:
     provider: firecrawl
     max_results: 8

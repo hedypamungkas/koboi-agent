@@ -1,4 +1,4 @@
-"""koboi/web/types.py -- result dataclasses for search/fetch providers."""
+"""koboi/websearch/types.py -- result dataclasses for search/fetch providers."""
 
 from __future__ import annotations
 

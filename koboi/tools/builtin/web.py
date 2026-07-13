@@ -1,11 +1,11 @@
 """koboi/tools/builtin/web -- Web search and URL fetching.
 
-``web_search`` delegates to a registry-resolved search provider (``koboi.web``); the
+``web_search`` delegates to a registry-resolved search provider (``koboi.websearch``); the
 active provider is injected via the tool registry's dep store (``search_provider``) and
 defaults to ``mock`` for offline safety / back-compat. ``web_fetch`` still uses the
 in-process httpx + SSRF guard here (Wave 1 refactors it onto a fetch-provider registry).
 
-The mock/ddg helpers are migrated to ``koboi.web.providers`` and re-exported below for
+The mock/ddg helpers are migrated to ``koboi.websearch.providers`` and re-exported below for
 back-compat (tests and the ``WEB_SEARCH_PROVIDER`` env path still import them from here).
 """
 
@@ -24,22 +24,22 @@ import httpx
 
 from koboi.tools.registry import tool
 from koboi.types import RiskLevel
-from koboi.web.base import BaseSearchProvider
-from koboi.web.types import SearchResult
+from koboi.websearch.base import BaseSearchProvider
+from koboi.websearch.types import SearchResult
 
 _logger = logging.getLogger(__name__)
 
-# ── web_search (delegates to the koboi.web search-provider registry) ──
+# ── web_search (delegates to the koboi.websearch search-provider registry) ──
 
 WEB_SEARCH_PROVIDER = os.getenv("WEB_SEARCH_PROVIDER", "mock")
 
-# Back-compat re-exports: the mock/ddg logic now lives in koboi.web.providers, but tests
+# Back-compat re-exports: the mock/ddg logic now lives in koboi.websearch.providers, but tests
 # and the WEB_SEARCH_PROVIDER env path import these names from koboi.tools.builtin.web.
-from koboi.web.providers.ddg import (  # noqa: E402,F401
+from koboi.websearch.providers.ddg import (  # noqa: E402,F401
     _DDGResultParser,
     _search_duckduckgo,
 )
-from koboi.web.providers.mock import (  # noqa: E402,F401
+from koboi.websearch.providers.mock import (  # noqa: E402,F401
     SEARCH_INDEX,
     _format_results,
     _search_mock,
@@ -60,7 +60,7 @@ def _default_search_provider() -> BaseSearchProvider:
     cached = _DEFAULT_SEARCH_PROVIDER_CACHE.get(name)
     if cached is not None:
         return cached
-    from koboi.web.registry import search_provider_registry
+    from koboi.websearch.registry import search_provider_registry
 
     entry = search_provider_registry.get(name) or search_provider_registry.get("mock")
     if entry is None:  # pragma: no cover - builtins always register mock

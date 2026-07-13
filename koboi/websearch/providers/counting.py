@@ -1,4 +1,4 @@
-"""koboi/web/providers/counting.py -- budget-metering wrappers (W4).
+"""koboi/websearch/providers/counting.py -- budget-metering wrappers (W4).
 
 Wrap a real search/fetch provider to count each call against a shared ``ResearchBudget``
 (deep_research hard caps). When the budget is exhausted, return an empty/error result
@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from koboi.web.base import BaseFetchProvider, BaseSearchProvider
-from koboi.web.types import FetchResult, SearchResult
+from koboi.websearch.base import BaseFetchProvider, BaseSearchProvider
+from koboi.websearch.types import FetchResult, SearchResult
 
 if TYPE_CHECKING:
     from koboi.orchestration.research import ResearchBudget

@@ -25,8 +25,8 @@
 
 | Wave | Role toward Deep Research | Scope | Effort | Depends on |
 |---|---|---|---|---|
-| **W0** | 🔧 I/O enabler — **search** | search-provider **registry** (`@register_search_provider`) + Brave + Firecrawl-search + `web:` config + `web_search` tool refactor | ~2-3 hari | — |
-| **W1** | 🔧 I/O enabler — **fetch** | fetch-provider **registry** (`@register_fetch_provider`) + readability (trafilatura) + render escalation + Firecrawl-scrape + RAG `source: http/firecrawl` wiring + better HtmlParser | ~3-4 hari | — *(parallel to W0; shares the `koboi/web/` pkg)* |
+| **W0** | 🔧 I/O enabler — **search** | search-provider **registry** (`@register_search_provider`) + Brave + Firecrawl-search + `websearch:` config + `web_search` tool refactor | ~2-3 hari | — |
+| **W1** | 🔧 I/O enabler — **fetch** | fetch-provider **registry** (`@register_fetch_provider`) + readability (trafilatura) + render escalation + Firecrawl-scrape + RAG `source: http/firecrawl` wiring + better HtmlParser | ~3-4 hari | — *(parallel to W0; shares the `koboi/websearch/` pkg)* |
 | **W2** | 🎯 **THE PAYLOAD — Deep Research** | `execution.mode: deep_research` + `ResearchContext` + **coverage-gated loop** + `SourceStore` + **citation threading** + budget caps + `deep_research_demo.yaml` | ~6-8 hari | W0 + W1 *(can scaffold with mock providers in parallel)* |
 | **W3** | 🔧 Persistence enabler | `ingest_url` tool + `LiveRetriever` (mutable corpus) + research-output persistence → "RAG not doc-only" + findings accumulate | ~3-4 hari | W1 + W2 |
 
@@ -88,7 +88,7 @@ Perplexity Pro, GPT Researcher):
    └──────────────────────────────────────┬─────────────────────────────────────┘
                                           │ calls
    ┌────────────────────────── Layer 1 — I/O (W0 + W1) ─────────────────────────┐
-   │  koboi/web/  ·  search_provider_registry  (Brave · Firecrawl · ddg · mock)  │
+   │  koboi/websearch/  ·  search_provider_registry  (Brave · Firecrawl · ddg · mock)  │
    │               fetch_provider_registry   (httpx+readability · Firecrawl ·    │
    │                                          Playwright)                        │
    │  shared SSRF guard · shared primitive: fetch→extract→chunk→rank→cite        │
@@ -136,7 +136,7 @@ Mirrors the RAG `ComponentRegistry` (proven 4× in-tree: chunker/retriever/augme
 ### 4.1 Package layout
 
 ```
-koboi/web/                       NEW top-level pkg (sibling of rag/, sandbox/)
+koboi/websearch/                       NEW top-level pkg (sibling of rag/, sandbox/)
   __init__.py                    re-exports + _register_builtins() at import
   types.py                       SearchResult, FetchResult
   base.py                        BaseSearchProvider / BaseFetchProvider ABCs
@@ -148,14 +148,14 @@ koboi/web/                       NEW top-level pkg (sibling of rag/, sandbox/)
     readability.py               ReadabilityFetchProvider (httpx + trafilatura; default fetch)
     playwright.py  (W1.5)        PlaywrightFetchProvider (JS escalation)
 
-koboi/tools/builtin/web.py       REFACTORED → thin tool wrappers over koboi/web/
+koboi/tools/builtin/web.py       REFACTORED → thin tool wrappers over koboi/websearch/
 koboi/rag/sources.py             fetch_http() → build_fetch_provider(); new fetch_firecrawl_entry()
 ```
 
 ### 4.2 Types & ABCs (sketch)
 
 ```python
-# koboi/web/types.py
+# koboi/websearch/types.py
 @dataclass
 class SearchResult:
     title: str; url: str; snippet: str = ""
@@ -166,7 +166,7 @@ class FetchResult:
     url: str; content: str; title: str = ""; content_type: str = ""
     status: int = 200; truncated: bool = False; metadata: dict = field(default_factory=dict)
 
-# koboi/web/base.py
+# koboi/websearch/base.py
 class BaseSearchProvider(ABC):
     @abstractmethod
     async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]: ...
@@ -179,7 +179,7 @@ class BaseFetchProvider(ABC):
 ### 4.3 Registry + decorator
 
 ```python
-# koboi/web/registry.py  (mirrors koboi/rag/registry.py)
+# koboi/websearch/registry.py  (mirrors koboi/rag/registry.py)
 search_provider_registry: dict[str, ProviderEntry] = {}
 fetch_provider_registry:  dict[str, ProviderEntry] = {}
 
@@ -207,10 +207,10 @@ def build_fetch_provider(config: dict) -> BaseFetchProvider: ...     # web.fetch
 `web.fetch.render: never|auto|always` controls JS escalation (`auto` = try httpx, escalate if
 extracted text < N chars or SPA detected).
 
-### 4.5 Config schema (new `web:` section)
+### 4.5 Config schema (new `websearch:` section)
 
 ```yaml
-web:
+websearch:
   search:
     provider: brave            # brave | firecrawl | ddg | mock | <custom>
     max_results: 10
@@ -258,7 +258,7 @@ class BingSearchProvider(BaseSearchProvider):
     async def search(self, query: str, *, max_results: int = 10) -> list[SearchResult]: ...
 ```
 ```yaml
-web: { search: { provider: bing, bing: { api_key: ${BING_API_KEY:} } }, custom_modules: [mycorp.web_providers.bing] }
+websearch: { search: { provider: bing, bing: { api_key: ${BING_API_KEY:} } }, custom_modules: [mycorp.web_providers.bing] }
 ```
 
 ---
@@ -414,7 +414,7 @@ accumulate** (deep-research enhancer).
 | Before | After |
 |---|---|
 | `WEB_SEARCH_PROVIDER=duckduckgo` | still works (mapped to `web.search.provider: ddg`) |
-| no env, no `web:` section | `mock` default (unchanged, now logged loudly) |
+| no env, no `websearch:` section | `mock` default (unchanged, now logged loudly) |
 | `web_search` / `web_fetch` tool signatures | unchanged (LLM contract stable) |
 | `rag.documents: [{source: http, url: ...}]` | unchanged output, better extraction (readability) |
 | existing configs (`sales_agent.yaml`, `rag_agent.yaml`, …) | work as-is |

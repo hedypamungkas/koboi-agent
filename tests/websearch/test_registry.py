@@ -1,14 +1,14 @@
-"""Tests for koboi/web/registry.py -- provider registry + build_search_provider."""
+"""Tests for koboi/websearch/registry.py -- provider registry + build_search_provider."""
 
 from __future__ import annotations
 
 import pytest
 
-from koboi.web import build_search_provider, load_custom_components, search_provider_registry
-from koboi.web.providers.brave import BraveSearchProvider
-from koboi.web.providers.firecrawl import FirecrawlSearchProvider
-from koboi.web.providers.mock import MockSearchProvider
-from koboi.web.registry import ProviderRegistry, _redact
+from koboi.websearch import build_search_provider, load_custom_components, search_provider_registry
+from koboi.websearch.providers.brave import BraveSearchProvider
+from koboi.websearch.providers.firecrawl import FirecrawlSearchProvider
+from koboi.websearch.providers.mock import MockSearchProvider
+from koboi.websearch.registry import ProviderRegistry, _redact
 
 
 class TestBuiltinsRegistered:

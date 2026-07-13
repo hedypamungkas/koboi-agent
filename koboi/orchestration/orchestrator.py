@@ -164,7 +164,7 @@ class Orchestrator:
         research: dict | None = None,
         # W4: web config so deep_research nodes get the CONFIGURED search/fetch providers
         # (Brave/Firecrawl), not the mock/inline default.
-        web_conf: dict | None = None,
+        websearch_conf: dict | None = None,
         # W7: session_id tags persisted research_context rows so GET /v1/sessions/{id}
         # can map a session to its deep-research run. None for non-server callers.
         session_id: str | None = None,
@@ -195,7 +195,7 @@ class Orchestrator:
         # W2: deep_research knobs.
         self._sandbox = sandbox
         self._research = research or {}
-        self._web_conf = web_conf or {}
+        self._web_conf = websearch_conf or {}
         self._resume_ctx_json: str | None = None
         self._session_id = session_id
 
@@ -848,8 +848,8 @@ class Orchestrator:
             ResearchContext,
         )
         from koboi.types import AgentDef
-        from koboi.web import build_fetch_provider, build_search_provider
-        from koboi.web.providers.counting import CountingFetchProvider, CountingSearchProvider
+        from koboi.websearch import build_fetch_provider, build_search_provider
+        from koboi.websearch.providers.counting import CountingFetchProvider, CountingSearchProvider
 
         start = time.time()
         rc = self._research or {}

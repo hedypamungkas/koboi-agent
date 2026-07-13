@@ -1,4 +1,4 @@
-"""koboi/web/providers/mock.py -- offline hardcoded search index (default provider).
+"""koboi/websearch/providers/mock.py -- offline hardcoded search index (default provider).
 
 Migrated verbatim from ``koboi/tools/builtin/web.py`` (SEARCH_INDEX + _format_results +
 _search_mock) so the suite stays offline; the legacy module re-exports these names for
@@ -7,9 +7,9 @@ back-compat. ``MockSearchProvider`` wraps the same matching logic for the regist
 
 from __future__ import annotations
 
-from koboi.web.base import BaseSearchProvider
-from koboi.web.registry import register_search_provider
-from koboi.web.types import SearchResult
+from koboi.websearch.base import BaseSearchProvider
+from koboi.websearch.registry import register_search_provider
+from koboi.websearch.types import SearchResult
 
 # Hardcoded offline index (kept identical to the pre-refactor web.py contents).
 SEARCH_INDEX: dict[str, list[dict]] = {

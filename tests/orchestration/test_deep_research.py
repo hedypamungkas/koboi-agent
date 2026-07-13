@@ -694,12 +694,12 @@ class TestMedium8EmptyFollowupsStops:
 
 
 class TestMedium11WebConfProviderWiring:
-    """M11: web_conf with a spy provider proves the configured provider reaches nodes."""
+    """M11: websearch_conf with a spy provider proves the configured provider reaches nodes."""
 
     async def test_configured_provider_reaches_node(self, tmp_path):
-        from koboi.web.base import BaseSearchProvider
-        from koboi.web.registry import search_provider_registry
-        from koboi.web.types import SearchResult
+        from koboi.websearch.base import BaseSearchProvider
+        from koboi.websearch.registry import search_provider_registry
+        from koboi.websearch.types import SearchResult
 
         # Class-level call tracking (build_search_provider creates a NEW instance from the class,
         # so instance-level tracking won't work -- must track at class scope).
@@ -721,7 +721,7 @@ class TestMedium11WebConfProviderWiring:
                 router=KeywordRouter(),
                 research={"max_depth": 1, "coverage_threshold": 0.7, "max_searches": 5},
                 dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "spy.db")),
-                web_conf={"search": {"provider": "__spy_test__"}},
+                websearch_conf={"search": {"provider": "__spy_test__"}},
             )
             _ = [e async for e in orch._run_deep_research("Research Python")]
             # The spy was called through the CountingProvider chain (A0 wiring proven end-to-end).

@@ -1,4 +1,4 @@
-"""koboi/web -- web I/O abstraction: search + fetch provider registries.
+"""koboi/websearch -- web I/O abstraction: search + fetch provider registries.
 
 Two decorator-based registries (mirroring ``koboi/rag``): ``@register_search_provider``
 and ``@register_fetch_provider``. Built-in search providers: mock (offline default),
@@ -9,17 +9,17 @@ the tool registry's dep store.
 
 from __future__ import annotations
 
-from koboi.web.base import BaseFetchProvider, BaseSearchProvider
-from koboi.web.types import FetchResult, SearchResult
+from koboi.websearch.base import BaseFetchProvider, BaseSearchProvider
+from koboi.websearch.types import FetchResult, SearchResult
 
 # Register built-in providers (idempotent; decorators fire on import of each module).
-from koboi.web.providers import brave as _brave  # noqa: F401
-from koboi.web.providers import ddg as _ddg  # noqa: F401
-from koboi.web.providers import firecrawl as _firecrawl  # noqa: F401  (registers search + fetch)
-from koboi.web.providers import mock as _mock  # noqa: F401
-from koboi.web.providers import readability as _readability  # noqa: F401  (registers default "httpx" fetch)
+from koboi.websearch.providers import brave as _brave  # noqa: F401
+from koboi.websearch.providers import ddg as _ddg  # noqa: F401
+from koboi.websearch.providers import firecrawl as _firecrawl  # noqa: F401  (registers search + fetch)
+from koboi.websearch.providers import mock as _mock  # noqa: F401
+from koboi.websearch.providers import readability as _readability  # noqa: F401  (registers default "httpx" fetch)
 
-from koboi.web.registry import (
+from koboi.websearch.registry import (
     ProviderEntry,
     ProviderRegistry,
     build_fetch_provider,
