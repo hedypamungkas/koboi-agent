@@ -43,6 +43,7 @@ from koboi.server.jobs import (
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
+from koboi.server.session_events import SessionEventRegistry
 from koboi.server.schema import (
     ApproveRequest,
     ApproveResponse,
@@ -177,6 +178,7 @@ def create_app(
     idempotency_store: Any | None = None,
     ownership_store: Any | None = None,
     approval_registry: Any | None = None,
+    session_event_buffer: Any | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
 
@@ -235,6 +237,13 @@ def create_app(
     job_webhooks = config.get("jobs", "webhooks", default=[]) or []
     job_resume = config.get("jobs", "resume_on_startup", default=True)
     job_registry = event_buffer if event_buffer is not None else JobRegistry(max_events=job_max_events)
+    # B2: per-session replayable event buffer (GET /v1/sessions/{id}/stream).
+    session_max_events = config.get("server", "limits", "session_event_buffer", "max_events", default=1000) or 1000
+    session_streams_per_owner = config.get("server", "limits", "session_streams_per_owner", default=4)
+    session_stream_timeout = config.get("server", "limits", "session_stream_timeout", default=3600.0) or 3600.0
+    session_events = (
+        session_event_buffer if session_event_buffer is not None else SessionEventRegistry(max_events=session_max_events)
+    )
     # G6: /chat/stream Idempotency-Key (409-reject, in-memory TTL).
     chat_idem_ttl = config.get("server", "idempotency", "chat_ttl_seconds", default=600.0) or 600.0
     chat_idem_max = config.get("server", "idempotency", "max_entries", default=10000)  # H6
@@ -324,6 +333,10 @@ def create_app(
     app.state.health = health
     app.state.job_streams_per_owner = job_streams_per_owner  # M3
     app.state.job_streams = {}  # M3: owner -> active job-stream count
+    app.state.session_events = session_events  # B2: per-session replay buffer
+    app.state.session_streams_per_owner = session_streams_per_owner  # B2 slowloris guard
+    app.state.session_streams = {}  # B2: owner -> active session-stream count
+    app.state.session_stream_timeout = session_stream_timeout  # B2: stream deadline
     app.state.mcp_registries = {}  # G6: session_id -> SessionMcpRegistry
 
     # Middleware: registration order is the REVERSE of execution order.
@@ -382,6 +395,9 @@ def create_app(
         memory_backend,
         shared_db,
         job_webhooks,
+        session_events,
+        session_stream_timeout,
+        session_streams_per_owner,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -443,6 +459,9 @@ def _register_routes(
     memory_backend: str,
     shared_db: str,
     job_webhooks: list[dict] | None = None,
+    session_events: Any | None = None,
+    session_stream_timeout: float = 3600.0,
+    session_streams_per_owner: int = 4,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -636,6 +655,8 @@ def _register_routes(
             ownership.delete(session_id)
             # 29-E: drop the session's MCP registry so app.state.mcp_registries can't leak.
             app.state.mcp_registries.pop(session_id, None)
+            # B2: drop the session's replay buffer so it can't leak.
+            app.state.session_events.forget(session_id)
         if not evicted and not db_cleared:
             raise HTTPException(status_code=404, detail="session not found")
         return SessionDeletedResponse(session_id=session_id, evicted=evicted or db_cleared)  # type: ignore[return-value]
@@ -826,6 +847,7 @@ def _register_routes(
                             agent._core.max_iterations = effective_max_iter
                         async for ev in agent.run_stream(message):
                             await queue.put(ev)
+                            session_events.append_event(session_id, ev)  # B2: buffer for replay
                     finally:
                         agent._core.mode_manager.switch_mode(prior_mode)
                         agent._core.max_iterations = prior_max_iter
@@ -835,15 +857,17 @@ def _register_routes(
                 # run_stream, so the ``async with pool.session_lock`` above already
                 # exited -> lock released (no deadlock). A human operator takes over
                 # via POST /v1/sessions/{id}/transfer + a new /chat/stream.
-                await queue.put(
-                    HandoverEvent(
-                        handover_id=uuid.uuid4().hex[:12],
-                        reason=he.reason,
-                        summary=he.summary,
-                    )
+                hev = HandoverEvent(
+                    handover_id=uuid.uuid4().hex[:12],
+                    reason=he.reason,
+                    summary=he.summary,
                 )
+                session_events.append_event(session_id, hev)  # B2: buffer for replay
+                await queue.put(hev)
             except Exception as exc:
-                await queue.put(ErrorEvent(error=exc))
+                err_ev = ErrorEvent(error=exc)
+                session_events.append_event(session_id, err_ev)  # B2: buffer for replay
+                await queue.put(err_ev)
             finally:
                 await queue.put(None)
 
@@ -918,6 +942,55 @@ def _register_routes(
         ownership.set_owner(session_id, new_owner)
         return TransferResponse(  # type: ignore[return-value]
             session_id=session_id, transferred=True, owner=new_owner
+        )
+
+    @app.get("/v1/sessions/{session_id}/stream")
+    async def stream_session(session_id: str, request: Request):
+        """B2: replay a session's buffered event history + live-tail the current/next turn.
+
+        A supervisor/human operator calls this AFTER a handover (or during a turn)
+        to see what the bot said (replay) + watch the live turn (tail) before/while
+        taking over via POST /transfer + /chat/stream. Long-lived (tails across
+        turns until disconnect or the configured deadline); SSE keepalives cover
+        silent waits. No 404 on pool-miss -- the buffer is the source of truth for
+        replay (an LRU-evicted-but-not-DELETE'd session still has a buffer). RBAC
+        gap: _check_owner is owner-equality only (no supervisor role).
+        """
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        owner = getattr(request.state, "api_key_id", "dev")
+        # B2: per-owner stream cap (slowloris guard); skip in dev (mirror jobs).
+        if auth_enabled:
+            active = app.state.session_streams.get(owner, 0)
+            if active >= app.state.session_streams_per_owner:
+                return _error_response(429, "too_many_streams", "Max concurrent session streams reached", request)
+            app.state.session_streams[owner] = active + 1
+
+        async def event_gen():
+            last_index = 0
+            deadline = time.monotonic() + session_stream_timeout
+            try:
+                while True:
+                    all_events = session_events.get_events(session_id)
+                    for ev in all_events[last_index:]:
+                        yield ev
+                    last_index = len(all_events)
+                    if time.monotonic() >= deadline:
+                        break
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                if auth_enabled:
+                    app.state.session_streams[owner] = max(0, app.state.session_streams.get(owner, 0) - 1)
+
+        return StreamingResponse(
+            sse_stream(event_gen()),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     # ---- M4: Jobs (autonomous) ----
