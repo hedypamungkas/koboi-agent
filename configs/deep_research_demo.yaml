@@ -11,6 +11,7 @@ agent:
   description: "Iterative, cited web research (deep_research mode)"
   system_prompt: "You plan and run iterative, cited web research."
   mode: act
+  max_iterations: 20              # research nodes need more than the default 10
 
 orchestration:
   enabled: true
@@ -19,8 +20,8 @@ orchestration:
 
 research:
   max_depth: 3              # coverage-gated replan rounds
-  max_searches: 30          # total across all depth rounds (complex topics need more)
-  max_fetches: 40
+  max_searches: 50          # total across all depth rounds (7 nodes × ~5 searches + re-plan margin)
+  max_fetches: 60
   coverage_threshold: 0.7   # stop iterating once coverage >= this
   citations: numbered
   persist_findings: ./research_findings.jsonl   # W3: dump findings for later corpus reuse

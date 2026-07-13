@@ -150,7 +150,14 @@ class FirecrawlFetchProvider(BaseFetchProvider):
         meta = data.get("metadata") or {}
         title = meta.get("title", "") if isinstance(meta, dict) else ""
         content_type = "markdown" if data.get("markdown") else "text"
-        _logger.debug("firecrawl scrape '%s' -> %d chars", url, len(content))
+        if not content.strip():
+            _logger.warning(
+                "firecrawl scrape '%s' returned empty content (likely JS-rendered or paywalled) "
+                "-- the node should skip this URL and try another source",
+                url,
+            )
+        else:
+            _logger.debug("firecrawl scrape '%s' -> %d chars", url, len(content))
         return FetchResult(
             url=url,
             content=content,

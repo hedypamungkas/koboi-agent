@@ -33,11 +33,15 @@ RESEARCH_TOOLS_CONFIG: dict = {"builtin": ["web_search", "web_fetch"]}
 # tools -- the repo's known tool-nudge gap).
 RESEARCH_NODE_PREAMBLE = (
     "You are a research agent. To answer your assigned sub-question:\n"
-    "1. ALWAYS call web_search first with focused queries.\n"
-    "2. web_fetch the most relevant result URLs to read the actual content.\n"
-    "3. Report concrete findings with the source URL for each fact.\n"
-    "4. Never fabricate sources or facts -- if you couldn't find something, say so.\n"
-    "Be concise and specific."
+    "1. Call web_search with BROAD, SIMPLE queries (2-5 words max). Do NOT use site: operators "
+    "or long compound queries -- they return 0 results. If a search returns nothing, simplify.\n"
+    "2. web_fetch the most relevant result URLs. If a page returns empty content (paywalled or "
+    "JS-rendered), SKIP it -- do not retry the same URL. Move to the next result.\n"
+    "3. After 3-5 search+fetch cycles, STOP searching and write your findings. Do not exhaust "
+    "your iterations searching -- conclude as soon as you have enough evidence.\n"
+    "4. Report concrete findings with the source URL for each fact. Be specific: numbers, dates, "
+    "names, technical details.\n"
+    "5. Never fabricate sources or facts -- if you couldn't find something, say so explicitly."
 )
 
 # response_format schema for the coverage judge.
