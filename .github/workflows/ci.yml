@@ -65,10 +65,12 @@ jobs:
           pip install -e ".[dev,tui,api]"
 
       - name: Run tests with coverage
-        # The 80% floor is enforced on Linux only: macOS skips the seccomp-only
-        # tests (Linux system package), so its measured coverage is slightly
-        # lower and should not gate the build. All platforms still run the tests.
-        run: pytest --tb=short -q --cov=koboi --cov-report=term-missing --cov-report=xml ${{ matrix.os == 'ubuntu-latest' && '--cov-fail-under=80' || '' }}
+        # The 90% floor is the unit-test baseline, enforced as a HARD gate on
+        # Linux only: macOS skips the seccomp-only tests (Linux system package),
+        # so its measured coverage is slightly lower and should not gate the
+        # build. All platforms still run the tests. A regression below 90% on
+        # Linux fails the job (pytest --cov-fail-under exits non-zero).
+        run: pytest --tb=short -q --cov=koboi --cov-report=term-missing --cov-report=xml ${{ matrix.os == 'ubuntu-latest' && '--cov-fail-under=90' || '' }}
 
       - name: Upload coverage artifact
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
