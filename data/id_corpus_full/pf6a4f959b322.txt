@@ -1,0 +1,1 @@
+Masalah saya adalah, saya perlu mengurutkan tabel ini berdasarkan tanggal tetapi dengan tanggal yang paling dekat dengan tanggal hari ini di bagian atas... Fungsi sortir menempatkan yang paling lama di atas atau yang paling lama di bawah, yang tidak cocok untuk kebutuhan saya... Saya menggunakan xl 2003.

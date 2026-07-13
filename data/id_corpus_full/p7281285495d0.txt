@@ -1,0 +1,1 @@
+Program menyimpan instruksinya di RAM saat dijalankan, jadi RAM menentukan berapa banyak program yang dapat Anda buka sekaligus, ukuran file yang dapat Anda buka di program, dan sampai batas tertentu, seberapa cepat suatu program menjalankan instruksinya. Sangat mudah untuk mengetahui berapa banyak RAM yang Anda miliki di komputer Anda. INSTRUKSI. Langkah 1:

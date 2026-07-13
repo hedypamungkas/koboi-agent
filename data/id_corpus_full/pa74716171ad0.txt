@@ -1,0 +1,1 @@
+DRAM (Dynamic Random Access Memory) Jenis memori komputer yang paling umum. DRAM menyimpan data dalam jangka waktu yang relatif singkat dan perlu disegarkan pada interval teratur. DRAM diukur berdasarkan waktu akses (dalam nanodetik, atau ns) dan kapasitas penyimpanan (dalam megabita, atau MB).

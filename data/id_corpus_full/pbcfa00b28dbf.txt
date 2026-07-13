@@ -1,0 +1,1 @@
+Pergantian karyawan dihitung dengan membagi jumlah pemisahan oleh total staf: pergantian karyawan = jumlah pemisahan / rata-rata jumlah karyawan. Ada dua kategori utama pergantian: pergantian sukarela adalah ketika karyawan mengundurkan diri; pergantian tidak sukarela adalah ketika karyawan dirumahkan atau dipecat.

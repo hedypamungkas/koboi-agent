@@ -1,0 +1,1 @@
+Sebagai fungsi terdiferensialkan dari variabel kompleks yang sama dengan jumlah deret Taylor-nya (artinya, bersifat analitik), analisis kompleks secara khusus membahas fungsi analitik dari variabel kompleks (artinya, fungsi holomorfik). 1 Sejarah.

@@ -1,0 +1,1 @@
+Untuk menghitung rata-rata pukulan, cukup masukkan jumlah at bat dan jumlah hit yang diperoleh ke dalam kolom formulir di bawah ini. Klik calculate dan kalkulator kami akan segera menghitung rata-rata pukulan Anda untuk Anda. At Bats.

@@ -1,0 +1,1 @@
+Secara umum, jika suatu kelas tidak mendefinisikan konstruktor tanpa argumen, semua subkelasnya harus mendefinisikan konstruktor yang secara eksplisit memanggil konstruktor superclass dengan argumen yang diperlukan. Jika suatu kelas tidak mendeklarasikan konstruktor apa pun, kelas tersebut secara default diberi konstruktor tanpa argumen.

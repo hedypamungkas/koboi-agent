@@ -1,0 +1,1 @@
+1 Mahasiswa harus memiliki FAFSA 2014-2015 yang telah lengkap dan tersimpan di FAU. 2 Mahasiswa harus tidak memiliki persyaratan bantuan keuangan yang belum terpenuhi untuk tahun 2014-2015. 3 Persyaratan yang belum terpenuhi akan ditampilkan saat melihat Status Bantuan Keuangan (klik di sini untuk petunjuk tentang cara melihat status bantuan keuangan).

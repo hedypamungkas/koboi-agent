@@ -6,8 +6,8 @@ handbook (paid time off: 12 days annually), so a query targeting *permanent* lea
 must surface the policy chunk near the top, not be buried by the handbook PTO line.
 
 The live leg (faithfulness drop <= 5% when distractors are injected -- the
-lost-in-the-middle guard via ragas noise_sensitivity) is deferred to the Tier-2
-nightly RAGAS suite.
+lost-in-the-middle guard via ragas noise_sensitivity) lives in
+``evals/rag_noise_faithfulness.eval.py`` (a manual live run; there is no automated nightly job).
 
 Mock-safe (no LLM): retrieval is pre-LLM.
 

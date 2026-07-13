@@ -1,0 +1,1 @@
+Pengisi daya yang dapat mengisi baterai AAA NiCD berkapasitas standar (180 mAh) hanya dalam satu jam mungkin memerlukan 8 jam untuk mengisi baterai NiMH berkapasitas tinggi (1500 mAh). Sebaiknya abaikan istilah-istilah seperti itu dan lakukan perkiraan kasar seberapa cepat sebuah pengisi daya dapat mengisi baterai.

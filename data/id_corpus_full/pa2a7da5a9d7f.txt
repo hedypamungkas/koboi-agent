@@ -1,0 +1,1 @@
+Mari mulai dengan contoh sederhana. Kita akan menggunakan apotema sebuah segi enam untuk menemukan luasnya seperti ditunjukkan pada Gambar 2. 1  Mulailah dengan dua segi enam. 2  Asumsikan bahwa setiap sisi memiliki panjang x satuan. 3  Keliling setiap segi enam adalah 6 x satuan. 4  Bagi setiap segi enam menjadi enam segitiga sama sisi (diilustrasikan di bawah).

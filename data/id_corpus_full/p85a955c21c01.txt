@@ -1,0 +1,1 @@
+Tabel rata-rata menampilkan kumpulan rata-rata 30 tahun terbaru, yang mencakup periode 1981-2010, untuk stasiun iklim terdekat / paling mirip dengan lokasi yang Anda pilih. Tab lainnya menampilkan tabel rata-rata untuk distrik, wilayah, dan UK, yang mencakup periode 1961-1990, 1971-2000, dan 1981-2010.

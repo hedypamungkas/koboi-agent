@@ -1,0 +1,1 @@
+1 Jika panjang apotema adalah 5√3, misalnya, masukkan ke dalam rumus dan dapatkan 5√3 cm = x√3, atau x = 5 cm. 2 Dengan menyelesaikan untuk x, Anda telah menemukan panjang sisi pendek segitiga, 5. 3 Karena itu mewakili setengah dari panjang salah satu sisi segi enam, kalikan dengan 2 untuk mendapatkan panjang penuh sisi tersebut. 4 5 cm x 2 = 10 cm.

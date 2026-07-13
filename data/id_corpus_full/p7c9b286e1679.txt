@@ -1,0 +1,1 @@
+Untuk menjadikan Google sebagai default, berikut caranya: 1  Klik ikon Tools di ujung kanan jendela browser. 2  Pilih Internet options. 3  Pada tab General, temukan bagian Search dan klik Settings.  Pilih 1  Google. Klik Set as default dan klik Close.

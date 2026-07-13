@@ -74,11 +74,5 @@ docs/eve-impact-effort-analysis.md
 
 # === Path B: real IR eval corpus (MS MARCO passages; research-use, built by scripts/build_ir_corpus.py) ===
 data/ir_corpus/
-# Indonesian validation corpus (translated MS MARCO subset; derived, regenerable via the ID build script)
-data/id_corpus/
-# EN@80 ablation corpus (derived subset of ir_corpus; regenerable via the EN@80 script)
-data/en80_corpus/
-# Scale-matched ID corpus (translated MS MARCO full; derived, regenerable)
-data/id_corpus_full/
 # Native Indonesian corpus (TyDi QA; Apache-2.0, derived, regenerable via scripts/build_id_native_corpus.py)
 data/id_native_corpus/

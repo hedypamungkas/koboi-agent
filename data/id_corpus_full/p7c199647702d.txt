@@ -1,0 +1,1 @@
+Sertifikat yang menunjukkan hasil dari kalibrasi semacam itu biasanya mencantumkan rentang nilai gaya yang dihasilkan oleh mesin standar, nilai keluaran yang sesuai yang ditunjukkan oleh instrumen yang dikalibrasi, dan persamaan kalibrasi yang menghubungkan kedua set angka tersebut.

@@ -1,0 +1,1 @@
+Peningkatan Dynamics CRM 2015 Outlook dan Sinkronisasi. oleh Peter Majer 5 Januari 2015. Microsoft недавно mengumumkan fitur-fitur baru yang hadir pada versi berikutnya dari Microsoft Dynamics CRM 2015 (sebelumnya diberi nama kode Vega). Lihat Dynamics CRM 2015 Release Preview Guide untuk melihat fitur apa saja yang hadir di 2015.

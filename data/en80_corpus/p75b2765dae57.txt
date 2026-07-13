@@ -1,0 +1,1 @@
+A charger that can charge a standard capacity AAA NiCD battery (180 mAh) in just one hour might take 8 hours to charge a high capacity NiMH (1500 mAh) battery. It's best to ignore such terms and make a rough calculation of how fast a charger can charge batteries.

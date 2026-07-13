@@ -1,0 +1,1 @@
+Catatan: Jika Anda perlu mencari luas poligon beraturan, yang Anda butuhkan hanyalah apotema! Tutorial ini menunjukkan cara mencari luas segilima beraturan ketika Anda hanya mengetahui apotemanya.

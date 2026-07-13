@@ -1,0 +1,1 @@
+Kartu ini dirancang berdasarkan standar kartu PCMCIA PC Card dan dapat dipasang ke slot PCMCIA dengan adaptor. Ada dua jenis kartu CompactFlash untuk menampung kapasitas yang berbeda: 1 Kartu Type I berukuran 42.8mm x 36.4mm x 3.3 mm tebal. 2 Kartu Type II berukuran 42.8mm x 36.4mm x 5.5 mm tebal.

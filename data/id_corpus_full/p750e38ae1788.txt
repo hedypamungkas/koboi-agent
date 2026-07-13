@@ -1,0 +1,1 @@
+Kalender lunar dan lunisolar berbeda dalam hal hari mana yang menjadi hari pertama dalam sebulan. Dalam beberapa kalender lunisolar, seperti kalender Tiongkok, hari pertama suatu bulan adalah hari ketika bulan baru astronomis terjadi di zona waktu tertentu. Dalam yang lain, seperti beberapa kalender Hindu, setiap bulan dimulai pada hari setelah bulan purnama atau bulan baru.

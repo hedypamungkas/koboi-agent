@@ -1,0 +1,1 @@
+Tanggal pengembalian dana. Jika pengembalian dana Anda disetujui, sistem akan menjadwalkan tanggal pembayaran. Pesan pengembalian dana kemudian akan memberikan jumlah, tanggal yang dijadwalkan, dan metode pembayaran (setoran langsung, kartu debit, cek kertas). Anda juga bisa mendapatkan informasi ini dengan mendaftar untuk peringatan email.

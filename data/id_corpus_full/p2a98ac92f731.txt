@@ -1,0 +1,1 @@
+CRM 2011 Outlook Synchronization Process. Selama beberapa tahun terakhir, beberapa Microsoft CRM 4.0 White Paper telah dibuat yang membahas sinkronisasi Outlook, serta sinkronisasi Offline.

@@ -1,0 +1,1 @@
+Klik sel dengan tanggal pertama untuk memilihnya, lalu seret fill handle ke seluruh atau ke bawah sel tempat Anda ingin Excel menambahkan tanggal. Fill handle adalah kotak hijau kecil yang muncul di sudut kanan bawah saat Anda memilih sel atau rentang sel di Excel, seperti ditunjukkan pada tangkapan layar di bawah.

@@ -1,0 +1,1 @@
+Anggota Superclass Beranda Konstruktor Subclass • Konstruktor tidak diwariskan. • Namun, subclass dapat memanggil konstruktor superclass untuk menginisialisasi field yang diwarisi. • Pemanggilan implisit – Konstruktor default dari subclass secara otomatis memanggil konstruktor default dari superclass • Untuk pemanggilan eksplisit, gunakan sintaks ini:

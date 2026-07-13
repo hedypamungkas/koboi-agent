@@ -1,0 +1,1 @@
+Massa m dari tetesan yang tergantung di ujung tabung dapat ditemukan dengan menyamakan gaya akibat gravitasi () dengan komponen tegangan permukaan pada arah vertikal () sehingga diperoleh rumus. di mana α adalah sudut kontak dengan tabung, dan g adalah percepatan akibat gravitasi.

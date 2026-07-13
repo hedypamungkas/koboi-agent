@@ -1,0 +1,1 @@
+Buat monogram untuk pengantin pria dan wanita dengan inisial nama depan pengantin wanita di sebelah kiri, inisial nama keluarga pasangan di tengah, dan inisial nama depan pengantin pria di sebelah kanan. Buat inisial nama keluarga lebih besar daripada dua inisial lainnya.

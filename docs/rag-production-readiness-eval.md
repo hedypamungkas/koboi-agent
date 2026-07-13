@@ -66,7 +66,7 @@ Pre-change: ~2 of 9 well-evidenced (robustness + ingestion-format); the 3 heavie
   rank-order context seam + a frozen golden qrels set. Unblocks both gates.
 - **Tier 1 — Mock-safe HARD PR gate.** `koboi eval-test evals/ --mock --strict` on a
   bare install. Zero API cost, zero non-determinism. **Shipped in this change.**
-- **Tier 2 — Live-LLM nightly gate.** RAGAS faithfulness/recall/relevancy/precision +
+- **Tier 2 — Live-LLM evals (manual; no automated job).** RAGAS faithfulness/recall/relevancy/precision +
   real-embedding semantic/hybrid/HyDE + live legs of noise/abstention/citation. Needs
   `pip install -e ".[eval-ragas]"` + an LLM key. SOFT until calibrated.
 - **Tier 3 — Pre-release statistical gate.** RAGASDataGenerator-seeded N≥100 golden
@@ -204,13 +204,15 @@ observations worth tracking:
 | After | Defensible statement |
 |---|---|
 | **Tier 0+1 (this change)** | *"Retrieval ranking, abstention-retrieval, citation resolution, ingestion fidelity, and metadata scoping will not silently regress on any PR — evidenced by a mock-safe HARD gate at zero API cost, with a retrieval-side 95%-CI leg."* |
-| Tier 2 | + *"Faithfulness ≥0.9 and end-to-end answer correctness are evidenced **manually** over the real MS MARCO / TyDi-QA corpora (N=128, direct decoupled-judge measurements recorded in this doc), not yet automated — see the nightly-removal note above."* |
+| Tier 2 | + *"Faithfulness ≥0.9 and end-to-end answer correctness are evidenced **manually** over the real MS MARCO / TyDi-QA corpora (retrieval N=128 / answer-quality N=48, direct decoupled-judge measurements recorded in this doc), not automated — see the nightly-removal note above."* |
 | Tier 3 | + *"Statistically defensible at N≥100 with 95%-CI lower bounds per dimension."* |
 | (beyond) | A human-annotated PPI tier is the prerequisite for an **unqualified external** "RAG is production-ready" assertion — N=100 bootstrap half-width (~±0.10) is too wide for high-stakes ≥0.9 claims and judge-LLM determinism is unbounded. |
 
-**Ceiling:** the method now supports a **CI-gated retrieval-safety + nightly-evidenced
-grounding** claim (defensible for internal/pre-production), not yet an unqualified
-external production assertion.
+**Ceiling:** the method now supports a **CI-gated retrieval-safety + manually-evidenced
+grounding** (one-time N=128 retrieval / N=48 answer-quality measurements recorded in this doc;
+not automated and not re-run on any PR — see the nightly-removal note) — defensible for
+**internal / pre-production** retrieval, but **not yet an unqualified external "production-ready"
+assertion** (that needs the human-annotated PPI tier per the "(beyond)" row above).
 
 ## 7. Verification (2026-07-11)
 
@@ -223,7 +225,12 @@ external production assertion.
 - `loop._run_metadata` stamp change verified by a focused unit test (additive
   `retrieval_method`/`doc_id`; existing readers ignore unknown keys).
 
-### 7a. Live calibration (2026-07-11) — RAGAS integration fixed + production scores achieved
+### 7a. Live calibration (2026-07-11) — RAGAS integration fixed — ⚠️ SUPERSEDED (self-inflated; see §7b)
+
+> ⚠️ The "all 1.0" numbers below are **self-judged** (same model judged its own answers on the toy
+> 36-chunk Acme corpus at N=1) and were **re-measured honestly in §7b**. Kept only as the
+> diagnostic trail of *why* the decoupled-judge re-measurement was needed. Do NOT cite §7a as
+> evidence — use §7b onward.
 
 The shipped `RAGASScorer` was broken against current ragas (0.4.x) — fixed and **run
 live** (gpt-5.4-mini judge via an OpenAI-compatible gateway + a separate OpenAI
@@ -365,9 +372,18 @@ precision@1 ≥0.45, which passes (0.469, CI [0.383, 0.555]); the 0.50 figure is
 aspirational target, not the platform bar.**
 
 **Final verdict: 7/8 metrics pass at production targets (recall, MRR, nDCG, faithfulness,
-correctness, context_relevance + all ID).** The 8th (precision@1) is at 94% of an
-English-aspirational target, with the gap being the validated, platform-mandated multilingual
-tradeoff. RAG is production-ready for a general-purpose (EN+ID) platform.
+correctness, context_relevance + all ID), measured on real benchmarks (EN MS MARCO + native TyDi
+QA-id). Honest qualifiers:
+- precision@1 (0.469) is at 94% of the original ≥0.50 target; it "passes" only against the
+  adjusted ≥0.45 **multilingual-platform** target (reaching 0.50 needs an English-specialized
+  model, excluded by the platform principle).
+- The answer-quality metrics (faithfulness/correctness/context_relevance) are a **one-time manual
+  measurement (N=48)**, not CI-gated — so this is a **pre-production / internal "ready"**, not the
+  unqualified external claim. Per the claim ladder above, the external "production-ready" assertion
+  still requires a human-annotated PPI tier (N≥100 + bounded judge determinism).
+
+**Net: production-ready for internal/pre-production retrieval on a general-purpose (EN+ID) platform;
+the unqualified external claim is staged but not yet earned.**
 
 ## Per-language deep-dive (EN vs ID) — what needs improvement, per language
 
@@ -487,8 +503,10 @@ Measured native-ID retrieval (N=128, jina-reranker-v3 + fm4, paced, rerank engag
    passages vs MS MARCO's noisy web fragments), not translation. So cross-benchmark numbers (TyDi-ID
    vs MS-MARCO-EN) aren't directly comparable — but BOTH pass their targets.
 
-**Caveat status: CLOSED.** The ID production claim now rests on a NATIVE Indonesian benchmark at
-production density, passing all targets. Residual honesty note: TyDi ≠ MS MARCO difficulty, so
+**Caveat status: translation caveat RESOLVED (one-time native-ID measurement).** The ID claim
+rests on a NATIVE Indonesian benchmark at production density, passing all targets — but it is a
+**one-time manual measurement, not CI-gated** (the eval self-skips under `--mock`), so re-run it
+manually before any ID-targeting release. Residual honesty note: TyDi ≠ MS MARCO difficulty, so
 "native-ID > EN" is benchmark-structural, not a model property — but it removes the translation
 caveat entirely. (`stemmer: id` is opt-in — Sastrawi adds ~14min CPU per build on a 3000-passage
 corpus, measured; correctness unit-tested, benefit shown above. `stopwords: id` is cheap/always-on.)
@@ -519,4 +537,4 @@ stronger model or native multi-query/step retrieval (future work).
 the hard strata**: multi-hop reasoning and abstention-under-non-empty-context both fail.
 These are the production blockers; Path C (stopword filter, refusal-prompt/relevance_threshold,
 factual_correctness deterministic fallback) targets them. A trustworthy production claim
-still needs the full N=128 nightly CI + closing the hard-strata gaps.
+still needs the full N=128 CI (manual re-run) + closing the hard-strata gaps.

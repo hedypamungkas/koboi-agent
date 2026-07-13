@@ -1,0 +1,1 @@
+Misalnya, jika Anda adalah siswa senior dengan IPK kumulatif saat ini 4.0 dan menjalani sistem 2 semester, nilai Anda kemungkinan akan berubah dari 4.0 menjadi 3.93. Namun, jika Anda adalah siswa tahun kedua (dengan asumsi Anda di sekolah menengah) dan menjalani tahun ajaran 2 semester yang sama, nilai Anda akan turun dari 4.0 menjadi 3.8.

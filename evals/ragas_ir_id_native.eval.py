@@ -4,10 +4,10 @@ The translated-MS-MARCO ID measurements (ID@1000) inflate retrieval scores via t
 normalization. This suite measures ranking on NATIVELY-collected Indonesian (TyDi QA secondary_task,
 gold 1-in-3000 == EN MS MARCO density) so the ID claim carries no translation caveat.
 
-CONFIG: bm25 + rerank v3 + fetch_mult=4 + **stopwords=id + stemmer=id** (the Step 2 ID capability:
-Indonesian function-word filter + Sastrawi morphology). Metrics are exact doc_id rank (gold_doc pid
-vs rag_results[].doc_id rank), gated on the bootstrap 95% CI lower bound. Gates are provisional
-pending the first live calibration run (the translated-ID@1000 numbers, deflated for native text).
+CONFIG: bm25 + rerank v3 + fetch_mult=4 + **stopwords=id** (the ID function-word filter;
+stemmer=id is opt-in -- see the perf note below). Metrics are exact doc_id rank (gold_doc pid
+vs rag_results[].doc_id rank), gated on the bootstrap 95% CI lower bound. Gates are CALIBRATED to
+the N=128 native-ID TyDi QA measurement (recall .938 / MRR .878 / nDCG .893 / p1 .836).
 
 LIVE ONLY; self-skips under --mock via t.require_live(). Needs RERANK_API_KEY + [indo-nlp] (for the
 stemmer; falls back to stopwords-only if absent) + the built id_native_corpus.

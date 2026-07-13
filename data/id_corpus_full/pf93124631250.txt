@@ -1,0 +1,1 @@
+Hambatan pada fuel sender Anda harus sesuai dengan gauge Anda. Misalnya, hambatan gauge bawaan pada 55 Chevy bernilai nol ohm saat kosong dan 30 ohm saat penuh. Daftar berikut adalah untuk gauge bawaan dan beberapa merek aftermarket populer:

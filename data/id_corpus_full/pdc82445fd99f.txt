@@ -1,0 +1,1 @@
+Pengotoran pada permukaan atas array dapat menyebabkan kerugian mismatch atau penurunan output daya yang lebih merata. Mekanisme degradasi dapat melibatkan penurunan bertahap pada daya keluaran modul PV seiring waktu atau penurunan keseluruhan daya akibat kegagalan satu sel surya di dalam modul.

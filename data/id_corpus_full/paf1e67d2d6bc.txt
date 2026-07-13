@@ -1,0 +1,1 @@
+Lalu, membagi satuan energi (seperti eV) dengan konstanta fundamental yang memiliki satuan kecepatan (L T −1), memudahkan konversi yang diperlukan untuk menggunakan satuan energi guna mendeskripsikan momentum. Dalam bidang fisika partikel berenergi tinggi, satuan kecepatan fundamental adalah kecepatan cahaya di vakum c.

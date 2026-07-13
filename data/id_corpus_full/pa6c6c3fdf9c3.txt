@@ -1,0 +1,1 @@
+13. adalah hubungan satu-ke-banyak antara tabel lookup dan layer GIS penggunaan lahan – artinya, ada satu catatan dalam tabel lookup (misalnya, kode 3 - hutan) yang berhubungan dengan banyak catatan dalam layer GIS penggunaan lahan (semua poligon dengan tipe “hutan”).
