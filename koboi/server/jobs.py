@@ -583,17 +583,17 @@ async def _execute_job(
                 "Configure the 'sandbox:' section before enabling jobs."
             )
         store.update_status(job_id, "running")
-        final_content: str | None = None
+        orchestrated_content: str | None = None
         async with pool.session_lock(record.session_id):
             if resume:
                 result = await agent.resume()
-                final_content = result.content
+                orchestrated_content = result.content
             else:
                 async for event in agent.run_stream(message):
                     registry.append_event(job_id, event)
                     if isinstance(event, CompleteEvent):
-                        final_content = event.content
-        return final_content
+                        orchestrated_content = event.content
+        return orchestrated_content
 
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network
     # isolation, so refuse it -- raise before running; run_job marks the job failed.

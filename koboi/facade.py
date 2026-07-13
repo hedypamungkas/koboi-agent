@@ -189,8 +189,8 @@ class KoboiAgent:
                 ctx_json = DagScheduler.load_latest_research_context(db_path)
                 if not ctx_json:
                     raise AgentError("No research context found to resume (run deep_research first)")
-                self._orchestrator._resume_ctx_json = ctx_json
-                return await self._run_orchestrator(self._orchestrator, "")
+                self._orchestrator._resume_ctx_json = ctx_json  # type: ignore[attr-defined]
+                return await _run_orchestrator(self._orchestrator, "")
             # Issue #10b: clearer message. Orchestration mode runs N per-agent
             # memories with no single shared conversation/journal to resume; full
             # resume support requires orchestration-mode redesign (deferred).

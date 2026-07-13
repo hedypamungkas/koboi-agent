@@ -193,6 +193,7 @@ class Orchestrator:
         self._sandbox = sandbox
         self._research = research or {}
         self._web_conf = web_conf or {}
+        self._resume_ctx_json: str | None = None
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
