@@ -17,6 +17,7 @@ from koboi.workflows.definition import (
     parse_determinism,
     validate_workflow,
 )
+from koboi.workflows.store import FileWorkflowStore, resolve_workflows_dir
 
 __all__ = [
     "WORKFLOW_SCHEMA_VERSION",
@@ -27,4 +28,6 @@ __all__ = [
     "build_graph_snapshot",
     "parse_determinism",
     "validate_workflow",
+    "FileWorkflowStore",
+    "resolve_workflows_dir",
 ]

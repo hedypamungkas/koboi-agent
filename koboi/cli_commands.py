@@ -99,19 +99,121 @@ def cmd_graph(config_path: str, fmt: str = "mermaid") -> int:
         print("No orchestration agents found (orchestration.agents is empty).", file=sys.stderr)
         return 1
 
+    if fmt == "json":
+        from koboi.workflows import build_graph_snapshot
+
+        # Non-lossy snapshot: legacy nodes/edges keys + conditionals/execution_mode/
+        # router/agents (AgentDef.to_dict() per node).
+        print(json.dumps(build_graph_snapshot(agent_defs, config), indent=2))
+        return 0
+
+    # Mermaid: depends_on edges only (a readable graph).
     nodes = [ad.name for ad in agent_defs]
     edges = [{"from": dep, "to": ad.name} for ad in agent_defs for dep in ad.depends_on]
-
-    if fmt == "json":
-        print(json.dumps({"nodes": nodes, "edges": edges}, indent=2))
-    else:
-        lines = ["graph TD"]
-        for n in nodes:
-            lines.append(f'  {n}["{n}"]')
-        for edge in edges:
-            lines.append(f"  {edge['from']} --> {edge['to']}")
-        print("\n".join(lines))
+    lines = ["graph TD"]
+    for n in nodes:
+        lines.append(f'  {n}["{n}"]')
+    for edge in edges:
+        lines.append(f"  {edge['from']} --> {edge['to']}")
+    print("\n".join(lines))
     return 0
+
+
+def cmd_export_workflow(
+    config_path: str,
+    fmt: str = "yaml",
+    name: str | None = None,
+    output: str | None = None,
+    save: bool = False,
+    scope: str = "project",
+) -> int:
+    """Export a config as a self-contained, secret-redacted workflow bundle.
+
+    Prints to stdout by default (pipe-friendly); ``--output FILE`` writes a file;
+    ``--save`` stores it in the workflow store (``--scope project|user``).
+    """
+    from koboi.workflows import build_from_config_path, validate_workflow
+
+    wf_name = name or Path(config_path).stem
+    try:
+        wd = build_from_config_path(config_path, name=wf_name)
+    except Exception as e:
+        print(f"Error building workflow: {e}", file=sys.stderr)
+        return 1
+    for warning in validate_workflow(wd):
+        print(f"warning: {warning}", file=sys.stderr)
+    text = wd.to_bundle_json() if fmt == "json" else wd.to_bundle_yaml()
+    if output:
+        Path(output).write_text(text, encoding="utf-8")
+        print(f"Workflow '{wf_name}' exported to {output}")
+        return 0
+    if save:
+        from koboi.workflows.store import FileWorkflowStore
+
+        path = FileWorkflowStore(scope=scope).save(wf_name, text)
+        print(f"Workflow '{wf_name}' saved to {path}")
+        return 0
+    print(text)
+    return 0
+
+
+def cmd_import_workflow(file: str, name: str | None = None, scope: str = "project") -> int:
+    """Import a workflow bundle file into the store (validate + re-redact + save)."""
+    from koboi.redact import redact_config_for_export
+    from koboi.workflows import WorkflowDefinition, validate_workflow
+    from koboi.workflows.store import FileWorkflowStore
+
+    try:
+        text = Path(file).read_text(encoding="utf-8")
+        wd = WorkflowDefinition.from_bundle_yaml(text)
+    except Exception as e:
+        print(f"Error parsing workflow bundle: {e}", file=sys.stderr)
+        return 1
+    # Trust boundary: never persist secrets into the store.
+    wd.config = redact_config_for_export(wd.config)
+    wf_name = name or wd.name or Path(file).stem
+    for warning in validate_workflow(wd):
+        print(f"warning: {warning}", file=sys.stderr)
+    path = FileWorkflowStore(scope=scope).save(wf_name, wd.to_bundle_yaml())
+    print(f"Workflow '{wf_name}' imported to {path}")
+    return 0
+
+
+def cmd_workflows(command: str, scope: str = "project", name: str | None = None) -> int:
+    """List / show / delete stored workflows (``--scope project|user``)."""
+    from koboi.workflows.store import FileWorkflowStore
+
+    store = FileWorkflowStore(scope=scope)
+    if command == "list":
+        items = store.list()
+        if not items:
+            print(f"No workflows in {store.dir}")
+            return 0
+        for it in items:
+            desc = f"  -- {it.get('description')}" if it.get("description") else ""
+            print(f"{it['name']}{desc}")
+        return 0
+    if command == "show":
+        if not name:
+            print("Error: `workflows show` requires a name.", file=sys.stderr)
+            return 1
+        try:
+            print(store.load(name))
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        return 0
+    if command == "delete":
+        if not name:
+            print("Error: `workflows delete` requires a name.", file=sys.stderr)
+            return 1
+        if store.delete(name):
+            print(f"Deleted workflow '{name}'")
+            return 0
+        print(f"Workflow '{name}' not found in {store.dir}", file=sys.stderr)
+        return 1
+    print(f"Unknown workflows command: {command}", file=sys.stderr)
+    return 1
 
 
 def cmd_validate(config_path: str) -> int:
@@ -161,12 +263,46 @@ def cmd_run(
     verbose: bool,
     print_mode: bool,
     resume_session: str | None,
+    workflow_name: str | None = None,
+    replay_mode: str = "live",
+    input_json: str | None = None,
 ) -> int:
-    """Run a single agent query (non-interactive or one-shot)."""
+    """Run a single agent query (non-interactive or one-shot).
+
+    With ``workflow_name`` set, loads a stored workflow bundle
+    (``cwd/.koboi/workflows``) and runs it instead of the config at
+    ``config_path``. ``replay_mode`` selects the determinism tier (v1: ``live``
+    only; ``cache``/``replay`` arrive in v2/v3).
+    """
     from koboi.facade import KoboiAgent
 
+    if replay_mode not in ("live", "cache", "replay"):
+        _print_error(f"unknown replay_mode {replay_mode!r}", print_mode=print_mode)
+        return 1
+    if replay_mode != "live":
+        print(
+            f"note: replay_mode={replay_mode} is not implemented in v1 (only 'live'); "
+            "running live.",
+            file=sys.stderr,
+        )
+
     try:
-        agent = KoboiAgent.from_config(config_path, verbose=verbose, resume_session=resume_session)
+        if workflow_name:
+            from koboi.workflows.store import FileWorkflowStore
+
+            bundle = FileWorkflowStore(scope="project").load(workflow_name)
+            agent = KoboiAgent.from_config_string(bundle, verbose=verbose)
+            if input_json:
+                try:
+                    parsed = json.loads(input_json)
+                    message = message or (
+                        parsed.get("message") if isinstance(parsed, dict) else str(parsed)
+                    )
+                except json.JSONDecodeError as e:
+                    _print_error(f"--input is not valid JSON: {e}", print_mode=print_mode)
+                    return 1
+        else:
+            agent = KoboiAgent.from_config(config_path, verbose=verbose, resume_session=resume_session)
     except Exception as e:
         _print_error(f"loading agent: {e}", print_mode=print_mode)
         return 1
