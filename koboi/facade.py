@@ -1578,33 +1578,72 @@ def _build_command_hooks(config: Config, sandbox: BaseSandbox, hook_chain) -> No
 
 
 def _parse_agent_defs(config: Config) -> list:
-    """Parse AgentDef list from orchestration.agents config."""
+    """Parse AgentDef list from orchestration.agents config.
+
+    Applies the workflow-level determinism profile (``orchestration.determinism``)
+    merged with any per-node ``determinism`` block into each node's ``llm_config``
+    (via :func:`_apply_determinism`) so a dedicated pinned LLM client is built
+    through the existing ``_has_client_overrides`` path -- no change to
+    ``_agent_client_builder``. ``output_schema`` and
+    ``force_response_format_with_tools`` are captured here for the
+    response_format path (Gap A/B).
+    """
     from koboi.types import AgentDef
 
     agents_conf = config.orchestration.get("agents", [])
     if not agents_conf:
         raise ValueError("orchestration.agents must have at least one agent")
 
+    wf_det = config.orchestration.get("determinism") or {}
     defs = []
     for ac in agents_conf:
-        name = ac.get("name", "")
-        if not name:
+        if not ac.get("name", ""):
             raise ValueError("Each orchestration agent must have a 'name'")
-        defs.append(
-            AgentDef(
-                name=name,
-                system_prompt=ac.get("system_prompt", ""),
-                description=ac.get("description", ""),
-                keywords=ac.get("keywords", []),
-                tools_config=ac.get("tools"),
-                rag_config=ac.get("rag"),
-                llm_config=ac.get("llm"),
-                depends_on=ac.get("depends_on", []),
-                conditionals=ac.get("conditionals", []),
-                interrupt_after=ac.get("interrupt_after", False),
-            )
-        )
+        agent_def = AgentDef.from_dict(ac)
+        _apply_determinism(agent_def, wf_det)
+        defs.append(agent_def)
     return defs
+
+
+def _profile_from_determinism(det: dict | None):
+    """Build a :class:`~koboi.workflows.DeterminismProfile` from a raw dict (or None)."""
+    from koboi.workflows import DeterminismProfile
+
+    if not det:
+        return None
+    return DeterminismProfile(
+        temperature=det.get("temperature"),
+        seed=det.get("seed"),
+        top_p=det.get("top_p"),
+        model_pin=det.get("model_pin"),
+        replay_mode=det.get("replay_mode", "live"),
+    )
+
+
+def _apply_determinism(agent_def, wf_det: dict) -> None:
+    """Merge workflow-level + per-node determinism into the node's ``llm_config``.
+
+    Per-node ``determinism`` overrides the workflow-level profile; explicit node
+    ``llm_config`` values are preserved (``setdefault``) so determinism only
+    fills gaps. The merged knobs (temperature/seed/top_p/model) make
+    ``_has_client_overrides`` return True, so the UNCHANGED ``_agent_client_builder``
+    builds a dedicated pinned client for this node. ``seed`` auto-forwards via
+    ``extract_extra_params`` (and is dropped on Anthropic by
+    ``_filter_extra_params_for_provider``).
+    """
+    node_profile = _profile_from_determinism(agent_def.determinism)
+    wf_profile = _profile_from_determinism(wf_det)
+    base = wf_profile or node_profile
+    if base is None:
+        return
+    effective = base.merge(node_profile) if (wf_profile and node_profile) else base
+    overrides = effective.to_llm_overrides()
+    if not overrides:
+        return
+    llm = dict(agent_def.llm_config or {})
+    for key, value in overrides.items():
+        llm.setdefault(key, value)  # explicit node llm values preserved
+    agent_def.llm_config = llm or None
 
 
 def _build_router(config: Config, client: Client, agent_defs: list):
