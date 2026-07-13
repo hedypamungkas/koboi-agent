@@ -50,7 +50,10 @@ TAGS = ["rag", "live", "abstention"]
 
 async def test_model_refuses_on_oos_query(t):
     """An OOS query (spurious retrieval due to no stopword filter) must still be refused."""
-    if not t.require_live():
+    # extra=None: this eval asserts a refusal via t.abstains() -- no RAGAS judge --
+    # so it must not gate on the [eval-ragas] extra being importable (it only needs
+    # a live LLM key). Under --mock the ScriptedClient check still self-skips.
+    if not t.require_live(extra=None):
         return
     await t.send("Explain the mating rituals of deep-sea anglerfish per Acme policy.")
     t.abstains()  # GATE: empty retrieval OR refusal marker

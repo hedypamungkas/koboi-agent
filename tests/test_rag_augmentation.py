@@ -39,13 +39,19 @@ class TestInMemoryAugmentation:
 
         assert "versatile programming language" in result or "data science libraries" in result
 
-    async def test_augment_for_memory_returns_original_when_no_results(self):
+    async def test_augment_for_memory_injects_marker_when_no_results(self):
         chunks = [Chunk(id="c0", doc_id="d1", content="XYZZZ nonmatching gibberish")]
         retriever = KeywordRetriever(chunks=chunks)
         aug = InMemoryAugmentation(retriever=retriever, top_k=3)
         result = await aug.augment_for_memory("What is Python?")
 
-        assert result == "What is Python?"
+        # A2: empty retrieval injects the abstention marker (wrapped in the
+        # standard Document-context block) instead of silently passing the bare
+        # question through to the LLM.
+        assert "[RETRIEVAL_EMPTY]" in result
+        assert "What is Python?" in result
+        assert "Document context:" in result
+        assert result != "What is Python?"
 
     async def test_augment_for_memory_with_single_result(self):
         retriever = _make_retriever()
@@ -118,14 +124,15 @@ class TestOnTheFlyAugmentation:
 
 
 class TestAugmentationEmptyResults:
-    async def test_empty_retrieval_returns_original_for_memory(self):
+    async def test_empty_retrieval_injects_marker_for_memory(self):
         chunks = [Chunk(id="c0", doc_id="d1", content="XYZZZZ completely unrelated")]
         retriever = KeywordRetriever(chunks=chunks)
         aug = InMemoryAugmentation(retriever=retriever, top_k=3)
         result = await aug.augment_for_memory("Python programming")
-        assert result == "Python programming"
+        assert "[RETRIEVAL_EMPTY]" in result
+        assert "Python programming" in result
 
-    async def test_empty_retrieval_returns_original_messages_for_llm(self):
+    async def test_empty_retrieval_injects_marker_for_llm(self):
         chunks = [Chunk(id="c0", doc_id="d1", content="XYZZZZ unrelated content")]
         retriever = KeywordRetriever(chunks=chunks)
         aug = OnTheFlyAugmentation(retriever=retriever, top_k=3)
@@ -133,7 +140,58 @@ class TestAugmentationEmptyResults:
             {"role": "user", "content": "Python programming"},
         ]
         result = await aug.augment_for_llm(messages)
-        assert result[0]["content"] == "Python programming"
+        assert "[RETRIEVAL_EMPTY]" in result[0]["content"]
+        assert "Python programming" in result[0]["content"]
+        assert result[0]["content"] != "Python programming"
+
+
+class TestAbstentionMarker:
+    """A2: the abstention marker fires on every empty-retrieval path (no hits,
+    threshold-sweep collapse, dedup collapse) and is absent whenever results are
+    present."""
+
+    async def test_retrieve_and_format_returns_marker_on_no_hits(self):
+        chunks = [Chunk(id="c0", doc_id="d1", content="XYZZZ nonmatching gibberish")]
+        aug = InMemoryAugmentation(retriever=KeywordRetriever(chunks=chunks), top_k=3)
+        context, results = await aug._retrieve_and_format("What is Python?")  # noqa: SLF001
+        assert results == []
+        assert "[RETRIEVAL_EMPTY]" in context
+
+    async def test_retrieve_and_format_returns_marker_on_threshold_sweep(self):
+        # relevance_threshold collapses low-score results to empty -> marker fires.
+        chunks = [Chunk(id="c1", doc_id="d", content="Annual leave is 12 days.")]
+        aug = OnTheFlyAugmentation(
+            retriever=KeywordRetriever(chunks=chunks), top_k=10, relevance_threshold=0.99
+        )
+        context, results = await aug._retrieve_and_format("annual leave days")  # noqa: SLF001
+        assert results == []
+        assert "[RETRIEVAL_EMPTY]" in context
+
+    async def test_marker_not_injected_when_results_present(self):
+        # Control: non-empty retrieval -> NO marker, real context.
+        aug = InMemoryAugmentation(retriever=_make_retriever(), top_k=2)
+        context, results = await aug._retrieve_and_format("What is Python?")  # noqa: SLF001
+        assert len(results) > 0
+        assert "[RETRIEVAL_EMPTY]" not in context
+
+    async def test_in_memory_marker_is_wrapped_in_document_context_block(self):
+        # Documents the in_memory stored shape (marker rides through _build_augmented_message).
+        chunks = [Chunk(id="c0", doc_id="d1", content="XYZZZ nonmatching gibberish")]
+        aug = InMemoryAugmentation(retriever=KeywordRetriever(chunks=chunks), top_k=3)
+        result = await aug.augment_for_memory("What is Python?")
+        assert result.startswith("Document context:\n---\n")
+        assert "[RETRIEVAL_EMPTY]" in result
+        assert "Question: What is Python?" in result
+
+    async def test_on_the_fly_marker_cached_as_empty(self):
+        # The empty-query cache entry holds the (truthy) marker so repeated empty
+        # queries reuse it instead of re-retrieving.
+        chunks = [Chunk(id="c0", doc_id="d1", content="XYZZZ nonmatching gibberish")]
+        aug = OnTheFlyAugmentation(retriever=KeywordRetriever(chunks=chunks), top_k=3)
+        messages = [{"role": "user", "content": "Python programming"}]
+        await aug.augment_for_llm(messages)
+        assert "Python programming" in aug._cache  # noqa: SLF001
+        assert "[RETRIEVAL_EMPTY]" in aug._cache["Python programming"]  # noqa: SLF001
 
 
 class TestOnTheFlyCaching:

@@ -320,7 +320,9 @@ class AgentCore:
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
 
-        await self._emit(HookEvent.POST_OUTPUT, iteration=iteration, llm_response=response)
+        ctx = await self._emit(HookEvent.POST_OUTPUT, iteration=iteration, llm_response=response)
+        if ctx.abort:
+            raise AgentAbortedError(ctx.inject_message or "Output rejected by hook")
         self.memory.add_assistant_message(output)
         return output
 
@@ -467,6 +469,20 @@ class AgentCore:
                     }
                     for r in results
                 ]
+            # A1: retrieval confidence observability. Always stamped when RAG is on
+            # (empty turns too) so consumers can see "retrieval ran, found nothing".
+            # Scores are NOT comparable across methods (keyword=[0,1), bm25=unbounded,
+            # semantic=[-1,1], hybrid=RRF~0.016, rerank:{p}=clamped, rerank:failed=base
+            # unclamped), so `method` MUST travel with max_score. Empty -> sentinel.
+            if results:
+                top = max(results, key=lambda r: r.score)
+                meta["retrieval_confidence"] = {
+                    "max_score": top.score,
+                    "method": top.retrieval_method,
+                    "count": len(results),
+                }
+            else:
+                meta["retrieval_confidence"] = {"max_score": None, "method": "none", "count": 0}
         # #9: stamp the query-rewrite outcome so evals/observability can inspect it.
         rw = getattr(self.augmentation, "last_rewrite", None)
         if rw:

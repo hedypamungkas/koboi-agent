@@ -407,6 +407,56 @@ class TestRunMetadataStamp:
         assert rr["retrieval_method"] == "keyword"
         assert rr["doc_id"] == "company_policy.md"
 
+    def test_retrieval_confidence_non_empty_picks_max(self):
+        """A1: retrieval_confidence stamps {max_score, method, count} -- the top
+        result's score/method, never a naive max without method (scores are not
+        comparable across retrievers)."""
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from koboi.rag.types import Chunk, RetrievalResult
+        from tests.conftest import MockClient, make_tool_registry
+
+        core = AgentCore(client=MockClient([]), memory=ConversationMemory(), tools=make_tool_registry())
+
+        class _FakeAug:
+            last_results = [
+                RetrievalResult(Chunk(id="c1", doc_id="d", content="a"), 0.4, "keyword"),
+                RetrievalResult(Chunk(id="c2", doc_id="d", content="b"), 0.9, "keyword"),
+                RetrievalResult(Chunk(id="c3", doc_id="d", content="c"), 0.2, "keyword"),
+            ]
+
+        core.augmentation = _FakeAug()  # type: ignore[assignment]
+        rc = core._run_metadata(resumed=False, last_step=0)["retrieval_confidence"]  # noqa: SLF001
+        assert rc == {"max_score": 0.9, "method": "keyword", "count": 3}
+
+    def test_retrieval_confidence_empty_sentinel(self):
+        """A1: empty retrieval stamps a sentinel (max_score=None, not 0.0) so
+        'no result' is distinguishable from 'a result scoring 0.0'."""
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from tests.conftest import MockClient, make_tool_registry
+
+        core = AgentCore(client=MockClient([]), memory=ConversationMemory(), tools=make_tool_registry())
+
+        class _FakeAug:
+            last_results = []
+
+        core.augmentation = _FakeAug()  # type: ignore[assignment]
+        rc = core._run_metadata(resumed=False, last_step=0)["retrieval_confidence"]  # noqa: SLF001
+        assert rc == {"max_score": None, "method": "none", "count": 0}
+
+    def test_retrieval_confidence_absent_when_rag_disabled(self):
+        """A1: when augmentation is None (RAG off) no retrieval_confidence key
+        is stamped -- no retrieval happened."""
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from tests.conftest import MockClient, make_tool_registry
+
+        core = AgentCore(client=MockClient([]), memory=ConversationMemory(), tools=make_tool_registry())
+        core.augmentation = None
+        meta = core._run_metadata(resumed=False, last_step=0)  # noqa: SLF001
+        assert "retrieval_confidence" not in meta
+
 
 # --------------------------------------------------------------------------
 # RAGAS composite honesty fixes: _composite_weighted + _extract_ragas_score
