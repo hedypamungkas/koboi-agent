@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from koboi.config import Config
-from koboi.events import ErrorEvent
+from koboi.events import ErrorEvent, HandoverEvent
+from koboi.exceptions import AgentHandoverError
 from koboi.guardrails.approval import AsyncCallbackApprovalHandler
 from koboi.guardrails.approval_types import ApprovalResponse
 from koboi.modes import AgentMode, ModeManager
@@ -48,6 +50,8 @@ from koboi.server.schema import (
     CreateSessionResponse,
     ErrorDetail,
     ErrorResponse,
+    TransferRequest,
+    TransferResponse,
     JobStatusResponse,
     JobSubmitRequest,
     McpServerCreateRequest,
@@ -825,6 +829,19 @@ def _register_routes(
                     finally:
                         agent._core.mode_manager.switch_mode(prior_mode)
                         agent._core.max_iterations = prior_max_iter
+            except AgentHandoverError as he:
+                # B1: the bot yielded via transfer_to_human -> emit a typed
+                # HandoverEvent (NOT ErrorEvent). The exception propagated out of
+                # run_stream, so the ``async with pool.session_lock`` above already
+                # exited -> lock released (no deadlock). A human operator takes over
+                # via POST /v1/sessions/{id}/transfer + a new /chat/stream.
+                await queue.put(
+                    HandoverEvent(
+                        handover_id=uuid.uuid4().hex[:12],
+                        reason=he.reason,
+                        summary=he.summary,
+                    )
+                )
             except Exception as exc:
                 await queue.put(ErrorEvent(error=exc))
             finally:
@@ -879,6 +896,29 @@ def _register_routes(
         if not resolved:
             raise HTTPException(status_code=404, detail="approval not found or already resolved")
         return ApproveResponse(approval_id=body.approval_id, resolved=True)  # type: ignore[return-value]
+
+    @app.post("/v1/sessions/{session_id}/transfer", response_model=TransferResponse)
+    async def transfer(session_id: str, body: TransferRequest, request: Request) -> Response:
+        """B1: claim ownership of a session to take it over from the bot.
+
+        After the bot yields (``HandoverEvent`` on the stream), the host CS platform
+        POSTs ``/transfer`` (with the current owner's key) to reassign ownership to
+        the chosen human operator; the operator then POSTs ``/chat/stream`` on the
+        same session to drive it. RBAC note: ``_check_owner`` only verifies the
+        caller is the CURRENT owner -- the host platform (holding the bot's key) can
+        reassign to any operator. Proper RBAC (operators can't reassign each other's
+        sessions) is deferred to the enterprise layer.
+        """
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        new_owner = body.operator or getattr(request.state, "api_key_id", "dev")
+        ownership.set_owner(session_id, new_owner)
+        return TransferResponse(  # type: ignore[return-value]
+            session_id=session_id, transferred=True, owner=new_owner
+        )
 
     # ---- M4: Jobs (autonomous) ----
 

@@ -113,6 +113,26 @@ class ApproveResponse(BaseModel):
     resolved: bool
 
 
+class TransferRequest(BaseModel):
+    """POST /v1/sessions/:id/transfer body (B1 handover takeover).
+
+    ``operator`` is the new owner (defaults to the caller's api-key id).
+    ``handover_id`` is for audit correlation with the ``HandoverEvent``; it is NOT
+    required (there is no Future to resolve -- the bot's run already ended).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    operator: str | None = None
+    handover_id: str | None = None
+
+
+class TransferResponse(BaseModel):
+    session_id: str
+    transferred: bool
+    owner: str
+
+
 class JobSubmitRequest(BaseModel):
     """POST /v1/jobs body."""
 

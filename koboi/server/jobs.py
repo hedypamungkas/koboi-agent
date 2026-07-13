@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 #: Terminal statuses (no further state transitions).
-TERMINAL = frozenset({"completed", "failed", "timed_out", "cancelled"})
+TERMINAL = frozenset({"completed", "failed", "timed_out", "cancelled", "awaiting_human"})
 
 
 class DuplicateIdempotencyKey(Exception):
@@ -511,6 +511,8 @@ async def run_job(
     if record is None:
         return
 
+    from koboi.exceptions import AgentHandoverError  # noqa: PLC0415 (lazy; jobs.py keeps koboi imports function-local)
+
     try:
         final_content = await asyncio.wait_for(
             _execute_job(job_id, pool, registry, store, message, mode, max_iterations, resume=resume),
@@ -531,6 +533,16 @@ async def run_job(
         )
         registry.set_terminal(job_id, "timed_out")
         _emit_job_webhooks(webhooks, store, job_id, "timed_out")
+    except AgentHandoverError as he:
+        # B1: the agent yielded via transfer_to_human -> awaiting_human (NOT failed).
+        # Not reapable (not in the reaper's status IN tuple) -- it awaits human action.
+        store.update_status(
+            job_id,
+            "awaiting_human",
+            result_json=json.dumps({"reason": he.reason, "summary": he.summary}),
+        )
+        registry.set_terminal(job_id, "awaiting_human")
+        _emit_job_webhooks(webhooks, store, job_id, "awaiting_human")
     except Exception as exc:
         # M2: log type only (no traceback/locals) + mask/truncate the persisted
         # error so a failure never durable-stores the user prompt or leaked creds.
