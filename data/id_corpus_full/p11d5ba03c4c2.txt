@@ -1,1 +1,0 @@
-Saat Anda membuat kelas relasi, Anda memilih satu kelas sebagai asal dan kelas lainnya sebagai tujuan. Penting untuk tidak membingungkan keduanya. Dengan perilaku penghapusan berantai dalam relasi komposit, pentingnya hal ini mungkin tampak jelas. Dalam relasi sederhana, mendapatkan ini dengan benar sangatlah penting.

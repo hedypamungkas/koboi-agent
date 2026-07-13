@@ -1,1 +1,0 @@
-Instal Chrome jika belum terpasang. Google Chrome perlu diinstal sebelum Anda dapat menetapkannya sebagai browser default. Jalankan penginstal Chrome setelah mengunduhnya. Untuk menginstal Chrome, klik file DMG di folder Downloads Anda, lalu seret ikon Google Chrome ke folder Applications.

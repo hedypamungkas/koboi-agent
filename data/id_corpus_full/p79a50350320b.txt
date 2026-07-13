@@ -1,1 +1,0 @@
-White paper Outlook Synchronization di Microsoft Dynamics CRM membahas secara rinci bagaimana sinkronisasi data CRM terjadi antara basis data pusat Microsoft Dynamics CRM, Microsoft Office Outlook, basis data offline Dynamics CRM for Outlook, dan server email berbasis Exchange atau POP3.

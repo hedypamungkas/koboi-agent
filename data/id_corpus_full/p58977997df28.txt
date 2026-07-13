@@ -1,1 +1,0 @@
-Aturan pertama diterapkan saat kompilasi, aturan kedua saat runtime: (1) metode apa yang DIIZINKAN oleh compiler Java untuk dipanggil pada sebuah variabel dan (2) bagaimana Java menentukan METODE MANA (dalam konteks pewarisan dan overriding) yang akan dipanggil.

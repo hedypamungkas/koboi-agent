@@ -1,1 +1,0 @@
-Microsoft Dynamics CRM memiliki jenis sinkronisasi berikut. 1  Sinkronisasi Outlook. Menyinkronkan kontak dan aktivitas ke folder Outlook. 2  Sinkronisasi sisi server. Digunakan untuk mengintegrasikan CRM dengan Exchange dan server email berbasis POP3 atau SMTP. 3  Sinkronisasi online dan offline.

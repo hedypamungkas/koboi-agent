@@ -1,1 +1,0 @@
-Demikian pula, perubahan desain tidak hanya memerlukan masukan dari tim desain, tetapi juga dari pengembangan dan QA. Mengesampingkan sebagian dari tim produk yang lebih luas dalam proses estimasi menghasilkan estimasi yang lebih rendah kualitasnya, menurunkan moral karena kontributor utama tidak merasa dilibatkan, dan mengorbankan kualitas perangkat lunak.

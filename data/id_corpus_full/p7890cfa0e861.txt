@@ -1,1 +1,0 @@
-Pada lapisan data banjir Q3, Anda dapat memilih dan mengimpor hanya fitur yang mewakili dataran banjir 100 tahun. Untuk melakukannya, gunakan area Expression pada jendela dialog. 1. Klik ikon SQL 2.

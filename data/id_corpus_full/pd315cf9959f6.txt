@@ -1,1 +1,0 @@
-Freebase(0.00 / 0 votes)Beri nilai definisi ini: Jape. Jape adalah asisten pembuktian grafis yang dapat dikonfigurasi, yang awalnya dikembangkan di University of Oxford. Ini memungkinkan pengguna untuk mendefinisikan logika, menentukan cara menampilkan bukti, dan banyak lagi. Ini bekerja dengan varian kalkulus sekuen dan deduksi natural.

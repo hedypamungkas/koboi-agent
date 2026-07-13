@@ -1,1 +1,0 @@
-Fungsi Today() digunakan untuk mengembalikan nomor seri dari tanggal saat ini. Dengan memformat sel tempat rumus digunakan, fungsi ini akan menampilkan Bulan, Hari, dan Tahun hari ini. Karena hari ini adalah 5 Juni 2007, rumus akan mengembalikan 6/5/07 karena secara otomatis diformat dalam format tanggal.

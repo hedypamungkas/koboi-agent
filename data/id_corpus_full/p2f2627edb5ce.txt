@@ -1,1 +1,0 @@
-Tufts GIS Center 10 6. Isi kotak dialog berikutnya seperti yang Anda lihat di bawah: 7. Di kotak dialog berikutnya, tentukan bahwa ini adalah hubungan 1-1 – ada satu baris di tabel Commute Means untuk setiap baris di tabel atribut poligon Blockgroup. 8. Klik Next 9. Di jendela berikutnya, tentukan bahwa Anda TIDAK ingin menambahkan atribut ke kelas hubungan ini.

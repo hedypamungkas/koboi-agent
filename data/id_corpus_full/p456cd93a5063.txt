@@ -1,1 +1,0 @@
-Windows 8, 7, dan Vista. 1  1. Instal Chrome. Chrome perlu diinstal sebelum Anda dapat menetapkannya sebagai browser default Anda. 2  2. Buka Panel Kontrol. Anda dapat menemukannya di menu Start. 3  3. Pilih Program Default.. Jika Anda berada dalam tampilan Kategori, klik dulu kategori Program.  4. Klik Atur program default Anda..

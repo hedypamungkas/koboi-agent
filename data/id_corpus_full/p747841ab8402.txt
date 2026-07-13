@@ -1,1 +1,0 @@
-Mekanik saya memasang pompa bahan bakar baru. Sekarang indikatornya berfungsi... kecuali terbalik (kosong berarti penuh dan sebaliknya). Mekanik saya sudah mencoba mengkalibrasi ulang ecm. Itu tidak berhasil.

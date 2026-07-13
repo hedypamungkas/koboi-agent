@@ -1,1 +1,0 @@
-100 Zona Medis Kondisi medis tidak spesifik ada. 101 Zona Darurat Pribadi Permintaan bantuan darurat. 102 Gagal melapor di Zona A pengguna gagal mengaktifkan perangkat pemantauan. 110 Zona Kebakaran Kondisi alarm kebakaran tidak spesifik ada. 111 Zona Asap Alarm telah dipicu oleh detektor asap. 112 Zona Pembakaran Alarm telah dipicu oleh detektor pembakaran.

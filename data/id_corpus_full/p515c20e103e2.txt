@@ -1,1 +1,0 @@
-Tabung output adalah yang besar. Mereka menyediakan daya untuk menggerakkan speaker. Karena banyak arus melewati tabung output, tabung ini cenderung aus seiring penggunaan. Masa pakainya bergantung pada desain tabung dan amplifier, tetapi secara umum, 6L6, 5881WXT, EL34, 6V6 bertahan sekitar 1000 jam dan EL84 bertahan sekitar 500 jam.

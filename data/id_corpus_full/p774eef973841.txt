@@ -1,1 +1,0 @@
-Poin penting yang membedakan tenancy-in-common dari tenancy lainnya adalah bahwa tenant-in-common tidak memiliki “right of survivorship” atas properti tersebut. Ini berarti bahwa ketika salah satu tenant-in-common meninggal, bagiannya tidak otomatis berpindah kepada tenant yang lain.

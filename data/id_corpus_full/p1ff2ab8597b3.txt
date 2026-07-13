@@ -1,1 +1,0 @@
-Ini adalah konverter ons ke cup yang sangat mudah digunakan. Pertama-tama cukup ketik nilai ounces (fl oz) di kolom teks pada formulir konversi untuk mulai mengonversi fl oz ke cup, lalu pilih nilai desimal dan terakhir tekan tombol convert jika perhitungan otomatis tidak berhasil. Nilai cup akan dikonversi secara otomatis saat Anda mengetik.

@@ -1,1 +1,0 @@
-Ketik Geology of Texas, itu akan menampilkan layanan yang telah dibuat orang lain dan Anda dapat menambahkannya ke proyek ArcExplorer Anda. Cara lain adalah mengunduh langganan gratis ArcGIS for Desktop dan mengonversi mdb ke gdb jika Anda tidak memiliki ArcGIS.

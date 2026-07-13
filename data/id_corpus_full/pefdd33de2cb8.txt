@@ -1,1 +1,0 @@
-Estimasi Pengujian Perangkat Lunak – 9 Tips Umum untuk Mengestimasi Waktu Pengujian Secara Akurat. Ini adalah artikel tamu oleh penulis “N. Sandhya Rani”. Agar proyek berhasil, estimasi pengujian dan pelaksanaan yang tepat sama pentingnya dengan siklus pengembangan. Berpegang pada estimasi sangat penting untuk membangun reputasi yang baik dengan klien.

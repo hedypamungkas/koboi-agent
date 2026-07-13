@@ -1,1 +1,0 @@
-Gunakan rumus kecepatan terminal, v = akar kuadrat dari ((2*m*g)/(ρ*A*C)). Masukkan nilai-nilai berikut ke dalam rumus tersebut untuk menyelesaikan v, kecepatan terminal. 1  m = massa benda yang jatuh. 2  g = percepatan akibat gravitasi.

@@ -1,1 +1,0 @@
-Sekarang, kita siap untuk pembahasan tentang Estimasi Upaya Pengujian! Pertama - Definisi Estimasi Pengujian. Estimasi Pengujian adalah estimasi ukuran pengujian, upaya pengujian, biaya pengujian, dan jadwal pengujian untuk proyek pengujian perangkat lunak tertentu di lingkungan tertentu dengan menggunakan metode, alat, dan teknik yang ditetapkan.

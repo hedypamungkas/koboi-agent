@@ -1,1 +1,0 @@
-Cara memasukkan tanggal di Excel. Anda dapat mengetik tanggal di sel Excel dengan berbagai cara, misalnya 1/1/2015, atau 1-Jan-2015, atau 1-Jan, atau January 1, 2015. Saat Anda mengetik sesuatu seperti itu di dalam sel, Microsoft Excel mengetahui bahwa Anda sedang memasukkan tanggal dan secara otomatis menerapkan format tanggal pada sel tersebut.

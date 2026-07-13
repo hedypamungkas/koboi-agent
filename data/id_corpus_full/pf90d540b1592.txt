@@ -1,1 +1,0 @@
-Langkah 3: Mengimpor shapefile ke dalam geodatabase Anda Dalam langkah ini Anda akan mengimpor layer data GIS yang sudah ada dari MassGIS. 1. Klik kanan pada set data fitur baru Anda dan pilih – IMPORT-Feature Class-single or multiple. (Single jika Anda hanya punya satu layer untuk dimuat, multiple jika lebih dari satu). 2.
