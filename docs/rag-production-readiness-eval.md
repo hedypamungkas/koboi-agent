@@ -155,19 +155,15 @@ the RAGAS judges, + an `embedding:` endpoint for semantic/hybrid/HyDE), which th
 could not exercise here — `min_score` thresholds are PROVISIONAL and need calibration
 against real nightly runs. Judge severity is SOFT until then.
 
-### Tier 3 — statistical-confidence gate (live; shipped, uncalibrated)
-- `evals/ragas_golden_suite.eval.py` (CRITICAL, w0.08) — runs `ragas_faithfulness` over
-  the frozen Acme qrels and gates on the bootstrap **95% CI lower bound** (not the
-  mean) via the shipped `bootstrap_ci`. This is the audit-grade "at what confidence?"
-  leg; SOFT half-width at the hand-authored N.
-- `evals/fixtures/acme_qrels.json` — expanded 24 → 45 needle-verified queries (tighter
-  retrieval CI).
-- `scripts/generate_rag_golden.py` — offline generator (reuses koboi's
-  `RAGASDataGenerator`, LLM-only — no `[eval-ragas]` needed) to scale toward N≥100 for
-  tighter CIs; human-spot-check then commit.
-
-Same caveat: the golden-suite threshold (lower bound ≥0.8) is PROVISIONAL and unverified
-without a live key + judge.
+### Tier 3 — statistical-confidence gate (mechanism shipped; the toy-Acme golden_suite eval was REMOVED)
+- The bootstrap-95%-CI-lower-bound **mechanism** ships (`koboi/eval/scorers/ci.py` `bootstrap_ci`,
+  exercised mock-safe by `evals/rag_ranking_ci.eval.py` + live by the IR suites' recall@10 gates).
+- `evals/ragas_golden_suite.eval.py` (the toy-Acme faithfulness-CI leg) was **removed** — its §7a
+  numbers were self-inflated (SUPERSEDED by the real-corpus N=128/N=48 measurements in §7b). The
+  bootstrap-CI-gate pattern is now demonstrated on the real IR corpora instead.
+- `evals/fixtures/acme_qrels.json` — 45 needle-verified queries (used by the mock `rag_ranking*` evals).
+- `scripts/generate_rag_golden.py` — offline generator (reuses koboi's `RAGASDataGenerator`) to scale
+  toward N≥100; human-spot-check then commit. (Aspirational; not yet run to produce a committed artifact.)
 
 ### Threshold table (Tier 1, provisional — calibrate after first real run)
 | Dimension | Metric | Target |
@@ -274,7 +270,7 @@ the eval correctly surfaces the one real retrieval gap (rank-6 facts need top_k�
   `embedding:` endpoint for semantic/hybrid). Calibration status: the **rank-metric** live evals
   (semantic/hybrid ranking, ir_rerank, ir_id_native) are **calibrated + passing** (semantic/hybrid
   recall@5=1.0, re-verified 2026-07-13); the **RAGAS answer-quality** evals (faithfulness,
-  correctness, golden_suite) remain **provisional** (RAGAS multi-gen hangs on the gateway — the
+  correctness) remain **provisional** (RAGAS multi-gen hangs on the gateway — the
   answer-quality numbers in this doc come from a direct decoupled-judge `/tmp` measurement, not
   from running those eval files). No automated nightly job today — see the nightly-removal note.
 
