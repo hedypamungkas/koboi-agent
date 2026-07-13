@@ -434,15 +434,13 @@ def build_rag(
     if isinstance(rerank_conf, dict):
         from koboi.rag.rerank import CrossEncoderReranker, build_rerank_client
 
-        backend = build_rerank_client(rerank_conf, logger=logger)
+        backend = build_rerank_client(rerank_conf)
         if backend is not None:
             retriever = CrossEncoderReranker(
                 retriever,
                 backend,
                 fetch_multiplier=rerank_conf.get("fetch_multiplier", 3),
                 score_threshold=rerank_conf.get("score_threshold"),
-                fallback=rerank_conf.get("fallback", True),
-                logger=logger,
             )
         # else: build_rerank_client already warned; base retriever used unwrapped.
     elif rerank_conf:

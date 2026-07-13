@@ -31,14 +31,13 @@ CONFIG = {
         "top_k": 3,
         "augmentation": "on_the_fly",
         # Dict -> cross-encoder path. Unreachable base_url + dummy key + fallback=false:
-        # the call fails fast (ECONNREFUSED), the wrapper stamps 'rerank:failed(jina,...)',
-        # proving it is wired + invoked. No real API call, no cost, no egress.
+        # the call fails fast (ECONNREFUSED), the wrapper stamps 'rerank:failed(jina,...)'
+        # (always observable -- no fallback flag needed), proving it is wired + invoked.
         "rerank": {
             "provider": "jina",
             "api_key": "dummy-key",
             "base_url": "http://127.0.0.1:1",
             "timeout": 1.0,
-            "fallback": False,
         },
         "documents": [
             {"path": "./data/sample/company_policy.md"},

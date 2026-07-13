@@ -40,6 +40,16 @@ class TestStopwordLanguage:
     def test_custom_set(self):
         assert _normalize_stopwords({"foo", "bar"}) == {"foo", "bar"}
 
+    def test_unknown_language_string_returns_none(self):
+        # An unknown language string must NOT be character-iterated into a bogus single-char
+        # set (e.g. "fr" -> {'f','r'} which would strip every f/r token). Warns + None.
+        assert _normalize_stopwords("fr") is None
+        assert _normalize_stopwords("english") is None
+
+    def test_language_string_case_insensitive(self):
+        assert _normalize_stopwords("EN") == _normalize_stopwords("en")
+        assert _normalize_stopwords("ID") == _normalize_stopwords("id")
+
 
 class TestStemmerFallback:
     def test_id_without_extra_returns_none(self, monkeypatch):

@@ -256,8 +256,8 @@ class KoboiAgent:
             if hasattr(retriever, "close"):
                 try:
                     await retriever.close()
-                except Exception:  # nosec B110 - best-effort teardown
-                    pass
+                except Exception as e:  # nosec B110 - best-effort teardown; logged for diagnostics
+                    logging.getLogger(__name__).debug("Augmentation retriever close failed: %s", e, exc_info=True)
             await self._core.client.close()
         # Clean up logger
         if self._logger is not None:

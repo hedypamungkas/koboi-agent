@@ -18,7 +18,7 @@ _logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from koboi.llm.base import LLMClient
 
-# Compact English stopword set (stdlib only; ~50 high-frequency function words).
+# Compact English stopword set (stdlib only; ~80 high-frequency function words).
 # Opt-in via ``rag.stopwords: true`` (or a custom set) on lexical retrievers so common
 # words stop producing spurious matches on out-of-scope queries. Default off (preserves
 # pre-existing behavior).
@@ -51,27 +51,34 @@ _STOPWORDS_ID: frozenset[str] = frozenset(
 def _normalize_stopwords(stopwords: bool | set[str] | frozenset[str] | str | None) -> set[str] | None:
     """Resolve the ``stopwords`` arg to a set (or None = no filtering).
 
-    Accepts: ``True`` (English, back-compat), ``"en"``/``"id"`` (language sets),
-    a custom ``set``/``frozenset``, or ``None``/``False`` (off).
+    Accepts: ``True`` (English, back-compat), ``"en"``/``"id"`` (case-insensitive language sets),
+    a custom ``set``/``frozenset`` of words, or ``None``/``False`` (off). An unknown language
+    string (e.g. ``"fr"``, a typo) logs a warning and returns ``None`` rather than silently
+    character-iterating the string into a bogus single-char set.
     """
     if stopwords is None or stopwords is False:
         return None
+    if isinstance(stopwords, str):
+        lang = stopwords.lower()
+        if lang == "en":
+            return set(_STOPWORDS)
+        if lang == "id":
+            return set(_STOPWORDS_ID)
+        _logger.warning("Unknown stopwords language %r; supported: 'en', 'id'. Ignoring.", stopwords)
+        return None
     if stopwords is True:
         return set(_STOPWORDS)
-    if stopwords == "en":
-        return set(_STOPWORDS)
-    if stopwords == "id":
-        return set(_STOPWORDS_ID)
     return {str(w).lower() for w in stopwords}
 
 
 def _normalize_stemmer(stemmer: str | bool | None) -> Callable[[str], str] | None:
     """Resolve a ``stemmer`` spec to a cached stem function (or None = no stemming).
 
-    Currently supports ``"id"`` (Indonesian, via the optional ``[indo-nlp]`` extra / Sastrawi),
-    which normalizes morphology (meN-, ber-, -kan, -i, -an) so inflected forms match their
-    root. Applied to BOTH index and query tokens (consistent). Falls back to None (no stemming)
-    with a warning if the extra is absent, so retrieval never breaks. Default off.
+    Only the literal ``"id"`` is accepted (Indonesian, via the optional ``[indo-nlp]`` extra /
+    Sastrawi); it normalizes morphology (meN-, ber-, -kan, -i, -an) so inflected forms match
+    their root. Applied to BOTH index and query tokens (consistent). Unlike ``stopwords``,
+    ``True`` is NOT a valid alias here (no English stemmer ships) -- ``True`` or any other value
+    logs a warning and disables stemming. Falls back to None if the extra is absent. Default off.
     """
     if stemmer is None or stemmer is False:
         return None

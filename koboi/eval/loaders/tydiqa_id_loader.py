@@ -33,8 +33,10 @@ ID_PREFIX = "indonesian"
 class TyDiQAIDLoader(DatasetLoader):
     """Loads TyDi QA Indonesian (secondary_task) into EvalCase objects.
 
-    Each row's ``context`` is its gold passage; ``question`` -> user_message; the first
-    ``answers["text"]`` -> expected_answer. Rows with empty answers are skipped.
+    Maps ``question`` -> user_message and the first ``answers["text"]`` -> expected_answer.
+    (The row's ``context`` gold passage is consumed by the corpus builder
+    ``scripts/build_id_native_corpus.py``, not this loader; this loader emits only the
+    question + expected_answer pair.) Rows with empty answers are skipped.
     """
 
     async def load(

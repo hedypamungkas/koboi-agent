@@ -195,19 +195,42 @@ class TestCrossEncoderReranker:
         assert len(out) == 2
         assert all(r.retrieval_method == "bm25" for r in out)
 
-    async def test_falls_back_on_backend_failure_default(self):
+    async def test_no_rerank_when_results_eq_top_k_boundary(self):
+        # The <= boundary (exactly top_k results): wrapper must skip rerank too.
+        base = _FakeBaseRetriever(_chunks(3))
+        wrapper = CrossEncoderReranker(base, _MockBackend(ranked=[(0, 1.0)]))
+        out = await wrapper.retrieve("q", top_k=3)
+        assert len(out) == 3
+        assert all(r.retrieval_method == "bm25" for r in out)  # backend not consulted
+
+    async def test_failsoft_always_stamps_failed_method(self):
+        # Default fail-soft is ALWAYS observable: a backend returning None (failure) stamps
+        # 'rerank:failed(...)' -- a persistent outage (bad key/quota/model) never silently
+        # reads as healthy bm25. Base order is preserved (retrieval never breaks).
         base = _FakeBaseRetriever(_chunks(6))
         wrapper = CrossEncoderReranker(base, _MockBackend(ranked=None))  # backend "fails"
         out = await wrapper.retrieve("q", top_k=3)
-        # Base order preserved, truncated to top_k; method stays the base method (silent).
-        assert [r.chunk.id for r in out] == ["0", "1", "2"]
-        assert all(r.retrieval_method == "bm25" for r in out)
+        assert [r.chunk.id for r in out] == ["0", "1", "2"]  # base order preserved
+        assert all("rerank:failed(mock" in r.retrieval_method for r in out)  # observable stamp
 
-    async def test_fallback_false_stamps_failed_method(self):
+    async def test_out_of_range_backend_index_is_skipped(self):
+        # A provider returning a stale/out-of-range index must be skipped (not crash with
+        # IndexError). 99 is out of range (only 6 docs); only the valid index survives.
         base = _FakeBaseRetriever(_chunks(6))
-        wrapper = CrossEncoderReranker(base, _MockBackend(ranked=None), fallback=False)
+        wrapper = CrossEncoderReranker(base, _MockBackend(ranked=[(99, 0.9), (0, 0.8)]))
         out = await wrapper.retrieve("q", top_k=3)
-        assert all("rerank:failed(mock" in r.retrieval_method for r in out)
+        assert [r.chunk.id for r in out] == ["0"]  # 99 skipped, 0 kept
+
+    async def test_score_threshold_all_filtered_falls_back_to_base(self):
+        # When EVERY reranked result is below score_threshold, out is empty -> wrapper returns
+        # the base results (top_k) rather than nothing. Pins the documented contract.
+        base = _FakeBaseRetriever(_chunks(6))
+        wrapper = CrossEncoderReranker(
+            base, _MockBackend(ranked=[(5, 0.1), (0, 0.2), (1, 0.05)]), score_threshold=0.9
+        )
+        out = await wrapper.retrieve("q", top_k=3)
+        assert len(out) == 3  # all filtered -> base results returned
+        assert [r.chunk.id for r in out] == ["0", "1", "2"]  # base order
 
     async def test_score_threshold_drops_low_scores(self):
         base = _FakeBaseRetriever(_chunks(6))
@@ -217,6 +240,16 @@ class TestCrossEncoderReranker:
         out = await wrapper.retrieve("q", top_k=3)
         # 0.1 dropped; only 5 and 1 survive.
         assert [r.chunk.id for r in out] == ["5", "1"]
+
+    async def test_parse_rerank_results_tolerates_malformed_row(self):
+        # One malformed row (index: null) must not discard the whole batch.
+        from koboi.rag.rerank import _parse_rerank_results
+
+        out = _parse_rerank_results(
+            {"results": [{"index": 0, "relevance_score": 0.9}, {"index": None, "relevance_score": 0.8},
+                         {"index": 2, "relevance_score": 0.7}]}
+        )
+        assert out == [(0, 0.9), (2, 0.7)]  # the null-index row skipped, the other two kept
 
     async def test_fetch_k_clamped_to_provider_cap(self):
         base = _FakeBaseRetriever(_chunks(150))
