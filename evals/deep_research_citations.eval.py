@@ -23,7 +23,7 @@ CONFIG = {
     "llm": {
         "provider": "openai",
         "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        "api_key": os.getenv("OPENAI_API_KEY", ""),
+        "api_key": os.getenv("OPENAI_API_KEY", "dummy"),
     },
     "orchestration": {"enabled": True, "execution": {"mode": "deep_research"}},
     # max_depth=1 for speed; coverage_threshold=0.7 (likely stops after 1 round on a simple topic).
@@ -44,10 +44,8 @@ async def test_cited_report_completes(t):
     Asserts structural citation correctness: every ``[n]`` marker in the reply resolves to a
     ``research_sources`` citation id (``t.citation`` GATE) + the ``## Sources`` footer is present.
     """
-    if not os.getenv("OPENAI_API_KEY"):
-        # Live-only eval (orchestration can't --mock). Fail fast without a network attempt;
-        # the mock-driven golden test excludes this case by name.
-        raise RuntimeError("OPENAI_API_KEY required (live eval; web is mock -> $0 search)")
+    if not t.live_ready(extra=None):
+        return
     await t.send("Research the Python programming language release cycle.")
     t.completed()  # the run finished successfully
     t.citation(min_citations=1)  # every [n] resolves + at least one citation

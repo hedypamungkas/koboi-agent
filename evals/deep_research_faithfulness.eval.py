@@ -21,7 +21,7 @@ CONFIG = {
     "llm": {
         "provider": "openai",
         "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        "api_key": os.getenv("OPENAI_API_KEY", ""),
+        "api_key": os.getenv("OPENAI_API_KEY", "dummy"),
     },
     "orchestration": {"enabled": True, "execution": {"mode": "deep_research"}},
     "research": {"max_depth": 1, "coverage_threshold": 0.7, "max_searches": 5, "max_fetches": 8},
@@ -39,8 +39,8 @@ async def test_report_claims_grounded_in_sources(t):
     Live-only: needs OPENAI_API_KEY + ragas + RAGAS_PROVIDER env. Structural citation correctness
     (t.citation) is separate (W6); this is the faithfulness NUMBER (claim-grounding quality).
     """
-    if not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY required (live eval; web is mock -> $0 search)")
+    if not t.require_live(extra="ragas"):
+        return
     await t.send("Research the Python programming language release cycle.")
     t.completed()
     await t.judge("deep_research_faithfulness", min_score=0.7, name="faithfulness")

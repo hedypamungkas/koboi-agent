@@ -86,6 +86,7 @@ class TestSessionSurface:
             mem = SQLiteMemory(db_path=db, session_id=sid)
             mem.add_user_message("seed")
             mem.close()
+
             # force get_or_create to fail for the fork's new session
             async def _fail(_session_id):
                 raise RuntimeError("forced failure")

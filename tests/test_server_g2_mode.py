@@ -222,9 +222,7 @@ class TestJobStoreG2Columns:
             "CREATE TABLE jobs (job_id TEXT PRIMARY KEY, session_id TEXT, owner TEXT, "
             "status TEXT, message TEXT, idempotency_key TEXT, created_at REAL, updated_at REAL)"
         )
-        conn.execute(
-            "INSERT INTO jobs VALUES ('old','s','dev','pending','m',NULL,0,0)"
-        )
+        conn.execute("INSERT INTO jobs VALUES ('old','s','dev','pending','m',NULL,0,0)")
         conn.commit()
         conn.close()
         # Opening with JobStore runs the migration.
@@ -254,9 +252,7 @@ class TestModeStampingTakesEffect:
 
         factory = lambda: MockClient(  # noqa: E731
             [
-                make_mock_response(
-                    tool_calls=[make_mock_tool_call("write_file", {"path": "a.txt", "content": "x"})]
-                ),
+                make_mock_response(tool_calls=[make_mock_tool_call("write_file", {"path": "a.txt", "content": "x"})]),
                 make_mock_response(content="ok"),
             ]
         )

@@ -33,23 +33,34 @@ TAGS = ["rag", "ingestion"]
 async def test_text_parser_encoding_fallback(t):
     """TextParser must decode latin-1 bytes without crashing (encoding-safe)."""
     text, _meta = TextParser().extract("policy.txt", "café 12 days".encode("latin-1"))
-    t.check(text, Matches(fn=lambda x: "café" in x, description="latin-1 decoded to 'café'"),
-            name="text_parser_latin1", severity=Severity.GATE)
+    t.check(
+        text,
+        Matches(fn=lambda x: "café" in x, description="latin-1 decoded to 'café'"),
+        name="text_parser_latin1",
+        severity=Severity.GATE,
+    )
 
 
 async def test_html_parser_strips_tags(t):
     """HtmlParser must strip markup and keep the text content."""
     text, _meta = HtmlParser().extract("page.html", b"<div><p>Notice period is 30 days</p></div>")
-    t.check(text, Matches(fn=lambda x: "30 days" in x, description="html stripped -> '30 days' present"),
-            name="html_strips_tags", severity=Severity.GATE)
+    t.check(
+        text,
+        Matches(fn=lambda x: "30 days" in x, description="html stripped -> '30 days' present"),
+        name="html_strips_tags",
+        severity=Severity.GATE,
+    )
 
 
 async def test_detect_format_magic_bytes(t):
     """detect_format must classify by magic bytes when the extension is absent/unknown."""
-    t.check(detect_format("a", b"%PDF-1.4\n%..."), Equals("pdf"),
-            name="detect_pdf_magic", severity=Severity.GATE)
-    t.check(detect_format("a.docx", b"PK\x03\x04" + b"\x00" * 20), Equals("docx"),
-            name="detect_docx_magic", severity=Severity.GATE)
+    t.check(detect_format("a", b"%PDF-1.4\n%..."), Equals("pdf"), name="detect_pdf_magic", severity=Severity.GATE)
+    t.check(
+        detect_format("a.docx", b"PK\x03\x04" + b"\x00" * 20),
+        Equals("docx"),
+        name="detect_docx_magic",
+        severity=Severity.GATE,
+    )
 
 
 async def test_pdf_docx_registered_iff_extra(t):
@@ -60,11 +71,19 @@ async def test_pdf_docx_registered_iff_extra(t):
     # Ensure builtins are registered (lazy on first use).
     parser_registry.get("text") or None  # touch
     if _PYPDF_AVAILABLE:
-        t.check(parser_registry.get("pdf") is not None, Matches(fn=lambda b: b, description="pdf registered (pypdf present)"),
-                name="pdf_registered", severity=Severity.GATE)
+        t.check(
+            parser_registry.get("pdf") is not None,
+            Matches(fn=lambda b: b, description="pdf registered (pypdf present)"),
+            name="pdf_registered",
+            severity=Severity.GATE,
+        )
     if _DOCX_AVAILABLE:
-        t.check(parser_registry.get("docx") is not None, Matches(fn=lambda b: b, description="docx registered (python-docx present)"),
-                name="docx_registered", severity=Severity.GATE)
+        t.check(
+            parser_registry.get("docx") is not None,
+            Matches(fn=lambda b: b, description="docx registered (python-docx present)"),
+            name="docx_registered",
+            severity=Severity.GATE,
+        )
 
 
 async def test_chunker_emits_multiple_aligned_chunks(t):
@@ -75,7 +94,15 @@ async def test_chunker_emits_multiple_aligned_chunks(t):
         content="\n\n".join(f"Section {i}: carry forward maximum 3 days of leave." for i in range(20)),
     )
     chunks = FixedSizeChunker(chunk_size=120, overlap=0).chunk(long_doc)
-    t.check(len(chunks), Matches(fn=lambda n: n > 1, description=">1 chunk emitted"),
-            name="chunk_count", severity=Severity.GATE)
-    t.check(all(c.content.strip() for c in chunks), Matches(fn=lambda b: b, description="no empty chunks"),
-            name="no_empty_chunks", severity=Severity.GATE)
+    t.check(
+        len(chunks),
+        Matches(fn=lambda n: n > 1, description=">1 chunk emitted"),
+        name="chunk_count",
+        severity=Severity.GATE,
+    )
+    t.check(
+        all(c.content.strip() for c in chunks),
+        Matches(fn=lambda b: b, description="no empty chunks"),
+        name="no_empty_chunks",
+        severity=Severity.GATE,
+    )

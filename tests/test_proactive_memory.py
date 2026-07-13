@@ -49,9 +49,7 @@ class TestExtractionD:
         secret = "sk-live-" + "a" * 24
         client = MagicMock()
         client.complete = AsyncMock(
-            return_value=AgentResponse(
-                content='{"password": "hunter2", "api_key": "' + secret + '", "normal": "ok"}'
-            )
+            return_value=AgentResponse(content='{"password": "hunter2", "api_key": "' + secret + '", "normal": "ok"}')
         )
         pm = _proactive(tmp_path, client)
         n = await pm.extract_and_store()
@@ -79,7 +77,9 @@ class TestExtractionD:
         mem = SQLiteMemory(db_path=str(tmp_path / "p2.db"), session_id="S")
         mem.add_user_message("hi")  # only 1 message
         store = _MemoryStore(filepath=str(tmp_path / "m.json"))
-        pm = ProactiveMemory(client=MagicMock(), embedding_client=None, memory=mem, store=store, config={"extract": True})
+        pm = ProactiveMemory(
+            client=MagicMock(), embedding_client=None, memory=mem, store=store, config={"extract": True}
+        )
         assert await pm.extract_and_store() == 0
 
 
@@ -91,6 +91,7 @@ def json_of(store: _MemoryStore) -> str:
 
 def _embed_client_for_recall():
     """Deterministic embedding: keyword -> unit vector (python/dog/utc axes)."""
+
     def fake_embed(text):
         t = text.lower()
         if "python" in t:
@@ -292,9 +293,7 @@ class TestCriticalRegressions:
         # TG1: extract -> cache invalidation -> recall finds the new fact (no
         # manual seeding). Guards the extract->recall boundary.
         client = MagicMock()
-        client.complete = AsyncMock(
-            return_value=AgentResponse(content='{"preferred_language": "python"}')
-        )
+        client.complete = AsyncMock(return_value=AgentResponse(content='{"preferred_language": "python"}'))
 
         async def emb(text):
             return [1.0, 0.0, 0.0] if "python" in text.lower() else [0.0, 0.0, 0.0]
@@ -359,6 +358,3 @@ class TestCriticalRegressions:
         # ephemerality: the block is NOT a persisted conversation row
         persisted = " ".join(str(m.get("content", "")) for m in agent._core.memory.get_messages())
         assert "Relevant long-term memory" not in persisted
-
-
-

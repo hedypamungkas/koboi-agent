@@ -119,9 +119,7 @@ class TestJinaBackend:
 
 class TestCohereBackend:
     async def test_parses_response_no_document_echo(self):
-        backend = _http_backend(
-            CohereRerankBackend, {"results": [{"index": 1, "relevance_score": 0.42}]}
-        )
+        backend = _http_backend(CohereRerankBackend, {"results": [{"index": 1, "relevance_score": 0.42}]})
         ranked = await backend.rerank("q", ["a", "b"], 1)
         assert ranked == [(1, 0.42)]
 
@@ -225,18 +223,14 @@ class TestCrossEncoderReranker:
         # When EVERY reranked result is below score_threshold, out is empty -> wrapper returns
         # the base results (top_k) rather than nothing. Pins the documented contract.
         base = _FakeBaseRetriever(_chunks(6))
-        wrapper = CrossEncoderReranker(
-            base, _MockBackend(ranked=[(5, 0.1), (0, 0.2), (1, 0.05)]), score_threshold=0.9
-        )
+        wrapper = CrossEncoderReranker(base, _MockBackend(ranked=[(5, 0.1), (0, 0.2), (1, 0.05)]), score_threshold=0.9)
         out = await wrapper.retrieve("q", top_k=3)
         assert len(out) == 3  # all filtered -> base results returned
         assert [r.chunk.id for r in out] == ["0", "1", "2"]  # base order
 
     async def test_score_threshold_drops_low_scores(self):
         base = _FakeBaseRetriever(_chunks(6))
-        wrapper = CrossEncoderReranker(
-            base, _MockBackend(ranked=[(5, 0.9), (0, 0.1), (1, 0.8)]), score_threshold=0.5
-        )
+        wrapper = CrossEncoderReranker(base, _MockBackend(ranked=[(5, 0.9), (0, 0.1), (1, 0.8)]), score_threshold=0.5)
         out = await wrapper.retrieve("q", top_k=3)
         # 0.1 dropped; only 5 and 1 survive.
         assert [r.chunk.id for r in out] == ["5", "1"]
@@ -246,8 +240,13 @@ class TestCrossEncoderReranker:
         from koboi.rag.rerank import _parse_rerank_results
 
         out = _parse_rerank_results(
-            {"results": [{"index": 0, "relevance_score": 0.9}, {"index": None, "relevance_score": 0.8},
-                         {"index": 2, "relevance_score": 0.7}]}
+            {
+                "results": [
+                    {"index": 0, "relevance_score": 0.9},
+                    {"index": None, "relevance_score": 0.8},
+                    {"index": 2, "relevance_score": 0.7},
+                ]
+            }
         )
         assert out == [(0, 0.9), (2, 0.7)]  # the null-index row skipped, the other two kept
 

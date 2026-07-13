@@ -147,17 +147,23 @@ class TestContext:
         **manual** ``--tags live`` invocation (``[eval-ragas]`` install + a real
         key, no ``--mock``); there is no automated nightly job today.
 
-        Returns False when: the agent's client is a :class:`ScriptedClient`
-        (``--mock``), the optional ``extra`` (default ``ragas``) is not importable,
-        or no real (non-dummy) LLM key is set.
+        Returns False when: the agent's client is a :class:`ScriptedClient` or
+        :class:`DispatchingClient` (``--mock``), the optional ``extra`` (default ``ragas``)
+        is not importable, or no real (non-dummy) LLM key is set.
         """
         import importlib.util
         import os
 
-        from koboi.eval.t.mock import ScriptedClient
+        from koboi.eval.t.mock import DispatchingClient, ScriptedClient
 
-        client = getattr(getattr(self._agent, "core", None), "client", None)
-        if isinstance(client, ScriptedClient):
+        # For orchestration configs (core=None), the client lives on the orchestrator.
+        core = getattr(self._agent, "core", None)
+        if core is not None:
+            client = getattr(core, "client", None)
+        else:
+            orch = getattr(self._agent, "orchestrator", None)
+            client = getattr(orch, "client", None) if orch is not None else None
+        if isinstance(client, (ScriptedClient, DispatchingClient)):
             return False
         # ``extra`` gates judge-LLM deps (e.g. "ragas" for faithfulness). Pass
         # ``extra=None`` for retrieval-only live evals (semantic/hybrid ranking) that

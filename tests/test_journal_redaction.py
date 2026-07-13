@@ -12,9 +12,7 @@ from koboi.types import ToolCall
 
 def _stored_args(db_path, session_id):
     conn = sqlite3_conn(db_path)
-    row = conn.execute(
-        "SELECT tool_calls_json FROM steps WHERE session_id=?", (session_id,)
-    ).fetchone()
+    row = conn.execute("SELECT tool_calls_json FROM steps WHERE session_id=?", (session_id,)).fetchone()
     conn.close()
     return row[0] if row else None
 
@@ -27,18 +25,14 @@ def sqlite3_conn(db_path):
 
 class TestRedactModule:
     def test_redacts_sensitive_keys(self):
-        out = redact_tool_arguments(
-            json.dumps({"password": "hunter2", "api_key": "sk-live-123", "ok": "keep"})
-        )
+        out = redact_tool_arguments(json.dumps({"password": "hunter2", "api_key": "sk-live-123", "ok": "keep"}))
         parsed = json.loads(out)
         assert parsed["password"] == "***REDACTED***"
         assert parsed["api_key"] == "***REDACTED***"
         assert parsed["ok"] == "keep"
 
     def test_redacts_value_shapes_on_non_sensitive_keys(self):
-        out = redact_tool_arguments(
-            json.dumps({"note": "token=abc123 and bearer xyz and sk-" + "a" * 24})
-        )
+        out = redact_tool_arguments(json.dumps({"note": "token=abc123 and bearer xyz and sk-" + "a" * 24}))
         assert "abc123" not in out
         assert "bearer" not in out.lower() or "***REDACTED***" in out
 
@@ -81,9 +75,7 @@ class TestJournalRedaction:
             }
         )
         tc = ToolCall(id="c1", name="charge_card", arguments=secret_args)
-        jr.record_step(
-            turn_index=1, step_index=0, status="tool_calls", tool_calls=[tc]
-        )
+        jr.record_step(turn_index=1, step_index=0, status="tool_calls", tool_calls=[tc])
 
         stored = _stored_args(str(tmp_path / "t.db"), "S1")
         assert stored is not None
@@ -128,9 +120,6 @@ class TestRedactionSafety:
         finally:
             jmod.redact_tool_arguments = original
 
-        row = mem._ensure_conn().execute(
-            "SELECT tool_calls_json FROM steps WHERE session_id='S'"
-        ).fetchone()
+        row = mem._ensure_conn().execute("SELECT tool_calls_json FROM steps WHERE session_id='S'").fetchone()
         assert row[0] is not None
         assert "***redaction-failed***" in row[0]  # masked, row preserved
-

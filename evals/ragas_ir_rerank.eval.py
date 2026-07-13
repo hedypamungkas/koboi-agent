@@ -139,8 +139,7 @@ async def test_rerank_closes_ranking_gap(t):
         severity=Severity.GATE,
     )
     t.check(
-        f"means: recall@10={_mean(rec)} precision@1={_mean(p1)} MRR={_mean(mrr)} nDCG@10={_mean(ndcg)} "
-        f"(n={len(rec)})",
+        f"means: recall@10={_mean(rec)} precision@1={_mean(p1)} MRR={_mean(mrr)} nDCG@10={_mean(ndcg)} (n={len(rec)})",
         Matches(fn=lambda _s: True, description="per-dimension means recorded"),
         name="rerank_means",
         severity=Severity.SOFT,

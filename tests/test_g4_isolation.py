@@ -28,9 +28,7 @@ from koboi.server.pool import AgentPool  # noqa: E402
 
 
 def _pool(tmp_path) -> AgentPool:
-    cfg = Config.from_dict(
-        {"agent": {"name": "t", "system_prompt": "h", "max_iterations": 3}}, validate=False
-    )
+    cfg = Config.from_dict({"agent": {"name": "t", "system_prompt": "h", "max_iterations": 3}}, validate=False)
     return AgentPool(cfg, workspace_root=str(tmp_path))
 
 
