@@ -35,7 +35,20 @@ retrieval_metric.py   Mock-safe IR ranking: RetrievalMetricScorer (recall@k/prec
 citation_grounding.py Mock-safe citation resolution: CitationGroundingScorer (ALCE-style [n]/[Source:x] -> chunk)
 ci.py                 Mock-safe bootstrap CI: BootstrapCIScorer + bootstrap_ci() (95% lower-bound gating)
 skill_scorer.py       Skill scorer: trigger_accuracy only (routing_accuracy + token_overhead were removed)
+deep_research_scorer.py RAGAS faithfulness over DYNAMIC run-derived sources (reads context['research_sources']
+                      -- the report's gathered source text, surfaced from RunResult.metadata); fail-open
+recency_scorer.py     Heuristic recency proxy (regex year extraction from source texts + report) for
+                      stale-knowledge leak detection; free/deterministic; fail-open
 ```
+
+## deep_research evals
+deep_research is an orchestration config (`core=None`) so `--mock` is unsupported for it; the
+`t` runner auto-creates a `DispatchingClient` (content-dispatching, not sequential) for orchestration
+configs so the loop runs deterministically without an API key (`deep_research_mock.eval.py`).
+Live structural + RAGAS-faithfulness evals: `deep_research_citations.eval.py` /
+`deep_research_faithfulness.eval.py`. **Production smoke** (Tier 2, real Firecrawl + `gpt-5.4`,
+env-gated, GATE-severity bar): `evals/deep_research_prod_{multifaceted,recency,comparative,adversarial}.eval.py`.
+The passing grade + run commands are documented in `docs/deep-research-smoke.md`.
 
 ## How to run evals
 See `examples/21_eval_suite.py` and `configs/eval_suite.yaml`.

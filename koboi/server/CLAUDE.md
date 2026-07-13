@@ -130,3 +130,15 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
   this package -- `sse_stream` just sees delayed deltas.
 - **M5 seams**: `protocols.py` defines SessionStore/LockProvider/EventBuffer for a
   future Redis/SaaS swap; do NOT pre-protocol-ize for one impl.
+- **Orchestrated configs (`execution.mode: dynamic|dag|deep_research`) build `core=None`** —
+  `KoboiAgent(core=None, orchestrator=...)`. The orchestrator manages its own per-node agents, so
+  there's no `AgentCore`/HITL pipeline. Every `_core` access is guarded:
+  - `/v1/chat/stream` (`app.py` B1 guard): `if agent._core is not None:` wraps the approval-handler
+    build + mode/`max_iterations` snapshot/restore; `handler` stays `None` for core=None.
+  - `/v1/jobs` middle path (`jobs.py`): `if agent._core is None:` → config-level
+    `sandbox.backend='restricted'` check (passthrough refused) → `agent.run_stream()` / `agent.resume()`.
+    Job results come from `OrchestrationCompleteEvent.final_answer` (NOT `CompleteEvent` — distinct class).
+  - `GET /v1/sessions/{id}` (`pool._deep_research_messages`): surfaces the query + cited report from
+    the session-tagged `research_context` table (returns `[]` only when no research run exists).
+  - `pool.py` `_client_factory`/`_approval_handler` seams are guarded too (skipped for core=None).
+  See `docs/deep-research-smoke.md` for the production bar.

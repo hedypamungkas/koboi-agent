@@ -234,6 +234,23 @@ job terminal → return result + `[DONE]`. Buffer in-memory capped; TTL `jobs.tt
 
 **Idempotency:** `POST /jobs` menerima `Idempotency-Key` (§11); dedup window → key sama = job_id sama.
 
+### 8.1 Orchestration / deep_research configs (core=None)
+
+Config `orchestration.enabled: true` (`execution.mode: dynamic|dag|conditional|deep_research`)
+membangun `KoboiAgent(core=None, orchestrator=...)` — orchestrator mengelola per-node agent-nya
+sendiri, jadi tidak ada `AgentCore`/pipeline HITL. Setiap akses `_core` di-guard:
+
+- **Interactive `/v1/chat/stream`** (B1 guard): approval-handler build + mode/`max_iterations`
+  snapshot di-skip (`handler=None`); `run_stream()` dispatch ke orchestrator.
+- **`/v1/jobs`** (middle path): cek `sandbox.backend='restricted'` di level config (passthrough
+  ditolak), lalu `agent.run_stream()` / `agent.resume()`. Result job di-capture dari
+  `OrchestrationCompleteEvent.final_answer` (bukan `CompleteEvent` — kelas berbeda).
+- **`GET /v1/sessions/{id}`**: mengembalikan query + cited report deep_research dari tabel
+  `research_context` (session-tagged) via `pool._deep_research_messages`; `[]` hanya jika belum ada
+  run. `POST /v1/sessions/{id}/approve` inert (tidak ada HITL di orchestration).
+
+Production quality bar + smoke: `docs/deep-research-smoke.md`.
+
 ---
 
 ## 9. API Surface

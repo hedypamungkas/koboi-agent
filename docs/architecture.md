@@ -287,7 +287,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (25)
+### Config sections (27)
 
 | Section | Controls |
 |---------|----------|
@@ -304,7 +304,9 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `skills` | Search paths |
 | `mcp` | MCP server connections, per-server `risk_level`/`risk_heuristic` |
 | `memory` | Backend (sqlite/in_memory), db_path, `retention` (max_messages cap), `owner` (tenant tag), `proactive` (opt-in extract/recall/core_block long-term memory) |
-| `orchestration` | Router type, agents, execution mode |
+| `orchestration` | Router type, agents, execution mode (`sequential`/`parallel`/`dag`/`conditional`/`dynamic`/`deep_research`) |
+| `websearch` | Pluggable search/fetch providers for `web_search`/`web_fetch` (`search.provider` brave/firecrawl/ddg/mock, `fetch.provider` httpx/firecrawl) |
+| `research` | deep_research knobs: `max_depth`, `max_searches`/`max_fetches`, `coverage_threshold`, `citations`, `persist_findings` |
 | `sandbox` | Backend (passthrough/restricted), workdir strategy, network, network_isolation (seccomp), rlimits |
 | `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume |
 | `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
@@ -372,6 +374,15 @@ future Redis/SaaS state swap. Runtime per-session MCP server management
 (`GET/POST/DELETE /v1/sessions/{id}/mcp/servers` + `.../reconnect`) is backed by
 `SessionMcpRegistry` (`server/mcp_registry.py`) — in-process and session-scoped, not
 persisted across restart/eviction.
+
+**Orchestrated configs (`execution.mode: dynamic|dag|deep_research`)** build
+`KoboiAgent(core=None, orchestrator=...)` — the orchestrator manages its own per-node agents,
+so there is no `AgentCore`/HITL pipeline. Every `_core` access is guarded: interactive
+`/chat/stream` skips the approval-handler/mode-snapshot block; `/v1/jobs` takes a middle path
+(config-level `sandbox.backend='restricted'` check, then `agent.run_stream()`); job results are
+captured from `OrchestrationCompleteEvent.final_answer`. `GET /v1/sessions/{id}` surfaces the
+deep_research query + cited report via the session-tagged `research_context` table
+(`pool._deep_research_messages`).
 
 Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
 (`fastapi`, `uvicorn`). See `koboi/server/CLAUDE.md` for routes/conventions/gotchas and
@@ -542,6 +553,28 @@ rag:
 
 ---
 
+## Web Search/Fetch Providers
+
+`koboi/websearch/` is the pluggable backend for the `web_search`/`web_fetch` tools — a
+decorator-registry pattern mirroring `koboi/rag/`:
+
+- `@register_search_provider("name")` / `@register_fetch_provider("name")` register
+  `BaseSearchProvider` / `BaseFetchProvider` subclasses. Built-ins: search = `mock` (offline
+  default), `ddg`, `brave`, `firecrawl`; fetch = `httpx` (trafilatura readability, default),
+  `firecrawl` (JS rendering).
+- `build_search_provider(conf)` / `build_fetch_provider(conf)` resolve the `websearch.search` /
+  `websearch.fetch` config (provider name + nested per-provider kwargs) into an instance. Unknown
+  → `mock`/`httpx` fallback (offline-safe).
+- The `web_search`/`web_fetch` tools (`tools/builtin/web.py`) delegate to providers injected via
+  the tool registry's dep store. `CountingSearchProvider`/`CountingFetchProvider` wrap each to
+  meter calls against a `ResearchBudget` (deep_research).
+- All providers enforce the SSRF guard (`_check_url_ssrf`) so the agent can't probe internal
+  topology via search/fetch.
+
+Config: the `websearch:` section (`websearch.search.provider`, `websearch.fetch.provider`).
+
+---
+
 ## Guardrails and Safety
 
 The safety model has four layers: guardrails, policy engine, approval handler, and trust database.
@@ -642,12 +675,39 @@ Orchestrator.run(mode=...)
      |
      +-- [dynamic]     --> planner extracts step graph -> run as dag waves (plan-or-skip)
      |
+     +-- [deep_research] --> plan_research -> per-node DAG waves (web_search/web_fetch) ->
+     |                     CoverageEvaluator (LLM judge) -> drill gaps (re-plan) ->
+     |                     synthesize cited report (SourceStore [n] citations) [research.py]
+     |
      v
 [optional] QualityEvaluator --> revision loop (max_revisions)   (sequential/parallel only)
      |
      v
-OrchestratorResult (final_answer, agent_results)
+OrchestratorResult (final_answer, agent_results, metadata{research_sources, coverage, depth, plan_nodes, used_searches, ...})
 ```
+
+### Deep research (`execution.mode: deep_research`)
+
+Coverage-gated, cited web research (GPT-Researcher shape). `Orchestrator._run_deep_research`
+(`orchestrator.py`) drives the loop; the stateful primitives live in `orchestration/research.py`:
+
+- **`plan_research`** (`planner.py`) — one LLM call decides `needs_workflow`; multi-step queries
+  get a step graph, simple queries take a fast direct-answer fallback.
+- **Per-node DAG waves** — each planned node is an `AgentCore` with `web_search`/`web_fetch` tools
+  wired to the configured providers (via `CountingProvider` budget proxies). Node findings flow into
+  a `SourceStore` as numbered citations `[n]`.
+- **`CoverageEvaluator`** — one LLM judge call per depth round → `(overall_score, follow_ups,
+  coverage_map)`. The loop iterates (re-plans on gaps) until `coverage >= coverage_threshold` or
+  `max_depth`/budget; a deterministic safety net generates generic follow-ups if the judge returns
+  none on low coverage (prevents premature shallow-report stops).
+- **Synthesize + verify** — `_synthesize_research` writes a cited report; `_verify_citations`
+  strips unresolvable `[n]` markers; a Sources footer is appended.
+- **`ResearchBudget`** — hard caps (`max_searches`/`max_fetches`/`max_tokens`).
+- **Persistence** — `ResearchContext` (query, sources, coverage, `final_report`) is journaled to
+  the `research_context` SQLite table, session-tagged, so `GET /v1/sessions/{id}` surfaces the
+  query + cited report and `koboi run --resume` rehydrates-and-finishes.
+
+Production quality bar + smoke scenarios: `docs/deep-research-smoke.md`.
 
 ### Routers
 
