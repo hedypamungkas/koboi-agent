@@ -251,6 +251,8 @@ class AgentFactory:
             verbose=False,
             tools=tools,
             hook_chain=hook_chain,
+            output_schema=agent_def.output_schema,
+            force_response_format_with_tools=agent_def.force_response_format_with_tools,
         )
 
     @classmethod
