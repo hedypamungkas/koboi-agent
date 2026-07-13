@@ -150,6 +150,78 @@ class AgentDef:
     # #6: if True, the scheduler surfaces a [NODE_INTERRUPT] marker after this node
     # completes (for human review / HITL at the node boundary).
     interrupt_after: bool = False
+    # JSON Schema dict (provider-agnostic) for structured node output. When set,
+    # the node's final answer is constrained to the schema (response_format on
+    # OpenAI/Cloudflare; forced tool_use emulation on Anthropic). See
+    # loop.py ``_resolve_response_format`` for the provider-aware + tools guard.
+    output_schema: dict | None = None
+    # Gap B: when True, apply response_format even on iterations that carry tool
+    # definitions. OpenAI/Cloudflare support RF + tools together; Anthropic does
+    # not (RF is emulated via a forced tool_use, incompatible with real tools) so
+    # it stays suppressed there regardless of this flag.
+    force_response_format_with_tools: bool = False
+    # Per-node determinism profile (temperature/seed/top_p/model_pin); merged over
+    # the workflow-level profile by facade._apply_determinism before the node's
+    # LLM client is built. Stored as a raw dict so it round-trips through YAML.
+    determinism: dict | None = None
+
+    def to_dict(self) -> dict:
+        """Serialize to the ``orchestration.agents[*]`` YAML shape.
+
+        Inverse of :func:`koboi.facade._parse_agent_defs`: the ``*_config``
+        fields are remapped to the YAML ``tools`` / ``rag`` / ``llm`` keys and
+        empty/None sections are omitted so the dump stays clean.
+        """
+        out: dict = {"name": self.name}
+        if self.system_prompt:
+            out["system_prompt"] = self.system_prompt
+        if self.description:
+            out["description"] = self.description
+        if self.keywords:
+            out["keywords"] = list(self.keywords)
+        if self.tools_config:
+            out["tools"] = self.tools_config
+        if self.rag_config:
+            out["rag"] = self.rag_config
+        if self.llm_config:
+            out["llm"] = self.llm_config
+        if self.depends_on:
+            out["depends_on"] = list(self.depends_on)
+        if self.conditionals:
+            out["conditionals"] = list(self.conditionals)
+        if self.interrupt_after:
+            out["interrupt_after"] = self.interrupt_after
+        if self.output_schema is not None:
+            out["output_schema"] = self.output_schema
+        if self.force_response_format_with_tools:
+            out["force_response_format_with_tools"] = self.force_response_format_with_tools
+        if self.determinism:
+            out["determinism"] = self.determinism
+        return out
+
+    @classmethod
+    def from_dict(cls, ac: dict) -> AgentDef:
+        """Build from the ``orchestration.agents[*]`` YAML shape.
+
+        Mirrors :func:`koboi.facade._parse_agent_defs`. Accepts both the YAML
+        keys (``tools`` / ``rag`` / ``llm``) and the dataclass ``*_config`` keys
+        so a dict produced by :meth:`to_dict` round-trips cleanly.
+        """
+        return cls(
+            name=ac.get("name", ""),
+            system_prompt=ac.get("system_prompt", ""),
+            description=ac.get("description", ""),
+            keywords=list(ac.get("keywords") or []),
+            tools_config=ac.get("tools", ac.get("tools_config")),
+            rag_config=ac.get("rag", ac.get("rag_config")),
+            llm_config=ac.get("llm", ac.get("llm_config")),
+            depends_on=list(ac.get("depends_on") or []),
+            conditionals=list(ac.get("conditionals") or []),
+            interrupt_after=bool(ac.get("interrupt_after", False)),
+            output_schema=ac.get("output_schema"),
+            force_response_format_with_tools=bool(ac.get("force_response_format_with_tools", False)),
+            determinism=ac.get("determinism") or None,
+        )
 
 
 @dataclass

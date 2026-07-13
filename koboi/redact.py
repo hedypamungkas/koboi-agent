@@ -122,6 +122,50 @@ def _redact_nested(obj: object, _depth: int = 0) -> object:
     return obj
 
 
+# A value that is entirely a ``${VAR}`` / ``${VAR:default}`` env template. Such
+# values are KEPT on export (under sensitive keys) so an exported workflow bundle
+# stays re-runnable via environment credentials instead of carrying a real secret.
+_ENV_TEMPLATE_RE = re.compile(r"^\$\{[^}]+\}$")
+
+
+def _redact_export_value(value: object, _depth: int = 0) -> object:
+    """Export-time handling for a SENSITIVE-key value.
+
+    Keep a whole ``${VAR:default}`` template (re-runnable); otherwise recurse via
+    :func:`redact_config_for_export` so a concrete secret (``sk-...``) is masked.
+    """
+    if isinstance(value, str) and _ENV_TEMPLATE_RE.match(value):
+        return value
+    return redact_config_for_export(value, _depth + 1)
+
+
+def redact_config_for_export(obj: object, _depth: int = 0) -> object:
+    """Export-time redaction that PRESERVES ``${VAR:default}`` env placeholders.
+
+    Unlike :func:`_redact_nested` (which masks any value under a sensitive key),
+    this keeps a value that is entirely a ``${VAR}`` / ``${VAR:default}`` template
+    on sensitive keys, so an exported workflow bundle stays re-runnable via env.
+    A concrete secret (``sk-...``, ``bearer ...``) under a sensitive key, and any
+    secret-shaped leaf under a non-sensitive key, are still masked via
+    :func:`redact_value`. Depth-capped like :func:`_redact_nested`.
+    """
+    if _depth > _REDACT_MAX_DEPTH:
+        return redact_value(obj) if isinstance(obj, str) else obj
+    if isinstance(obj, dict):
+        out: dict = {}
+        for k, v in obj.items():
+            if _is_sensitive_key(k):
+                out[k] = _redact_export_value(v, _depth)
+            else:
+                out[k] = redact_config_for_export(v, _depth + 1)
+        return out
+    if isinstance(obj, list):
+        return [redact_config_for_export(v, _depth + 1) for v in obj]
+    if isinstance(obj, str):
+        return redact_value(obj)
+    return obj
+
+
 def redact_tool_arguments(arguments_json: str) -> str:
     """Redact secrets from a tool-call ``arguments`` JSON string.
 
