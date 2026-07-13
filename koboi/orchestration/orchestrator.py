@@ -1095,6 +1095,20 @@ class Orchestrator:
         )
         yield AgentDispatchEvent(agent_name="assistant", agent_index=0, total_agents=1, mode="deep_research")
         result = await self._run_single("assistant", query)
+        # W7 parity: journal the direct answer so GET /v1/sessions/{id} surfaces it --
+        # mirrors the multi-step loop's post-synthesis persist. depth=0 + empty sources
+        # distinguish this from a cited multi-step report (no new marker field needed).
+        db_path = self._dag_scheduler.db_path if self._dag_scheduler else None
+        if db_path and result.answer:
+            try:
+                from koboi.orchestration.dag_scheduler import DagScheduler
+                from koboi.orchestration.research import ResearchContext
+
+                da_ctx = ResearchContext(query=query)
+                da_ctx.final_report = result.answer
+                DagScheduler.persist_research_context(db_path, run_id, da_ctx.to_json(), session_id=self._session_id)
+            except Exception as e:  # noqa: BLE001 - journaling is best-effort, never fatal
+                logger.warning("direct-answer journal failed: %s", e)
         yield AgentResultEvent(
             agent_name=result.agent_name,
             answer=result.answer[:200],

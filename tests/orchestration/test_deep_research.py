@@ -340,6 +340,27 @@ class TestRunDeepResearch:
         _ = [e async for e in orch._run_deep_research("Tell me about X")]
         assert DagScheduler.load_research_context_for_session(db_path, "any") is None  # untagged
 
+    async def test_direct_answer_is_journalled_session_scoped(self, tmp_path):
+        # W7 gap #2: the simple-request direct-answer path (needs_workflow=False) must also
+        # journal so GET /v1/sessions/{id} surfaces the answer (was lost on /chat/stream).
+        db_path = str(tmp_path / "r.db")
+        orch = Orchestrator(
+            client=_FakeClient(plan_needs_workflow=False, node_answer="The capital of France is Paris."),
+            router=KeywordRouter(),
+            research={"max_depth": 1, "coverage_threshold": 0.7},
+            dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=db_path),
+            session_id="sess-direct",
+        )
+        _ = [e async for e in orch._run_deep_research("What is the capital of France?")]
+        ctx_json = DagScheduler.load_research_context_for_session(db_path, "sess-direct")
+        assert ctx_json is not None, "direct-answer context not journalled"
+        ctx = ResearchContext.from_json(ctx_json)
+        assert ctx.query == "What is the capital of France?"
+        assert "Paris" in ctx.final_report
+        # Direct-answer shape: depth 0, no gathered sources (distinguishes from multi-step).
+        assert ctx.depth == 0
+        assert ctx.source_store.sources_list() == []
+
     async def test_persists_findings_to_corpus_file(self, tmp_path):
         out_path = str(tmp_path / "findings.jsonl")
         orch = _orch(
