@@ -18,6 +18,7 @@ from koboi.events import (
 from koboi.exceptions import (
     AgentAbortedError,
     AgentGuardrailError,
+    AgentHandoverError,
     AgentMaxIterationsError,
 )
 from koboi.guardrails.base import BaseGuardrail
@@ -294,6 +295,9 @@ class AgentCore:
         ctx = await self._emit(HookEvent.PRE_INPUT, messages=self.memory.get_messages(), user_message=text_part)
         if ctx.abort:
             raise AgentAbortedError(ctx.inject_message or "Input rejected by hook")
+        _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
+        if _hr:
+            raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
 
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
         """Run output guardrails, emit POST_OUTPUT, save to memory.
@@ -344,6 +348,9 @@ class AgentCore:
         ctx = await self._emit(HookEvent.POST_OUTPUT, iteration=iteration, llm_response=response)
         if ctx.abort:
             raise AgentAbortedError(ctx.inject_message or "Output rejected by hook")
+        _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
+        if _hr:
+            raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
         self.memory.add_assistant_message(output)
         return output
 
