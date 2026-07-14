@@ -1722,6 +1722,16 @@ def _build_orchestration(config: Config, verbose: bool = False):
     Reuses AgentAssembler for common subsystems (logger, client, guardrails,
     policy, hooks, skills, mode_manager, trust_db) so orchestration mode
     gets the same policy enforcement and guardrails as single-agent mode.
+
+    Cache/replay coverage (v2/v3): EVERY chat LLM call in orchestration flows
+    through ``_maybe_wrap_cache`` -- the shared ``assembler.client`` (router,
+    planner, synthesis, dynamic builder) via ``build_client``, and per-node
+    clients via ``_agent_client_builder``. Three call paths are currently
+    UNREACHABLE from here and therefore uncached: ``QualityEvaluator`` (only
+    constructed in tests), ``ProactiveExtractionHook`` (not attached in
+    orchestration mode), and ``deep_research`` (docs-only on this branch). If
+    any becomes reachable, route it through ``_maybe_wrap_cache`` or it
+    egresses live during a cache/replay run.
     """
     from koboi.orchestration.factory import AgentFactory
     from koboi.orchestration.orchestrator import Orchestrator

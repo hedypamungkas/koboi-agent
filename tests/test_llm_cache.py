@@ -239,3 +239,24 @@ class TestFacadeCacheWiring:
         client = agent._core.client
         assert isinstance(client, CachedClient)
         assert client._on_miss == CacheMissPolicy.RAISE
+
+    def test_orchestration_shared_client_is_cached(self, tmp_path):
+        # v3 #2: orchestration chat calls flow through the SAME _maybe_wrap_cache
+        # seam (assembler.client) -- the orchestrator's shared client is wrapped.
+        from koboi.facade import KoboiAgent
+
+        from koboi.llm.cache import CachedClient
+
+        cfg = self._cfg(
+            orchestration={
+                "enabled": True,
+                "execution": {"mode": "sequential"},
+                "router": {"type": "keyword"},
+                "agents": [
+                    {"name": "a", "system_prompt": "x"},
+                    {"name": "b", "system_prompt": "y"},
+                ],
+            }
+        )
+        agent = KoboiAgent.from_dict(cfg, replay_mode="cache", cache_dir=str(tmp_path / "c"))
+        assert isinstance(agent._orchestrator.client, CachedClient)
