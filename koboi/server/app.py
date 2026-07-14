@@ -181,6 +181,7 @@ def create_app(
     ownership_store: Any | None = None,
     approval_registry: Any | None = None,
     workflow_store: Any | None = None,
+    config_source_text: str | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
 
@@ -330,6 +331,7 @@ def create_app(
     app.state.job_store = job_store
     app.state.job_registry = job_registry
     app.state.workflow_store = workflow_store
+    app.state.config_source_text = config_source_text  # v3 #4-b: for plain-job capture
     app.state.job_max_concurrent = job_max_concurrent
     app.state.job_timeout = job_timeout
     app.state.health = health
@@ -583,20 +585,38 @@ def _register_routes(
             return _error_response(403, "forbidden", "not the job owner", request)
         if job["status"] != "completed":
             return _error_response(409, "job_not_complete", "only completed jobs can be captured", request)
-        if not job.get("workflow_ref"):
-            return _error_response(400, "capture_requires_workflow_ref", "v2 captures workflow_ref jobs only", request)
-        wf = workflow_store.get(job["workflow_ref"], owner)
-        if wf is None:
-            raise HTTPException(status_code=404, detail="workflow not found")
-        cache_dir = job.get("cache_dir") if body.with_cache else None
-        if body.with_cache and not cache_dir:
-            return _error_response(
-                400, "no_cache_to_freeze", "the job did not run in cache mode (no cache_dir recorded)", request
-            )
+        if job.get("workflow_ref"):
+            wf = workflow_store.get(job["workflow_ref"], owner)
+            if wf is None:
+                raise HTTPException(status_code=404, detail="workflow not found")
+            config_text = wf["bundle_yaml"]
+            cache_dir = job.get("cache_dir") if body.with_cache else None
+            if body.with_cache and not cache_dir:
+                return _error_response(
+                    400, "no_cache_to_freeze", "the job did not run in cache mode (no cache_dir recorded)", request
+                )
+        else:
+            # v3 #4-b: plain job -- emit the server's un-interpolated config source
+            # (preserves ${VAR} templates; to_yaml() would carry resolved secrets).
+            # Plain jobs cannot isolate a run cache (shared pooled client).
+            config_text = app.state.config_source_text
+            if config_text is None:
+                return _error_response(
+                    400,
+                    "server_config_source_not_exposed",
+                    "the server was built via create_app(config) without config_source_text; "
+                    "plain-job capture needs the un-interpolated source",
+                    request,
+                )
+            cache_dir = None
+            if body.with_cache:
+                return _error_response(
+                    400, "no_cache_to_freeze", "plain (non-workflow_ref) jobs cannot isolate a run cache", request
+                )
         from koboi.workflows import capture_from_run, validate_capture
 
         wd, entries = capture_from_run(
-            config_text=wf["bundle_yaml"],
+            config_text=config_text,
             name=body.name or job_id,
             source_run_id=job_id,
             source_session_id=job["session_id"],
@@ -1383,5 +1403,14 @@ def serve_app(config_path: str | Path, *, host: str | None = None, port: int | N
             "(KOBOI_API_KEYS or `koboi keys create`) before exposing to untrusted networks.",
             resolved_host,
         )
-    app = create_app(cfg)
+    # v3 #4-b: pass the un-interpolated source text so plain-job capture can emit
+    # a re-runnable bundle (Config.to_yaml() carries resolved secrets; this keeps
+    # the ${VAR} templates for share-safe re-runnability).
+    import yaml as _yaml
+    from pathlib import Path as _Path
+
+    from koboi.config import _load_yaml_with_extends
+
+    _source = _yaml.safe_dump(_load_yaml_with_extends(_Path(config_path)), sort_keys=False, allow_unicode=True)
+    app = create_app(cfg, config_source_text=_source)
     uvicorn.run(app, host=resolved_host, port=resolved_port)  # pragma: no cover (blocking server)

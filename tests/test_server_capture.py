@@ -113,3 +113,26 @@ class TestServerCapture:
         async with _client(app) as c:
             r = await c.post("/v1/jobs/jobA/capture", json={"name": "cap"}, headers={"Authorization": "Bearer keyB"})
             assert r.status_code == 403
+
+    async def test_capture_plain_job_with_source_201(self, tmp_path):
+        app, js, ws = _app_with_stores(tmp_path)
+        app.state.config_source_text = (
+            "agent:\n  name: srv\nllm:\n  provider: openai\n  model: m\n  api_key: ${OPENAI_API_KEY:}\n"
+        )
+        js.insert("job5", "sess5", "dev", "hi")  # plain job (no workflow_ref)
+        js.update_status("job5", "completed")
+        async with _client(app) as c:
+            r = await c.post("/v1/jobs/job5/capture", json={"name": "pca"})
+            assert r.status_code == 201, r.text
+        # the bundle preserves the ${VAR} template (not resolved secrets)
+        bundle = ws.get("pca", "dev")["bundle_yaml"]
+        assert "${OPENAI_API_KEY:}" in bundle
+
+    async def test_capture_plain_job_with_cache_400(self, tmp_path):
+        app, js, ws = _app_with_stores(tmp_path)
+        app.state.config_source_text = "agent:\n  name: srv\nllm:\n  model: m\n"
+        js.insert("job6", "sess6", "dev", "hi")
+        js.update_status("job6", "completed")
+        async with _client(app) as c:
+            r = await c.post("/v1/jobs/job6/capture", json={"name": "x", "with_cache": True})
+            assert r.status_code == 400  # plain jobs can't isolate a run cache
