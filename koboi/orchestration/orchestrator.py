@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from koboi.tokens import estimate_tokens
 from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, RoutingDecision
+from koboi.exceptions import AgentError
 from koboi.hooks.chain import AgentInfo, HookContext, HookEvent
 from koboi.events import (
     AgentDispatchEvent,
@@ -198,6 +199,13 @@ class Orchestrator:
         self._web_conf = websearch_conf or {}
         self._resume_ctx_json: str | None = None
         self._session_id = session_id
+        # F9: reentrancy guard. The Orchestrator holds per-run mutable state (_agents_map,
+        # _dynamic_blueprints) that is rebuilt each round, so it is NOT safe to drive two
+        # concurrent runs on one instance. Today every caller (server pool = one Orchestrator
+        # per session + per-session lock; CLI = one run) creates a fresh instance per run, so
+        # this never trips in practice -- it exists to fail loudly if a future "pool the
+        # Orchestrator" optimization reintroduces the shared-state race.
+        self._run_in_progress = False
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -249,6 +257,19 @@ class Orchestrator:
         return resolved
 
     async def run(self, query: str, mode: str = "sequential") -> OrchestratorResult:
+        # F9 guard: one run per Orchestrator instance at a time (per-run mutable state).
+        if self._run_in_progress:
+            raise AgentError(
+                "Orchestrator is already running a query; it is not concurrent-safe. Create one "
+                "Orchestrator instance per concurrent run (the server pool does this per session)."
+            )
+        self._run_in_progress = True
+        try:
+            return await self._run_impl(query, mode)
+        finally:
+            self._run_in_progress = False
+
+    async def _run_impl(self, query: str, mode: str = "sequential") -> OrchestratorResult:
         start = time.time()
 
         if self.use_revision and self.evaluator:
@@ -1345,7 +1366,17 @@ class Orchestrator:
 
     async def run_stream(self, query: str, mode: str = "sequential") -> AsyncGenerator:
         """Streaming version of run() -- yields orchestration events."""
-        async for event in self._execute_pipeline(query, mode):
-            if isinstance(event, _AgentCompletedEvent):
-                continue
-            yield event
+        # F9 guard: one run per Orchestrator instance at a time (per-run mutable state).
+        if self._run_in_progress:
+            raise AgentError(
+                "Orchestrator is already running a query; it is not concurrent-safe. Create one "
+                "Orchestrator instance per concurrent run (the server pool does this per session)."
+            )
+        self._run_in_progress = True
+        try:
+            async for event in self._execute_pipeline(query, mode):
+                if isinstance(event, _AgentCompletedEvent):
+                    continue
+                yield event
+        finally:
+            self._run_in_progress = False

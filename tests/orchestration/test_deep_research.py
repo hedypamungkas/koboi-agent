@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from koboi.events import OrchestrationCompleteEvent, TextDeltaEvent
 from koboi.orchestration.dag_scheduler import DagScheduler
 from koboi.orchestration.orchestrator import Orchestrator
@@ -416,9 +418,28 @@ class TestRunDeepResearch:
         c2.final_report = "second report"
         DagScheduler.persist_research_context(db_path, "run-2", c2.to_json(), session_id="sess-X")
         loaded = ResearchContext.from_json(DagScheduler.load_research_context_for_session(db_path, "sess-X"))
-        assert loaded.query == "second"  # latest run wins
+        assert loaded.query == "second"  # same depth (0) -> latest run wins
         # A different session sees nothing.
         assert DagScheduler.load_research_context_for_session(db_path, "sess-other") is None
+
+    def test_report_wins_over_later_direct_answer(self, tmp_path):
+        # v0.14 follow-up #1: a multi-step cited report (depth>=1) must survive a LATER trivial
+        # direct-answer (depth=0) in the same session -- the report is the session's deliverable,
+        # not the throwaway follow-up. Precedence: ORDER BY depth DESC, updated_at DESC.
+        import time as _time
+
+        db_path = str(tmp_path / "reportwins.db")
+        report = ResearchContext(query="research query")
+        report.depth = 2  # multi-step
+        report.final_report = "## Cited Report\nDeep findings [1] [2]."
+        DagScheduler.persist_research_context(db_path, "run-report", report.to_json(), session_id="sess-R")
+        _time.sleep(0.02)
+        direct = ResearchContext(query="what is 2+2?")  # depth=0 (direct-answer)
+        direct.final_report = "4"
+        DagScheduler.persist_research_context(db_path, "run-direct", direct.to_json(), session_id="sess-R")
+        loaded = ResearchContext.from_json(DagScheduler.load_research_context_for_session(db_path, "sess-R"))
+        assert loaded.query == "research query"  # the report wins, not the later direct-answer
+        assert "Cited Report" in loaded.final_report
 
     def test_persist_research_context_coalesces_session_id(self, tmp_path):
         # W8 review #7: re-persisting a run with session_id=None must NOT clobber an existing tag
@@ -873,3 +894,53 @@ class TestMedium11WebConfProviderWiring:
         finally:
             if "__spy_test__" in search_provider_registry._entries:
                 del search_provider_registry._entries["__spy_test__"]
+
+
+class TestRunGuard:
+    """F9: the Orchestrator is not concurrent-safe (per-run mutable state); a reentrant run
+    on one instance must fail loudly instead of silently corrupting shared state."""
+
+    def _orch(self, tmp_path):
+        return Orchestrator(
+            client=_FakeClient(coverage_score=0.95),
+            router=KeywordRouter(),
+            research={"max_depth": 1, "coverage_threshold": 0.7},
+            dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "guard.db")),
+            default_mode="deep_research",
+        )
+
+    async def test_reentrant_run_raises(self, tmp_path):
+        # An in-flight run (flag set) rejects a second run() with a clear error.
+        from koboi.exceptions import AgentError
+
+        orch = self._orch(tmp_path)
+        orch._run_in_progress = True  # simulate an in-flight run holding the lock
+        with pytest.raises(AgentError, match="not concurrent-safe"):
+            await orch.run("q")
+        with pytest.raises(AgentError, match="not concurrent-safe"):
+            [e async for e in orch.run_stream("q")]  # run_stream guards too
+
+    async def test_run_clears_flag_after_completion(self, tmp_path):
+        # A normal run sets the flag for its duration + clears it on completion (finally),
+        # so a subsequent run on the same instance works.
+        orch = self._orch(tmp_path)
+        assert orch._run_in_progress is False
+        _ = await orch.run("Tell me about X", mode="deep_research")
+        assert orch._run_in_progress is False  # cleared after
+        # A second run on the same instance succeeds (flag was cleared).
+        _ = [e async for e in orch.run_stream("Tell me about Y")]
+        assert orch._run_in_progress is False
+
+    async def test_run_clears_flag_after_failure(self, tmp_path):
+        # The flag clears even if the run raises (finally), so a transient failure doesn't
+        # permanently lock the instance.
+        orch = self._orch(tmp_path)
+
+        async def _boom(query, mode):  # signature matches _run_impl
+            assert orch._run_in_progress is True  # guard set the flag before calling _run_impl
+            raise RuntimeError("boom")
+
+        orch._run_impl = _boom
+        with pytest.raises(RuntimeError, match="boom"):
+            await orch.run("q")
+        assert orch._run_in_progress is False  # finally cleared despite the raise

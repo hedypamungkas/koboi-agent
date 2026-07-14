@@ -90,13 +90,17 @@ def ensure_research_context_table(conn: sqlite3.Connection) -> None:
             graph_run_id TEXT PRIMARY KEY,
             context_json TEXT NOT NULL,
             updated_at REAL,
-            session_id TEXT
+            session_id TEXT,
+            depth INTEGER
         )
         """
     )
     # Additive column for pre-existing DBs created before session scoping (so
     # GET /v1/sessions/{id} can map a session to its deep-research context).
     _migrate_research_session_id(conn)
+    # Additive column for report-wins precedence (a multi-step report survives a later
+    # trivial direct-answer in the same session). Backfilled from context_json.
+    _migrate_research_depth(conn)
 
 
 def _migrate_research_session_id(conn: sqlite3.Connection) -> None:
@@ -104,6 +108,27 @@ def _migrate_research_session_id(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
     if "session_id" not in cols:
         conn.execute("ALTER TABLE research_context ADD COLUMN session_id TEXT")
+        conn.commit()
+
+
+def _migrate_research_depth(conn: sqlite3.Connection) -> None:
+    """Add the ``depth`` column to an older ``research_context`` table + backfill from context_json.
+
+    ``depth`` is denormalized from ``ResearchContext.depth`` (0 = direct-answer, >=1 = multi-step)
+    so ``load_research_context_for_session`` can rank a richer report above a later trivial answer
+    without parsing JSON in SQL.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+    if "depth" not in cols:
+        conn.execute("ALTER TABLE research_context ADD COLUMN depth INTEGER")
+        for graph_run_id, context_json in conn.execute(
+            "SELECT graph_run_id, context_json FROM research_context"
+        ).fetchall():
+            try:
+                depth = int(json.loads(context_json).get("depth", 0))
+            except (ValueError, TypeError):
+                depth = 0
+            conn.execute("UPDATE research_context SET depth=? WHERE graph_run_id=?", (depth, graph_run_id))
         conn.commit()
 
 

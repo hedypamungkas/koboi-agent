@@ -16,6 +16,7 @@ the executed set are ignored (a routed subgraph runs in its induced order).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from uuid import uuid4
@@ -190,17 +191,24 @@ class DagScheduler:
         """
         if not db_path or not graph_run_id:
             return
+        # Denormalize depth (0 = direct-answer, >=1 = multi-step) for report-wins precedence:
+        # a cited multi-step report outranks a later trivial direct-answer in the same session.
+        try:
+            depth = int(json.loads(context_json).get("depth", 0))
+        except (ValueError, TypeError):
+            depth = 0
         conn = sqlite3.connect(db_path)
         try:
             ensure_research_context_table(conn)
             conn.execute(
-                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id) "
-                "VALUES (?, ?, ?, ?) "
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id, depth) "
+                "VALUES (?, ?, ?, ?, ?) "
                 "ON CONFLICT(graph_run_id) DO UPDATE SET "
                 "context_json=excluded.context_json, "
                 "updated_at=excluded.updated_at, "
-                "session_id=COALESCE(excluded.session_id, research_context.session_id)",
-                (graph_run_id, context_json, time.time(), session_id),
+                "session_id=COALESCE(excluded.session_id, research_context.session_id), "
+                "depth=excluded.depth",
+                (graph_run_id, context_json, time.time(), session_id, depth),
             )
             conn.commit()
         finally:
@@ -233,10 +241,11 @@ class DagScheduler:
 
     @classmethod
     def load_research_context_for_session(cls, db_path: str, session_id: str | None) -> str | None:
-        """Read the latest journaled ResearchContext JSON for a session (GET /v1/sessions/{id}).
+        """Read the best journaled ResearchContext JSON for a session (GET /v1/sessions/{id}).
 
-        Returns None when the session has no deep-research run (or the column predates
-        session scoping and was never tagged).
+        Report-wins precedence: a multi-step cited report (depth >= 1) outranks a later trivial
+        direct-answer (depth 0) in the same session. Among equal depth, the latest (updated_at)
+        wins. Returns None when the session has no deep-research run.
         """
         if not db_path or not session_id:
             return None
@@ -244,7 +253,8 @@ class DagScheduler:
         try:
             ensure_research_context_table(conn)
             row = conn.execute(
-                "SELECT context_json FROM research_context WHERE session_id=? ORDER BY updated_at DESC LIMIT 1",
+                "SELECT context_json FROM research_context WHERE session_id=? "
+                "ORDER BY depth DESC, updated_at DESC LIMIT 1",
                 (session_id,),
             ).fetchone()
         finally:

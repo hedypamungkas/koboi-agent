@@ -516,3 +516,45 @@ class TestResearchContextMigration:
             assert "session_id" in cols
         finally:
             conn.close()
+
+    def test_migrate_adds_depth_column_and_backfills(self, tmp_path):
+        # v0.14 follow-up #1: the depth column (report-wins precedence) is added to older DBs +
+        # backfilled from each row's context_json so existing runs get correct precedence.
+        import json
+
+        from koboi.memory_sqlite import _migrate_research_depth, ensure_research_context_table
+
+        db_path = tmp_path / "old_depth.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            # Pre-depth-column schema (has session_id but no depth), with a multi-step row.
+            conn.execute(
+                "CREATE TABLE research_context (graph_run_id TEXT PRIMARY KEY, "
+                "context_json TEXT NOT NULL, updated_at REAL, session_id TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id) "
+                "VALUES ('run-1', ?, 0, 'sess-A')",
+                (json.dumps({"depth": 2, "query": "report"}),),
+            )
+            conn.execute(
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id) "
+                "VALUES ('run-2', ?, 1, 'sess-A')",
+                (json.dumps({"depth": 0, "query": "direct"}),),
+            )
+            conn.commit()
+            ensure_research_context_table(conn)  # triggers _migrate_research_depth
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+            assert "depth" in cols
+            # Backfilled from context_json.
+            rows = {r[0]: r[1] for r in conn.execute("SELECT graph_run_id, depth FROM research_context").fetchall()}
+            assert rows["run-1"] == 2 and rows["run-2"] == 0
+        finally:
+            conn.close()
+
+        # Idempotent re-run.
+        conn = sqlite3.connect(db_path)
+        try:
+            _migrate_research_depth(conn)
+        finally:
+            conn.close()
