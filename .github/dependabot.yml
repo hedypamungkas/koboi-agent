@@ -36,6 +36,12 @@ updates:
       - dependency-name: "langfuse"
         # koboi's LangfuseTracingHook targets the Langfuse SDK v2 API
         # (client.trace().span().generation() fluent chain + Langfuse(publicKey=,
-        # host=) constructor), which langfuse v3 removed. Ignore major bumps
-        # until the hook is migrated to the v3/v4 SDK.
+        # host=) constructor), which langfuse v3 removed. Pin below v3 until the
+        # hook is migrated to the v3/v4 SDK.
+        #
+        # `versions: [">=3.0"]` is the load-bearing rule: it blocks BOTH a normal
+        # major bump AND a requirement-cap-widening PR (the `<3.0` -> `<5.0` kind
+        # that Dependabot opened as #39 and #14 despite the rule below). The
+        # `update-types` entry alone does NOT gate cap-widening — keep both.
+        versions: [">=3.0"]
         update-types: ["version-update:semver-major"]
