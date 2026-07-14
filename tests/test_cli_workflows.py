@@ -141,7 +141,7 @@ class TestRunWorkflow:
                 captured["ran"] = message
                 return "STUB-RESULT"
 
-        def _fake_from_config_string(bundle, verbose=False):
+        def _fake_from_config_string(bundle, verbose=False, **kwargs):
             captured["bundle"] = bundle
             return _StubAgent()
 
@@ -163,7 +163,7 @@ class TestRunWorkflow:
                 captured["ran"] = message
                 return "OK"
 
-        monkeypatch.setattr(KoboiAgent, "from_config_string", lambda bundle, verbose=False: _StubAgent())
+        monkeypatch.setattr(KoboiAgent, "from_config_string", lambda bundle, verbose=False, **kwargs: _StubAgent())
         rc = cli_commands.cmd_run(
             "dummy", None, False, False, None, workflow_name="rw2", input_json='{"message": "from json"}'
         )

@@ -70,9 +70,7 @@ def _now_iso() -> str:
 def _serialize_response(resp: AgentResponse) -> dict:
     return {
         "content": resp.content,
-        "tool_calls": [
-            {"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in resp.tool_calls
-        ],
+        "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in resp.tool_calls],
         "usage": (
             {
                 "prompt_tokens": resp.usage.prompt_tokens,
@@ -99,8 +97,7 @@ def _deserialize_response(d: dict) -> AgentResponse:
     return AgentResponse(
         content=d.get("content"),
         tool_calls=[
-            ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
-            for tc in (d.get("tool_calls") or [])
+            ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"]) for tc in (d.get("tool_calls") or [])
         ],
         usage=usage,
         model=d.get("model"),

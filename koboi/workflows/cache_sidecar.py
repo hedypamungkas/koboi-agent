@@ -91,9 +91,7 @@ class SqliteCacheSidecar:
             "  PRIMARY KEY (owner, name, cache_key)"
             ")"
         )
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_workflows_cache_owner ON workflows_cache(owner, name)"
-        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_cache_owner ON workflows_cache(owner, name)")
         self._conn.commit()
 
     def write(self, entries: Iterable[tuple[str, dict]]) -> int:

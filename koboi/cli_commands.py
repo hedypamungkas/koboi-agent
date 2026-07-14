@@ -269,27 +269,34 @@ def cmd_run(
     workflow_name: str | None = None,
     replay_mode: str = "live",
     input_json: str | None = None,
+    clear_cache: bool = False,
 ) -> int:
     """Run a single agent query (non-interactive or one-shot).
 
     With ``workflow_name`` set, loads a stored workflow bundle
     (``cwd/.koboi/workflows``) and runs it instead of the config at
-    ``config_path``. ``replay_mode`` selects the determinism tier (v1: ``live``
-    only; ``cache``/``replay`` arrive in v2/v3).
+    ``config_path``. ``replay_mode`` selects the determinism tier: ``live``
+    (default, no caching) or ``cache`` (file-backed response cache → re-runs of
+    identical input are byte-identical). ``replay`` is an alias for ``cache``
+    (pure offline raise-on-miss arrives in v3).
     """
     from koboi.facade import KoboiAgent
 
     if replay_mode not in ("live", "cache", "replay"):
         _print_error(f"unknown replay_mode {replay_mode!r}", print_mode=print_mode)
         return 1
-    if replay_mode != "live":
+    # v2: 'cache' is the user-facing determinism mode; 'replay' runs a captured
+    # bundle in cache mode (pure offline raise-on-miss arrives in v3).
+    effective_mode = "cache" if replay_mode in ("cache", "replay") else "live"
+    if replay_mode == "replay":
         print(
-            f"note: replay_mode={replay_mode} is not implemented in v1 (only 'live'); running live.",
+            "note: replay_mode='replay' runs a captured bundle in cache mode "
+            "(pure offline raise-on-miss arrives in v3).",
             file=sys.stderr,
         )
     if workflow_name and resume_session:
         _print_error(
-            "--workflow and --resume are mutually exclusive (workflows are not session-resumable in v1)",
+            "--workflow and --resume are mutually exclusive (workflows are not session-resumable)",
             print_mode=print_mode,
         )
         return 1
@@ -299,7 +306,7 @@ def cmd_run(
             from koboi.workflows.store import FileWorkflowStore
 
             bundle = FileWorkflowStore(scope="project").load(workflow_name)
-            agent = KoboiAgent.from_config_string(bundle, verbose=verbose)
+            agent = KoboiAgent.from_config_string(bundle, verbose=verbose, replay_mode=effective_mode)
             if input_json:
                 try:
                     parsed = json.loads(input_json)
@@ -308,10 +315,20 @@ def cmd_run(
                     _print_error(f"--input is not valid JSON: {e}", print_mode=print_mode)
                     return 1
         else:
-            agent = KoboiAgent.from_config(config_path, verbose=verbose, resume_session=resume_session)
+            agent = KoboiAgent.from_config(
+                config_path, verbose=verbose, resume_session=resume_session, replay_mode=effective_mode
+            )
     except Exception as e:
         _print_error(f"loading agent: {e}", print_mode=print_mode)
         return 1
+
+    if clear_cache:
+        from koboi.llm.cache import CachedClient
+
+        core_client = getattr(agent._core, "client", None) if agent._core else None
+        if isinstance(core_client, CachedClient):
+            cleared = core_client._cache.clear()
+            print(f"Cleared {cleared} cached response(s).", file=sys.stderr)
 
     # --resume: rehydrate-and-continue an interrupted session.
     if resume_session:

@@ -3,7 +3,6 @@
 import asyncio
 
 from koboi.llm.cache import (
-    CacheEntry,
     CacheMissError,
     CacheMissPolicy,
     CachedClient,
@@ -13,7 +12,7 @@ from koboi.llm.cache import (
     _serialize_response,
 )
 from koboi.types import AgentResponse, TokenUsage, ToolCall
-from tests.conftest import MockClient, make_mock_response
+from tests.conftest import MockClient
 
 
 def _resp(content="hello", tool_calls=None, model="mock-model"):
@@ -40,9 +39,13 @@ class TestCacheKey:
         assert compute_cache_key("m", msgs, None, None) == compute_cache_key("m", msgs, [], {})
 
     def test_insertion_order_independent(self):
-        a = compute_cache_key("m", [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}], None, None)
+        a = compute_cache_key(
+            "m", [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}], None, None
+        )
         # same messages, same set -> same key (sort_keys handles nested dict order)
-        b = compute_cache_key("m", [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}], None, None)
+        b = compute_cache_key(
+            "m", [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}], None, None
+        )
         assert a == b
 
 
@@ -140,7 +143,7 @@ class TestCachedClient:
         client = CachedClient(inner, ResponseCache(tmp_path / "c"), on_miss=CacheMissPolicy.RAISE)
         try:
             asyncio.run(client.complete([{"role": "user", "content": "hi"}]))
-            assert False, "expected CacheMissError"
+            raise AssertionError("expected CacheMissError")
         except CacheMissError:
             pass
         assert inner.call_count == 0  # never called the inner
@@ -170,7 +173,7 @@ class TestCachedClient:
             return events
 
         # first call: live stream (miss) -> stores
-        live = asyncio.run(collect(True))
+        asyncio.run(collect(True))
         assert inner.call_count == 1
         # second call: cache hit -> single TextDelta + CompleteEvent
         hit = asyncio.run(collect(False))
@@ -190,3 +193,38 @@ class TestCachedClient:
         client = CachedClient(inner, ResponseCache(tmp_path / "c"))
         assert client.model == "gpt-x"
         assert client.provider == "?"  # MockClient has no provider attr
+
+
+class TestFacadeCacheWiring:
+    def _cfg(self, **ov):
+        cfg = {
+            "agent": {"name": "x", "system_prompt": "h", "max_iterations": 3},
+            "llm": {"provider": "openai", "model": "m", "api_key": "test", "base_url": "http://x/v1"},
+            "memory": {"backend": "in_memory"},
+        }
+        cfg.update(ov)
+        return cfg
+
+    def test_from_dict_cache_mode_wraps_client(self, tmp_path):
+        from koboi.facade import KoboiAgent
+
+        from koboi.llm.cache import CachedClient
+
+        agent = KoboiAgent.from_dict(self._cfg(), replay_mode="cache", cache_dir=str(tmp_path / "c"))
+        assert isinstance(agent._core.client, CachedClient)
+
+    def test_from_dict_live_mode_does_not_wrap(self):
+        from koboi.facade import KoboiAgent
+        from koboi.llm.cache import CachedClient
+
+        agent = KoboiAgent.from_dict(self._cfg())
+        assert not isinstance(agent._core.client, CachedClient)
+
+    def test_config_with_replay_is_immutable(self):
+        from koboi.config import Config
+
+        cfg = Config.from_dict(self._cfg())
+        cfg2 = cfg.with_replay(replay_mode="cache", cache_dir="/tmp/x")
+        assert cfg.replay == {}  # original untouched
+        assert cfg2.replay.get("mode") == "cache"
+        assert cfg2.replay.get("cache_dir") == "/tmp/x"

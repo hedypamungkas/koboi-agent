@@ -86,19 +86,30 @@ class KoboiAgent:
         config_path: str | Path,
         verbose: bool = False,
         resume_session: str | None = None,
+        replay_mode: str | None = None,
+        cache_dir: str | None = None,
     ) -> KoboiAgent:
         """Factory method: create a KoboiAgent from YAML config.
 
         Pass ``resume_session`` to rehydrate-and-continue an interrupted session
         (P2-A): the SQLite memory reloads that session's conversation and the
         journal inherits its turn numbering. Call ``agent.resume()`` to actually
-        resume the loop.
+        resume the loop. ``replay_mode`` / ``cache_dir`` inject a per-run cache
+        mode (see ``koboi.llm.cache``) without mutating the source config.
         """
         config = Config.from_yaml(config_path)
-        return cls._from_config(config, verbose=verbose, resume_session=resume_session)
+        return cls._from_config(
+            config,
+            verbose=verbose,
+            resume_session=resume_session,
+            replay_mode=replay_mode,
+            cache_dir=cache_dir,
+        )
 
     @classmethod
-    def from_dict(cls, data: dict, verbose: bool = False) -> KoboiAgent:
+    def from_dict(
+        cls, data: dict, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None
+    ) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a Python dict.
 
         Usage:
@@ -108,10 +119,12 @@ class KoboiAgent:
             })
         """
         config = Config.from_dict(data)
-        return cls._from_config(config, verbose=verbose)
+        return cls._from_config(config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir)
 
     @classmethod
-    def from_config_string(cls, yaml_string: str, verbose: bool = False) -> KoboiAgent:
+    def from_config_string(
+        cls, yaml_string: str, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None
+    ) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a YAML string.
 
         Usage:
@@ -124,7 +137,7 @@ class KoboiAgent:
             ''')
         """
         config = Config.from_string(yaml_string)
-        return cls._from_config(config, verbose=verbose)
+        return cls._from_config(config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir)
 
     @classmethod
     def _from_config(
@@ -132,12 +145,18 @@ class KoboiAgent:
         config: Config,
         verbose: bool = False,
         resume_session: str | None = None,
+        replay_mode: str | None = None,
+        cache_dir: str | None = None,
     ) -> KoboiAgent:
         """Shared builder: assemble all subsystems from a Config object."""
         if resume_session:
             # Point the SQLite memory at the target session so it rehydrates that
             # conversation (and the journal inherits its turn numbering).
             config._data.setdefault("memory", {})["session_id"] = resume_session
+        if replay_mode is not None or cache_dir is not None:
+            # Inject a per-run cache mode on an immutable copy (the shared pooled
+            # server Config must not be mutated -- AgentCore is not concurrent-safe).
+            config = config.with_replay(replay_mode=replay_mode, cache_dir=cache_dir)
         # Orchestration mode: transparent to caller
         if config.orchestration.get("enabled"):
             return _build_orchestration(config, verbose=verbose)
@@ -656,6 +675,35 @@ def _resolve_chat_client(config: Config, logger: AgentLogger | None) -> Client:
     return _build_client(config, logger)
 
 
+def _resolve_replay_mode(config: Config) -> str:
+    """Effective replay mode. Precedence: top-level ``replay.mode`` (incl. the
+    CLI-injected value set by ``Config.with_replay``) > workflow-level
+    ``orchestration.determinism.replay_mode`` (when not ``live``) > ``live``."""
+    mode = config.replay.get("mode") or "live"
+    if mode == "live":
+        det = (config.orchestration.get("determinism") or {}).get("replay_mode")
+        if det and det != "live":
+            return det
+    return mode
+
+
+def _resolve_cache_dir(config: Config) -> str:
+    return config.replay.get("cache_dir") or ".koboi/cache"
+
+
+def _maybe_wrap_cache(client: Client, config: Config) -> Client:
+    """Wrap a chat client in ``CachedClient`` when the effective replay mode is
+    ``cache``. Idempotent (never double-wraps). Embeddings are NOT wrapped (they
+    flow through a separate builder)."""
+    if _resolve_replay_mode(config) != "cache":
+        return client
+    from koboi.llm.cache import CachedClient, ResponseCache
+
+    if isinstance(client, CachedClient):
+        return client
+    return CachedClient(client, ResponseCache(_resolve_cache_dir(config)))
+
+
 def _build_tools(config: Config) -> ToolRegistry:
     registry = ToolRegistry()
     builtin_list = config.get("tools", "builtin", default=[])
@@ -1028,7 +1076,7 @@ class AgentAssembler:
         return self.logger
 
     def build_client(self) -> Client:
-        self.client = _resolve_chat_client(self.config, self.logger)
+        self.client = _maybe_wrap_cache(_resolve_chat_client(self.config, self.logger), self.config)
         return self.client
 
     def build_memory(self) -> object:
@@ -1700,11 +1748,13 @@ def _build_orchestration(config: Config, verbose: bool = False):
         # behavior). Pool specs (W2) raise.
         def _agent_client_builder(agent_llm: dict | str) -> Client:
             if isinstance(agent_llm, str):
-                return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
-            if isinstance(agent_llm, dict) and "pool" in agent_llm:
-                return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
-            overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
-            return _build_client(config, assembler.logger, llm_overrides=overrides)
+                c = _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
+            elif isinstance(agent_llm, dict) and "pool" in agent_llm:
+                c = _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
+            else:
+                overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
+                c = _build_client(config, assembler.logger, llm_overrides=overrides)
+            return _maybe_wrap_cache(c, config)
 
     # G5: wire shared MCP clients into orchestration (default on). The shared clients
     # are connected once; the registrar re-registers their tools into each sub-agent's

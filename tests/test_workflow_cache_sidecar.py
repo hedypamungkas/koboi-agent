@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from koboi.llm.cache import CacheEntry, ResponseCache
+from koboi.llm.cache import ResponseCache
 from koboi.types import AgentResponse
 from koboi.workflows.cache_sidecar import (
     CacheSidecarManifest,
@@ -13,8 +13,26 @@ from koboi.workflows.cache_sidecar import (
 )
 
 _ENTRIES = [
-    ("aa" + "1" * 62, {"schema": "koboi-cache-1", "key": "aa" + "1" * 62, "model": "m", "created_at": "t1", "response": {"content": "a"}}),
-    ("bb" + "2" * 62, {"schema": "koboi-cache-1", "key": "bb" + "2" * 62, "model": "m", "created_at": "t2", "response": {"content": "b"}}),
+    (
+        "aa" + "1" * 62,
+        {
+            "schema": "koboi-cache-1",
+            "key": "aa" + "1" * 62,
+            "model": "m",
+            "created_at": "t1",
+            "response": {"content": "a"},
+        },
+    ),
+    (
+        "bb" + "2" * 62,
+        {
+            "schema": "koboi-cache-1",
+            "key": "bb" + "2" * 62,
+            "model": "m",
+            "created_at": "t2",
+            "response": {"content": "b"},
+        },
+    ),
 ]
 
 
