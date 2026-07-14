@@ -137,6 +137,11 @@ def register_framework_scorers() -> None:
         ScorerRegistry.register("ragas_recall", lambda **kw: RAGASScorer("context_recall", **kw))
         ScorerRegistry.register("ragas_factual_correctness", lambda **kw: RAGASScorer("factual_correctness", **kw))
         ScorerRegistry.register("ragas_composite", lambda **kw: RAGASCompositeScorer(**kw))
+
+        # W6.1: deep_research faithfulness (reads dynamic context['research_sources'] not static case.context_docs)
+        from koboi.eval.scorers.deep_research_scorer import DeepResearchFaithfulnessScorer
+
+        ScorerRegistry.register("deep_research_faithfulness", lambda **kw: DeepResearchFaithfulnessScorer())
     except ImportError:
         pass
 

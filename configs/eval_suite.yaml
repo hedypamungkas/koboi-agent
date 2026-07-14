@@ -39,14 +39,17 @@ eval:
         - cost
       max_cases: 50
 
-    # RAGAS: RAG Quality (requires ragas package)
-    - name: ragas_quality
+    # RAGAS: RAG Quality (requires ragas package) -- suite entry removed: it referenced a
+    # non-existent evals/rag_quality.yaml. Re-add when a YAML-cases RAG quality file exists
+    # (the t.* evals use a different loader -- PythonTestLoader, not YAMLLoader).
+
+    # Deep Research: structural quality (keyword_presence scorer checks for the ## Sources footer).
+    # Run: koboi eval-test --config configs/deep_research_demo.yaml --suite deep_research_quality
+    - name: deep_research_quality
       framework: yaml
-      source: "./evals/rag_quality.yaml"
+      source: "./evals/deep_research_golden.yaml"
       scorers:
-        - ragas_faithfulness
-        - ragas_relevancy
-        - ragas_composite
+        - name: keyword_presence
 
     # GAIA: General Tasks (requires datasets package)
     - name: gaia_level1

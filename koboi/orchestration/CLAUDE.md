@@ -3,25 +3,49 @@
 ## What this is
 Routes a query to one or more specialist agents, runs them, and combines results. Execution
 modes: `sequential`, `parallel`, `dag` (dependency-ordered, wave-parallel), `conditional`
-(output-predicate branching), and `dynamic` (an LLM plans the graph per query, plan-or-skip).
-Optionally revises low-quality answers, and can build specialist agents on the fly for unknown
+(output-predicate branching), `dynamic` (an LLM plans the graph per query, plan-or-skip), and
+`deep_research` (coverage-gated, cited web research — plan → search → fetch → coverage eval →
+drill → synthesize). Optionally revises low-quality answers, and can build specialist agents on the fly for unknown
 domains. Each agent is a standalone `AgentCore` (`koboi/loop.py`).
 
 ## Key files
 ```
 router.py         BaseRouter ABC + KeywordRouter/LLMRouter/HybridRouter (return RoutingDecision)
-orchestrator.py   Orchestrator (sequential/parallel/dag/conditional/dynamic) + QualityEvaluator; run()/run_stream()
+orchestrator.py   Orchestrator (sequential/parallel/dag/conditional/dynamic/deep_research) +
+                  QualityEvaluator; run()/run_stream(); _run_deep_research loop + _synthesize_research
 factory.py        AgentFactory (builds an AgentCore per agent) + DynamicAgentBuilder
 dag_scheduler.py  DagScheduler -- topological wave grouping from AgentDef.depends_on; persists a
                   durable graph plan + per-node completion to the `steps` table (graph-cursor-resume primitives)
-planner.py        plan_or_skip() -- one LLM call (response_format) decides needs_workflow + extracts
-                  the step graph; simple requests skip the workflow. Exports PlanResult / PlanStep
+planner.py        plan_or_skip() + plan_research() -- one LLM call (response_format) decides
+                  needs_workflow + extracts the step graph; simple requests skip the workflow.
+                  Exports PlanResult / PlanStep (+ search_queries)
+research.py       deep_research engine primitives: ResearchBudget (hard caps), SourceStore (numbered
+                  [n] citations), ResearchContext (per-run state, journable), CoverageEvaluator
+                  (LLM judge), RESEARCH_TOOLS_CONFIG, synthesis/coverage prompts
 workflow_graph.py WorkflowGraph -- ergonomic programmatic builder (add_node/add_edge/
                   add_conditional_edges/compile().invoke()), LangGraph-shaped, over DagScheduler + Orchestrator
 _utils.py         extract_json() -- brace-balanced JSON extraction from LLM text
 __init__.py       Re-exports BaseRouter, the 3 routers, Orchestrator, QualityEvaluator, AgentFactory,
                   DynamicAgentBuilder, DagScheduler, PlanResult, PlanStep, plan_or_skip
 ```
+
+## deep_research mode (`execution.mode: deep_research`)
+Coverage-gated, cited web research (GPT-Researcher shape). `Orchestrator._run_deep_research`:
+1. `plan_research` (planner.py) — multi-step queries get a step graph; simple queries take a fast
+   direct-answer fallback (`_research_direct_answer`, also persists its answer session-tagged).
+2. Per-node DAG waves — each node is an `AgentCore` with `web_search`/`web_fetch` wired to the
+   configured `websearch` providers, wrapped in `CountingProvider` budget proxies. Findings flow
+   into a `SourceStore` as numbered citations `[n]`.
+3. `CoverageEvaluator` — one LLM judge/round → `(score, follow_ups, coverage_map)`. Iterates
+   (re-plans on gaps) until `coverage_threshold` or `max_depth`/budget. Deterministic safety net:
+   generates generic follow-ups if the judge returns none on low coverage (prevents shallow stops).
+4. `_synthesize_research` → cited report; `_verify_citations` strips unresolvable `[n]`; Sources footer.
+5. Persistence — `ResearchContext` (query + sources + coverage + `final_report`) journaled to the
+   `research_context` SQLite table (session-tagged) → `GET /v1/sessions/{id}` + `koboi run --resume`.
+
+Orchestrator `__init__` deep_research params: `research` (caps/threshold dict), `websearch_conf`
+(provider config), `sandbox` (node tool dep), `session_id` (tags persisted rows). Production
+quality bar + smoke scenarios: `docs/deep-research-smoke.md`.
 
 ## Extension API -- adding a router
 There is NO registry or decorator for routers. To add one:

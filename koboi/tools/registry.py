@@ -30,6 +30,7 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
+from koboi.exceptions import AgentHandoverError
 from koboi.types import ToolDefinition, RiskLevel
 
 # Short YAML override keys -> canonical registered tool names.
@@ -227,6 +228,11 @@ class ToolRegistry:
             return str(result)
         except asyncio.TimeoutError:
             return f"Error: tool '{name}' timed out after {effective_timeout}s"
+        except AgentHandoverError:
+            # B1: a control-flow signal, not a tool failure -- must propagate out of
+            # execute -> execute_tool_call -> the loop -> _run_agent/run_job (which
+            # convert it to a HandoverEvent / awaiting_human). Do NOT stringify it.
+            raise
         except KeyboardInterrupt:
             raise
         except SystemExit:

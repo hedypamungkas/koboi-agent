@@ -1,0 +1,38 @@
+# Brave Search provider demo (Wave 0).
+#
+# The web: section selects the Brave search provider; web_search reads it from the
+# tool registry's injected search_provider dep. Defaults to mock when no key is set.
+#
+# Run:  BRAVE_API_KEY=... koboi run configs/web_brave.yaml -m "What changed in Python 3.13?"
+
+agent:
+  name: "brave-search-agent"
+  description: "Web research assistant using the Brave Search provider"
+  system_prompt: "You are a web research assistant. Use web_search to find current information, then web_fetch to read a source if you need detail."
+  mode: act
+
+llm:
+  provider: openai
+  model: ${OPENAI_MODEL:gpt-4o-mini}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+
+tools:
+  builtin: [web_search, web_fetch]
+
+websearch:
+  search:
+    provider: brave
+    max_results: 8
+    brave:
+      api_key: ${BRAVE_API_KEY:}
+      country: "US"
+      # freshness: "pw"   # past week; omit for all time
+
+memory:
+  backend: sqlite
+  db_path: ./koboi_memory.db
+
+sandbox:
+  backend: passthrough
+  workdir: ./workspace

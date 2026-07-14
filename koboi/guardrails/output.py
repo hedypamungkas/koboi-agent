@@ -34,7 +34,7 @@ class OutputGuardrail(PatternGuardrail):
             logger=logger,
         )
 
-    async def check(self, agent_output: str) -> GuardrailResult:
+    async def check(self, agent_output: str, context: list[str] | None = None) -> GuardrailResult:
         if not agent_output:
             return GuardrailResult(passed=True)
 

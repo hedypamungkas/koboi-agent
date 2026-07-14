@@ -25,9 +25,7 @@ class Throttler:
 
     def __init__(self, default_delay: float | None = None) -> None:
         self._default_delay = (
-            default_delay
-            if default_delay is not None
-            else float(os.environ.get("E2E_THROTTLE_SECONDS", "1.0"))
+            default_delay if default_delay is not None else float(os.environ.get("E2E_THROTTLE_SECONDS", "1.0"))
         )
 
     async def wait(self, seconds: float | None = None) -> None:

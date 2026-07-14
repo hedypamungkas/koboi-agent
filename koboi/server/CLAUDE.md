@@ -50,6 +50,8 @@ DELETE /v1/sessions/{id}/mcp/servers/{sid}  Detach a session MCP server
 POST   /v1/sessions/{id}/mcp/servers/{sid}/reconnect  Reconnect a session MCP server
 POST   /v1/chat/stream                Interactive SSE chat (lock + HITL + idempotency + per-request mode/cap)
 POST   /v1/sessions/{id}/approve      Resolve a pending HITL approval
+POST   /v1/sessions/{id}/transfer     Reassign session ownership to a human operator (handover take-over)
+GET    /v1/sessions/{id}/stream        Replay buffered events (B2: history + B4 warm-handoff digest) for an operator
 POST   /v1/jobs                       Submit autonomous job (202; admission + idempotency)
 GET    /v1/jobs                       List caller's jobs
 GET    /v1/jobs/{id}                  Job status (result/error/retriable)
@@ -110,6 +112,14 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
   carries tenant `result` → use HTTPS + a secret. Config is threaded `create_app` →
   `_register_routes(job_webhooks=...)` → `_start_job` (NOT a create_app closure: routes
   live in `_register_routes`). v1: terminal statuses only.
+- **Handover flow** (`handover:` config, PR #40): the `transfer_to_human` tool /
+  `HandoverDetectionHook` raise `AgentHandoverError`; `_run_agent` (SSE) converts it to a
+  `HandoverEvent` and `run_job` converts it to an `awaiting_human` terminal status. No Future
+  is awaited, so `pool.session_lock` releases when the run ends and a human operator takes over
+  via `POST /v1/sessions/{id}/transfer` (ownership) + `GET /v1/sessions/{id}/stream` (B2 replay:
+  history + B4 digest) + a new `POST /v1/chat/stream`. `handover.webhooks` fire HMAC-signed
+  `handover.requested` callbacks mid-conversation (mirror of `jobs.webhooks`); `handover.digest.enabled`
+  generates the warm-handoff summary. See `docs/channel-bridge.md` for the omnichannel surfaces.
 - **Pooled agent state must be restored**: snapshot `mode`/`max_iterations`/`_tool_pipeline`/
   `approval_handler` before a run, restore in `finally` (agent is reused; without restore
   a later `mode=None` request inherits this request's mode).
@@ -130,3 +140,15 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
   this package -- `sse_stream` just sees delayed deltas.
 - **M5 seams**: `protocols.py` defines SessionStore/LockProvider/EventBuffer for a
   future Redis/SaaS swap; do NOT pre-protocol-ize for one impl.
+- **Orchestrated configs (`execution.mode: dynamic|dag|deep_research`) build `core=None`** —
+  `KoboiAgent(core=None, orchestrator=...)`. The orchestrator manages its own per-node agents, so
+  there's no `AgentCore`/HITL pipeline. Every `_core` access is guarded:
+  - `/v1/chat/stream` (`app.py` B1 guard): `if agent._core is not None:` wraps the approval-handler
+    build + mode/`max_iterations` snapshot/restore; `handler` stays `None` for core=None.
+  - `/v1/jobs` middle path (`jobs.py`): `if agent._core is None:` → config-level
+    `sandbox.backend='restricted'` check (passthrough refused) → `agent.run_stream()` / `agent.resume()`.
+    Job results come from `OrchestrationCompleteEvent.final_answer` (NOT `CompleteEvent` — distinct class).
+  - `GET /v1/sessions/{id}` (`pool._deep_research_messages`): surfaces the query + cited report from
+    the session-tagged `research_context` table (returns `[]` only when no research run exists).
+  - `pool.py` `_client_factory`/`_approval_handler` seams are guarded too (skipped for core=None).
+  See `docs/deep-research-smoke.md` for the production bar.

@@ -67,9 +67,7 @@ class TestNonIdempotentSkippedOnResume:
         )
         agent._core.client = MockClient(
             [
-                make_mock_response(
-                    tool_calls=[make_mock_tool_call("tool_safe"), make_mock_tool_call("tool_charge")]
-                ),
+                make_mock_response(tool_calls=[make_mock_tool_call("tool_safe"), make_mock_tool_call("tool_charge")]),
                 make_mock_response(content="done"),
             ]
         )

@@ -16,10 +16,12 @@ the executed set are ignored (a routed subgraph runs in its induced order).
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import time
 from uuid import uuid4
 
-from koboi.memory_sqlite import ensure_steps_table
+from koboi.memory_sqlite import ensure_research_context_table, ensure_steps_table
 from koboi.task import TaskManager
 
 
@@ -170,3 +172,91 @@ class DagScheduler:
         finally:
             conn.close()
         return {row[0]: row[1] for row in rows if row[0]}
+
+    @property
+    def db_path(self) -> str | None:
+        return self._db_path
+
+    @classmethod
+    def persist_research_context(
+        cls, db_path: str, graph_run_id: str, context_json: str, session_id: str | None = None
+    ) -> None:
+        """Journal a ResearchContext for a graph run (W2 deep-research).
+
+        One upsert row per ``graph_run_id``. Called by ``_run_deep_research`` after each
+        depth round so the run state (sub-questions / SourceStore / coverage_map / budget /
+        depth) is inspectable + recoverable. Cross-session rehydrate-on-resume is W2.1.
+        ``session_id`` tags the row so ``GET /v1/sessions/{id}`` can map a session to its
+        latest research context. No-op without db_path/graph_run_id.
+        """
+        if not db_path or not graph_run_id:
+            return
+        # Denormalize depth (0 = direct-answer, >=1 = multi-step) for report-wins precedence:
+        # a cited multi-step report outranks a later trivial direct-answer in the same session.
+        try:
+            depth = int(json.loads(context_json).get("depth", 0))
+        except (ValueError, TypeError):
+            depth = 0
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            conn.execute(
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id, depth) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(graph_run_id) DO UPDATE SET "
+                "context_json=excluded.context_json, "
+                "updated_at=excluded.updated_at, "
+                "session_id=COALESCE(excluded.session_id, research_context.session_id), "
+                "depth=excluded.depth",
+                (graph_run_id, context_json, time.time(), session_id, depth),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @classmethod
+    def load_research_context(cls, db_path: str, graph_run_id: str) -> str | None:
+        """Read the journaled ResearchContext JSON for a graph run, or None."""
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            row = conn.execute(
+                "SELECT context_json FROM research_context WHERE graph_run_id=?",
+                (graph_run_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
+
+    @classmethod
+    def load_latest_research_context(cls, db_path: str) -> str | None:
+        """Read the latest journaled ResearchContext JSON for a DB (W5.1 resume)."""
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            row = conn.execute("SELECT context_json FROM research_context ORDER BY updated_at DESC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None
+
+    @classmethod
+    def load_research_context_for_session(cls, db_path: str, session_id: str | None) -> str | None:
+        """Read the best journaled ResearchContext JSON for a session (GET /v1/sessions/{id}).
+
+        Report-wins precedence: a multi-step cited report (depth >= 1) outranks a later trivial
+        direct-answer (depth 0) in the same session. Among equal depth, the latest (updated_at)
+        wins. Returns None when the session has no deep-research run.
+        """
+        if not db_path or not session_id:
+            return None
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            row = conn.execute(
+                "SELECT context_json FROM research_context WHERE session_id=? "
+                "ORDER BY depth DESC, updated_at DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row[0] if row else None

@@ -12,6 +12,7 @@ wired by the facade and the server.
 base.py           BaseGuardrail ABC (async check) + PatternGuardrail (regex-driven base)
 input.py          InputGuardrail -- prompt-injection + length check (action "block")
 output.py         OutputGuardrail -- secret/PII leak screen (action "warn")
+grounding.py       GroundingGuardrail -- runtime faithfulness (claim-decompose + NLI vs retrieved context; action "abstain"; A3; fail-soft)
 rate_limiter.py   RateLimiter -- per-session/per-tool/per-minute caps (RateLimitConfig)
 audit.py          AuditTrail (in-memory) + SQLiteAuditTrail (WAL-persistent)
 approval.py       ApprovalHandler base + CLI/Callback/AsyncCallback/Autonomous handlers
@@ -31,7 +32,8 @@ __init__.py       Re-exports public surface; calls register_builtin_guardrails()
 - Registration is a METHOD CALL (no decorator): `GuardrailRegistry.register("name", lambda **kw: MyGuardrail(**kw))`. Build from config via
   `GuardrailRegistry.from_config([{"name": ..., ...}])`.
 - Built-in factories (registered at import): `injection_detector` (InputGuardrail),
-  `content_filter` (OutputGuardrail). `RateLimiter`/`AuditTrail` are NOT registered --
+  `content_filter` (OutputGuardrail), `grounding_check` (GroundingGuardrail — opt-in runtime
+  faithfulness, Wave 2 A3). `RateLimiter`/`AuditTrail` are NOT registered --
   they are constructed directly by the facade.
 
 ## Conventions

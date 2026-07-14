@@ -55,9 +55,7 @@ class TestOwnerColumn:
         assert "owner" in sess_cols
         # old row keeps NULL owner; new rows are stamped.
         mem.add_user_message("new")
-        row = mem._ensure_conn().execute(
-            "SELECT owner FROM messages WHERE content='new'"
-        ).fetchone()
+        row = mem._ensure_conn().execute("SELECT owner FROM messages WHERE content='new'").fetchone()
         assert row[0] == "alice"
 
     def test_migration_is_idempotent(self, tmp_path):
@@ -73,12 +71,8 @@ class TestOwnerColumn:
         mem = SQLiteMemory(db_path=db, session_id="S1", owner="bob")
         mem.add_user_message("hi")
         mem.ensure_session_record(agent_name="a", model="m")
-        mrow = mem._ensure_conn().execute(
-            "SELECT owner FROM messages WHERE session_id='S1'"
-        ).fetchone()
-        srow = mem._ensure_conn().execute(
-            "SELECT owner FROM sessions WHERE session_id='S1'"
-        ).fetchone()
+        mrow = mem._ensure_conn().execute("SELECT owner FROM messages WHERE session_id='S1'").fetchone()
+        srow = mem._ensure_conn().execute("SELECT owner FROM sessions WHERE session_id='S1'").fetchone()
         assert mrow[0] == "bob"
         assert srow[0] == "bob"
         assert mem.owner == "bob"
@@ -86,9 +80,7 @@ class TestOwnerColumn:
     def test_default_owner_is_none(self, tmp_path):
         mem = SQLiteMemory(db_path=str(tmp_path / "n.db"), session_id="S")
         mem.add_user_message("hi")
-        row = mem._ensure_conn().execute(
-            "SELECT owner FROM messages WHERE session_id='S'"
-        ).fetchone()
+        row = mem._ensure_conn().execute("SELECT owner FROM messages WHERE session_id='S'").fetchone()
         assert row[0] is None
         assert mem.owner is None
 

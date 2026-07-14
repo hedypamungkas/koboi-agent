@@ -1,0 +1,24 @@
+# Golden research queries for deep_research quality evaluation (Tier 3 framework).
+#
+# Expandable to N≥100 with human-annotated expected answers + context_docs for RAGAS faithfulness.
+# These 5 cases are the FRAMEWORK — the eval infrastructure (YAMLLoader + scorers) is already shipped.
+#
+# Run: koboi eval-test --config configs/deep_research_demo.yaml --suite deep_research_quality
+# (LIVE — needs OPENAI_API_KEY; web.search.provider defaults to mock → $0 search cost)
+# The keyword_presence scorer checks for "Sources" (reliable structural marker — the ## Sources footer).
+
+cases:
+  - user_message: "Research the Python programming language release cycle."
+    expected_keywords: ["Sources"]
+
+  - user_message: "Research FastAPI's key features and how it compares to Flask."
+    expected_keywords: ["Sources"]
+
+  - user_message: "Research Docker best practices for production deployments."
+    expected_keywords: ["Sources"]
+
+  - user_message: "Research Python asyncio concurrency model."
+    expected_keywords: ["Sources"]
+
+  - user_message: "Research the Model Context Protocol (MCP) standard."
+    expected_keywords: ["Sources"]

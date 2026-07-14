@@ -39,7 +39,11 @@ class TestCheckTurnToolAliases:
 
     def test_multiple_expected_tools_all_satisfied_via_aliases(self):
         ex = _executor()
-        turn = Turn("msg", expect_tools=["task_create", "task_list"], tool_aliases={"task_create": ["add_todo"], "task_list": ["list_todos"]})
+        turn = Turn(
+            "msg",
+            expect_tools=["task_create", "task_list"],
+            tool_aliases={"task_create": ["add_todo"], "task_list": ["list_todos"]},
+        )
         _, ok = ex._check_turn(turn, "ok", [{"tool_name": "add_todo"}, {"tool_name": "list_todos"}], _EVENTS)
         assert ok
 

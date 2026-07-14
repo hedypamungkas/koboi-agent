@@ -75,3 +75,10 @@ def register_builtin_guardrails() -> None:
         "content_filter",
         lambda **kw: OutputGuardrail(**kw),
     )
+    # A3: runtime faithfulness guardrail (opt-in via config; side-LLM NLI judge).
+    from koboi.guardrails.grounding import GroundingGuardrail
+
+    GuardrailRegistry.register(
+        "grounding_check",
+        lambda **kw: GroundingGuardrail(**kw),
+    )

@@ -124,9 +124,11 @@ async def test_mixed_workload_concurrent():
             sid = r.json()["session_id"]
             content = ""
             async with c.stream(
-                "POST", "/v1/chat/stream",
+                "POST",
+                "/v1/chat/stream",
                 json={"message": "Reply with just the word: pong"},
-                headers={**_auth_headers(), "X-Session-Id": sid}, timeout=200,
+                headers={**_auth_headers(), "X-Session-Id": sid},
+                timeout=200,
             ) as resp:
                 async for line in resp.aiter_lines():
                     if line.startswith("data: ") and line[6:] != "[DONE]":
@@ -137,7 +139,9 @@ async def test_mixed_workload_concurrent():
 
     async def job():
         async with httpx.AsyncClient(base_url=BASE_URL, timeout=200) as c:
-            r = await c.post("/v1/jobs", json={"message": "Use the calculator to compute 9*9."}, headers=_auth_headers())
+            r = await c.post(
+                "/v1/jobs", json={"message": "Use the calculator to compute 9*9."}, headers=_auth_headers()
+            )
             assert r.status_code == 202
             jid = r.json()["job_id"]
             for _ in range(120):
@@ -166,8 +170,11 @@ async def test_session_create_delete_recreate():
         # The recreated session is usable.
         got_content = False
         async with c.stream(
-            "POST", "/v1/chat/stream", json={"message": "say hi"},
-            headers={**_auth_headers(), "X-Session-Id": sid2}, timeout=120,
+            "POST",
+            "/v1/chat/stream",
+            json={"message": "say hi"},
+            headers={**_auth_headers(), "X-Session-Id": sid2},
+            timeout=120,
         ) as resp:
             async for line in resp.aiter_lines():
                 if line.startswith("data: ") and line[6:] != "[DONE]":

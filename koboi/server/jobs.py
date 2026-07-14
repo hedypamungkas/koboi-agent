@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 #: Terminal statuses (no further state transitions).
-TERMINAL = frozenset({"completed", "failed", "timed_out", "cancelled"})
+TERMINAL = frozenset({"completed", "failed", "timed_out", "cancelled", "awaiting_human"})
 
 
 class DuplicateIdempotencyKey(Exception):
@@ -513,6 +513,46 @@ def _emit_job_webhooks(webhooks: list[dict] | None, store: JobStore, job_id: str
     task.add_done_callback(_on_webhook_task_done)
 
 
+def _emit_handover_webhook(
+    webhooks: list[dict] | None,
+    session_id: str,
+    handover_id: str,
+    reason: str,
+    summary: str,
+) -> None:
+    """B5: fire-and-forget -- notify the host CS platform of a CHAT-path handover.
+
+    Unlike ``_emit_job_webhooks`` (terminal job status), this fires mid-conversation
+    when a ``HandoverEvent`` is emitted on ``/chat/stream`` (B1/B1.5). Reuses the
+    jobs ``_post_webhook`` (2-retry, fail-safe) + HMAC signing + ``_WEBHOOK_TASKS``.
+    Payload: ``{event: "handover.requested", session_id, handover_id, reason, summary}``.
+    Job-path handovers already fire ``job.awaiting_human`` via ``_emit_job_webhooks``.
+    """
+    if not webhooks:
+        return
+    payload = {
+        "event": "handover.requested",
+        "session_id": session_id,
+        "handover_id": handover_id,
+        "reason": reason,
+        "summary": summary,
+    }
+    body = json.dumps(payload).encode()
+    for wh in webhooks:
+        url = wh.get("url")
+        if not url:
+            continue
+        headers = {"Content-Type": "application/json"}
+        secret = wh.get("secret")
+        if secret:
+            signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+            headers["X-Koboi-Signature"] = f"sha256={signature}"
+        timeout = wh.get("timeout") or _WEBHOOK_DEFAULT_TIMEOUT
+        task = asyncio.create_task(_post_webhook(url, body, headers, float(timeout)))
+        _WEBHOOK_TASKS.add(task)
+        task.add_done_callback(_on_webhook_task_done)
+
+
 async def run_job(
     job_id: str,
     pool: AgentPool,
@@ -539,6 +579,8 @@ async def run_job(
     record = registry.get(job_id)
     if record is None:
         return
+
+    from koboi.exceptions import AgentHandoverError  # noqa: PLC0415 (lazy; jobs.py keeps koboi imports function-local)
 
     try:
         final_content = await asyncio.wait_for(
@@ -572,6 +614,16 @@ async def run_job(
         )
         registry.set_terminal(job_id, "timed_out")
         _emit_job_webhooks(webhooks, store, job_id, "timed_out")
+    except AgentHandoverError as he:
+        # B1: the agent yielded via transfer_to_human -> awaiting_human (NOT failed).
+        # Not reapable (not in the reaper's status IN tuple) -- it awaits human action.
+        store.update_status(
+            job_id,
+            "awaiting_human",
+            result_json=json.dumps({"reason": he.reason, "summary": he.summary}),
+        )
+        registry.set_terminal(job_id, "awaiting_human")
+        _emit_job_webhooks(webhooks, store, job_id, "awaiting_human")
     except Exception as exc:
         # M2: log type only (no traceback/locals) + mask/truncate the persisted
         # error so a failure never durable-stores the user prompt or leaked creds.
@@ -775,9 +827,42 @@ async def _execute_job(
             job_id, pool, registry, store, message, record, mode, max_iterations, replay_mode
         )
 
-    from koboi.events import CompleteEvent
+    from koboi.events import CompleteEvent, OrchestrationCompleteEvent
 
     agent = await pool.get_or_create(record.session_id)
+
+    # W5.1 B1-jobs middle path: orchestrated configs (core=None) run with a config-level
+    # sandbox check (not job-level AutonomousApprovalHandler). deep_research nodes carry
+    # their own sandbox/approval from factory build -- the AutonomousApprovalHandler only
+    # auto-approves write_file/delete_file (unused by deep_research nodes), so skipping it
+    # is safe. Single-agent configs (core is not None) fall through to the full job path below.
+    if agent._core is None:
+        backend = (
+            agent._config.get("sandbox", "backend", default="passthrough")
+            if hasattr(agent, "_config") and agent._config
+            else "passthrough"
+        )
+        if backend == "passthrough":
+            raise PermissionError(
+                "Autonomous jobs require sandbox.backend='restricted'; 'passthrough' is refused. "
+                "Configure the 'sandbox:' section before enabling jobs."
+            )
+        store.update_status(job_id, "running")
+        orchestrated_content: str | None = None
+        async with pool.session_lock(record.session_id):
+            if resume:
+                result = await agent.resume()
+                orchestrated_content = result.content
+            else:
+                async for event in agent.run_stream(message):
+                    registry.append_event(job_id, event)
+                    if isinstance(event, CompleteEvent):
+                        orchestrated_content = event.content
+                    elif isinstance(event, OrchestrationCompleteEvent):
+                        # deep_research/dynamic/dag emit OrchestrationCompleteEvent
+                        # (NOT CompleteEvent); the cited report is in final_answer.
+                        orchestrated_content = event.final_answer
+        return orchestrated_content
 
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network
     # isolation, so refuse it -- raise before running; run_job marks the job failed.

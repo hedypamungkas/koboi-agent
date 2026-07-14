@@ -16,7 +16,15 @@ class BaseGuardrail(ABC):
     """
 
     @abstractmethod
-    async def check(self, content: str) -> GuardrailResult: ...
+    async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
+        """Inspect ``content`` (user input or agent output) and return a verdict.
+
+        ``context`` is the list of retrieved chunk strings (output path only,
+        Wave 2 A3) so a grounding guardrail can judge faithfulness against the
+        retrieved evidence. ``None``/empty on the input path and for guardrails
+        that don't need it; implementors MUST accept and ignore it.
+        """
+        ...
 
 
 class PatternGuardrail(BaseGuardrail):

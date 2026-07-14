@@ -18,6 +18,7 @@ from koboi.events import (
 from koboi.exceptions import (
     AgentAbortedError,
     AgentGuardrailError,
+    AgentHandoverError,
     AgentMaxIterationsError,
 )
 from koboi.guardrails.base import BaseGuardrail
@@ -317,24 +318,48 @@ class AgentCore:
         ctx = await self._emit(HookEvent.PRE_INPUT, messages=self.memory.get_messages(), user_message=text_part)
         if ctx.abort:
             raise AgentAbortedError(ctx.inject_message or "Input rejected by hook")
+        _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
+        if _hr:
+            raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
 
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
         """Run output guardrails, emit POST_OUTPUT, save to memory.
 
-        ``block``/``deny``/``abort`` raises (denies the output); any other action
+        ``block``/``deny``/``abort`` raises (denies the output); ``abstain``
+        swaps the output for a refusal (A3 grounding guardrail); any other action
         (incl. ``warn`` and non-string/absent) prepends a warning and continues.
         The detailed reason is logged server-side only; the raised message carries
         just the guardrail name so a leaky ``reason`` can't re-leak via the error
         frame / durable job error.
         """
+        # A3: thread retrieved context to output guardrails so a grounding
+        # guardrail can judge faithfulness against the retrieved evidence.
+        retrieved_context: list[str] = []
+        if self.augmentation is not None:
+            _results = getattr(self.augmentation, "last_results", None) or []
+            retrieved_context = [r.chunk.content for r in _results]
         for grd in self.output_guardrails:
-            out_result = await grd.check(output)
+            out_result = await grd.check(output, context=retrieved_context)
             self._audit("output_check", details=f"guardrail={type(grd).__name__} passed={out_result.passed}")
             if not out_result.passed:
                 action = out_result.action if isinstance(out_result.action, str) else ""
                 if action.lower() in {"block", "deny", "abort"}:
                     self._log(f"Output blocked by {type(grd).__name__}: {out_result.reason}")
                     raise AgentGuardrailError(f"output blocked by {type(grd).__name__}", direction="output")
+                if action.lower() == "abstain":
+                    # A3.2: swap the output for a refusal. ``block`` is too harsh
+                    # (it denies the whole turn); ``warn`` is too weak (it
+                    # prepends). The guardrail supplies the refusal via
+                    # ``sanitized_content`` (or a default).
+                    self._last_output_guardrail = {
+                        "guardrail": type(grd).__name__,
+                        "reason": out_result.reason,
+                        "action": "abstain",
+                    }
+                    output = out_result.sanitized_content or (
+                        "I don't have enough grounded information to answer this confidently."
+                    )
+                    break
                 self._last_output_guardrail = {
                     "guardrail": type(grd).__name__,
                     "reason": out_result.reason,
@@ -343,7 +368,12 @@ class AgentCore:
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
 
-        await self._emit(HookEvent.POST_OUTPUT, iteration=iteration, llm_response=response)
+        ctx = await self._emit(HookEvent.POST_OUTPUT, iteration=iteration, llm_response=response)
+        if ctx.abort:
+            raise AgentAbortedError(ctx.inject_message or "Output rejected by hook")
+        _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
+        if _hr:
+            raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
         self.memory.add_assistant_message(output)
         return output
 
@@ -490,6 +520,20 @@ class AgentCore:
                     }
                     for r in results
                 ]
+            # A1: retrieval confidence observability. Always stamped when RAG is on
+            # (empty turns too) so consumers can see "retrieval ran, found nothing".
+            # Scores are NOT comparable across methods (keyword=[0,1), bm25=unbounded,
+            # semantic=[-1,1], hybrid=RRF~0.016, rerank:{p}=clamped, rerank:failed=base
+            # unclamped), so `method` MUST travel with max_score. Empty -> sentinel.
+            if results:
+                top = max(results, key=lambda r: r.score)
+                meta["retrieval_confidence"] = {
+                    "max_score": top.score,
+                    "method": top.retrieval_method,
+                    "count": len(results),
+                }
+            else:
+                meta["retrieval_confidence"] = {"max_score": None, "method": "none", "count": 0}
         # #9: stamp the query-rewrite outcome so evals/observability can inspect it.
         rw = getattr(self.augmentation, "last_rewrite", None)
         if rw:

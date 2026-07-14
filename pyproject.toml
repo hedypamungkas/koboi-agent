@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "koboi-agent"
-version = "0.13.0"
+version = "0.14.2"
 description = "Universal configurable AI agent framework — production-grade, YAML-driven, open-source ready."
 license = "MIT"
 readme = "README.md"
@@ -55,15 +55,23 @@ rerank-local = ["sentence-transformers>=2.7"]
 # Optional Indonesian NLP (stemmer) for the lexical retrievers -- enables `rag.stemmer: id`
 # so inflected forms (meN-/-kan/-i/-an) match their root. Pure-Python, lightweight.
 indo-nlp = ["Sastrawi>=1.0.1"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.19.1,<2.3.0", "bandit>=1.9", "types-PyYAML"]
+# Websearch readability extraction (boilerplate removal for web_fetch / RAG html source).
+# Optional -- when absent, web_fetch falls back to the stdlib regex extractor.
+websearch = ["trafilatura>=1.12"]
+# JS-rendered fetch provider (Playwright). NOTE: Playwright's browser engine is a
+# SYSTEM-level install (`playwright install chromium`), not a pure-Python dep -- analogous
+# to the seccomp system package above. Requires sandbox.backend: restricted at runtime.
+browser = ["playwright>=1.40"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.19.1,<2.4.0", "bandit>=1.9", "types-PyYAML"]
 all = [
     "langfuse>=2.0,<3.0",
     "fastapi>=0.110", "uvicorn[standard]>=0.27",
     "rich>=13.0", "textual>=0.40", "click>=8.0", "prompt_toolkit>=3.0", "rapidfuzz>=3.0",
     "tiktoken>=0.7",
+    "trafilatura>=1.12",
     "ragas>=0.2", "datasets>=2.14", "pandas>=2.0", "deepeval>=0.20",
-    "sentence-transformers>=2.7",
-    "pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.19.1,<2.3.0", "bandit>=1.9", "types-PyYAML",
+    "sentence-transformers>=2.7", "Sastrawi>=1.0.1",
+    "pytest>=7.0", "pytest-asyncio>=0.23", "pytest-cov", "pytest-benchmark>=4.0", "ruff>=0.4.0", "mypy>=1.19.1,<2.4.0", "bandit>=1.9", "types-PyYAML",
 ]
 
 [project.scripts]

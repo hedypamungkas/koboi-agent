@@ -39,7 +39,7 @@ class InputGuardrail(PatternGuardrail):
         )
         self.max_length = max_length or self.MAX_INPUT_LENGTH
 
-    async def check(self, user_input: str) -> GuardrailResult:
+    async def check(self, user_input: str, context: list[str] | None = None) -> GuardrailResult:
         if not user_input or not user_input.strip():
             return GuardrailResult(passed=False, reason="Input is empty", action="block")
 

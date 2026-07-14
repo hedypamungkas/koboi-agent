@@ -23,6 +23,7 @@ doom_loop_hook.py     Repeated-action detection and abort
 task_hook.py          Task management lifecycle
 task_persistence_hook.py   Persists task state across compaction
 proactive_extraction_hook.py  SESSION_END auto-extract of durable facts -> KV store (proactive memory D-side; priority 65)
+handover_detection_hook.py    Structural handover detection (B1.5; PRE_INPUT user-ask patterns + POST_OUTPUT low A3-grounding coverage) -> sets ctx.metadata['handover_requested']; the emit-site raises AgentHandoverError
 subagent_hook.py      Sub-agent lifecycle tracking
 notification_hook.py  Notification dispatch
 rich_subagent_hook.py Rich TUI sub-agent display

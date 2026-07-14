@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 from koboi.eval.t.assertions import (
@@ -146,17 +147,23 @@ class TestContext:
         **manual** ``--tags live`` invocation (``[eval-ragas]`` install + a real
         key, no ``--mock``); there is no automated nightly job today.
 
-        Returns False when: the agent's client is a :class:`ScriptedClient`
-        (``--mock``), the optional ``extra`` (default ``ragas``) is not importable,
-        or no real (non-dummy) LLM key is set.
+        Returns False when: the agent's client is a :class:`ScriptedClient` or
+        :class:`DispatchingClient` (``--mock``), the optional ``extra`` (default ``ragas``)
+        is not importable, or no real (non-dummy) LLM key is set.
         """
         import importlib.util
         import os
 
-        from koboi.eval.t.mock import ScriptedClient
+        from koboi.eval.t.mock import DispatchingClient, ScriptedClient
 
-        client = getattr(getattr(self._agent, "core", None), "client", None)
-        if isinstance(client, ScriptedClient):
+        # For orchestration configs (core=None), the client lives on the orchestrator.
+        core = getattr(self._agent, "core", None)
+        if core is not None:
+            client = getattr(core, "client", None)
+        else:
+            orch = getattr(self._agent, "orchestrator", None)
+            client = getattr(orch, "client", None) if orch is not None else None
+        if isinstance(client, (ScriptedClient, DispatchingClient)):
             return False
         # ``extra`` gates judge-LLM deps (e.g. "ragas" for faithfulness). Pass
         # ``extra=None`` for retrieval-only live evals (semantic/hybrid ranking) that
@@ -380,6 +387,34 @@ class TestContext:
 
         self._record("abstains", sev, _evaluate)
 
+    def citation(self, *, min_citations: int = 1, severity: Severity | None = None) -> None:
+        """Assert the deep_research report cites its sources: every ``[n]`` marker in the reply
+        resolves to a ``research_sources`` citation id (gate by default), and at least
+        ``min_citations`` markers are present.
+
+        Reads ``RunResult.metadata['research_sources']`` (deep_research; ``{citation_id, node_id}``
+        per source). Evidences the runtime ``_verify_citations`` strip worked + the report actually
+        cites gathered findings. Structural + deterministic -- runs on a live report (no RAGAS/judge).
+        """
+        sev = self._sev(severity)
+
+        def _evaluate() -> AssertionOutcome:
+            valid_ids: set[int] = set()
+            for turn in self._turns:
+                for s in (turn.metadata or {}).get("research_sources", []) or []:
+                    if isinstance(s, dict) and s.get("citation_id") is not None:
+                        try:
+                            valid_ids.add(int(s["citation_id"]))
+                        except (TypeError, ValueError):
+                            continue
+            markers = {int(n) for n in re.findall(r"\[(\d+)\]", self.reply or "")}
+            unresolved = markers - valid_ids
+            ok = len(markers) >= min_citations and not unresolved
+            reason = f"citation -> {len(markers)} marker(s), {len(unresolved)} unresolved, {len(valid_ids)} source(s)"
+            return binary_outcome(sev, ok, reason)
+
+        self._record("citation", sev, _evaluate)
+
     def blocked(self, direction: str | None = None, *, severity: Severity | None = None) -> None:
         """Assert a guardrail BLOCKED the turn at least once (gate by default).
 
@@ -602,4 +637,8 @@ class TestContext:
             if rag:
                 context["rag_results"] = rag
                 context["rag_augmented"] = True
+            # W6.1: surface deep_research sources (with text) for faithfulness scoring.
+            sources = (self._turns[-1].metadata or {}).get("research_sources_with_text", [])
+            if sources:
+                context["research_sources"] = sources
         return context
