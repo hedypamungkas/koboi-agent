@@ -179,7 +179,7 @@ class GuardrailsConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     input: InputGuardrailConfig = Field(default_factory=InputGuardrailConfig)
-    output: OutputGuardrailConfig = Field(default_factory=OutputGuardrailConfig)
+    output: OutputGuardrailConfig | list[dict] = Field(default_factory=OutputGuardrailConfig)
     rate_limit: RateLimitConfig | None = None
     audit: AuditConfig = Field(default_factory=AuditConfig)
     approval: dict = Field(default_factory=dict)
