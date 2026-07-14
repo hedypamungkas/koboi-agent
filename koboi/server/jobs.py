@@ -501,30 +501,40 @@ def _emit_handover_webhook(
     jobs ``_post_webhook`` (2-retry, fail-safe) + HMAC signing + ``_WEBHOOK_TASKS``.
     Payload: ``{event: "handover.requested", session_id, handover_id, reason, summary}``.
     Job-path handovers already fire ``job.awaiting_human`` via ``_emit_job_webhooks``.
+
+    C1 fix: the ENTIRE body (payload construction + HMAC + POST) runs inside the
+    tasked coroutine, so a config typo (e.g. ``timeout: 10s`` → ValueError) raises
+    inside the task (caught/logged by ``_on_webhook_task_done``), NOT in the caller's
+    ``except AgentHandoverError`` frame (which would silently drop the HandoverEvent
+    from the operator's live stream).
     """
     if not webhooks:
         return
-    payload = {
-        "event": "handover.requested",
-        "session_id": session_id,
-        "handover_id": handover_id,
-        "reason": reason,
-        "summary": summary,
-    }
-    body = json.dumps(payload).encode()
-    for wh in webhooks:
-        url = wh.get("url")
-        if not url:
-            continue
-        headers = {"Content-Type": "application/json"}
-        secret = wh.get("secret")
-        if secret:
-            signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-            headers["X-Koboi-Signature"] = f"sha256={signature}"
-        timeout = wh.get("timeout") or _WEBHOOK_DEFAULT_TIMEOUT
-        task = asyncio.create_task(_post_webhook(url, body, headers, float(timeout)))
-        _WEBHOOK_TASKS.add(task)
-        task.add_done_callback(_on_webhook_task_done)
+
+    async def _deliver() -> None:
+        payload = {
+            "event": "handover.requested",
+            "session_id": session_id,
+            "handover_id": handover_id,
+            "reason": reason,
+            "summary": summary,
+        }
+        body = json.dumps(payload).encode()
+        for wh in webhooks:
+            url = wh.get("url")
+            if not url:
+                continue
+            headers = {"Content-Type": "application/json"}
+            secret = wh.get("secret")
+            if secret:
+                signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+                headers["X-Koboi-Signature"] = f"sha256={signature}"
+            timeout = wh.get("timeout") or _WEBHOOK_DEFAULT_TIMEOUT
+            await _post_webhook(url, body, headers, float(timeout))
+
+    task = asyncio.create_task(_deliver())
+    _WEBHOOK_TASKS.add(task)
+    task.add_done_callback(_on_webhook_task_done)
 
 
 async def run_job(

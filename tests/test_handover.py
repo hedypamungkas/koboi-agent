@@ -193,7 +193,7 @@ class TestHandoverServerE2E:
 
 
 class TestTransferRoute:
-    async def test_transfer_reassigns_owner_and_403s_non_owner(self):
+    async def test_transfer_reassigns_owner(self):
         _need_fastapi()
         import httpx
         from koboi.server import create_app
