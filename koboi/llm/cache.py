@@ -173,8 +173,9 @@ class ResponseCache:
             for f in sorted(shard.glob("*.json")):
                 try:
                     yield f.stem, json.loads(f.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError, ValueError, KeyError):
-                    continue  # skip corrupt/unreadable entries
+                except (OSError, json.JSONDecodeError, ValueError, KeyError) as exc:
+                    _logger.warning("cache iter_entries skip for %s: %s", f.stem[:8], exc)
+                    continue
 
     def count(self) -> int:
         return sum(1 for _ in self.iter_entries())
@@ -270,7 +271,10 @@ class CachedClient(LLMClient):
             if cached is not None:
                 return cached
             response = await self._inner.complete(messages, tools, response_format=response_format)
-            self._cache.put(key, response, model=self._inner.model)
+            try:
+                self._cache.put(key, response, model=self._inner.model)
+            except OSError as exc:
+                _logger.warning("cache write failed for key %s: %s (response returned uncached)", key[:8], exc)
             return response
 
     async def get_embeddings(self, text: str) -> list[float] | None:
@@ -306,7 +310,12 @@ class CachedClient(LLMClient):
                 terminal = event.response
             yield event
         if terminal is not None:
-            self._cache.put(key, terminal, model=self._inner.model)
+            try:
+                self._cache.put(key, terminal, model=self._inner.model)
+            except OSError as exc:
+                _logger.warning("cache write failed for key %s: %s (response not cached)", key[:8], exc)
+        elif self._on_miss == CacheMissPolicy.STORE:
+            _logger.warning("stream ended without a CompleteEvent; response not cached (key %s)", key[:8])
 
     async def close(self) -> None:
         await self._inner.close()

@@ -691,7 +691,13 @@ async def _execute_workflow_job(
             if _sc is not None:
                 from koboi.llm.cache import ResponseCache
 
-                ResponseCache(cache_dir).load_entries([(e.key, e.payload) for e in _sc.read()])
+                _entries = [(e.key, e.payload) for e in _sc.read()]
+                ResponseCache(cache_dir).load_entries(_entries)
+                _logger.info("hydrated %d cached response(s) for job %s", len(_entries), job_id)
+            elif _effective_mode == "replay":
+                _logger.warning("replay mode but no sidecar for workflow %r -- will raise on miss", workflow_ref)
+        elif _effective_mode == "replay":
+            _logger.warning("workflow_store has no get_sidecar -- hydration skipped for job %s", job_id)
         from koboi.workflows import prepare_captured_bundle
 
         effective_yaml = prepare_captured_bundle(bundle_yaml, cache_dir=cache_dir, mode=_effective_mode)

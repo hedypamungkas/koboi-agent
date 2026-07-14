@@ -565,7 +565,13 @@ def _register_routes(
         except Exception as exc:
             return _error_response(400, "invalid_workflow", f"bundle parse failed: {exc}", request)
         description = body.description or wd.description
-        workflow_store.put(body.name, owner, body.bundle, description=description)
+        # Trust boundary: re-redact before persisting (mirrors cmd_import_workflow).
+        from koboi.redact import redact_config_for_export
+        from typing import cast as _cast
+
+        redacted_config = _cast("dict", redact_config_for_export(wd.config))
+        wd.config = redacted_config
+        workflow_store.put(body.name, owner, wd.to_bundle_yaml(), description=description)
         stored = workflow_store.get(body.name, owner) or {}
         return WorkflowResponse(  # type: ignore[return-value]
             name=body.name,

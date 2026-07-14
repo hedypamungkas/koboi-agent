@@ -394,6 +394,8 @@ def cmd_run(
         if isinstance(core_client, CachedClient):
             cleared = core_client._cache.clear()
             print(f"Cleared {cleared} cached response(s).", file=sys.stderr)
+        else:
+            print("--clear-cache has no effect: replay_mode is live (no cache to clear).", file=sys.stderr)
 
     # --resume: rehydrate-and-continue an interrupted session.
     if resume_session:

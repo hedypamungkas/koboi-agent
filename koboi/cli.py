@@ -151,7 +151,7 @@ def _build_parser():
         dest="replay_mode",
         choices=["live", "cache", "replay"],
         default="live",
-        help="Determinism tier: live (default) or cache (file-backed response cache; replay aliases cache)",
+        help="Determinism tier: live (default), cache (memoize+replay; live on miss), or replay (pure offline; raise on miss -- needs a populated/captured cache)",
     )
     p.add_argument("--input", default=None, help="JSON args for the workflow entry (e.g. '{\"message\": ...}')")
     p.add_argument(
