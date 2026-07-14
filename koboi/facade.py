@@ -1763,6 +1763,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
         # REPLACES the top-level client; an inline dict MERGES over it (today's
         # behavior). Pool specs (W2) raise.
         def _agent_client_builder(agent_llm: dict | str) -> Client:
+            c: Client
             if isinstance(agent_llm, str):
                 c = _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
             elif isinstance(agent_llm, dict) and "pool" in agent_llm:
