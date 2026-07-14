@@ -7,8 +7,9 @@ re-runnable directly via ``KoboiAgent.from_config_string`` / ``koboi run <file>`
 
 This module is stdlib + PyYAML + ``koboi.redact`` + ``koboi.__version__`` only (no
 facade/server import) so it stays importable on a bare install for the CLI. v1
-ships the ``live`` replay mode (sampling pinning); ``cache`` / ``replay`` arrive
-later (v2/v3).
+ships the ``live`` replay mode (sampling pinning); v2 adds ``cache`` (file-backed
+response cache + capture-from-run); pure offline ``replay`` (raise-on-miss)
+arrives in v3.
 """
 
 from __future__ import annotations
