@@ -24,11 +24,18 @@ _QUESTION = "What is 2+2? Answer with just the number."
 _ORCH_QUESTION = "Review: 'This product is amazing!' Reply with one word."
 
 
+def _llm():
+    llm = {"provider": "openai", "model": _MODEL, "api_key": os.environ["OPENAI_API_KEY"]}
+    if os.environ.get("OPENAI_BASE_URL"):
+        llm["base_url"] = os.environ["OPENAI_BASE_URL"]
+    return llm
+
+
 def _single_agent_cfg():
     return Config.from_dict(
         {
             "agent": {"name": "smoke", "system_prompt": "You answer concisely."},
-            "llm": {"provider": "openai", "model": _MODEL, "api_key": os.environ["OPENAI_API_KEY"]},
+            "llm": _llm(),
             "memory": {"backend": "in_memory"},
         }
     )
@@ -38,7 +45,7 @@ def _orch_cfg():
     return Config.from_dict(
         {
             "agent": {"name": "orch-smoke", "system_prompt": "You orchestrate."},
-            "llm": {"provider": "openai", "model": _MODEL, "api_key": os.environ["OPENAI_API_KEY"]},
+            "llm": _llm(),
             "memory": {"backend": "in_memory"},
             "orchestration": {
                 "enabled": True,
@@ -71,7 +78,7 @@ class TestRealApiSingleAgentSmoke:
         cache_dir = str(tmp_path / "cache")
 
         # 1. CACHE RUN: real LLM call, response memoized
-        agent = KoboiAgent.from_dict(cfg, replay_mode="cache", cache_dir=cache_dir)
+        agent = KoboiAgent._from_config(cfg, replay_mode="cache", cache_dir=cache_dir)
         result1 = asyncio.run(agent.run(_QUESTION))
         assert result1.content  # got a real response
 
@@ -82,7 +89,7 @@ class TestRealApiSingleAgentSmoke:
         # 3. REPLAY: fresh agent, RAISE on miss → 0 live calls, byte-identical
         sidecar = str(tmp_path / "sidecar")
         DirectoryCacheSidecar(sidecar).write(entries)
-        agent2 = KoboiAgent.from_dict(cfg, replay_mode="replay", cache_dir=sidecar)
+        agent2 = KoboiAgent._from_config(cfg, replay_mode="replay", cache_dir=sidecar)
         result2 = asyncio.run(agent2.run(_QUESTION))
         assert result2.content == result1.content  # byte-identical
 
@@ -96,7 +103,7 @@ class TestRealApiOrchestrationSmoke:
         cache_dir = str(tmp_path / "cache")
 
         # 1. CACHE RUN: multiple real LLM calls (classify + praise + synthesis)
-        agent = KoboiAgent.from_dict(cfg, replay_mode="cache", cache_dir=cache_dir)
+        agent = KoboiAgent._from_config(cfg, replay_mode="cache", cache_dir=cache_dir)
         result1 = asyncio.run(agent.run(_ORCH_QUESTION))
         assert result1.content  # got a real synthesis
 
@@ -109,6 +116,6 @@ class TestRealApiOrchestrationSmoke:
         # 3. REPLAY: 0 live calls, byte-identical synthesis
         sidecar = str(tmp_path / "sidecar")
         DirectoryCacheSidecar(sidecar).write(entries)
-        agent2 = KoboiAgent.from_dict(cfg, replay_mode="replay", cache_dir=sidecar)
+        agent2 = KoboiAgent._from_config(cfg, replay_mode="replay", cache_dir=sidecar)
         result2 = asyncio.run(agent2.run(_ORCH_QUESTION))
         assert result2.content == result1.content  # byte-identical
