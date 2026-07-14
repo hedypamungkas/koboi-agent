@@ -49,7 +49,7 @@ DEFAULT_REFUSAL = "I don't have enough grounded information to answer this confi
 
 _DECOMPOSE_PROMPT = (
     "Break the following answer into atomic factual claims. Output ONLY a JSON "
-    "array of short strings, no prose. Example: [\"claim one\", \"claim two\"].\n\n"
+    'array of short strings, no prose. Example: ["claim one", "claim two"].\n\n'
     "Answer:\n{answer}"
 )
 _NLI_PROMPT = (

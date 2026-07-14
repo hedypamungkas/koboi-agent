@@ -1316,9 +1316,7 @@ class AgentAssembler:
             self.hook_chain.add(
                 HandoverDetectionHook(
                     grounding=grounding,
-                    coverage_threshold=self.config.get(
-                        "handover", "detection", "coverage_threshold", default=0.5
-                    ),
+                    coverage_threshold=self.config.get("handover", "detection", "coverage_threshold", default=0.5),
                     ask_patterns=self.config.get("handover", "detection", "ask_patterns", default=None),
                 )
             )

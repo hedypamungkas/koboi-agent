@@ -246,7 +246,9 @@ def create_app(
     session_streams_per_owner = config.get("server", "limits", "session_streams_per_owner", default=4)
     session_stream_timeout = config.get("server", "limits", "session_stream_timeout", default=3600.0) or 3600.0
     session_events = (
-        session_event_buffer if session_event_buffer is not None else SessionEventRegistry(max_events=session_max_events)
+        session_event_buffer
+        if session_event_buffer is not None
+        else SessionEventRegistry(max_events=session_max_events)
     )
     # B4: warm handoff digest (opt-in). Reuses the main llm config for the side-LLM.
     handoff_digest = None
@@ -899,9 +901,7 @@ def _register_routes(
                 )
                 session_events.append_event(session_id, hev)  # B2: buffer for replay
                 # B5: notify the host CS platform of the chat-path handover (fire-and-forget).
-                _emit_handover_webhook(
-                    handover_webhooks, session_id, hev.handover_id, hev.reason, _summary
-                )
+                _emit_handover_webhook(handover_webhooks, session_id, hev.handover_id, hev.reason, _summary)
                 await queue.put(hev)
             except Exception as exc:
                 err_ev = ErrorEvent(error=exc)
