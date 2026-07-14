@@ -416,9 +416,28 @@ class TestRunDeepResearch:
         c2.final_report = "second report"
         DagScheduler.persist_research_context(db_path, "run-2", c2.to_json(), session_id="sess-X")
         loaded = ResearchContext.from_json(DagScheduler.load_research_context_for_session(db_path, "sess-X"))
-        assert loaded.query == "second"  # latest run wins
+        assert loaded.query == "second"  # same depth (0) -> latest run wins
         # A different session sees nothing.
         assert DagScheduler.load_research_context_for_session(db_path, "sess-other") is None
+
+    def test_report_wins_over_later_direct_answer(self, tmp_path):
+        # v0.14 follow-up #1: a multi-step cited report (depth>=1) must survive a LATER trivial
+        # direct-answer (depth=0) in the same session -- the report is the session's deliverable,
+        # not the throwaway follow-up. Precedence: ORDER BY depth DESC, updated_at DESC.
+        import time as _time
+
+        db_path = str(tmp_path / "reportwins.db")
+        report = ResearchContext(query="research query")
+        report.depth = 2  # multi-step
+        report.final_report = "## Cited Report\nDeep findings [1] [2]."
+        DagScheduler.persist_research_context(db_path, "run-report", report.to_json(), session_id="sess-R")
+        _time.sleep(0.02)
+        direct = ResearchContext(query="what is 2+2?")  # depth=0 (direct-answer)
+        direct.final_report = "4"
+        DagScheduler.persist_research_context(db_path, "run-direct", direct.to_json(), session_id="sess-R")
+        loaded = ResearchContext.from_json(DagScheduler.load_research_context_for_session(db_path, "sess-R"))
+        assert loaded.query == "research query"  # the report wins, not the later direct-answer
+        assert "Cited Report" in loaded.final_report
 
     def test_persist_research_context_coalesces_session_id(self, tmp_path):
         # W8 review #7: re-persisting a run with session_id=None must NOT clobber an existing tag
