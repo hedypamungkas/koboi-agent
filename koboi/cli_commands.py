@@ -182,6 +182,69 @@ def cmd_import_workflow(file: str, name: str | None = None, scope: str = "projec
     return 0
 
 
+def cmd_capture(
+    config_path: str,
+    name: str | None = None,
+    session: str | None = None,
+    job: str | None = None,
+    with_cache: bool = False,
+    redact_cache: bool = False,
+    output: str | None = None,
+    save: bool = False,
+    scope: str = "project",
+) -> int:
+    """Capture a run into a reusable workflow bundle (+ optional cache sidecar).
+
+    Reads the config (un-interpolated, extends-merged), redacts secrets, stamps
+    provenance (``--session``/``--job``), and optionally freezes the run's response
+    cache as a sidecar (``--with-cache``) so the bundle re-runs byte-identical +
+    offline. ``--save`` stores it; ``--output`` writes a file; else stdout.
+    """
+    import yaml
+
+    from koboi.config import _load_yaml_with_extends
+    from koboi.workflows import capture_from_run, validate_capture
+
+    try:
+        raw = _load_yaml_with_extends(Path(config_path))
+        config_text = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True)
+    except Exception as e:
+        print(f"Error reading config: {e}", file=sys.stderr)
+        return 1
+    wf_name = name or Path(config_path).stem
+    cache_dir = None
+    if with_cache:
+        from koboi.config import Config
+
+        cfg = Config.from_yaml(config_path)
+        cache_dir = cfg.replay.get("cache_dir") or ".koboi/cache"
+    wd, entries = capture_from_run(
+        config_text=config_text,
+        name=wf_name,
+        source_run_id=job or session,
+        source_session_id=session,
+        with_cache=with_cache,
+        cache_dir=cache_dir,
+        redact_cache=redact_cache,
+    )
+    for warning in validate_capture(wd, entries):
+        print(f"warning: {warning}", file=sys.stderr)
+    bundle = wd.to_bundle_yaml()
+    if output:
+        Path(output).write_text(bundle, encoding="utf-8")
+        print(f"Captured workflow '{wf_name}' to {output}")
+        return 0
+    if save:
+        from koboi.workflows.store import FileWorkflowStore
+
+        path = FileWorkflowStore(scope=scope).save(wf_name, bundle, sidecar_entries=entries)
+        extra = f" (+{len(entries)} cached responses)" if entries else ""
+        print(f"Captured workflow '{wf_name}' saved to {path}{extra}")
+        return 0
+    print(bundle)
+    return 0
+
+
 def cmd_workflows(command: str, scope: str = "project", name: str | None = None) -> int:
     """List / show / delete stored workflows (``--scope project|user``)."""
     from koboi.workflows.store import FileWorkflowStore

@@ -151,9 +151,12 @@ def _build_parser():
         dest="replay_mode",
         choices=["live", "cache", "replay"],
         default="live",
-        help="Determinism tier (v1: live only; cache/replay arrive later)",
+        help="Determinism tier: live (default) or cache (file-backed response cache; replay aliases cache)",
     )
     p.add_argument("--input", default=None, help="JSON args for the workflow entry (e.g. '{\"message\": ...}')")
+    p.add_argument(
+        "--clear-cache", action="store_true", help="Clear the response cache before running (cache mode only)"
+    )
 
     # mcp-serve (core-only stdio; exposes koboi tools to external MCP clients)
     p = sub.add_parser(
@@ -242,6 +245,27 @@ def _build_parser():
     p.add_argument("--name", default=None, help="Stored name (default: bundle name / file stem)")
     p.add_argument("--scope", choices=["project", "user"], default="project")
 
+    # capture (core) -- capture a run into a reusable workflow bundle (+ cache sidecar)
+    p = sub.add_parser("capture", help="Capture a run as a reusable workflow bundle (optionally with a frozen cache)")
+    p.add_argument("config_path")
+    p.add_argument("--name", default=None, help="Workflow name (default: config file stem)")
+    p.add_argument("--session", default=None, help="Session ID (recorded as provenance source_run_id)")
+    p.add_argument("--job", default=None, help="Job ID (recorded as provenance source_run_id)")
+    p.add_argument(
+        "--with-cache",
+        action="store_true",
+        help="Freeze the run's response cache as a sidecar (byte-identical re-run)",
+    )
+    p.add_argument(
+        "--redact-cache",
+        action="store_true",
+        help="Mask secrets in the frozen cache (share-safe; may diverge on replay)",
+    )
+    p_sink = p.add_mutually_exclusive_group()
+    p_sink.add_argument("--output", "-o", default=None, help="Write to FILE instead of stdout")
+    p_sink.add_argument("--save", action="store_true", help="Save into the workflow store (with sidecar)")
+    p.add_argument("--scope", choices=["project", "user"], default="project")
+
     # workflows (core) -- list/show/delete stored workflows
     p = sub.add_parser("workflows", help="Manage stored workflows (list/show/delete)")
     p.add_argument("--scope", choices=["project", "user"], default="project")
@@ -299,6 +323,7 @@ def main() -> None:
                 workflow_name=args.workflow,
                 replay_mode=args.replay_mode,
                 input_json=args.input,
+                clear_cache=args.clear_cache,
             )
         )
     if args.command == "mcp-serve":
@@ -333,6 +358,20 @@ def main() -> None:
         )
     if args.command == "import":
         sys.exit(cli_commands.cmd_import_workflow(args.file, args.name, scope=args.scope))
+    if args.command == "capture":
+        sys.exit(
+            cli_commands.cmd_capture(
+                args.config_path,
+                args.name,
+                args.session,
+                args.job,
+                args.with_cache,
+                args.redact_cache,
+                args.output,
+                args.save,
+                args.scope,
+            )
+        )
     if args.command == "workflows":
         sys.exit(cli_commands.cmd_workflows(args.workflows_command, scope=args.scope, name=getattr(args, "name", None)))
     if args.command == "init-zsh":

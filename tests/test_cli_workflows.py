@@ -183,3 +183,47 @@ def test_export_output_and_save_are_mutually_exclusive():
     parser = _build_parser()
     with pytest.raises(SystemExit):
         parser.parse_args(["export", "c.yaml", "--output", "out.yaml", "--save"])
+
+
+class TestCapture:
+    def test_capture_save_with_cache_sidecar(self, wf_dir, tmp_path, capsys):
+        import asyncio
+        import yaml as _y
+
+        from koboi.llm.cache import CachedClient, ResponseCache
+        from koboi.types import AgentResponse, TokenUsage
+        from tests.conftest import MockClient
+
+        cache_dir = tmp_path / "c"
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text(
+            _y.safe_dump(
+                {
+                    "agent": {"name": "x", "system_prompt": "h"},
+                    "llm": {"provider": "openai", "model": "m", "api_key": "test"},
+                    "replay": {"mode": "cache", "cache_dir": str(cache_dir)},
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        # populate the cache (simulate a cache-mode run)
+        inner = MockClient([AgentResponse(content="ans", usage=TokenUsage())])
+        asyncio.run(CachedClient(inner, ResponseCache(cache_dir)).complete([{"role": "user", "content": "hi"}]))
+
+        rc = cli_commands.cmd_capture(str(cfg), name="cap", with_cache=True, save=True, session="sess1")
+        assert rc == 0
+        store = FileWorkflowStore()
+        assert store.exists("cap")
+        bundle, cdir = store.load_with_cache("cap")
+        assert cdir is not None  # sidecar present
+        assert "workflow:" in bundle
+        assert "source_run_id" in bundle  # provenance
+
+    def test_capture_stdout_without_cache(self, wf_dir, tmp_path, capsys):
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text("agent:\n  name: x\nllm:\n  provider: openai\n  model: m\n", encoding="utf-8")
+        rc = cli_commands.cmd_capture(str(cfg), name="cap2")
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert out.lstrip().startswith("workflow:")
