@@ -487,6 +487,46 @@ def _emit_job_webhooks(webhooks: list[dict] | None, store: JobStore, job_id: str
     task.add_done_callback(_on_webhook_task_done)
 
 
+def _emit_handover_webhook(
+    webhooks: list[dict] | None,
+    session_id: str,
+    handover_id: str,
+    reason: str,
+    summary: str,
+) -> None:
+    """B5: fire-and-forget -- notify the host CS platform of a CHAT-path handover.
+
+    Unlike ``_emit_job_webhooks`` (terminal job status), this fires mid-conversation
+    when a ``HandoverEvent`` is emitted on ``/chat/stream`` (B1/B1.5). Reuses the
+    jobs ``_post_webhook`` (2-retry, fail-safe) + HMAC signing + ``_WEBHOOK_TASKS``.
+    Payload: ``{event: "handover.requested", session_id, handover_id, reason, summary}``.
+    Job-path handovers already fire ``job.awaiting_human`` via ``_emit_job_webhooks``.
+    """
+    if not webhooks:
+        return
+    payload = {
+        "event": "handover.requested",
+        "session_id": session_id,
+        "handover_id": handover_id,
+        "reason": reason,
+        "summary": summary,
+    }
+    body = json.dumps(payload).encode()
+    for wh in webhooks:
+        url = wh.get("url")
+        if not url:
+            continue
+        headers = {"Content-Type": "application/json"}
+        secret = wh.get("secret")
+        if secret:
+            signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+            headers["X-Koboi-Signature"] = f"sha256={signature}"
+        timeout = wh.get("timeout") or _WEBHOOK_DEFAULT_TIMEOUT
+        task = asyncio.create_task(_post_webhook(url, body, headers, float(timeout)))
+        _WEBHOOK_TASKS.add(task)
+        task.add_done_callback(_on_webhook_task_done)
+
+
 async def run_job(
     job_id: str,
     pool: AgentPool,

@@ -39,11 +39,13 @@ from koboi.server.jobs import (
     new_job_id,
     resume_on_startup,
     run_job,
+    _emit_handover_webhook,
 )
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
 from koboi.server.session_events import SessionEventRegistry
+from koboi.server.handoff_digest import HandoffDigest
 from koboi.server.schema import (
     ApproveRequest,
     ApproveResponse,
@@ -235,6 +237,8 @@ def create_app(
     job_ttl = config.get("jobs", "ttl_seconds", default=86400.0) or 86400.0  # G5c-a
     job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
     job_webhooks = config.get("jobs", "webhooks", default=[]) or []
+    # B5: chat-path handover webhooks (mid-conversation HandoverEvent notification).
+    handover_webhooks = config.get("handover", "webhooks", default=[]) or []
     job_resume = config.get("jobs", "resume_on_startup", default=True)
     job_registry = event_buffer if event_buffer is not None else JobRegistry(max_events=job_max_events)
     # B2: per-session replayable event buffer (GET /v1/sessions/{id}/stream).
@@ -244,6 +248,15 @@ def create_app(
     session_events = (
         session_event_buffer if session_event_buffer is not None else SessionEventRegistry(max_events=session_max_events)
     )
+    # B4: warm handoff digest (opt-in). Reuses the main llm config for the side-LLM.
+    handoff_digest = None
+    if config.get("handover", "digest", "enabled", default=False):
+        handoff_digest = HandoffDigest(
+            provider=config.get("llm", "provider", default="openai"),
+            model=config.get("llm", "model", default="gpt-4o-mini"),
+            api_key=config.get("llm", "api_key", default=""),
+            base_url=config.get("llm", "base_url", default=""),
+        )
     # G6: /chat/stream Idempotency-Key (409-reject, in-memory TTL).
     chat_idem_ttl = config.get("server", "idempotency", "chat_ttl_seconds", default=600.0) or 600.0
     chat_idem_max = config.get("server", "idempotency", "max_entries", default=10000)  # H6
@@ -398,6 +411,8 @@ def create_app(
         session_events,
         session_stream_timeout,
         session_streams_per_owner,
+        handoff_digest,
+        handover_webhooks,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -462,6 +477,8 @@ def _register_routes(
     session_events: Any | None = None,
     session_stream_timeout: float = 3600.0,
     session_streams_per_owner: int = 4,
+    handoff_digest: Any | None = None,
+    handover_webhooks: list[dict] | None = None,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -857,12 +874,26 @@ def _register_routes(
                 # run_stream, so the ``async with pool.session_lock`` above already
                 # exited -> lock released (no deadlock). A human operator takes over
                 # via POST /v1/sessions/{id}/transfer + a new /chat/stream.
+                _summary = he.summary
+                if not _summary and handoff_digest is not None:
+                    # B4: warm handoff digest (opt-in). Side-LLM summary + redact.
+                    # Never raises (the helper is fail-soft; this double-wrap mirrors
+                    # ProactiveExtractionHook -- a digest failure MUST NOT lose the
+                    # handover by falling through to the ErrorEvent branch below).
+                    try:
+                        _summary = await handoff_digest.digest(agent._core.memory.get_messages())
+                    except Exception:  # nosec - belt-and-suspenders; never lose the handover
+                        _summary = ""
                 hev = HandoverEvent(
                     handover_id=uuid.uuid4().hex[:12],
                     reason=he.reason,
-                    summary=he.summary,
+                    summary=_summary,
                 )
                 session_events.append_event(session_id, hev)  # B2: buffer for replay
+                # B5: notify the host CS platform of the chat-path handover (fire-and-forget).
+                _emit_handover_webhook(
+                    handover_webhooks, session_id, hev.handover_id, hev.reason, _summary
+                )
                 await queue.put(hev)
             except Exception as exc:
                 err_ev = ErrorEvent(error=exc)
