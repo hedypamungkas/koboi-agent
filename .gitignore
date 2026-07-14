@@ -81,3 +81,8 @@ data/id_native_corpus/
 data/id_corpus/
 data/en80_corpus/
 data/id_corpus_full/
+.koboi/cache/
+.koboi/workflows/
+*.db
+*.db-shm
+*.db-wal
