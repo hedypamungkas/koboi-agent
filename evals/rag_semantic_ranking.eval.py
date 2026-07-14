@@ -60,7 +60,9 @@ async def test_paraphrase_retrieves_target_with_real_embeddings(t):
     methods = {str(c.get("retrieval_method", "")) for c in rag}
     t.check(
         methods,
-        Matches(fn=lambda m: any(x == "semantic" for x in m), description="retrieval_method == 'semantic' (no fallback)"),
+        Matches(
+            fn=lambda m: any(x == "semantic" for x in m), description="retrieval_method == 'semantic' (no fallback)"
+        ),
         name="semantic_method_no_fallback",
         severity=Severity.GATE,
     )

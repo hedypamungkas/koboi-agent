@@ -31,7 +31,8 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **Hook lifecycle**: 15 event types for logging, guardrails, telemetry, plus declarative external-command hooks (`hooks:` YAML — no Python required)
 - **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/BM25/semantic/hybrid), cross-encoder rerank (jina/cohere/local), augmentation, query rewriting/HyDE, metadata filtering, Indonesian stopwords/stemmer, remote sources (HTTP/S3)
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
-- **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, and dynamic (LLM-planned) execution
+- **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, dynamic (LLM-planned), and **deep_research** (coverage-gated, cited web research) execution
+- **Web research providers**: pluggable search + fetch backends for the `web_search`/`web_fetch` tools via `@register_search_provider`/`@register_fetch_provider` — built-in mock, DuckDuckGo, Brave, Firecrawl (search) + httpx/readability, Firecrawl (fetch)
 - **Context management**: truncation, smart truncation, key facts, sliding window
 - **Sandboxed execution**: pluggable passthrough/restricted backends (per-session workdir, network/rlimit isolation)
 - **MCP** client (stdio + HTTP) and server support
@@ -180,6 +181,26 @@ harness:
   carryover: true
 ```
 
+**Deep research** — iterative, cited web research (plan → search → fetch → assess coverage → drill
+deeper → synthesize a cited report). Set `execution.mode: deep_research` + a web provider:
+
+```yaml
+orchestration:
+  enabled: true
+  execution:
+    mode: deep_research
+research:
+  max_depth: 3               # coverage-gated replan rounds
+  coverage_threshold: 0.7    # stop iterating once coverage >= this
+  citations: numbered
+websearch:
+  search: { provider: firecrawl, firecrawl: { api_key: ${FIRECRAWL_API_KEY:} } }
+  fetch:  { provider: firecrawl, firecrawl: { api_key: ${FIRECRAWL_API_KEY:} } }
+```
+
+Run: `koboi run configs/deep_research_demo.yaml -m "Research solid-state battery breakthroughs in 2025-2026."`
+See `docs/deep-research-smoke.md` for the production quality bar + smoke scenarios.
+
 See `configs/` for full examples and `.claude/skills/yaml-config.md` for the complete schema.
 
 ## Testing
@@ -209,6 +230,7 @@ pytest --cov=koboi            # with coverage
 | 29-32 | Skills (enhanced), eval-test, tool selection, sandbox + resume |
 | 33 | Declarative external-command hooks (`hooks:` YAML) |
 | 34 | Modern RAG pipeline (BM25 + rewriting + filtering + reranking + caches) |
+| configs/deep_research_demo.yaml | Deep research (coverage-gated cited web research; `koboi run` + `koboi serve`) |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 | hitl_client / workflow_graph_demo / dynamic_workflow_live / phase3_live_e2e | HITL client + DAG/workflow-graph demos |
 
@@ -244,7 +266,8 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **ProactiveMemory** (`proactive_memory.py`) -- opt-in long-term memory: auto-extract durable facts (D), semantic recall + per-turn injection (C), always-in-context core block (B)
 - **Redaction** (`redact.py`) -- shared secret masking (value-shape + key-name) for the journal/jobs/diagnostics
 - **Server** (`server/`) -- FastAPI HTTP/SSE serving (interactive chat + autonomous jobs)
-- **Orchestrator** (`orchestration/`) -- multi-agent coordination
+- **Orchestrator** (`orchestration/`) -- multi-agent coordination; `deep_research` mode plans + runs cited web research (plan → DAG waves → coverage eval → synthesize)
+- **Websearch providers** (`websearch/`) -- pluggable search/fetch backends (Brave/Firecrawl/ddg/mock + httpx/firecrawl) behind the `web_search`/`web_fetch` tools
 - **SubAgentManager** (`subagent.py`) -- parallel sub-agent delegation
 - **MCP clients** (`mcp/`) -- external tool servers
 

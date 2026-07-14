@@ -76,6 +76,62 @@ def ensure_tasks_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)")
 
 
+def ensure_research_context_table(conn: sqlite3.Connection) -> None:
+    """Create the ``research_context`` table (W2) for durable deep-research state.
+
+    One row per ``graph_run_id`` holding the journaled ``ResearchContext`` JSON, so a
+    ``--resume`` rehydrates sub-questions / SourceStore / coverage_map / budget and
+    continues at the recorded depth (no re-bill across completed depth rounds). Mirrors
+    ``ensure_tasks_table`` (CREATE IF NOT EXISTS + index).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS research_context (
+            graph_run_id TEXT PRIMARY KEY,
+            context_json TEXT NOT NULL,
+            updated_at REAL,
+            session_id TEXT,
+            depth INTEGER
+        )
+        """
+    )
+    # Additive column for pre-existing DBs created before session scoping (so
+    # GET /v1/sessions/{id} can map a session to its deep-research context).
+    _migrate_research_session_id(conn)
+    # Additive column for report-wins precedence (a multi-step report survives a later
+    # trivial direct-answer in the same session). Backfilled from context_json.
+    _migrate_research_depth(conn)
+
+
+def _migrate_research_session_id(conn: sqlite3.Connection) -> None:
+    """Add the ``session_id`` column to an older ``research_context`` table if missing."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+    if "session_id" not in cols:
+        conn.execute("ALTER TABLE research_context ADD COLUMN session_id TEXT")
+        conn.commit()
+
+
+def _migrate_research_depth(conn: sqlite3.Connection) -> None:
+    """Add the ``depth`` column to an older ``research_context`` table + backfill from context_json.
+
+    ``depth`` is denormalized from ``ResearchContext.depth`` (0 = direct-answer, >=1 = multi-step)
+    so ``load_research_context_for_session`` can rank a richer report above a later trivial answer
+    without parsing JSON in SQL.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+    if "depth" not in cols:
+        conn.execute("ALTER TABLE research_context ADD COLUMN depth INTEGER")
+        for graph_run_id, context_json in conn.execute(
+            "SELECT graph_run_id, context_json FROM research_context"
+        ).fetchall():
+            try:
+                depth = int(json.loads(context_json).get("depth", 0))
+            except (ValueError, TypeError):
+                depth = 0
+            conn.execute("UPDATE research_context SET depth=? WHERE graph_run_id=?", (depth, graph_run_id))
+        conn.commit()
+
+
 class SQLiteMemory(ConversationMemory):
     """ConversationMemory backed by SQLite. Persists sessions across restarts.
 
@@ -192,6 +248,7 @@ class SQLiteMemory(ConversationMemory):
         """
         ensure_steps_table(conn)
         ensure_tasks_table(conn)
+        ensure_research_context_table(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS session_meta ("
             "session_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, "

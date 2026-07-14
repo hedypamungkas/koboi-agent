@@ -86,10 +86,28 @@ class _TagStripper(HTMLParser):
 
 
 class HtmlParser(BaseParser):
-    """HTML -> text via stdlib ``html.parser`` (zero dependencies)."""
+    """HTML -> text via stdlib ``html.parser`` (zero dependencies).
+
+    Prefers ``trafilatura`` (readability/boilerplate removal) when the ``[web]`` extra is
+    installed; falls back to the stdlib tag-stripper (the offline default). Either path
+    returns ``source_format: html``.
+    """
 
     def extract(self, name: str, data: bytes) -> tuple[str, dict]:
         raw = data.decode("utf-8", errors="replace")
+        if _TRAFILATURA_AVAILABLE:
+            try:
+                extracted = trafilatura.extract(  # type: ignore[union-attr]
+                    raw,
+                    output_format="markdown",
+                    include_comments=False,
+                    include_tables=True,
+                    with_metadata=False,
+                )
+                if extracted and extracted.strip():
+                    return extracted, {"source_format": "html"}
+            except Exception as exc:  # noqa: BLE001 - readability is best-effort; fall back below
+                _logger.debug("trafilatura failed on '%s' (%s); falling back to tag-strip", name, exc)
         stripper = _TagStripper()
         try:
             stripper.feed(raw)
@@ -126,6 +144,16 @@ try:  # pragma: no cover - dep guard
     _PDFPLUMBER_AVAILABLE = True
 except ImportError:
     pdfplumber = None  # type: ignore[assignment]
+
+# Optional readability extraction for the html parser (boilerplate -> markdown). Lives
+# behind the `web` pyproject extra; absent in CI (falls back to the stdlib tag-stripper).
+_TRAFILATURA_AVAILABLE = False
+try:  # pragma: no cover - dep guard
+    import trafilatura  # type: ignore[import-not-found]  # noqa: F401
+
+    _TRAFILATURA_AVAILABLE = True
+except ImportError:
+    trafilatura = None  # type: ignore[assignment]
 
 
 class PdfParser(BaseParser):

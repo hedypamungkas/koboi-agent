@@ -208,6 +208,8 @@ class AgentFactory:
         embedding_config: dict | None = None,
         client_builder: Callable[[dict], Client] | None = None,
         mcp_registrar: Callable[[object], None] | None = None,
+        search_provider: object | None = None,
+        fetch_provider: object | None = None,
     ) -> Agent:
         """Build an AgentCore from an AgentDef (config-driven).
 
@@ -235,7 +237,12 @@ class AgentFactory:
         if client_builder and _has_client_overrides(agent_def.llm_config):
             agent_client = client_builder(agent_def.llm_config or {})
 
-        tools = cls._build_tools_from_config(agent_def.tools_config, sandbox=sandbox)
+        tools = cls._build_tools_from_config(
+            agent_def.tools_config,
+            sandbox=sandbox,
+            search_provider=search_provider,
+            fetch_provider=fetch_provider,
+        )
 
         # G5: register shared MCP tools into this sub-agent's registry (one set of
         # shared clients across all agents). Skipped when the agent has no tools at all.
@@ -265,6 +272,8 @@ class AgentFactory:
         embedding_config: dict | None = None,
         client_builder: Callable[[dict], Client] | None = None,
         mcp_registrar: Callable[[object], None] | None = None,
+        search_provider: object | None = None,
+        fetch_provider: object | None = None,
     ) -> dict[str, Agent]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -287,11 +296,18 @@ class AgentFactory:
                 embedding_config=embedding_config,
                 client_builder=client_builder,
                 mcp_registrar=mcp_registrar,
+                search_provider=search_provider,
+                fetch_provider=fetch_provider,
             )
         return agents
 
     @staticmethod
-    def _build_tools_from_config(tools_config: dict | None, sandbox: object | None = None):
+    def _build_tools_from_config(
+        tools_config: dict | None,
+        sandbox: object | None = None,
+        search_provider: object | None = None,
+        fetch_provider: object | None = None,
+    ):
         """Build a ToolRegistry from agent-level tools config."""
         if not tools_config:
             return None
@@ -326,6 +342,13 @@ class AgentFactory:
         from koboi.tools.state import ToolState
 
         registry.set_dep("tool_state", ToolState())
+        # W4: inject the configured web providers (deep_research nodes) so web_search /
+        # web_fetch reach Brave/Firecrawl instead of the mock/inline default. Mirrors
+        # facade._build_tools. Optional -- absent for non-web agent configs.
+        if search_provider is not None:
+            registry.set_dep("search_provider", search_provider)
+        if fetch_provider is not None:
+            registry.set_dep("fetch_provider", fetch_provider)
         # Apply defaults/overrides/disabled/groups via the shared helper so this
         # path stays in lock-step with facade._build_tools.
         from koboi.tools.registry import apply_tool_selection

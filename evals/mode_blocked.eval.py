@@ -73,4 +73,3 @@ async def test_write_tool_is_mode_blocked(t):
 
     # The agent must still complete (the blocked turn is non-fatal).
     t.completed()
-

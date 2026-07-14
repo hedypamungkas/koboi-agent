@@ -18,8 +18,12 @@ augmentation.py     AugmentationStrategy ABC + InMemory/OnTheFly; heuristic Rera
 rerank.py           Cross-encoder rerank stage (PR #38): RerankBackend ABC + jina/cohere/local-BGE backends; CrossEncoderReranker wrapper; build_rerank_client() factory
 rewrite.py          Query rewriting + HyDE backing module (#9); needs a chat client, output is ephemeral
 filters.py          Metadata pre-filter operators (#10); NOT a security/ACL boundary
-parsers.py          parser_registry -- text/html/pdf/docx document parsing ([rag] extra for PDF/DOCX)
-sources.py          _load_documents source loaders: file/http (httpx)/s3 (boto3, [rag-cloud] extra)
+parsers.py          parser_registry -- text/html/pdf/docx document parsing ([rag] extra for PDF/DOCX);
+                     HtmlParser prefers trafilatura (guarded) with a _TagStripper fallback
+sources.py          _load_documents source loaders: file/http (httpx)/s3 (boto3, [rag-cloud] extra)/
+                     firecrawl (site crawl -> corpus; `source: firecrawl`, [websearch] extra for scrape)
+live.py             LiveCorpus (mutable chunk store w/ dirty flag) + LiveRetriever (lazy KeywordRetriever
+                     delegate rebuild) -- the `rag.live` swap target for `ingest_url` (fetch -> chunk -> append)
 sample_documents.py Loaders for data/sample/ docs (company policy, handbook, catalog)
 __init__.py         Re-exports public API; calls _register_builtins() at import
 ```

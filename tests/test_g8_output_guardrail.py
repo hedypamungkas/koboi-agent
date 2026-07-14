@@ -125,9 +125,7 @@ class TestOutputGuardrailStreamingG8b:
         # live exactly as before (latency unchanged for the default case).
         core = _core([], content="hello world")
         yielded = [ev async for ev in core.run_stream("hi")]
-        assert any(
-            isinstance(ev, TextDeltaEvent) and ev.content == "hello world" for ev in yielded
-        )
+        assert any(isinstance(ev, TextDeltaEvent) and ev.content == "hello world" for ev in yielded)
 
     async def test_warn_guardrail_flushes_text_deltas_after_check(self):
         # A warn-action guardrail doesn't block, so the buffered TextDeltas are

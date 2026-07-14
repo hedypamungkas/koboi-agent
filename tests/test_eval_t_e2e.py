@@ -19,7 +19,6 @@ class TestShippedEvalsGolden:
     async def test_evals_directory_outcomes(self):
         results = await run_tests(EVALS_DIR, threshold=0.6, mock=True)
 
-        # All mock-driven (R4 made RAG retrieval mock-safe via t.retrievedChunk).
         # Core samples (11): weather (2) + no_tools (1) + multi_turn (1)
         # + guardrail_block (2) + mode_blocked (1) + rag_retrieval (2)
         # + guardrail_output_warn (1) + skill_activation (1).
@@ -38,11 +37,15 @@ class TestShippedEvalsGolden:
         # -- self-skip under mock via t.require_live() (live_skip), so they pass here
         # and run for real on a manual `--tags live` run. rag_abstention_live is a 3-case
         # +/−/edge suite (empty-retrieval marker / in-corpus answer / near-miss refuse).
-        assert len(results) == 54
+        # Deep research mock eval (2): deep_research_mock + deep_research_citations/faithfulness
+        # self-skip under mock (DispatchingClient W6.1 + fail-fast OPENAI_API_KEY guard).
+        # Production smoke evals (4): deep_research_prod_{multifaceted,recency,comparative,adversarial}
+        # -- live-only, self-skip under mock (live_ready guard). Real-provider run is pre-release.
+        assert len(results) == 61
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 54
+        assert len(passed) == 61
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing

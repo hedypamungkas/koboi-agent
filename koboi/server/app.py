@@ -837,37 +837,45 @@ def _register_routes(
         queue: asyncio.Queue = asyncio.Queue(maxsize=chat_queue_maxsize)  # H6: backpressure
         coordinator = ApprovalCoordinator(queue, timeout=APPROVAL_TIMEOUT)
         approvals.register(session_id, coordinator)
-        handler = AsyncCallbackApprovalHandler(
-            callback=coordinator.request,
-            trust_db=agent.trust_db,
-            audit_trail=agent._core.audit_trail,
-            timeout=APPROVAL_TIMEOUT,
-        )
+        # W5 B1: orchestrated configs (execution.mode: dynamic/dag/deep_research) build the
+        # agent with core=None -- the orchestrator manages its own per-node agents. HITL approval
+        # + per-request mode/cap don't apply during orchestration, so guard every _core access.
+        handler = None
+        if agent._core is not None:
+            handler = AsyncCallbackApprovalHandler(
+                callback=coordinator.request,
+                trust_db=agent.trust_db,
+                audit_trail=agent._core.audit_trail,
+                timeout=APPROVAL_TIMEOUT,
+            )
         # 16.21: enrich Langfuse trace with serving context.
         _enrich_trace(agent, mode="interactive", request_id=getattr(request.state, "request_id", ""), owner=owner)
 
         async def _run_agent():
             try:
                 async with pool.session_lock(session_id):
-                    if hasattr(agent._core, "_tool_pipeline"):
-                        del agent._core._tool_pipeline
-                    agent._core.approval_handler = handler
-                    # G2: per-request mode + cap; restore in finally (pooled agent
-                    # is reused, so without restore a later mode=None inherits this
-                    # request's mode). switch_mode is live (shared ModeManager ref).
-                    prior_mode = agent._core.mode_manager.current_mode
-                    prior_max_iter = agent._core.max_iterations
-                    try:
+                    prior_mode = None
+                    prior_max_iter = None
+                    if agent._core is not None:
+                        if hasattr(agent._core, "_tool_pipeline"):
+                            del agent._core._tool_pipeline
+                        agent._core.approval_handler = handler
+                        # G2: per-request mode + cap; restore in finally (pooled agent is
+                        # reused). switch_mode is live (shared ModeManager ref).
+                        prior_mode = agent._core.mode_manager.current_mode
+                        prior_max_iter = agent._core.max_iterations
                         if effective_mode is not None:
                             agent._core.mode_manager.switch_mode(effective_mode)
                         if effective_max_iter is not None:
                             agent._core.max_iterations = effective_max_iter
+                    try:
                         async for ev in agent.run_stream(message):
                             await queue.put(ev)
                             session_events.append_event(session_id, ev)  # B2: buffer for replay
                     finally:
-                        agent._core.mode_manager.switch_mode(prior_mode)
-                        agent._core.max_iterations = prior_max_iter
+                        if agent._core is not None:
+                            agent._core.mode_manager.switch_mode(prior_mode)
+                            agent._core.max_iterations = prior_max_iter
             except AgentHandoverError as he:
                 # B1: the bot yielded via transfer_to_human -> emit a typed
                 # HandoverEvent (NOT ErrorEvent). The exception propagated out of

@@ -316,7 +316,7 @@ def _load_documents(
     from pathlib import Path as PathlibPath
 
     from koboi.rag.parsers import dispatch_parser
-    from koboi.rag.sources import DocumentCache, fetch_http_entry, fetch_s3_entry
+    from koboi.rag.sources import DocumentCache, fetch_firecrawl_entry, fetch_http_entry, fetch_s3_entry
     from koboi.rag.types import Document
 
     chunker = _build_chunker(rag_conf)
@@ -365,6 +365,9 @@ def _load_documents(
             return
         if source == "http" or "url" in entry:
             yield from fetch_http_entry(entry, doc_cache)
+            return
+        if source == "firecrawl":
+            yield from fetch_firecrawl_entry(entry, doc_cache)
             return
         if source == "s3":
             yield from fetch_s3_entry(entry, doc_cache)

@@ -125,6 +125,44 @@ class OrchestrationCompleteEvent:
     execution_mode: str
     routing_agents: list[str]
     routing_confidence: float
+    # W2: deep-research stamps research_sources / coverage / depth here; merged into
+    # OrchestratorResult.metadata by run(). Other modes leave it empty.
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class SearchEvent:
+    """W2: a research node ran a web search."""
+
+    query: str
+    results_count: int
+
+
+@dataclass
+class FetchEvent:
+    """W2: a research node fetched a URL."""
+
+    url: str
+    status: int
+    chars: int
+
+
+@dataclass
+class SourceEvent:
+    """W2: a finding was added to the research SourceStore (assigned a citation id)."""
+
+    citation_id: int
+    node_id: str
+    preview: str
+
+
+@dataclass
+class CoverageEvent:
+    """W2: a coverage-evaluation round completed."""
+
+    depth: int
+    score: float
+    gaps: list[str]
 
 
 StreamEvent = (
@@ -140,6 +178,10 @@ StreamEvent = (
     | AgentDispatchEvent
     | AgentResultEvent
     | OrchestrationCompleteEvent
+    | SearchEvent
+    | FetchEvent
+    | SourceEvent
+    | CoverageEvent
 )
 
 
@@ -156,6 +198,10 @@ _EVENT_TYPE_MAP: dict[type, str] = {
     AgentDispatchEvent: "agent_dispatch",
     AgentResultEvent: "agent_result",
     OrchestrationCompleteEvent: "orchestration_complete",
+    SearchEvent: "search",
+    FetchEvent: "fetch",
+    SourceEvent: "source",
+    CoverageEvent: "coverage",
 }
 
 # Fields that need rounding to 2 decimal places

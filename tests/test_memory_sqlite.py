@@ -466,3 +466,95 @@ class TestSQLiteMemory:
         assert messages[1]["content"] == "Background thread message"
         assert messages[2]["content"] == "Background response"
         mem.close()
+
+
+class TestResearchContextMigration:
+    """W7: the research_context table gains a session_id column; old DBs self-heal."""
+
+    def test_new_db_has_session_id_column(self, tmp_path):
+        from koboi.memory_sqlite import ensure_research_context_table
+
+        db_path = tmp_path / "new.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+            assert "session_id" in cols
+        finally:
+            conn.close()
+
+    def test_migrate_adds_session_id_to_old_db(self, tmp_path):
+        from koboi.memory_sqlite import _migrate_research_session_id, ensure_research_context_table
+
+        db_path = tmp_path / "old.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            # Create the table WITHOUT session_id (simulate a pre-W7 DB).
+            conn.execute(
+                "CREATE TABLE research_context (graph_run_id TEXT PRIMARY KEY, "
+                "context_json TEXT NOT NULL, updated_at REAL)"
+            )
+            conn.execute(
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at) VALUES ('run-1', '{}', 0)"
+            )
+            conn.commit()
+            # ensure_research_context_table must self-heal (idempotent CREATE + migration).
+            ensure_research_context_table(conn)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+            assert "session_id" in cols
+            # Pre-existing row survived + the new column is nullable.
+            row = conn.execute("SELECT graph_run_id, context_json, session_id FROM research_context").fetchone()
+            assert row[0] == "run-1" and row[2] is None
+        finally:
+            conn.close()
+
+        # Re-running on an already-migrated DB is a no-op (idempotent).
+        conn = sqlite3.connect(db_path)
+        try:
+            _migrate_research_session_id(conn)  # should not raise/duplicate
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+            assert "session_id" in cols
+        finally:
+            conn.close()
+
+    def test_migrate_adds_depth_column_and_backfills(self, tmp_path):
+        # v0.14 follow-up #1: the depth column (report-wins precedence) is added to older DBs +
+        # backfilled from each row's context_json so existing runs get correct precedence.
+        import json
+
+        from koboi.memory_sqlite import _migrate_research_depth, ensure_research_context_table
+
+        db_path = tmp_path / "old_depth.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            # Pre-depth-column schema (has session_id but no depth), with a multi-step row.
+            conn.execute(
+                "CREATE TABLE research_context (graph_run_id TEXT PRIMARY KEY, "
+                "context_json TEXT NOT NULL, updated_at REAL, session_id TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id) "
+                "VALUES ('run-1', ?, 0, 'sess-A')",
+                (json.dumps({"depth": 2, "query": "report"}),),
+            )
+            conn.execute(
+                "INSERT INTO research_context (graph_run_id, context_json, updated_at, session_id) "
+                "VALUES ('run-2', ?, 1, 'sess-A')",
+                (json.dumps({"depth": 0, "query": "direct"}),),
+            )
+            conn.commit()
+            ensure_research_context_table(conn)  # triggers _migrate_research_depth
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+            assert "depth" in cols
+            # Backfilled from context_json.
+            rows = {r[0]: r[1] for r in conn.execute("SELECT graph_run_id, depth FROM research_context").fetchall()}
+            assert rows["run-1"] == 2 and rows["run-2"] == 0
+        finally:
+            conn.close()
+
+        # Idempotent re-run.
+        conn = sqlite3.connect(db_path)
+        try:
+            _migrate_research_depth(conn)
+        finally:
+            conn.close()

@@ -103,6 +103,8 @@ rag:
   augmentation: str         # "in_memory" | "on_the_fly"
   documents:
     - path: "./path/to/doc.md"
+  live: bool                # Mutable LiveCorpus (ingest_url appends chunks at runtime); default false
+  live_seed_file: str       # Optional seed corpus jsonl for the LiveCorpus
 ```
 
 ## guardrails
@@ -191,3 +193,50 @@ memory:
   db_path: str            # Default: "koboi_memory.db"
   session_id: str         # Optional session identifier
 ```
+
+## orchestration
+```yaml
+orchestration:
+  enabled: bool           # Enable multi-agent orchestration (default: false)
+  execution:
+    mode: str             # "sequential" | "parallel" | "dag" | "conditional" | "dynamic" | "deep_research"
+                          #   deep_research: plan -> search -> fetch -> coverage eval -> drill -> synthesize a cited report
+  router:
+    enable_dynamic: bool  # LLM router may emit "dynamic"/plan agents (default: false)
+  agents:                 # Agent definitions (name, system_prompt, tools, depends_on, keywords, llm_config, ...)
+    - name: "researcher"
+      system_prompt: "..."
+```
+
+## websearch
+```yaml
+websearch:                # Pluggable search/fetch providers for the web_search/web_fetch tools
+  search:
+    provider: str         # "mock" | "ddg" | "brave" | "firecrawl" (default: "mock" -- offline-safe)
+    max_results: int      # Default: 10
+    brave:                # Per-provider credentials (nested under the provider name)
+      api_key: str        # ${BRAVE_API_KEY}
+    firecrawl:
+      api_key: str        # ${FIRECRAWL_API_KEY}
+      scrape_results: bool # Embed markdown into each search hit (search+fetch fusion)
+  fetch:
+    provider: str         # "httpx" (readability, default) | "firecrawl" (JS rendering)
+    firecrawl:
+      api_key: str
+      only_main_content: bool
+  custom_modules:         # Extra @register_search_provider/@register_fetch_provider modules
+    - mycorp.websearch_providers.bing
+```
+
+## research
+```yaml
+research:                 # deep_research knobs (only used when execution.mode: deep_research)
+  max_depth: int          # Coverage-gated replan rounds (default: 3)
+  max_searches: int       # Total web_search calls across all rounds (default: 15)
+  max_fetches: int        # Total web_fetch calls (default: 20)
+  max_tokens: int         # Token budget cap (0 = unenforced, default: 0)
+  coverage_threshold: float # Stop iterating once coverage >= this (default: 0.7)
+  citations: str          # "numbered" (default)
+  persist_findings: str   # Optional path; dump findings as jsonl for later corpus reuse
+```
+

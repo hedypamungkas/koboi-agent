@@ -19,28 +19,61 @@ from tests.e2e.framework.scenario import Scenario, Turn
 SCENARIOS: list[Scenario] = [
     # --- Concurrency ---
     Scenario(
-        "stress_concurrent_5_sessions", "stress",
-        [Turn("In one short sentence, greet me and name a primary color.", expect_keywords=["blue", "red", "green", "yellow"])],
-        concurrent=5, throttle_seconds=0.5,
+        "stress_concurrent_5_sessions",
+        "stress",
+        [
+            Turn(
+                "In one short sentence, greet me and name a primary color.",
+                expect_keywords=["blue", "red", "green", "yellow"],
+            )
+        ],
+        concurrent=5,
+        throttle_seconds=0.5,
     ),
     Scenario(
-        "stress_concurrent_3_jobs", "stress",
-        [Turn("Use the calculator to compute 50 + 50 and report the total.", expect_tools=["calculate"], expect_keywords=["100"])],
-        job=True, concurrent=3, throttle_seconds=0.5,
+        "stress_concurrent_3_jobs",
+        "stress",
+        [
+            Turn(
+                "Use the calculator to compute 50 + 50 and report the total.",
+                expect_tools=["calculate"],
+                expect_keywords=["100"],
+            )
+        ],
+        job=True,
+        concurrent=3,
+        throttle_seconds=0.5,
     ),
     Scenario(
-        "stress_concurrent_8_sessions", "stress",
-        [Turn("Reply with exactly one word: a type of fruit.", expect_keywords=["apple", "banana", "orange", "mango", "pear", "grape"])],
-        concurrent=8, throttle_seconds=0.5, timeout_per_turn=200,
+        "stress_concurrent_8_sessions",
+        "stress",
+        [
+            Turn(
+                "Reply with exactly one word: a type of fruit.",
+                expect_keywords=["apple", "banana", "orange", "mango", "pear", "grape"],
+            )
+        ],
+        concurrent=8,
+        throttle_seconds=0.5,
+        timeout_per_turn=200,
     ),
     Scenario(
-        "stress_concurrent_4_tools", "stress",
-        [Turn("Use the calculator to compute 6 * 7 and report the product.", expect_tools=["calculate"], expect_keywords=["42"])],
-        concurrent=4, throttle_seconds=0.5,
+        "stress_concurrent_4_tools",
+        "stress",
+        [
+            Turn(
+                "Use the calculator to compute 6 * 7 and report the product.",
+                expect_tools=["calculate"],
+                expect_keywords=["42"],
+            )
+        ],
+        concurrent=4,
+        throttle_seconds=0.5,
     ),
     # --- Rapid-fire serialized (same session, low throttle) ---
     Scenario(
-        "stress_rapid_3turn", "stress",
+        "stress_rapid_3turn",
+        "stress",
         [
             Turn("Use the calculator to compute 10 + 10.", expect_tools=["calculate"], expect_keywords=["20"]),
             Turn("Now compute 20 + 20.", expect_tools=["calculate"], expect_keywords=["40"]),
@@ -49,7 +82,8 @@ SCENARIOS: list[Scenario] = [
         throttle_seconds=0.0,
     ),
     Scenario(
-        "stress_rapid_5turn_memory", "stress",
+        "stress_rapid_5turn_memory",
+        "stress",
         [
             Turn("My lucky number is 777."),
             Turn("My favorite season is autumn."),
@@ -61,16 +95,29 @@ SCENARIOS: list[Scenario] = [
     ),
     # --- Tool burst (one message, several tool calls) ---
     Scenario(
-        "stress_tool_burst_calc", "stress",
-        [Turn("Use the calculator to compute each of these and list the results: 5+5, 6*6, 100-37, 81/9, 3**4.", expect_tools=["calculate"])],
+        "stress_tool_burst_calc",
+        "stress",
+        [
+            Turn(
+                "Use the calculator to compute each of these and list the results: 5+5, 6*6, 100-37, 81/9, 3**4.",
+                expect_tools=["calculate"],
+            )
+        ],
     ),
     Scenario(
-        "stress_tool_burst_files", "stress",
-        [Turn("Write three files: a.txt='1', b.txt='2', c.txt='3' using write_file, then use list_files to show them.", expect_tools=["write_file", "list_files"])],
+        "stress_tool_burst_files",
+        "stress",
+        [
+            Turn(
+                "Write three files: a.txt='1', b.txt='2', c.txt='3' using write_file, then use list_files to show them.",
+                expect_tools=["write_file", "list_files"],
+            )
+        ],
     ),
     # --- Long conversations (memory growth / compaction) ---
     Scenario(
-        "stress_long_10turn", "stress",
+        "stress_long_10turn",
+        "stress",
         turns=[
             Turn("Let's plan a week-long trip. Day 1 is for arrival and rest."),
             Turn("Day 2: museum day."),
@@ -86,7 +133,8 @@ SCENARIOS: list[Scenario] = [
         throttle_seconds=0.5,
     ),
     Scenario(
-        "stress_long_15turn", "stress",
+        "stress_long_15turn",
+        "stress",
         turns=[
             *[Turn(f"Project note {i}: task T{i} is owned by person P{i % 3}.") for i in range(1, 11)],
             # Recall the LAST notes (T8–T10) which survive keep_last=10 truncation.
@@ -96,6 +144,7 @@ SCENARIOS: list[Scenario] = [
             Turn("Who owns T9?", expect_keywords=["P0"]),
             Turn("List the owners mentioned for T9 and T10.", min_events=2),
         ],
-        throttle_seconds=0.5, timeout_per_turn=200,
+        throttle_seconds=0.5,
+        timeout_per_turn=200,
     ),
 ]

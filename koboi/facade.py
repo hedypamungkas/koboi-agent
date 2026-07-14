@@ -179,6 +179,27 @@ class KoboiAgent:
         from koboi.exceptions import AgentError
 
         if self._orchestrator is not None:
+            # W5.1: deep_research can resume (rehydrate-and-finish from the journal).
+            if getattr(self._orchestrator, "default_mode", None) == "deep_research":
+                db_path = self._orchestrator._dag_scheduler.db_path if self._orchestrator._dag_scheduler else None
+                if not db_path:
+                    raise AgentError("Cannot resume deep_research: no db_path (memory.backend must be sqlite)")
+                from koboi.orchestration.dag_scheduler import DagScheduler
+
+                # Session-scoped first (avoid a cross-session leak: a shared koboi_memory.db
+                # holds every session's research_context rows; the global latest would return
+                # whichever session ran most recently). Fall back to the global latest only for
+                # non-server callers whose rows carry no session_id tag.
+                resume_session_id = getattr(self._orchestrator, "_session_id", None)
+                ctx_json = (
+                    DagScheduler.load_research_context_for_session(db_path, resume_session_id)
+                    if resume_session_id
+                    else DagScheduler.load_latest_research_context(db_path)
+                )
+                if not ctx_json:
+                    raise AgentError("No research context found to resume (run deep_research first)")
+                self._orchestrator._resume_ctx_json = ctx_json  # type: ignore[attr-defined]
+                return await _run_orchestrator(self._orchestrator, "")
             # Issue #10b: clearer message. Orchestration mode runs N per-agent
             # memories with no single shared conversation/journal to resume; full
             # resume support requires orchestration-mode redesign (deferred).
@@ -663,6 +684,16 @@ def _build_tools(config: Config) -> ToolRegistry:
         from koboi.tools.builtin import register_all
 
         register_all(registry)
+        # W0/W1: inject the registry-resolved web providers (koboi.websearch). web_search /
+        # web_fetch read these from their _deps; absent web: config -> mock search and
+        # httpx+readability fetch (offline-safe defaults).
+        from koboi.websearch import build_fetch_provider, build_search_provider, load_custom_components
+
+        websearch_conf = config.get("websearch", default={})
+        if websearch_conf.get("custom_modules"):
+            load_custom_components(websearch_conf["custom_modules"])
+        registry.set_dep("search_provider", build_search_provider(websearch_conf))
+        registry.set_dep("fetch_provider", build_fetch_provider(websearch_conf))
         # Inject per-agent memory store so agents don't share state
         from koboi.tools.builtin.memory import _MemoryStore
 
@@ -1131,6 +1162,26 @@ class AgentAssembler:
 
     def build_rag(self) -> object:
         self.augmentation = _build_rag(self.config, self.client, self.logger)
+        # W3: opt-in live corpus -- swap the augmentation retriever for a LiveRetriever over a
+        # shared LiveCorpus (seeded with the static chunks) and inject it as the live_corpus dep
+        # so the ingest_url tool can grow it mid-conversation (rag.live + tools.builtin:
+        # [ingest_url, ...]). add_chunks is cheap; the KeywordRetriever delegate rebuilds lazily.
+        if self.augmentation is not None and self.config.get("rag", "live", default=False):
+            from koboi.rag.live import LiveCorpus, LiveRetriever
+
+            seed = getattr(self.augmentation.retriever, "_chunks", []) or []
+            # W5 B2: optionally seed the live corpus from a research run's persisted findings
+            # (SourceStore.to_corpus_file jsonl) -- the research->corpus convergence.
+            seed_file = self.config.get("rag", "live_seed_file", default=None)
+            if seed_file:
+                seeded = LiveCorpus.from_corpus_file(seed_file)
+                if seeded is not None:
+                    seed = seeded.chunks
+            corpus = LiveCorpus(seed)
+            self.augmentation.retriever = LiveRetriever(corpus)
+            tools = getattr(self, "tools", None)
+            if tools is not None:
+                tools.set_dep("live_corpus", corpus)
         return self.augmentation
 
     def build_guardrails(self) -> tuple:
@@ -1674,8 +1725,8 @@ def _build_orchestration(config: Config, verbose: bool = False):
     exec_conf = orch_conf.get("execution", {})
     exec_mode = exec_conf.get("mode", "sequential")
 
-    # Dynamic mode: agents are planned at runtime from the query (no config agents).
-    agent_defs = [] if exec_mode == "dynamic" else _parse_agent_defs(config)
+    # Dynamic / deep_research: agents are planned at runtime from the query (no config agents).
+    agent_defs = [] if exec_mode in ("dynamic", "deep_research") else _parse_agent_defs(config)
     router = _build_router(config, assembler.client, agent_defs)
 
     parent_rag = config.rag
@@ -1732,6 +1783,16 @@ def _build_orchestration(config: Config, verbose: bool = False):
             agents_map=agents_map, deps=deps, db_path=dag_db_path, conditionals=conds, interrupt_nodes=interrupt_nodes
         )
 
+    if exec_mode == "deep_research":
+        # deep_research plans nodes per-query (like dynamic) but needs a DagScheduler for
+        # the db_path used to journal the ResearchContext (W2).
+        from koboi.orchestration.dag_scheduler import DagScheduler
+
+        deep_db_path = None
+        if config.get("memory", "backend", default="sqlite") == "sqlite":
+            deep_db_path = config.get("memory", "db_path", default="koboi_memory.db")
+        dag_scheduler = DagScheduler(agents_map={}, deps={}, db_path=deep_db_path)
+
     orchestrator = Orchestrator(
         client=assembler.client,
         router=router,
@@ -1745,6 +1806,10 @@ def _build_orchestration(config: Config, verbose: bool = False):
         hook_chain=assembler.hook_chain,
         full_graph=exec_conf.get("full_graph", False),
         max_replans=exec_conf.get("max_replans", 0),
+        sandbox=assembler.sandbox,
+        research=config.get("research", default={}),
+        websearch_conf=config.get("websearch", default={}),
+        session_id=config.get("memory", "session_id", default=None),
     )
 
     return KoboiAgent(
@@ -1839,5 +1904,8 @@ async def _run_orchestrator(orchestrator, message: str | list) -> RunResult:
             "agents_used": [r.agent_name for r in result.agent_results],
             "execution_mode": result.execution_mode,
             "total_tokens": total_tokens,
+            # W6 C1a: propagate orchestrator metadata (deep_research research_sources/coverage/depth)
+            # so t.* eval assertions + RunResult consumers can see them.
+            **result.metadata,
         },
     )
