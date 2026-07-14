@@ -15,6 +15,23 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+# A2: injected into the augmented user message when retrieval returned NO usable
+# context (no hits, or the relevance_threshold / dedup collapsed everything to
+# empty). Previously this case returned ("", []) silently -- the LLM received a
+# bare question with zero signal that retrieval failed and fabricated confidently.
+# The marker rides through ``_build_augmented_message`` so the LLM sees it inside
+# the standard "Document context" block (a stronger abstention cue than a bare
+# prefix, and consistent with non-empty turns). Default-ON; if a deployment sees
+# over-abstention, flip to opt-in via an ``abstention_marker`` kwarg on
+# ``AugmentationStrategy.__init__`` (the registry param-matching plumbing already
+# supports it -- ``relevance_threshold`` flows the same way).
+ABSTENTION_MARKER = (
+    "[RETRIEVAL_EMPTY] No relevant context was retrieved for this query. "
+    "Do not fabricate, infer, or speculate from parametric knowledge. "
+    "If you cannot answer from prior conversation, state that you do not have "
+    "enough information."
+)
+
 
 class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods have default no-op impls
     def __init__(
@@ -90,7 +107,7 @@ class AugmentationStrategy(ABC):  # noqa: B024 - registry type marker; methods h
         self.last_results = list(results)
 
         if not results:
-            return "", results
+            return ABSTENTION_MARKER, results
 
         # #12: numbered citations [1] [2] ... so the model can echo references.
         context_parts = []

@@ -36,3 +36,18 @@ class AgentStreamError(AgentError):
 
 class AgentAbortedError(AgentError):
     """Raised when a hook aborts execution."""
+
+
+class AgentHandoverError(AgentError):
+    """Raised (by the ``transfer_to_human`` tool or a handover hook) to yield the
+    conversation to a human operator (B1). Propagates out of ``run_stream``/``run``
+    uncaught (exactly like ``AgentGuardrailError`` from ``_process_output``) and is
+    caught in ``_run_agent`` (SSE -> ``HandoverEvent``) or ``run_job`` (->
+    ``awaiting_human``). Stop-then-resume: NO Future is awaited, so ``pool.session_lock``
+    releases when the run ends -- a human operator can then take over the session.
+    """
+
+    def __init__(self, reason: str, summary: str = ""):
+        self.reason = reason
+        self.summary = summary
+        super().__init__(f"Handover: {reason}")

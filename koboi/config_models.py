@@ -227,7 +227,7 @@ class GuardrailsConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     input: InputGuardrailConfig = Field(default_factory=InputGuardrailConfig)
-    output: OutputGuardrailConfig = Field(default_factory=OutputGuardrailConfig)
+    output: OutputGuardrailConfig | list[dict] = Field(default_factory=OutputGuardrailConfig)
     rate_limit: RateLimitConfig | None = None
     audit: AuditConfig = Field(default_factory=AuditConfig)
     approval: dict = Field(default_factory=dict)
@@ -463,9 +463,9 @@ class JobWebhookConfig(BaseModel):
     """One outbound webhook entry under ``jobs.webhooks``.
 
     POSTs a JSON job payload to ``url`` when the job reaches a terminal status in
-    ``events`` (one of ``completed``/``cancelled``/``timed_out``/``failed``; empty
-    = all). ``secret`` HMAC-SHA256-signs the body via the ``X-Koboi-Signature``
-    header so receivers can verify integrity.
+    ``events`` (one of ``completed``/``cancelled``/``timed_out``/``failed``/
+    ``awaiting_human``; empty = all). ``secret`` HMAC-SHA256-signs the body via the
+    ``X-Koboi-Signature`` header so receivers can verify integrity.
     """
 
     model_config = {"extra": "ignore"}

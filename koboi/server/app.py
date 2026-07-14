@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from koboi.config import Config
-from koboi.events import ErrorEvent
+from koboi.events import ErrorEvent, HandoverEvent
+from koboi.exceptions import AgentHandoverError
 from koboi.guardrails.approval import AsyncCallbackApprovalHandler
 from koboi.guardrails.approval_types import ApprovalResponse
 from koboi.modes import AgentMode, ModeManager
@@ -37,10 +39,13 @@ from koboi.server.jobs import (
     new_job_id,
     resume_on_startup,
     run_job,
+    _emit_handover_webhook,
 )
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
+from koboi.server.session_events import SessionEventRegistry
+from koboi.server.handoff_digest import HandoffDigest
 from koboi.server.schema import (
     ApproveRequest,
     ApproveResponse,
@@ -48,6 +53,8 @@ from koboi.server.schema import (
     CreateSessionResponse,
     ErrorDetail,
     ErrorResponse,
+    TransferRequest,
+    TransferResponse,
     JobStatusResponse,
     JobSubmitRequest,
     McpServerCreateRequest,
@@ -173,6 +180,7 @@ def create_app(
     idempotency_store: Any | None = None,
     ownership_store: Any | None = None,
     approval_registry: Any | None = None,
+    session_event_buffer: Any | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
 
@@ -229,8 +237,28 @@ def create_app(
     job_ttl = config.get("jobs", "ttl_seconds", default=86400.0) or 86400.0  # G5c-a
     job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
     job_webhooks = config.get("jobs", "webhooks", default=[]) or []
+    # B5: chat-path handover webhooks (mid-conversation HandoverEvent notification).
+    handover_webhooks = config.get("handover", "webhooks", default=[]) or []
     job_resume = config.get("jobs", "resume_on_startup", default=True)
     job_registry = event_buffer if event_buffer is not None else JobRegistry(max_events=job_max_events)
+    # B2: per-session replayable event buffer (GET /v1/sessions/{id}/stream).
+    session_max_events = config.get("server", "limits", "session_event_buffer", "max_events", default=1000) or 1000
+    session_streams_per_owner = config.get("server", "limits", "session_streams_per_owner", default=4)
+    session_stream_timeout = config.get("server", "limits", "session_stream_timeout", default=3600.0) or 3600.0
+    session_events = (
+        session_event_buffer
+        if session_event_buffer is not None
+        else SessionEventRegistry(max_events=session_max_events)
+    )
+    # B4: warm handoff digest (opt-in). Reuses the main llm config for the side-LLM.
+    handoff_digest = None
+    if config.get("handover", "digest", "enabled", default=False):
+        handoff_digest = HandoffDigest(
+            provider=config.get("llm", "provider", default="openai"),
+            model=config.get("llm", "model", default="gpt-4o-mini"),
+            api_key=config.get("llm", "api_key", default=""),
+            base_url=config.get("llm", "base_url", default=""),
+        )
     # G6: /chat/stream Idempotency-Key (409-reject, in-memory TTL).
     chat_idem_ttl = config.get("server", "idempotency", "chat_ttl_seconds", default=600.0) or 600.0
     chat_idem_max = config.get("server", "idempotency", "max_entries", default=10000)  # H6
@@ -320,6 +348,10 @@ def create_app(
     app.state.health = health
     app.state.job_streams_per_owner = job_streams_per_owner  # M3
     app.state.job_streams = {}  # M3: owner -> active job-stream count
+    app.state.session_events = session_events  # B2: per-session replay buffer
+    app.state.session_streams_per_owner = session_streams_per_owner  # B2 slowloris guard
+    app.state.session_streams = {}  # B2: owner -> active session-stream count
+    app.state.session_stream_timeout = session_stream_timeout  # B2: stream deadline
     app.state.mcp_registries = {}  # G6: session_id -> SessionMcpRegistry
 
     # Middleware: registration order is the REVERSE of execution order.
@@ -378,6 +410,11 @@ def create_app(
         memory_backend,
         shared_db,
         job_webhooks,
+        session_events,
+        session_stream_timeout,
+        session_streams_per_owner,
+        handoff_digest,
+        handover_webhooks,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -439,6 +476,11 @@ def _register_routes(
     memory_backend: str,
     shared_db: str,
     job_webhooks: list[dict] | None = None,
+    session_events: Any | None = None,
+    session_stream_timeout: float = 3600.0,
+    session_streams_per_owner: int = 4,
+    handoff_digest: Any | None = None,
+    handover_webhooks: list[dict] | None = None,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -632,6 +674,8 @@ def _register_routes(
             ownership.delete(session_id)
             # 29-E: drop the session's MCP registry so app.state.mcp_registries can't leak.
             app.state.mcp_registries.pop(session_id, None)
+            # B2: drop the session's replay buffer so it can't leak.
+            app.state.session_events.forget(session_id)
         if not evicted and not db_cleared:
             raise HTTPException(status_code=404, detail="session not found")
         return SessionDeletedResponse(session_id=session_id, evicted=evicted or db_cleared)  # type: ignore[return-value]
@@ -829,12 +873,40 @@ def _register_routes(
                     try:
                         async for ev in agent.run_stream(message):
                             await queue.put(ev)
+                            session_events.append_event(session_id, ev)  # B2: buffer for replay
                     finally:
                         if agent._core is not None:
                             agent._core.mode_manager.switch_mode(prior_mode)
                             agent._core.max_iterations = prior_max_iter
+            except AgentHandoverError as he:
+                # B1: the bot yielded via transfer_to_human -> emit a typed
+                # HandoverEvent (NOT ErrorEvent). The exception propagated out of
+                # run_stream, so the ``async with pool.session_lock`` above already
+                # exited -> lock released (no deadlock). A human operator takes over
+                # via POST /v1/sessions/{id}/transfer + a new /chat/stream.
+                _summary = he.summary
+                if not _summary and handoff_digest is not None:
+                    # B4: warm handoff digest (opt-in). Side-LLM summary + redact.
+                    # Never raises (the helper is fail-soft; this double-wrap mirrors
+                    # ProactiveExtractionHook -- a digest failure MUST NOT lose the
+                    # handover by falling through to the ErrorEvent branch below).
+                    try:
+                        _summary = await handoff_digest.digest(agent._core.memory.get_messages())
+                    except Exception:  # nosec - belt-and-suspenders; never lose the handover
+                        _summary = ""
+                hev = HandoverEvent(
+                    handover_id=uuid.uuid4().hex[:12],
+                    reason=he.reason,
+                    summary=_summary,
+                )
+                session_events.append_event(session_id, hev)  # B2: buffer for replay
+                # B5: notify the host CS platform of the chat-path handover (fire-and-forget).
+                _emit_handover_webhook(handover_webhooks, session_id, hev.handover_id, hev.reason, _summary)
+                await queue.put(hev)
             except Exception as exc:
-                await queue.put(ErrorEvent(error=exc))
+                err_ev = ErrorEvent(error=exc)
+                session_events.append_event(session_id, err_ev)  # B2: buffer for replay
+                await queue.put(err_ev)
             finally:
                 await queue.put(None)
 
@@ -887,6 +959,78 @@ def _register_routes(
         if not resolved:
             raise HTTPException(status_code=404, detail="approval not found or already resolved")
         return ApproveResponse(approval_id=body.approval_id, resolved=True)  # type: ignore[return-value]
+
+    @app.post("/v1/sessions/{session_id}/transfer", response_model=TransferResponse)
+    async def transfer(session_id: str, body: TransferRequest, request: Request) -> Response:
+        """B1: claim ownership of a session to take it over from the bot.
+
+        After the bot yields (``HandoverEvent`` on the stream), the host CS platform
+        POSTs ``/transfer`` (with the current owner's key) to reassign ownership to
+        the chosen human operator; the operator then POSTs ``/chat/stream`` on the
+        same session to drive it. RBAC note: ``_check_owner`` only verifies the
+        caller is the CURRENT owner -- the host platform (holding the bot's key) can
+        reassign to any operator. Proper RBAC (operators can't reassign each other's
+        sessions) is deferred to the enterprise layer.
+        """
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        new_owner = body.operator or getattr(request.state, "api_key_id", "dev")
+        ownership.set_owner(session_id, new_owner)
+        return TransferResponse(  # type: ignore[return-value]
+            session_id=session_id, transferred=True, owner=new_owner
+        )
+
+    @app.get("/v1/sessions/{session_id}/stream")
+    async def stream_session(session_id: str, request: Request):
+        """B2: replay a session's buffered event history + live-tail the current/next turn.
+
+        A supervisor/human operator calls this AFTER a handover (or during a turn)
+        to see what the bot said (replay) + watch the live turn (tail) before/while
+        taking over via POST /transfer + /chat/stream. Long-lived (tails across
+        turns until disconnect or the configured deadline); SSE keepalives cover
+        silent waits. No 404 on pool-miss -- the buffer is the source of truth for
+        replay (an LRU-evicted-but-not-DELETE'd session still has a buffer). RBAC
+        gap: _check_owner is owner-equality only (no supervisor role).
+        """
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        owner = getattr(request.state, "api_key_id", "dev")
+        # B2: per-owner stream cap (slowloris guard); skip in dev (mirror jobs).
+        if auth_enabled:
+            active = app.state.session_streams.get(owner, 0)
+            if active >= app.state.session_streams_per_owner:
+                return _error_response(429, "too_many_streams", "Max concurrent session streams reached", request)
+            app.state.session_streams[owner] = active + 1
+
+        async def event_gen():
+            last_index = 0
+            deadline = time.monotonic() + session_stream_timeout
+            try:
+                while True:
+                    all_events = session_events.get_events(session_id)
+                    for ev in all_events[last_index:]:
+                        yield ev
+                    last_index = len(all_events)
+                    if time.monotonic() >= deadline:
+                        break
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                if auth_enabled:
+                    app.state.session_streams[owner] = max(0, app.state.session_streams.get(owner, 0) - 1)
+
+        return StreamingResponse(
+            sse_stream(event_gen()),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # ---- M4: Jobs (autonomous) ----
 

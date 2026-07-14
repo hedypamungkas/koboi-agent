@@ -1304,6 +1304,23 @@ class AgentAssembler:
 
             self.hook_chain.add(ProactiveExtractionHook(proactive=self.proactive_memory))
 
+        # B1.5: structural handover detection (opt-in). A3-fed (GroundingGuardrail ref).
+        if self.hook_chain and self.config.get("handover", "detection", "enabled", default=False):
+            from koboi.guardrails.grounding import GroundingGuardrail
+            from koboi.hooks.handover_detection_hook import HandoverDetectionHook
+
+            grounding = next(
+                (g for g in (self.output_guardrails or []) if isinstance(g, GroundingGuardrail)),
+                None,
+            )
+            self.hook_chain.add(
+                HandoverDetectionHook(
+                    grounding=grounding,
+                    coverage_threshold=self.config.get("handover", "detection", "coverage_threshold", default=0.5),
+                    ask_patterns=self.config.get("handover", "detection", "ask_patterns", default=None),
+                )
+            )
+
         from koboi.loop import AgentCore
 
         core = AgentCore(

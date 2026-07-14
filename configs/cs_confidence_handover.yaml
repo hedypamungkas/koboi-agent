@@ -1,0 +1,48 @@
+agent:
+  name: "cs-confidence-handover"
+  description: "Confidence-aware CS agent with human handover (A1-A3 + B1/B1.5 + B4)"
+  system_prompt: |
+    You are a helpful customer service agent for Acme Corp. Answer from the provided
+    context only. If the context doesn't contain the answer, say you don't have that
+    information. For complex cases needing human judgment (complaints, policy exceptions,
+    escalations), use the transfer_to_human tool.
+  max_iterations: 5
+  mode: act
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL:gpt-4o-mini}"
+  api_key: "${OPENAI_API_KEY:}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  builtin: [transfer_to_human]
+
+rag:
+  enabled: true
+  chunker: "sentence"
+  chunk_size: 400
+  retriever: "bm25"
+  top_k: 10
+  stopwords: true
+  augmentation: "on_the_fly"
+  documents:
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/employee_handbook.md"
+    - path: "./data/sample/product_catalog.md"
+
+guardrails:
+  output:
+    - name: grounding_check
+      provider: "openai"
+      model: "${OPENAI_MODEL:gpt-4o-mini}"
+      api_key: "${OPENAI_API_KEY:}"
+      base_url: "${OPENAI_BASE_URL:}"
+      threshold: 0.8
+
+handover:
+  detection:
+    enabled: true
+    coverage_threshold: 0.5
+  digest:
+    enabled: true

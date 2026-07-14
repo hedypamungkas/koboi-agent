@@ -66,6 +66,22 @@ class PendingApprovalEvent:
 
 
 @dataclass
+class HandoverEvent:
+    """Emitted when the agent yields the conversation to a human operator (B1).
+
+    The agent's run ends cleanly (``AgentHandoverError`` propagated out, releasing
+    ``pool.session_lock``); a human operator takes over via ``POST /transfer`` +
+    a new ``/chat/stream`` on the same session. ``summary`` carries the warm-handoff
+    digest so the operator sees a case card, not a raw transcript.
+    """
+
+    handover_id: str
+    reason: str
+    summary: str = ""
+    tool_call_id: str = ""
+
+
+@dataclass
 class RoutingDecisionEvent:
     """Emitted when the router selects agents for a query."""
 
@@ -157,6 +173,7 @@ StreamEvent = (
     | CompleteEvent
     | ErrorEvent
     | PendingApprovalEvent
+    | HandoverEvent
     | RoutingDecisionEvent
     | AgentDispatchEvent
     | AgentResultEvent
@@ -176,6 +193,7 @@ _EVENT_TYPE_MAP: dict[type, str] = {
     CompleteEvent: "complete",
     ErrorEvent: "error",
     PendingApprovalEvent: "pending_approval",
+    HandoverEvent: "handover",
     RoutingDecisionEvent: "routing_decision",
     AgentDispatchEvent: "agent_dispatch",
     AgentResultEvent: "agent_result",

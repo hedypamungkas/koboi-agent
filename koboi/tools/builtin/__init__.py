@@ -8,6 +8,7 @@ def register_all(registry: ToolRegistry) -> None:
         calculator,
         filesystem,
         git,
+        handover,
         ingest,
         memory,
         search,
@@ -17,5 +18,17 @@ def register_all(registry: ToolRegistry) -> None:
         web,
     )
 
-    for mod in [calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest]:
+    for mod in [
+        calculator,
+        filesystem,
+        git,
+        handover,
+        ingest,
+        memory,
+        search,
+        shell,
+        subagent,
+        task,
+        web,
+    ]:
         register_decorated(registry, mod)

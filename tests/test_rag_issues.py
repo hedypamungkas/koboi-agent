@@ -112,6 +112,8 @@ def _agent_with_rag() -> AgentCore:
 async def test_issue_6_streaming_surfaces_rag_results():
     result = await _agent_with_rag().run("what is the refund window?")
     assert result.metadata.get("rag_results"), "run() must stamp rag_results"
+    rc = result.metadata.get("retrieval_confidence")
+    assert rc and {"max_score", "method", "count"} <= set(rc), "run() must stamp retrieval_confidence"
 
     complete = None
     async for ev in _agent_with_rag().run_stream("what is the refund window?"):
@@ -119,6 +121,10 @@ async def test_issue_6_streaming_surfaces_rag_results():
             complete = ev
     assert complete is not None
     assert complete.metadata.get("rag_results"), "run_stream CompleteEvent must carry rag_results"
+    rcs = complete.metadata.get("retrieval_confidence")
+    assert rcs and {"max_score", "method", "count"} <= set(rcs), (
+        "run_stream CompleteEvent must carry retrieval_confidence"
+    )
 
 
 # --------------------------------------------------------------------------- #
