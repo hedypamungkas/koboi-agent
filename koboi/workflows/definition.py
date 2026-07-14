@@ -59,7 +59,7 @@ class DeterminismProfile:
     seed: int | None = None
     top_p: float | None = None
     model_pin: str | None = None
-    replay_mode: str = "live"
+    replay_mode: str | None = None
 
     def merge(self, override: DeterminismProfile | None) -> DeterminismProfile:
         """Node override wins for non-None fields; workflow default fills the rest."""
@@ -70,7 +70,7 @@ class DeterminismProfile:
             seed=override.seed if override.seed is not None else self.seed,
             top_p=override.top_p if override.top_p is not None else self.top_p,
             model_pin=override.model_pin if override.model_pin is not None else self.model_pin,
-            replay_mode=override.replay_mode if override.replay_mode != "live" else self.replay_mode,
+            replay_mode=override.replay_mode if override.replay_mode is not None else self.replay_mode,
         )
 
     def to_llm_overrides(self) -> dict:
@@ -96,7 +96,7 @@ class DeterminismProfile:
             seed=det.get("seed"),
             top_p=det.get("top_p"),
             model_pin=det.get("model_pin"),
-            replay_mode=det.get("replay_mode", "live"),
+            replay_mode=det.get("replay_mode"),
         )
 
 

@@ -171,3 +171,18 @@ class TestGraphSnapshot:
         assert snap["execution_mode"] == "dag"
         assert snap["router"] == {"type": "keyword"}
         assert snap["agents"][0]["name"] == "classify"
+
+
+class TestReplayModeSentinel:
+    def test_node_can_downgrade_replay_mode_to_live(self):
+        from koboi.workflows import DeterminismProfile
+
+        wf = DeterminismProfile(replay_mode="cache")
+        assert wf.merge(DeterminismProfile(replay_mode="live")).replay_mode == "live"
+        assert wf.merge(DeterminismProfile(replay_mode=None)).replay_mode == "cache"
+        assert wf.merge(DeterminismProfile(replay_mode="replay")).replay_mode == "replay"
+
+    def test_default_replay_mode_is_none(self):
+        from koboi.workflows import DeterminismProfile
+
+        assert DeterminismProfile().replay_mode is None
