@@ -165,3 +165,76 @@ class TestServerWorkflowLifecycle:
             # verify the bundle preserves ${VAR} templates
             bundle = ws.get("plain-cap", "dev")["bundle_yaml"]
             assert "${K:}" in bundle
+
+
+class TestServerOrchestrationJob:
+    """#11: orchestration workflow_ref job via server."""
+
+    async def test_orchestration_workflow_job_completes(self, tmp_path, monkeypatch):
+        _patch_from_config_string(monkeypatch)
+        app, js, ws = _app_with_stores(tmp_path)
+
+        orch_bundle = (
+            "workflow:\n  name: orch\n  schema_version: '1.0'\n"
+            "agent:\n  name: orch\n  system_prompt: 'You orchestrate.'\n"
+            "llm:\n  provider: openai\n  model: mock-model\n  api_key: test\n"
+            "sandbox:\n  backend: restricted\n"
+            "orchestration:\n  enabled: true\n  execution: {mode: dag, full_graph: true}\n"
+            "  router: {type: keyword}\n"
+            "  agents:\n"
+            "    - {name: classify, system_prompt: 'Classify.', keywords: [c]}\n"
+            "    - {name: praise, system_prompt: 'Praise.', keywords: [p], depends_on: [classify]}\n"
+        )
+
+        async with _client(app) as c:
+            r = await c.post("/v1/workflows", json={"name": "orch", "bundle": orch_bundle})
+            assert r.status_code == 201
+
+            r = await c.post(
+                "/v1/jobs",
+                json={"workflow_ref": "orch", "replay_mode": "cache", "message": "Review: amazing!"},
+            )
+            assert r.status_code == 202
+            job_id = r.json()["job_id"]
+
+            job = await _poll_job(c, job_id, "completed")
+            assert job["result"]["content"]  # got a synthesis result
+
+
+class TestPlainCacheOrchestratorRefusal:
+    """#12: plain cache job on an orchestration server config -> PermissionError."""
+
+    async def test_orchestrator_server_plain_cache_job_fails(self, tmp_path):
+        db = str(tmp_path / "t.db")
+        js = JobStore(db_path=db)
+        ws = WorkflowStore(db_path=db)
+        orch_cfg = Config.from_dict(
+            {
+                "agent": {"name": "orch", "system_prompt": "h", "max_iterations": 3},
+                "llm": {"provider": "openai", "model": "m", "api_key": "test", "base_url": "http://x/v1"},
+                "memory": {"backend": "in_memory"},
+                "sandbox": {"backend": "restricted"},
+                "server": {"auth_required": False},
+                "orchestration": {
+                    "enabled": True,
+                    "execution": {"mode": "dag", "full_graph": True},
+                    "router": {"type": "keyword"},
+                    "agents": [{"name": "a", "system_prompt": "x", "keywords": ["a"]}],
+                },
+            },
+            validate=True,
+        )
+        app = create_app(
+            orch_cfg,
+            client_factory=lambda: MockClient([make_mock_response(content="x")]),
+            enable_cors=False,
+            job_store=js,
+            workflow_store=ws,
+        )
+
+        async with _client(app) as c:
+            r = await c.post("/v1/jobs", json={"message": "hi", "replay_mode": "cache"})
+            assert r.status_code == 202
+            job_id = r.json()["job_id"]
+            job = await _poll_job(c, job_id, "failed")
+            assert "single-agent" in (job.get("error") or "")

@@ -260,3 +260,74 @@ class TestFacadeCacheWiring:
         )
         agent = KoboiAgent.from_dict(cfg, replay_mode="cache", cache_dir=str(tmp_path / "c"))
         assert isinstance(agent._orchestrator.client, CachedClient)
+
+
+class TestCacheKeyLoudFailure:
+    def test_non_serializable_messages_raise(self):
+        # The foundational invariant: non-JSON-serializable messages must FAIL LOUD
+        # (never a silent key collision via a default=str fallback).
+        import pytest
+
+        with pytest.raises(TypeError):
+            compute_cache_key("m", [{"role": "user", "content": object()}], None, None)
+
+
+class TestResolveReplayModePrecedence:
+    def test_determinism_fallback_engages_cache(self):
+        # A config with orchestration.determinism.replay_mode but no top-level
+        # replay: section should still engage cache (the captured-bundle re-run path).
+        from koboi.config import Config
+        from koboi.facade import _resolve_replay_mode
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "x", "system_prompt": "h", "max_iterations": 3},
+                "llm": {"provider": "openai", "model": "m", "api_key": "test"},
+                "memory": {"backend": "in_memory"},
+                "orchestration": {"determinism": {"replay_mode": "cache"}},
+            }
+        )
+        assert _resolve_replay_mode(cfg) == "cache"
+
+    def test_top_level_live_plus_determinism_cache(self):
+        from koboi.config import Config
+        from koboi.facade import _resolve_replay_mode
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "x", "system_prompt": "h", "max_iterations": 3},
+                "llm": {"provider": "openai", "model": "m", "api_key": "test"},
+                "memory": {"backend": "in_memory"},
+                "replay": {"mode": "live"},
+                "orchestration": {"determinism": {"replay_mode": "cache"}},
+            }
+        )
+        assert _resolve_replay_mode(cfg) == "cache"
+
+    def test_top_level_cache_wins(self):
+        from koboi.config import Config
+        from koboi.facade import _resolve_replay_mode
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "x", "system_prompt": "h", "max_iterations": 3},
+                "llm": {"provider": "openai", "model": "m", "api_key": "test"},
+                "memory": {"backend": "in_memory"},
+                "replay": {"mode": "cache"},
+                "orchestration": {"determinism": {"replay_mode": "live"}},
+            }
+        )
+        assert _resolve_replay_mode(cfg) == "cache"
+
+    def test_neither_set_is_live(self):
+        from koboi.config import Config
+        from koboi.facade import _resolve_replay_mode
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "x", "system_prompt": "h", "max_iterations": 3},
+                "llm": {"provider": "openai", "model": "m", "api_key": "test"},
+                "memory": {"backend": "in_memory"},
+            }
+        )
+        assert _resolve_replay_mode(cfg) == "live"
