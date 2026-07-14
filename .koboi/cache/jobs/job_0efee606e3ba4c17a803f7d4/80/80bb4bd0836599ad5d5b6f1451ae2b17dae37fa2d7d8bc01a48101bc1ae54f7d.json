@@ -1,0 +1,1 @@
+{"schema": "koboi-cache-1", "key": "80bb4bd0836599ad5d5b6f1451ae2b17dae37fa2d7d8bc01a48101bc1ae54f7d", "model": "mock-model", "created_at": "2026-07-14T21:53:37.820755+00:00", "response": {"content": "call-1", "tool_calls": [], "usage": {"prompt_tokens": 10, "completion_tokens": 20, "reasoning_tokens": 0}, "model": null, "base_url": null}}
