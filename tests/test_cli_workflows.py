@@ -169,3 +169,17 @@ class TestRunWorkflow:
         )
         assert rc == 0
         assert captured["ran"] == "from json"
+
+    def test_run_workflow_and_resume_are_mutually_exclusive(self, cfg, wf_dir):
+        cli_commands.cmd_export_workflow(str(cfg), save=True, name="rw")
+        # --workflow + --resume must be rejected (workflows are not session-resumable in v1).
+        rc = cli_commands.cmd_run("dummy", "hi", False, False, "sess123", workflow_name="rw")
+        assert rc == 1
+
+
+def test_export_output_and_save_are_mutually_exclusive():
+    from koboi.cli import _build_parser
+
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["export", "c.yaml", "--output", "out.yaml", "--save"])

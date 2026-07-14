@@ -289,7 +289,9 @@ def create_app(
     async def lifespan(app: FastAPI):
         # M4: resume pending jobs on startup (simplified: running→failed).
         if job_resume:
-            requeued = await resume_on_startup(job_store, pool, job_registry, job_timeout, job_webhooks)
+            requeued = await resume_on_startup(
+                job_store, pool, job_registry, job_timeout, job_webhooks, workflow_store=workflow_store
+            )
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
         # 16.24: workdir TTL GC + G5c-a: job TTL GC background sweeps.
@@ -325,6 +327,7 @@ def create_app(
     app.state.ownership = ownership
     app.state.job_store = job_store
     app.state.job_registry = job_registry
+    app.state.workflow_store = workflow_store
     app.state.job_max_concurrent = job_max_concurrent
     app.state.job_timeout = job_timeout
     app.state.health = health
@@ -510,6 +513,9 @@ def _register_routes(
             from koboi.workflows import WorkflowDefinition
 
             wd = WorkflowDefinition.from_bundle_yaml(body.bundle)
+            # Validate the config body actually loads (catches invalid agent/llm/
+            # orchestration sections now, not at the first job run).
+            Config.from_string(body.bundle)
         except Exception as exc:
             return _error_response(400, "invalid_workflow", f"bundle parse failed: {exc}", request)
         description = body.description or wd.description
@@ -1006,9 +1012,7 @@ def _register_routes(
 
         # Workflow export/import (v1): validate the workflow_ref exists (owner-scoped).
         if body.workflow_ref and workflow_store.get(body.workflow_ref, owner) is None:
-            return _error_response(
-                400, "unknown_workflow", f"workflow {body.workflow_ref!r} not found", request
-            )
+            return _error_response(400, "unknown_workflow", f"workflow {body.workflow_ref!r} not found", request)
 
         # Idempotency: same key within window → return existing job.
         idem_key = request.headers.get("Idempotency-Key")
@@ -1052,10 +1056,14 @@ def _register_routes(
             if ownership.get_owner(session_id) is None:
                 ownership.set_owner(session_id, owner)
         else:
-            try:
-                await pool.get_or_create(session_id)
-            except PoolFull as exc:
-                return _error_response(429, "pool_full", str(exc), request)
+            # Workflow jobs build a fresh agent from the bundle and never touch the
+            # pooled one, so skip materializing it (avoids wasting an LRU pool slot
+            # + a spurious pool_full under burst submit).
+            if not body.workflow_ref:
+                try:
+                    await pool.get_or_create(session_id)
+                except PoolFull as exc:
+                    return _error_response(429, "pool_full", str(exc), request)
             # H1: dedicated new session — always acquires an owner.
             ownership.set_owner(session_id, owner)
 

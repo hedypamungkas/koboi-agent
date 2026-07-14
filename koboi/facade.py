@@ -1605,21 +1605,6 @@ def _parse_agent_defs(config: Config) -> list:
     return defs
 
 
-def _profile_from_determinism(det: dict | None):
-    """Build a :class:`~koboi.workflows.DeterminismProfile` from a raw dict (or None)."""
-    from koboi.workflows import DeterminismProfile
-
-    if not det:
-        return None
-    return DeterminismProfile(
-        temperature=det.get("temperature"),
-        seed=det.get("seed"),
-        top_p=det.get("top_p"),
-        model_pin=det.get("model_pin"),
-        replay_mode=det.get("replay_mode", "live"),
-    )
-
-
 def _apply_determinism(agent_def, wf_det: dict) -> None:
     """Merge workflow-level + per-node determinism into the node's ``llm_config``.
 
@@ -1630,15 +1615,24 @@ def _apply_determinism(agent_def, wf_det: dict) -> None:
     builds a dedicated pinned client for this node. ``seed`` auto-forwards via
     ``extract_extra_params`` (and is dropped on Anthropic by
     ``_filter_extra_params_for_provider``).
+
+    A node whose ``llm_config`` is a string (a named ``providers:`` ref that fully
+    replaces the client) opts out of determinism pinning -- the knobs cannot merge
+    into a string, and the named ref already specifies provider/model.
     """
-    node_profile = _profile_from_determinism(agent_def.determinism)
-    wf_profile = _profile_from_determinism(wf_det)
+    from koboi.workflows import DeterminismProfile
+
+    node_profile = DeterminismProfile.from_dict(agent_def.determinism)
+    wf_profile = DeterminismProfile.from_dict(wf_det)
     base = wf_profile or node_profile
     if base is None:
         return
     effective = base.merge(node_profile) if (wf_profile and node_profile) else base
     overrides = effective.to_llm_overrides()
     if not overrides:
+        return
+    if isinstance(agent_def.llm_config, str):
+        # Named providers: ref -- determinism knobs can't merge into a string.
         return
     llm = dict(agent_def.llm_config or {})
     for key, value in overrides.items():

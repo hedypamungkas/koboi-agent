@@ -115,3 +115,21 @@ class TestWorkflowRoutes:
             # Owner B GET the name -> 404 (no existence leak across tenants).
             r = await c.get("/v1/workflows/secret", headers={"Authorization": "Bearer keyB"})
             assert r.status_code == 404
+
+    async def test_invalid_config_body_rejected_400(self):
+        # Valid YAML + envelope, but an invalid llm.model (empty) -> Config.from_string
+        # fails -> 400 at POST (not deferred to the first job run).
+        app = create_app(
+            _config(),
+            client_factory=lambda: MockClient([make_mock_response(content="x")]),
+            enable_cors=False,
+        )
+        bundle = (
+            "workflow:\n  name: bad\n  schema_version: '1.0'\n"
+            "agent:\n  name: x\n"
+            "llm:\n  provider: openai\n  model: ''\n"
+        )
+        async with _client(app) as c:
+            r = await c.post("/v1/workflows", json={"name": "bad", "bundle": bundle})
+            assert r.status_code == 400
+            assert "invalid_workflow" in r.text

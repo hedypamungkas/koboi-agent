@@ -51,3 +51,10 @@ class TestApplyDeterminism:
         _apply_determinism(ad, {})
         assert ad.llm_config["temperature"] == 0.0
         assert ad.llm_config["seed"] == 1
+
+    def test_string_llm_config_named_ref_does_not_crash(self):
+        # A named providers: ref (string llm_config) + determinism must NOT crash
+        # (dict()-ing the string would raise ValueError); it opts out of pinning.
+        ad = AgentDef(name="x", llm_config="openai-fast")
+        _apply_determinism(ad, {"temperature": 0.0, "seed": 42})
+        assert ad.llm_config == "openai-fast"  # unchanged

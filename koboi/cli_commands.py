@@ -166,6 +166,9 @@ def cmd_import_workflow(file: str, name: str | None = None, scope: str = "projec
     try:
         text = Path(file).read_text(encoding="utf-8")
         wd = WorkflowDefinition.from_bundle_yaml(text)
+        from koboi.config import Config
+
+        Config.from_string(text)  # validate the config body loads
     except Exception as e:
         print(f"Error parsing workflow bundle: {e}", file=sys.stderr)
         return 1
@@ -281,10 +284,15 @@ def cmd_run(
         return 1
     if replay_mode != "live":
         print(
-            f"note: replay_mode={replay_mode} is not implemented in v1 (only 'live'); "
-            "running live.",
+            f"note: replay_mode={replay_mode} is not implemented in v1 (only 'live'); running live.",
             file=sys.stderr,
         )
+    if workflow_name and resume_session:
+        _print_error(
+            "--workflow and --resume are mutually exclusive (workflows are not session-resumable in v1)",
+            print_mode=print_mode,
+        )
+        return 1
 
     try:
         if workflow_name:
@@ -295,9 +303,7 @@ def cmd_run(
             if input_json:
                 try:
                     parsed = json.loads(input_json)
-                    message = message or (
-                        parsed.get("message") if isinstance(parsed, dict) else str(parsed)
-                    )
+                    message = message or (parsed.get("message") if isinstance(parsed, dict) else str(parsed))
                 except json.JSONDecodeError as e:
                     _print_error(f"--input is not valid JSON: {e}", print_mode=print_mode)
                     return 1

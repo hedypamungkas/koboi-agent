@@ -1,6 +1,6 @@
 """koboi/server/workflow_store -- SQLite-backed workflow store (owner-scoped).
 
-A near-verbatim clone of :class:`~koboi.server.ownership.OwnertyStore` /
+A near-verbatim clone of :class:`~koboi.server.ownership.OwnershipStore` /
 :class:`~koboi.server.jobs.JobStore`: a ``workflows`` table keyed by
 ``(owner, name)`` holding the bundle YAML. ``owner`` is the auth-middleware
 ``api_key_id``. Imported lazily by ``app.py`` (only when the ``[api]`` extra is

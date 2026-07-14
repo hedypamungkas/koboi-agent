@@ -601,6 +601,18 @@ async def _execute_workflow_job(
             "Autonomous workflow jobs require sandbox.backend='restricted'; 'passthrough' is refused."
         )
     agent = KoboiAgent.from_config_string(bundle_yaml)
+    # Install the same deny-by-default handler as a regular autonomous job so a
+    # single-agent workflow job is NOT more permissive (C3 + Trust-DB gate).
+    # Orchestrator-backed bundles (agent._core is None) keep the restricted
+    # sandbox as their floor; per-sub-agent handler install is deferred (v1).
+    if agent._core is not None:
+        from koboi.guardrails.approval import AutonomousApprovalHandler
+
+        agent._core.approval_handler = AutonomousApprovalHandler(
+            trust_db=agent.trust_db,
+            audit_trail=agent._core.audit_trail,
+            auto_approve_tools={"write_file", "delete_file"},
+        )
     store.update_status(job_id, "running")
     final_content: str | None = None
     try:
@@ -735,6 +747,22 @@ async def resume_on_startup(
 
     # #5: rehydrate-and-continue running jobs (was: mark running-as-failed).
     for job in store.list_by_status("running"):
+        if job.get("workflow_ref"):
+            # v1: workflow jobs build a fresh agent per run and cannot rehydrate an
+            # interrupted loop, so resuming would duplicate side effects. Mark
+            # failed (retriable) so the operator re-submits instead of double-running.
+            store.update_status(
+                job["job_id"],
+                "failed",
+                error="workflow jobs cannot be resumed in v1; re-submit the job",
+                error_class="WorkflowResumeUnsupported",
+                retriable=True,
+            )
+            registry.register(job["job_id"], job["session_id"], job["owner"])
+            registry.set_terminal(job["job_id"], "failed")
+            _logger.warning("Workflow job %s cannot be resumed in v1; marked failed", job["job_id"])
+            count += 1
+            continue
         registry.register(job["job_id"], job["session_id"], job["owner"])
         task = asyncio.create_task(
             run_job(

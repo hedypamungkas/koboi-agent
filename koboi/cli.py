@@ -143,7 +143,9 @@ def _build_parser():
     p.add_argument("--verbose", "-v", action="store_true", help="Show debug output")
     p.add_argument("--print", dest="print_mode", action="store_true", help="Stream JSON lines (pipe-friendly)")
     p.add_argument("--resume", dest="resume_session", default=None, help="Resume an interrupted session by ID")
-    p.add_argument("--workflow", default=None, metavar="NAME", help="Run a stored workflow by name instead of the config")
+    p.add_argument(
+        "--workflow", default=None, metavar="NAME", help="Run a stored workflow by name instead of the config"
+    )
     p.add_argument(
         "--replay-mode",
         dest="replay_mode",
@@ -229,8 +231,9 @@ def _build_parser():
     p.add_argument("config_path")
     p.add_argument("--format", choices=["yaml", "json"], default="yaml")
     p.add_argument("--name", default=None, help="Workflow name (default: config file stem)")
-    p.add_argument("--output", "-o", default=None, help="Write to FILE instead of stdout")
-    p.add_argument("--save", action="store_true", help="Save into the workflow store")
+    sink = p.add_mutually_exclusive_group()
+    sink.add_argument("--output", "-o", default=None, help="Write to FILE instead of stdout")
+    sink.add_argument("--save", action="store_true", help="Save into the workflow store")
     p.add_argument("--scope", choices=["project", "user"], default="project")
 
     # import (core) -- import a workflow bundle into the store
@@ -331,9 +334,7 @@ def main() -> None:
     if args.command == "import":
         sys.exit(cli_commands.cmd_import_workflow(args.file, args.name, scope=args.scope))
     if args.command == "workflows":
-        sys.exit(
-            cli_commands.cmd_workflows(args.workflows_command, scope=args.scope, name=getattr(args, "name", None))
-        )
+        sys.exit(cli_commands.cmd_workflows(args.workflows_command, scope=args.scope, name=getattr(args, "name", None)))
     if args.command == "init-zsh":
         sys.exit(cli_commands.cmd_init_zsh(args.target))
 

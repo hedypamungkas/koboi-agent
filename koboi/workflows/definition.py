@@ -81,6 +81,19 @@ class DeterminismProfile:
             out["model"] = self.model_pin
         return out
 
+    @classmethod
+    def from_dict(cls, det: dict | None) -> DeterminismProfile | None:
+        """Build a profile from a raw determinism dict (or None when empty)."""
+        if not det:
+            return None
+        return cls(
+            temperature=det.get("temperature"),
+            seed=det.get("seed"),
+            top_p=det.get("top_p"),
+            model_pin=det.get("model_pin"),
+            replay_mode=det.get("replay_mode", "live"),
+        )
+
 
 @dataclass
 class WorkflowDefinition:
@@ -147,16 +160,7 @@ class WorkflowDefinition:
 # --------------------------------------------------------------------------- #
 def parse_determinism(config_data: dict) -> DeterminismProfile | None:
     """Read ``orchestration.determinism`` from a config dict (or None when unset)."""
-    det = (config_data.get("orchestration") or {}).get("determinism")
-    if not det:
-        return None
-    return DeterminismProfile(
-        temperature=det.get("temperature"),
-        seed=det.get("seed"),
-        top_p=det.get("top_p"),
-        model_pin=det.get("model_pin"),
-        replay_mode=det.get("replay_mode", "live"),
-    )
+    return DeterminismProfile.from_dict((config_data.get("orchestration") or {}).get("determinism"))
 
 
 def build_from_config_path(
