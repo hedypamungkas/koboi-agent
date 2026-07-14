@@ -186,7 +186,16 @@ class KoboiAgent:
                     raise AgentError("Cannot resume deep_research: no db_path (memory.backend must be sqlite)")
                 from koboi.orchestration.dag_scheduler import DagScheduler
 
-                ctx_json = DagScheduler.load_latest_research_context(db_path)
+                # Session-scoped first (avoid a cross-session leak: a shared koboi_memory.db
+                # holds every session's research_context rows; the global latest would return
+                # whichever session ran most recently). Fall back to the global latest only for
+                # non-server callers whose rows carry no session_id tag.
+                resume_session_id = getattr(self._orchestrator, "_session_id", None)
+                ctx_json = (
+                    DagScheduler.load_research_context_for_session(db_path, resume_session_id)
+                    if resume_session_id
+                    else DagScheduler.load_latest_research_context(db_path)
+                )
                 if not ctx_json:
                     raise AgentError("No research context found to resume (run deep_research first)")
                 self._orchestrator._resume_ctx_json = ctx_json  # type: ignore[attr-defined]

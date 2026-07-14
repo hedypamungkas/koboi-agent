@@ -245,6 +245,31 @@ class TestDeepResearchMessages:
         assert await pool.get_messages("sess-none") == []
         await pool.close_all()
 
+    async def test_get_messages_falls_back_to_findings_when_no_report(self, tmp_path):
+        # W8 review #7: a session journaled MID-run (findings present, final_report empty -- e.g.
+        # interrupted before synthesis) -> _deep_research_messages returns the formatted findings,
+        # not an empty conversation (the `final_report or format_for_synthesis()` fallback).
+        from koboi.orchestration.dag_scheduler import DagScheduler
+        from koboi.orchestration.research import ResearchContext
+
+        db_path = str(tmp_path / "fallback.db")
+        agent = await self._orchestrated_agent(tmp_path, "sess-fb")  # wires db_path via dag_scheduler
+        # Overwrite the dag_scheduler db_path to our test file + journal a mid-run ctx.
+        agent._orchestrator._dag_scheduler = type(agent._orchestrator._dag_scheduler)(
+            agents_map={}, deps={}, db_path=db_path
+        )
+        ctx = ResearchContext(query="mid-run query")
+        ctx.add_findings("node_a", "a gathered finding about batteries")  # findings present
+        # final_report stays empty (synthesis hadn't run yet)
+        DagScheduler.persist_research_context(db_path, "run-1", ctx.to_json(), session_id="sess-fb")
+
+        pool = AgentPool(_config())
+        pool._agents["sess-fb"] = agent
+        msgs = await pool.get_messages("sess-fb")
+        assert [m["role"] for m in msgs] == ["user", "assistant"]
+        assert "gathered finding" in msgs[1]["content"]  # the findings fallback (not final_report)
+        await pool.close_all()
+
 
 class TestPoolRunStream:
     async def test_run_stream_yields_complete_event(self):

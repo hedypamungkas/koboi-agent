@@ -85,24 +85,26 @@ def _deep_research_messages(agent: KoboiAgent, session_id: str) -> list[dict]:
 
     Reads the session-scoped ``research_context`` row persisted by the orchestrator and
     returns ``[{user: query}, {assistant: final_report | findings}]``. Returns ``[]`` when
-    the session has no research run (e.g. a simple-request direct answer, which is not
-    journaled). Durable: reads the DB, so it survives pool eviction/restart.
+    the session has no research run. Durable: reads the DB, so it survives pool
+    eviction/restart.
     """
     orch = getattr(agent, "_orchestrator", None)
     dag = getattr(orch, "_dag_scheduler", None)
     db_path = getattr(dag, "db_path", None)
     if not db_path:
         return []
-    try:
-        from koboi.orchestration.dag_scheduler import DagScheduler
-        from koboi.orchestration.research import ResearchContext
+    from koboi.orchestration.dag_scheduler import DagScheduler
+    from koboi.orchestration.research import ResearchContext
 
-        ctx_json = DagScheduler.load_research_context_for_session(db_path, session_id)
-        if not ctx_json:
-            return []
+    ctx_json = DagScheduler.load_research_context_for_session(db_path, session_id)
+    if not ctx_json:
+        return []  # no research run for this session -- expected, no log
+    try:
         ctx = ResearchContext.from_json(ctx_json)
-    except Exception:  # noqa: BLE001 - read is best-effort; never crash GET /sessions
-        _logger.debug("deep_research context read failed for %s", session_id, exc_info=True)
+    except Exception:  # noqa: BLE001 - corrupt row / schema drift: never crash GET /sessions
+        # WARN (not DEBUG): this path means data loss (a session that HAD a report now shows
+        # empty), so operators need it visible in prod logs -- unlike the expected no-row case.
+        _logger.warning("deep_research context deserialization failed for %s", session_id, exc_info=True)
         return []
     answer = ctx.final_report or ctx.source_store.format_for_synthesis()
     if not ctx.query and not answer:

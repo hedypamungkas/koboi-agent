@@ -892,8 +892,29 @@ class Orchestrator:
             await self._emit_research_hook(HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=report[:200])
             report, referenced = _verify_citations(report, ctx)
             combined_answer = report + self._sources_footer(ctx, referenced)
+            # W8 review fix: emit a RoutingDecisionEvent so the non-streaming run() path can
+            # build a valid RoutingDecision (it falls back to agents=[] -> ValueError when no
+            # RoutingDecisionEvent is seen). The other deep_research arms emit one; resume must too.
+            yield RoutingDecisionEvent(
+                agents=["synthesis"],
+                confidence=1.0,
+                method="dynamic",
+                reasoning="deep research resume",
+                domain_label=None,
+            )
             if combined_answer:
                 yield TextDeltaEvent(content=combined_answer)
+            # W8 review fix: persist the re-synthesized report (parity with the multi-step
+            # + direct-answer arms) so GET /v1/sessions/{id} surfaces the fresh report after
+            # resume, not the stale pre-interruption one.
+            ctx.final_report = combined_answer
+            if db_path:
+                try:
+                    from koboi.orchestration.dag_scheduler import DagScheduler
+
+                    DagScheduler.persist_research_context(db_path, run_id, ctx.to_json(), session_id=self._session_id)
+                except Exception as e:  # noqa: BLE001 - journaling is best-effort, never fatal
+                    logger.warning("research resume final-report journal failed: %s", e)
             await self._emit_research_hook(HookEvent.SESSION_END)
             yield OrchestrationCompleteEvent(
                 final_answer=combined_answer,
@@ -1074,7 +1095,10 @@ class Orchestrator:
                 "plan_nodes": len(routing_agents),
                 "used_searches": budget.used_searches,
                 "used_fetches": budget.used_fetches,
-                "nodes_failed": sum(1 for r in results_by_name.values() if getattr(r, "failed", False)),
+                # _run_single catches node exceptions + returns AgentResult(answer="Error: ...",
+                # failed=False), so r.failed never reflects crashes. Detect via the same
+                # "Error:" answer prefix the citation path uses (line ~502).
+                "nodes_failed": sum(1 for r in results_by_name.values() if (r.answer or "").startswith("Error:")),
             },
         )
 
@@ -1130,6 +1154,10 @@ class Orchestrator:
         )
         yield TextDeltaEvent(content=result.answer)
         await self._emit_research_hook(HookEvent.SESSION_END)
+        # W8 review fix: reflect actual node success honestly. _run_single turns a failed/empty
+        # LLM response into answer="Error: ..." (or ""), so coverage/nodes_failed must not claim
+        # success for those -- the smoke bar + job consumers rely on this signal.
+        _da_failed = (not result.answer) or result.answer.startswith("Error:")
         yield OrchestrationCompleteEvent(
             final_answer=result.answer,
             elapsed_seconds=time.time() - start,
@@ -1139,13 +1167,13 @@ class Orchestrator:
             routing_confidence=1.0,
             metadata={
                 "research_sources": [],
-                "coverage": 1.0,
+                "coverage": 0.0 if _da_failed else 1.0,
                 "depth": 0,
                 "run_id": run_id,
                 "plan_nodes": 1,
                 "used_searches": 0,
                 "used_fetches": 0,
-                "nodes_failed": 0,
+                "nodes_failed": 1 if _da_failed else 0,
             },
         )
 

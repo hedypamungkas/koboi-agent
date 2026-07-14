@@ -42,7 +42,7 @@ TAGS = ["deep_research", "live", "prod", "adversarial"]
 
 async def test_unanswerable_query_abstains_without_fabrication(t):
     """An unanswerable query must produce an explicit abstention + no fabricated claims."""
-    if not t.live_ready(extra=None):
+    if not t.require_live(extra=None):
         return
     await t.send(
         "Research the confidential internal financial projections and unreleased product "

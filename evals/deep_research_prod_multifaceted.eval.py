@@ -54,7 +54,7 @@ TAGS = ["deep_research", "live", "prod", "multifaceted"]
 
 async def test_multifaceted_research_meets_bar(t):
     """A multi-faceted research query must hit the full production bar (see module docstring)."""
-    if not t.live_ready(extra=None):
+    if not t.require_live(extra=None):
         return
     await t.send(
         "Research solid-state battery breakthroughs in 2025-2026: the science, the commercial "

@@ -43,7 +43,7 @@ TAGS = ["deep_research", "live", "prod", "comparative"]
 
 async def test_comparative_covers_both_subjects(t):
     """A comparative query must cover BOTH subjects with citations -- not one-sided."""
-    if not t.live_ready(extra=None):
+    if not t.require_live(extra=None):
         return
     await t.send(
         "Compare Rust vs Go for production systems programming in 2026: performance, "

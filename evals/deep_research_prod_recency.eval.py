@@ -44,14 +44,15 @@ TAGS = ["deep_research", "live", "prod", "recency"]
 
 async def test_recency_sources_are_recent(t):
     """A recency-sensitive query must surface sources from within the last ~1 year."""
-    if not t.live_ready(extra=None):
+    if not t.require_live(extra=None):
         return
     await t.send(
         "Research the most important developments in open-source AI agent frameworks "
         "over the last year, with specific dates and version numbers."
     )
     t.completed()
-    # At least half the gathered sources mention a year within 1 year of today.
-    await t.judge(RecencyScorer(recent_years=1), min_score=0.5, name="recency>=0.5")
+    # At least half the gathered sources mention a year within 1 year of today (GATE -- this
+    # eval's whole purpose is catching staleness, so a miss must fail, not just dent the score).
+    await t.judge(RecencyScorer(recent_years=1), min_score=0.5, name="recency>=0.5", severity=Severity.GATE)
     # Plus the report itself references a recent year.
     t.check(t.reply, lambda r: "2025" in r or "2026" in r, name="report mentions a recent year", severity=Severity.GATE)

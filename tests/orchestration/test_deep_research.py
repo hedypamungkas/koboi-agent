@@ -374,6 +374,71 @@ class TestRunDeepResearch:
         assert ctx.depth == 0
         assert ctx.source_store.sources_list() == []
 
+    async def test_nodes_failed_counts_error_answers(self, tmp_path):
+        # W8 review #3: _run_single turns a crashed node into answer="Error: ..." (failed stays
+        # False), so nodes_failed must detect via the "Error:" prefix (same as the citation path).
+        # A node whose answer is an error string must raise the metric above 0.
+        orch = _orch(
+            _FakeClient(coverage_score=0.95, node_answer="Error: simulated node failure"),
+            {"max_depth": 1, "coverage_threshold": 0.7},
+            tmp_path,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)][0]
+        assert complete.metadata["nodes_failed"] >= 1  # the error node is counted
+
+    async def test_direct_answer_metadata_honest_on_failure(self, tmp_path):
+        # W8 review #4: direct-answer must not hardcode coverage=1.0/nodes_failed=0 when the node
+        # failed or returned empty -- the smoke bar + job consumers rely on the honest signal.
+        for bad_answer in ("Error: LLM gateway timed out", ""):
+            orch = Orchestrator(
+                client=_FakeClient(plan_needs_workflow=False, node_answer=bad_answer),
+                router=KeywordRouter(),
+                research={"max_depth": 1, "coverage_threshold": 0.7},
+                dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "r.db")),
+            )
+            events = [e async for e in orch._run_deep_research("simple question")]
+            complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)][0]
+            assert complete.metadata["coverage"] == 0.0, f"expected coverage 0 for {bad_answer!r}"
+            assert complete.metadata["nodes_failed"] == 1, f"expected nodes_failed 1 for {bad_answer!r}"
+
+    def test_session_scoped_load_returns_latest_run(self, tmp_path):
+        # W8 review #7: a session that re-runs deep_research (2 graph_run_ids, same session_id)
+        # must surface the LATEST report via load_research_context_for_session (ORDER BY updated_at).
+        import time as _time
+
+        db_path = str(tmp_path / "order.db")
+        c1 = ResearchContext(query="first")
+        c1.final_report = "first report"
+        DagScheduler.persist_research_context(db_path, "run-1", c1.to_json(), session_id="sess-X")
+        _time.sleep(0.02)  # updated_at = time.time(); ensure the second row is strictly later
+        c2 = ResearchContext(query="second")
+        c2.final_report = "second report"
+        DagScheduler.persist_research_context(db_path, "run-2", c2.to_json(), session_id="sess-X")
+        loaded = ResearchContext.from_json(DagScheduler.load_research_context_for_session(db_path, "sess-X"))
+        assert loaded.query == "second"  # latest run wins
+        # A different session sees nothing.
+        assert DagScheduler.load_research_context_for_session(db_path, "sess-other") is None
+
+    def test_persist_research_context_coalesces_session_id(self, tmp_path):
+        # W8 review #7: re-persisting a run with session_id=None must NOT clobber an existing tag
+        # (the COALESCE in the upsert preserves it -- a non-server re-journal can't un-tag a row).
+        import sqlite3
+
+        from koboi.memory_sqlite import ensure_research_context_table
+
+        db_path = str(tmp_path / "coalesce.db")
+        ctx = ResearchContext(query="q")
+        DagScheduler.persist_research_context(db_path, "run-1", ctx.to_json(), session_id="s1")
+        DagScheduler.persist_research_context(db_path, "run-1", ctx.to_json(), session_id=None)
+        conn = sqlite3.connect(db_path)
+        try:
+            ensure_research_context_table(conn)
+            row = conn.execute("SELECT session_id FROM research_context WHERE graph_run_id=?", ("run-1",)).fetchone()
+        finally:
+            conn.close()
+        assert row[0] == "s1"  # COALESCE preserved the tag across the None re-write
+
     async def test_persists_findings_to_corpus_file(self, tmp_path):
         out_path = str(tmp_path / "findings.jsonl")
         orch = _orch(
@@ -566,6 +631,51 @@ class TestHigh3Resume:
         assert complete, "expected OrchestrationCompleteEvent from resume"
         assert complete[0].metadata.get("resumed") is True
         assert "[1]" in complete[0].final_answer
+        # W8 review #2: resume must PERSIST the re-synthesized report (parity with the other
+        # arms), so GET /v1/sessions/{id} after resume surfaces the fresh report, not the stale
+        # pre-interruption one. Re-read the DB + assert the resumed synthesis is now journaled.
+        resumed_ctx = ResearchContext.from_json(_DS.load_latest_research_context(db_path))
+        assert "Resumed" in resumed_ctx.final_report, (
+            f"resume did not persist final_report; got: {resumed_ctx.final_report!r}"
+        )
+
+    async def test_resume_is_session_scoped_no_cross_session_leak(self, tmp_path):
+        # W8 review #1 (CRITICAL): resume must load the SESSION's research_context, not the
+        # globally-latest row. Two sessions share one DB; resuming A must return A's ctx even
+        # when B ran more recently (the global-latest loader would return B -- a cross-session
+        # content leak). End-to-end via KoboiAgent.resume().
+        from koboi.facade import KoboiAgent
+
+        db_path = str(tmp_path / "leak.db")
+
+        def _orches(session_id, node_answer, synthesis):
+            return Orchestrator(
+                client=_FakeClient(coverage_score=0.95, node_answer=node_answer, synthesis=synthesis),
+                router=KeywordRouter(),
+                research={"max_depth": 1, "coverage_threshold": 0.7},
+                dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=db_path),
+                default_mode="deep_research",
+                session_id=session_id,
+            )
+
+        # Session A journals "alpha query"; session B (later) journals "beta query".
+        _ = [
+            e
+            async for e in _orches("sess-A", "alpha finding", "## Report\nalpha [1].")._run_deep_research("alpha query")
+        ]
+        _ = [
+            e async for e in _orches("sess-B", "beta finding", "## Report\nbeta [1].")._run_deep_research("beta query")
+        ]
+
+        # Resume session A via the facade. A shared DB + B's row is the globally-latest ->
+        # the bug would load B. The session-scoped loader must load A.
+        orch_a = _orches("sess-A", "alpha finding", "## Report\nresumed [1].")
+        agent = KoboiAgent(core=None, orchestrator=orch_a)
+        _ = await agent.resume()
+        loaded = ResearchContext.from_json(orch_a._resume_ctx_json)
+        assert loaded.query == "alpha query", (
+            f"cross-session leak: resume loaded {loaded.query!r} (expected 'alpha query')"
+        )
 
 
 class TestHigh5SynthesisFallback:
