@@ -669,6 +669,63 @@ async def _execute_workflow_job(
     return final_content
 
 
+async def _execute_plain_cache_job(
+    job_id: str,
+    pool: AgentPool,
+    registry: JobRegistry,
+    store: JobStore,
+    message: str,
+    record: Any,
+    mode: str | None = None,
+    max_iterations: int | None = None,
+    replay_mode: str = "cache",
+) -> str | None:
+    """Run a PLAIN (non-workflow_ref) job in cache/replay mode with an isolated
+    per-job cache_dir (the pooled agent's shared client can't isolate a run).
+
+    Builds a fresh ``KoboiAgent`` from the server config (``with_replay`` + per-job
+    ``cache_dir``), enforces the C3 restricted-sandbox floor + the deny-by-default
+    ``AutonomousApprovalHandler``, and records the cache_dir so the run can be
+    captured with cache. v3 #4-a.
+    """
+    from koboi.events import CompleteEvent
+    from koboi.facade import KoboiAgent
+    from koboi.guardrails.approval import AutonomousApprovalHandler
+    from koboi.modes import AgentMode
+
+    cache_dir = f".koboi/cache/jobs/{job_id}"
+    cfg = pool._config.with_replay(replay_mode=replay_mode, cache_dir=cache_dir)
+    agent = KoboiAgent._from_config(cfg)
+    if agent._core is None:
+        raise PermissionError(
+            "plain cache/replay jobs require a single-agent server config "
+            "(orchestration-mode servers are unsupported for plain cache jobs)"
+        )
+    sb = agent._core.tools.get_dep("sandbox")
+    if getattr(sb, "name", "passthrough") == "passthrough":
+        raise PermissionError("Autonomous jobs require sandbox.backend='restricted'; 'passthrough' is refused.")
+    agent._core.approval_handler = AutonomousApprovalHandler(
+        trust_db=agent.trust_db,
+        audit_trail=agent._core.audit_trail,
+        auto_approve_tools={"write_file", "delete_file"},
+    )
+    if mode is not None:
+        agent._core.mode_manager.switch_mode(AgentMode(mode))
+    if max_iterations is not None:
+        agent._core.max_iterations = max_iterations
+    store.set_cache_dir(job_id, cache_dir)
+    store.update_status(job_id, "running")
+    final_content: str | None = None
+    try:
+        async for event in agent.run_stream(message):
+            registry.append_event(job_id, event)
+            if isinstance(event, CompleteEvent):
+                final_content = event.content
+    finally:
+        await agent.close()
+    return final_content
+
+
 async def _execute_job(
     job_id: str,
     pool: AgentPool,
@@ -701,6 +758,13 @@ async def _execute_job(
             record.owner,
             resume=resume,
             replay_mode=replay_mode,
+        )
+    if replay_mode in ("cache", "replay"):
+        # v3 #4-a: a plain (non-workflow_ref) cache/replay job builds a fresh
+        # per-job agent (the pooled agent shares one client and can't isolate
+        # this run's cache). Restricted sandbox + AutonomousApprovalHandler apply.
+        return await _execute_plain_cache_job(
+            job_id, pool, registry, store, message, record, mode, max_iterations, replay_mode
         )
 
     from koboi.events import CompleteEvent

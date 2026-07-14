@@ -136,3 +136,17 @@ class TestServerCapture:
         async with _client(app) as c:
             r = await c.post("/v1/jobs/job6/capture", json={"name": "x", "with_cache": True})
             assert r.status_code == 400  # plain jobs can't isolate a run cache
+
+    async def test_submit_plain_cache_job_accepted(self, tmp_path):
+        # v3 #4-a: a plain (non-workflow_ref) job may request replay_mode=cache
+        # (was 400 replay_mode_requires_workflow_ref; now accepted -- runs via the
+        # fresh per-job build path). The async run needs a real LLM (not asserted
+        # here); this verifies the submit gate lift + replay_mode persistence.
+        app, js, ws = _app_with_stores(tmp_path)
+        async with _client(app) as c:
+            r = await c.post("/v1/jobs", json={"message": "hi", "replay_mode": "cache"})
+            assert r.status_code == 202
+            job_id = r.json()["job_id"]
+        row = js.get(job_id)
+        assert row["replay_mode"] == "cache"
+        assert row["workflow_ref"] is None

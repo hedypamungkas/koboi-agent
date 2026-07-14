@@ -1089,17 +1089,11 @@ def _register_routes(
         # Workflow export/import (v1): validate the workflow_ref exists (owner-scoped).
         if body.workflow_ref and workflow_store.get(body.workflow_ref, owner) is None:
             return _error_response(400, "unknown_workflow", f"workflow {body.workflow_ref!r} not found", request)
-        # v2/v3: replay_mode cache/replay is only meaningful for workflow_ref jobs.
+        # v2/v3: replay_mode cache/replay. Plain jobs build a fresh per-job agent
+        # (_execute_plain_cache_job); workflow_ref jobs hydrate the sidecar.
         if body.replay_mode not in (None, "live", "cache", "replay"):
             return _error_response(
                 400, "invalid_replay_mode", "replay_mode must be 'live', 'cache', or 'replay'", request
-            )
-        if body.replay_mode in ("cache", "replay") and not body.workflow_ref:
-            return _error_response(
-                400,
-                "replay_mode_requires_workflow_ref",
-                "replay_mode='cache'/'replay' requires a workflow_ref",
-                request,
             )
 
         # Idempotency: same key within window → return existing job.
