@@ -32,6 +32,7 @@ health.py          HealthRegistry + /readyz checks (pool alive, DB ping)
 middleware.py      X-Request-Id middleware (mint/honor/echo; stashed on request.state)
 keys_cli.py        `koboi keys create|list|revoke|rotate` -> ~/.koboi/keys.json (hashed, 0600 atomic writes)
 protocols.py       M5 forward-only Protocols (SessionStore/LockProvider/EventBuffer) for a future Redis/SaaS swap
+session_events.py  SessionEventRegistry -- per-session capped B2 replay buffer (monotonic seq; get_events_since)
 ```
 
 ## Endpoints
@@ -119,7 +120,13 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
   via `POST /v1/sessions/{id}/transfer` (ownership) + `GET /v1/sessions/{id}/stream` (B2 replay:
   history + B4 digest) + a new `POST /v1/chat/stream`. `handover.webhooks` fire HMAC-signed
   `handover.requested` callbacks mid-conversation (mirror of `jobs.webhooks`); `handover.digest.enabled`
-  generates the warm-handoff summary. See `docs/channel-bridge.md` for the omnichannel surfaces.
+  generates the warm-handoff summary. **PR #57 robustness:** the HandoverEvent is queued to the
+  operator (`await queue.put`) *before* the webhook is scheduled, and the webhook's payload/HMAC/POST
+  run inside a fire-and-forget task — so a webhook config error (e.g. `timeout: 10s` -> ValueError) can
+  never drop the handover event from the operator's stream; the LLM-provided B1 summary is scrubbed via
+  `redact_value` before emission (the B4 digest path already redacts); the B2 replay cursor is a monotonic
+  sequence (`SessionEventRegistry.get_events_since`), not a list index, so it survives the 1000-event buffer trim.
+  See `docs/channel-bridge.md` for the omnichannel surfaces.
 - **Pooled agent state must be restored**: snapshot `mode`/`max_iterations`/`_tool_pipeline`/
   `approval_handler` before a run, restore in `finally` (agent is reused; without restore
   a later `mode=None` request inherits this request's mode).

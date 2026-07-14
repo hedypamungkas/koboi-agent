@@ -29,7 +29,7 @@ handover:
 Customer (any channel) → [host adapter] → POST /v1/chat/stream (session_id=S, X-Session-Id: S)
    bot answers simple turns (RAG + A3 grounding)
    complex/low-confidence → B1/B1.5 yields → AgentHandoverError
-      → HandoverEvent{handover_id, reason, summary(B4 digest)} on the SSE stream
+      → HandoverEvent{handover_id, reason, summary(redacted; B4 digest if enabled)} on the SSE stream
       → session_events buffer (B2 replay)
       → handover.webhooks fires "handover.requested" → host CS platform router
           → router picks an operator (skill/presence/SLA)

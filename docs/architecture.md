@@ -829,7 +829,7 @@ Recall needs a dedicated `embedding:` model (the chat model can't embed).
 
 ### Secret redaction
 
-`koboi/redact.py` provides shared value-shape + key-name masking, reused by the step journal (`journal.py`), error strings (`server/jobs.py`), and diagnostics. In the journal it's **fail-safe** (masks args wholesale on any error — never aborts the durability write) and depth-capped.
+`koboi/redact.py` provides shared value-shape + key-name masking, reused by the step journal (`journal.py`), error strings (`server/jobs.py`), the B1 handover summary (`server/app.py`), and diagnostics. In the journal it's **fail-safe** (masks args wholesale on any error — never aborts the durability write) and depth-capped.
 
 ### AuditTrail
 
