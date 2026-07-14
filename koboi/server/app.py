@@ -65,6 +65,8 @@ from koboi.server.schema import (
     WorkflowListItem,
     WorkflowListResponse,
     WorkflowResponse,
+    CaptureRequest,
+    CaptureResponse,
 )
 from koboi.server.sse import sse_stream
 
@@ -562,6 +564,59 @@ def _register_routes(
             raise HTTPException(status_code=404, detail="workflow not found")
         return {"deleted": name}  # type: ignore[return-value]
 
+    @app.post("/v1/jobs/{job_id}/capture", status_code=201, response_model=CaptureResponse)
+    async def capture_job(job_id: str, body: CaptureRequest, request: Request) -> Response:
+        """Capture a completed workflow_ref job into a reusable bundle (+ cache sidecar).
+
+        v2: only ``workflow_ref`` jobs can be captured (plain pooled jobs share one
+        client and can't isolate a run's cache). ``with_cache`` freezes the job's
+        per-job response cache into the bundle's SQLite sidecar so the captured
+        bundle re-runs byte-identical + offline.
+        """
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        job = job_store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["owner"] != owner:
+            return _error_response(403, "forbidden", "not the job owner", request)
+        if job["status"] != "completed":
+            return _error_response(409, "job_not_complete", "only completed jobs can be captured", request)
+        if not job.get("workflow_ref"):
+            return _error_response(400, "capture_requires_workflow_ref", "v2 captures workflow_ref jobs only", request)
+        wf = workflow_store.get(job["workflow_ref"], owner)
+        if wf is None:
+            return _error_response(404, "workflow not found", "the job's workflow_ref no longer exists", request)
+        cache_dir = job.get("cache_dir") if body.with_cache else None
+        if body.with_cache and not cache_dir:
+            return _error_response(
+                400, "no_cache_to_freeze", "the job did not run in cache mode (no cache_dir recorded)", request
+            )
+        from koboi.workflows import capture_from_run, validate_capture
+
+        wd, entries = capture_from_run(
+            config_text=wf["bundle_yaml"],
+            name=body.name or job_id,
+            source_run_id=job_id,
+            source_session_id=job["session_id"],
+            with_cache=body.with_cache,
+            cache_dir=cache_dir,
+            redact_cache=body.redact_cache,
+        )
+        for warning in validate_capture(wd, entries):
+            _logger.warning("capture %s: %s", job_id, warning)
+        workflow_store.put_with_sidecar(wd.name, owner, wd.to_bundle_yaml(), wd.description, entries or [])
+        stored = workflow_store.get(wd.name, owner) or {}
+        return CaptureResponse(  # type: ignore[return-value]
+            name=wd.name,
+            description=wd.description,
+            cache_entries=wd.provenance.cache_entries,
+            cache_redacted=wd.provenance.cache_redacted,
+            created_at=stored.get("created_at", time.time()),
+            updated_at=stored.get("updated_at", time.time()),
+        )
+
     # --- G6: per-session MCP server management ---
 
     def _mcp_registry_for(session_id: str):
@@ -985,6 +1040,7 @@ def _register_routes(
                 webhooks=job_webhooks,
                 workflow_ref=job.get("workflow_ref"),
                 workflow_store=workflow_store,
+                replay_mode=job.get("replay_mode"),
             )
         )
         job_registry.set_running(job_id, task)
@@ -1013,6 +1069,13 @@ def _register_routes(
         # Workflow export/import (v1): validate the workflow_ref exists (owner-scoped).
         if body.workflow_ref and workflow_store.get(body.workflow_ref, owner) is None:
             return _error_response(400, "unknown_workflow", f"workflow {body.workflow_ref!r} not found", request)
+        # v2: replay_mode (cache) is only meaningful for workflow_ref jobs.
+        if body.replay_mode not in (None, "live", "cache"):
+            return _error_response(400, "invalid_replay_mode", "replay_mode must be 'live' or 'cache'", request)
+        if body.replay_mode == "cache" and not body.workflow_ref:
+            return _error_response(
+                400, "replay_mode_requires_workflow_ref", "replay_mode='cache' requires a workflow_ref", request
+            )
 
         # Idempotency: same key within window → return existing job.
         idem_key = request.headers.get("Idempotency-Key")
@@ -1078,6 +1141,7 @@ def _register_routes(
                 mode=job_mode.value if job_mode else None,
                 max_iterations=job_max_iter,
                 workflow_ref=body.workflow_ref,
+                replay_mode=body.replay_mode,
             )
         except DuplicateIdempotencyKey as exc:
             # M1: a concurrent same-key submit won the race -- return the canonical

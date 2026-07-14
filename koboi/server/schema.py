@@ -129,6 +129,9 @@ class JobSubmitRequest(BaseModel):
     # Workflow export/import (v1): run a stored workflow bundle as an autonomous
     # job instead of the server-level config. Owner-scoped; validated at submit.
     workflow_ref: str | None = Field(default=None)
+    # v2: run the job in cache mode (file-backed response cache) so the completed
+    # run can be captured into a byte-deterministic bundle. Only with workflow_ref.
+    replay_mode: str | None = Field(default=None)
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -156,6 +159,25 @@ class WorkflowResponse(BaseModel):
     name: str
     description: str | None = None
     owner: str
+    created_at: float
+    updated_at: float
+
+
+class CaptureRequest(BaseModel):
+    """POST /v1/jobs/{id}/capture body."""
+
+    model_config = {"extra": "ignore"}
+
+    name: str | None = None
+    with_cache: bool = False
+    redact_cache: bool = False
+
+
+class CaptureResponse(BaseModel):
+    name: str
+    description: str | None = None
+    cache_entries: int = 0
+    cache_redacted: bool = False
     created_at: float
     updated_at: float
 
