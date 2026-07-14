@@ -129,8 +129,10 @@ class JobSubmitRequest(BaseModel):
     # Workflow export/import (v1): run a stored workflow bundle as an autonomous
     # job instead of the server-level config. Owner-scoped; validated at submit.
     workflow_ref: str | None = Field(default=None)
-    # v2: run the job in cache mode (file-backed response cache) so the completed
-    # run can be captured into a byte-deterministic bundle. Only with workflow_ref.
+    # v2/v3: run the job in cache/replay mode (file-backed response cache) so the
+    # completed run can be captured into a byte-deterministic bundle. Plain jobs
+    # build a fresh per-job agent (_execute_plain_cache_job); workflow_ref jobs
+    # hydrate the captured sidecar.
     replay_mode: str | None = Field(default=None)
 
 

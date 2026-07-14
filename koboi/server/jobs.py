@@ -695,6 +695,14 @@ async def _execute_plain_cache_job(
 
     cache_dir = f".koboi/cache/jobs/{job_id}"
     cfg = pool._config.with_replay(replay_mode=replay_mode, cache_dir=cache_dir)
+    # Per-job isolation (mirror AgentPool._build_agent): stamp the session_id + a
+    # per-session workdir so concurrent plain cache jobs don't share memory/fs state.
+    import os
+
+    cfg._data.setdefault("memory", {})["session_id"] = record.session_id
+    workdir = pool.workdir_for(record.session_id)
+    cfg._data.setdefault("sandbox", {})["workdir"] = workdir
+    os.makedirs(workdir, exist_ok=True)
     agent = KoboiAgent._from_config(cfg)
     if agent._core is None:
         raise PermissionError(
@@ -864,14 +872,14 @@ async def resume_on_startup(
 
     # #5: rehydrate-and-continue running jobs (was: mark running-as-failed).
     for job in store.list_by_status("running"):
-        if job.get("workflow_ref"):
-            # v1: workflow jobs build a fresh agent per run and cannot rehydrate an
-            # interrupted loop, so resuming would duplicate side effects. Mark
-            # failed (retriable) so the operator re-submits instead of double-running.
+        if job.get("workflow_ref") or job.get("replay_mode") in ("cache", "replay"):
+            # workflow_ref + plain cache/replay jobs build a fresh agent per run and
+            # cannot rehydrate an interrupted loop, so resuming would duplicate side
+            # effects. Mark failed (retriable) so the operator re-submits.
             store.update_status(
                 job["job_id"],
                 "failed",
-                error="workflow jobs cannot be resumed in v1; re-submit the job",
+                error="cache/replay + workflow jobs cannot be resumed; re-submit the job",
                 error_class="WorkflowResumeUnsupported",
                 retriable=True,
             )

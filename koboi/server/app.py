@@ -1138,10 +1138,10 @@ def _register_routes(
             if ownership.get_owner(session_id) is None:
                 ownership.set_owner(session_id, owner)
         else:
-            # Workflow jobs build a fresh agent from the bundle and never touch the
-            # pooled one, so skip materializing it (avoids wasting an LRU pool slot
-            # + a spurious pool_full under burst submit).
-            if not body.workflow_ref:
+            # workflow_ref + plain cache/replay jobs build a fresh agent and never
+            # touch the pooled one, so skip materializing it (avoids wasting an LRU
+            # pool slot + a spurious pool_full under burst submit).
+            if not body.workflow_ref and body.replay_mode not in ("cache", "replay"):
                 try:
                     await pool.get_or_create(session_id)
                 except PoolFull as exc:
@@ -1401,10 +1401,9 @@ def serve_app(config_path: str | Path, *, host: str | None = None, port: int | N
     # a re-runnable bundle (Config.to_yaml() carries resolved secrets; this keeps
     # the ${VAR} templates for share-safe re-runnability).
     import yaml as _yaml
-    from pathlib import Path as _Path
 
     from koboi.config import _load_yaml_with_extends
 
-    _source = _yaml.safe_dump(_load_yaml_with_extends(_Path(config_path)), sort_keys=False, allow_unicode=True)
+    _source = _yaml.safe_dump(_load_yaml_with_extends(Path(config_path)), sort_keys=False, allow_unicode=True)
     app = create_app(cfg, config_source_text=_source)
     uvicorn.run(app, host=resolved_host, port=resolved_port)  # pragma: no cover (blocking server)
