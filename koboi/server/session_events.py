@@ -6,12 +6,13 @@ B1 post-handover blindness gap (the per-invocation ``/chat/stream`` queue is GC'
 when the stream ends, so a supervisor connecting after a handover otherwise sees
 nothing).
 
-Mirrors ``JobRegistry``'s buffer mechanics (``koboi/server/jobs.py``) -- a plain
-capped ``list`` per key, ``append_event``/``get_events`` -- minus the job-specific
-``JobRecord`` fields (status/task/terminal/register-by-job). Conforms to the
-``EventBuffer`` Protocol (``koboi/server/protocols.py``): the same surface a future
-Redis-backed buffer would swap in. In-memory, per-process (lost on restart);
-retained across turns + after a ``/chat/stream`` ends until ``DELETE /sessions/{id}``.
+CR-1 fix: events carry a monotonic **sequence number** so the replay reader tracks
+``last_seq`` (stable across buffer trims) instead of a list index (which stalled
+permanently once the sliding-window buffer reached capacity). ``get_events_since``
+returns events appended after a given seq + the latest seq.
+
+In-memory, per-process (lost on restart); retained across turns + after a
+``/chat/stream`` ends until ``DELETE /sessions/{id}``.
 """
 
 from __future__ import annotations
@@ -22,16 +23,16 @@ from typing import Any
 
 @dataclass
 class _SessionBuffer:
-    events: list = field(default_factory=list)
+    # (seq, event) tuples; oldest trimmed when cap exceeded.
+    events: list[tuple[int, Any]] = field(default_factory=list)
+    next_seq: int = 1
 
 
 class SessionEventRegistry:
     """Per-session capped event buffer for SSE replay (B2).
 
-    Conforms to the ``EventBuffer`` Protocol (``append_event``/``get_events`` keyed
-    by ``session_id``). The producer is the ``/chat/stream`` ``_run_agent`` loop
-    (single-threaded per turn under ``pool.session_lock``); replay readers poll
-    ``get_events`` -- unsynchronized, mirroring ``JobRegistry``.
+    The producer is the ``/chat/stream`` ``_run_agent`` loop (single-threaded per
+    turn under ``pool.session_lock``); replay readers poll ``get_events_since``.
     """
 
     def __init__(self, max_events: int = 1000) -> None:
@@ -40,15 +41,29 @@ class SessionEventRegistry:
 
     def append_event(self, session_id: str, event: Any) -> None:
         buf = self._buffers.setdefault(session_id, _SessionBuffer())
-        buf.events.append(event)
+        seq = buf.next_seq
+        buf.events.append((seq, event))
+        buf.next_seq += 1
         if len(buf.events) > self._max_events:
-            # Slice-trim, keep newest (mirror jobs.py JobRegistry.append_event).
             buf.events = buf.events[-self._max_events :]
 
     def get_events(self, session_id: str) -> list:
-        """Return a COPY of the capped event list (empty if session unseen)."""
+        """Return a COPY of all buffered events (without seq). Legacy compat."""
         buf = self._buffers.get(session_id)
-        return list(buf.events) if buf else []
+        return [ev for _, ev in buf.events] if buf else []
+
+    def get_events_since(self, session_id: str, after_seq: int = 0) -> tuple[list, int]:
+        """Return ``(events appended after after_seq, latest_seq)``.
+
+        Uses the monotonic sequence (not a list index) so the cursor is stable
+        across buffer trims — the reader never stalls (CR-1 fix).
+        """
+        buf = self._buffers.get(session_id)
+        if not buf or not buf.events:
+            return [], after_seq
+        events = [ev for s, ev in buf.events if s > after_seq]
+        latest_seq = buf.events[-1][0]
+        return events, latest_seq
 
     def forget(self, session_id: str) -> None:
         """Drop the buffer (on DELETE /sessions/{id}). No-op if unseen."""

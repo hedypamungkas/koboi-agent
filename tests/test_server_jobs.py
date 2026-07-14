@@ -301,6 +301,22 @@ class TestJobStoreReap:
         assert store.get("recent") is not None
         assert store.get("running") is not None
 
+    def test_awaiting_human_not_reaped(self, tmp_path):
+        """awaiting_human is terminal but deliberately excluded from the reaper (it awaits human action)."""
+        import time as _time
+
+        store = JobStore(str(tmp_path / "jobs.db"))
+        store.insert("handover", "s", "a", "m")
+        store.update_status("handover", "awaiting_human")
+        store._conn.execute(
+            "UPDATE jobs SET updated_at = ? WHERE job_id = ?", (_time.time() - 200000, "handover")
+        )
+        store._conn.commit()
+
+        reaped = store.reap_terminal_older_than(_time.time() - 86400)
+        assert "handover" not in reaped
+        assert store.get("handover") is not None  # survived — not reaped
+
 
 class TestJobRegistryQueue:
     """G5c-b: pending-queue admission (run/queue/reject), FIFO, forget."""

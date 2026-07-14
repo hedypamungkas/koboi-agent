@@ -885,6 +885,12 @@ def _register_routes(
                 # exited -> lock released (no deadlock). A human operator takes over
                 # via POST /v1/sessions/{id}/transfer + a new /chat/stream.
                 _summary = he.summary
+                # CR-2: scrub secret shapes from the LLM-provided summary (the B4 digest
+                # path already applies redact_value internally; this covers the B1 path).
+                if _summary:
+                    from koboi.redact import redact_value
+
+                    _summary = redact_value(_summary)
                 if not _summary and handoff_digest is not None:
                     # B4: warm handoff digest (opt-in). Side-LLM summary + redact.
                     # Never raises (the helper is fail-soft; this double-wrap mirrors
@@ -892,7 +898,8 @@ def _register_routes(
                     # handover by falling through to the ErrorEvent branch below).
                     try:
                         _summary = await handoff_digest.digest(agent._core.memory.get_messages())
-                    except Exception:  # nosec - belt-and-suspenders; never lose the handover
+                    except Exception as exc:  # nosec - belt-and-suspenders; never lose the handover
+                        _logger.warning("handoff digest raised (never-raises invariant broken): %s", exc)
                         _summary = ""
                 hev = HandoverEvent(
                     handover_id=uuid.uuid4().hex[:12],
@@ -900,9 +907,9 @@ def _register_routes(
                     summary=_summary,
                 )
                 session_events.append_event(session_id, hev)  # B2: buffer for replay
-                # B5: notify the host CS platform of the chat-path handover (fire-and-forget).
+                await queue.put(hev)  # deliver to operator FIRST (C1: never block on the webhook)
+                # B5: notify the host CS platform (fire-and-forget, post-delivery).
                 _emit_handover_webhook(handover_webhooks, session_id, hev.handover_id, hev.reason, _summary)
-                await queue.put(hev)
             except Exception as exc:
                 err_ev = ErrorEvent(error=exc)
                 session_events.append_event(session_id, err_ev)  # B2: buffer for replay
@@ -1009,14 +1016,13 @@ def _register_routes(
             app.state.session_streams[owner] = active + 1
 
         async def event_gen():
-            last_index = 0
+            last_seq = 0  # CR-1: stable cursor (not list index — survives buffer trims)
             deadline = time.monotonic() + session_stream_timeout
             try:
                 while True:
-                    all_events = session_events.get_events(session_id)
-                    for ev in all_events[last_index:]:
+                    new_events, last_seq = session_events.get_events_since(session_id, last_seq)
+                    for ev in new_events:
                         yield ev
-                    last_index = len(all_events)
                     if time.monotonic() >= deadline:
                         break
                     await asyncio.sleep(0.1)

@@ -80,6 +80,11 @@ class HandoverDetectionHook(Hook):
                     "reason": f"low grounding coverage ({cov:.2f} < {self._coverage_threshold})",
                     "summary": "",
                 }
+            elif cov is None:
+                _logger.debug(
+                    "HandoverDetectionHook: grounding signal absent (last_coverage=None) "
+                    "-- coverage-based handover skipped this turn"
+                )
         # NOTE: deliberately does NOT set ctx.abort -- the emit-site reads the flag
         # and raises AgentHandoverError (setting abort would raise AgentAbortedError
         # first, the wrong exception). See module docstring.

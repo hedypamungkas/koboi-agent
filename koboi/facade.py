@@ -1313,6 +1313,11 @@ class AgentAssembler:
                 (g for g in (self.output_guardrails or []) if isinstance(g, GroundingGuardrail)),
                 None,
             )
+            if grounding is None:
+                logging.getLogger(__name__).warning(
+                    "handover.detection enabled without a grounding_check output guardrail "
+                    "-- coverage-based handover will be inert; only explicit user-ask will trigger"
+                )
             self.hook_chain.add(
                 HandoverDetectionHook(
                     grounding=grounding,
