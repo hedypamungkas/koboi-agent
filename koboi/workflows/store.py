@@ -50,12 +50,20 @@ class FileWorkflowStore:
     def exists(self, name: str) -> bool:
         return self.path_for(name).exists()
 
-    def save(self, name: str, bundle_yaml: str) -> Path:
+    def cache_dir_for(self, name: str) -> Path:
+        """The sibling ``<slug>.cache/`` sidecar dir for a captured workflow."""
+        return self._dir / f"{_slugify(name)}.cache"
+
+    def save(self, name: str, bundle_yaml: str, *, sidecar_entries=None) -> Path:
         self._dir.mkdir(parents=True, exist_ok=True)
         path = self.path_for(name)
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(bundle_yaml, encoding="utf-8")
         os.replace(str(tmp), str(path))
+        if sidecar_entries is not None:
+            from koboi.workflows.cache_sidecar import DirectoryCacheSidecar
+
+            DirectoryCacheSidecar(self.cache_dir_for(name)).write(sidecar_entries)
         return path
 
     def load(self, name: str) -> str:
@@ -63,6 +71,12 @@ class FileWorkflowStore:
         if not path.exists():
             raise FileNotFoundError(f"Workflow {name!r} not found at {path}")
         return path.read_text(encoding="utf-8")
+
+    def load_with_cache(self, name: str) -> tuple[str, Path | None]:
+        """Return ``(bundle_yaml, cache_dir)``; ``cache_dir`` is None when no sidecar."""
+        bundle = self.load(name)
+        cache_dir = self.cache_dir_for(name)
+        return bundle, (cache_dir if cache_dir.exists() else None)
 
     def list(self) -> list[dict]:
         import yaml
@@ -88,7 +102,13 @@ class FileWorkflowStore:
 
     def delete(self, name: str) -> bool:
         path = self.path_for(name)
-        if path.exists():
+        removed = path.exists()
+        if removed:
             path.unlink()
-            return True
-        return False
+        cache_dir = self.cache_dir_for(name)
+        if cache_dir.exists():
+            import shutil
+
+            shutil.rmtree(cache_dir)
+            removed = True
+        return removed

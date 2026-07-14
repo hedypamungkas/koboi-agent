@@ -35,8 +35,12 @@ class WorkflowProvenance:
     """Where a workflow bundle came from."""
 
     source_run_id: str | None = None
+    source_session_id: str | None = None  # v2: the session the run lived in
     captured_at: str | None = None  # ISO-8601 UTC
     koboi_version: str | None = None  # from koboi.__version__
+    with_cache: bool = False  # v2: a frozen response-cache sidecar accompanies the bundle
+    cache_entries: int = 0  # v2: number of frozen cache entries
+    cache_redacted: bool = False  # v2: sidecar was redacted (may diverge on replay)
 
 
 @dataclass
@@ -116,8 +120,12 @@ class WorkflowDefinition:
             "description": self.description,
             "provenance": {
                 "source_run_id": self.provenance.source_run_id,
+                "source_session_id": self.provenance.source_session_id,
                 "captured_at": self.provenance.captured_at,
                 "koboi_version": self.provenance.koboi_version,
+                "with_cache": self.provenance.with_cache,
+                "cache_entries": self.provenance.cache_entries,
+                "cache_redacted": self.provenance.cache_redacted,
             },
         }
         out: dict = {"workflow": envelope}
@@ -143,8 +151,12 @@ class WorkflowDefinition:
             description=envelope.get("description", ""),
             provenance=WorkflowProvenance(
                 source_run_id=prov.get("source_run_id"),
+                source_session_id=prov.get("source_session_id"),
                 captured_at=prov.get("captured_at"),
                 koboi_version=prov.get("koboi_version"),
+                with_cache=bool(prov.get("with_cache", False)),
+                cache_entries=int(prov.get("cache_entries", 0) or 0),
+                cache_redacted=bool(prov.get("cache_redacted", False)),
             ),
             config=body,
         )
@@ -185,6 +197,40 @@ def build_from_config_path(
     body = cast("dict", redact.redact_config_for_export(raw))
     provenance = WorkflowProvenance(
         source_run_id=source_run_id,
+        captured_at=datetime.now(timezone.utc).isoformat(),
+        koboi_version=getattr(koboi, "__version__", None),
+    )
+    return WorkflowDefinition(
+        schema_version=WORKFLOW_SCHEMA_VERSION,
+        name=name,
+        description=description,
+        provenance=provenance,
+        config=body,
+    )
+
+
+def build_from_config_text(
+    config_text: str,
+    *,
+    name: str,
+    description: str = "",
+    source_run_id: str | None = None,
+    source_session_id: str | None = None,
+) -> WorkflowDefinition:
+    """Build a :class:`WorkflowDefinition` from a config YAML STRING.
+
+    Sibling of :func:`build_from_config_path` for the capture path (the server
+    has a config string from ``Config.to_yaml()``, not a path). Parses the text
+    and redacts secrets via :func:`koboi.redact.redact_config_for_export`.
+    """
+    import koboi
+    from datetime import datetime, timezone
+
+    raw = yaml.safe_load(config_text) or {}
+    body = cast("dict", redact.redact_config_for_export(raw))
+    provenance = WorkflowProvenance(
+        source_run_id=source_run_id,
+        source_session_id=source_session_id,
         captured_at=datetime.now(timezone.utc).isoformat(),
         koboi_version=getattr(koboi, "__version__", None),
     )

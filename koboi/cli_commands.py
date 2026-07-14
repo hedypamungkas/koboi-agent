@@ -303,10 +303,19 @@ def cmd_run(
 
     try:
         if workflow_name:
+            from koboi.workflows import prepare_captured_bundle
             from koboi.workflows.store import FileWorkflowStore
 
-            bundle = FileWorkflowStore(scope="project").load(workflow_name)
-            agent = KoboiAgent.from_config_string(bundle, verbose=verbose, replay_mode=effective_mode)
+            store = FileWorkflowStore(scope="project")
+            bundle, cache_dir = store.load_with_cache(workflow_name)
+            if cache_dir is not None:
+                # Captured bundle: force cache mode pointing at the sidecar so the
+                # re-run is byte-identical + offline (every response is a cache hit).
+                bundle = prepare_captured_bundle(bundle, cache_dir=str(cache_dir))
+                run_mode = "cache"
+            else:
+                run_mode = effective_mode
+            agent = KoboiAgent.from_config_string(bundle, verbose=verbose, replay_mode=run_mode)
             if input_json:
                 try:
                     parsed = json.loads(input_json)
