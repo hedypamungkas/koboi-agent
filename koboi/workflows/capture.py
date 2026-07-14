@@ -12,8 +12,6 @@ entries; persistence (file dir / SQLite) is the caller's job (the store owns it)
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import yaml
 
 from koboi import redact
@@ -23,9 +21,6 @@ from koboi.workflows.definition import (
     build_from_config_text,
     validate_workflow,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 def _redact_payload(payload: dict) -> dict:

@@ -52,7 +52,7 @@ class DeterminismProfile:
     as forward-as-is generation params (``seed`` is dropped on Anthropic, which
     has no seed parameter). ``model_pin`` maps to ``llm.model`` (a dated snapshot
     for bounded reproducibility). ``replay_mode`` is metadata (not an LLM param);
-    v1 only supports ``"live"``.
+    v1 supports ``"live"``, v2 adds ``"cache"`` (file-backed response cache).
     """
 
     temperature: float | None = None
@@ -129,8 +129,10 @@ class WorkflowDefinition:
                 "cache_redacted": self.provenance.cache_redacted,
             },
         }
+        # Envelope first + wins: a config body carrying a stale ``workflow:`` key
+        # (e.g. capturing from an existing bundle) must not overwrite the fresh envelope.
         out: dict = {"workflow": envelope}
-        out.update(self.config)
+        out.update({k: v for k, v in self.config.items() if k != "workflow"})
         return out
 
     def to_bundle_yaml(self) -> str:

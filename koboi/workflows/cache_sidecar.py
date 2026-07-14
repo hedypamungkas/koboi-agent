@@ -26,9 +26,6 @@ from koboi.llm.cache import CacheEntry, ResponseCache
 @dataclass(frozen=True)
 class CacheSidecarManifest:
     entry_count: int
-    redacted: bool = False
-    schema: str = "koboi-cache-1"
-    created_at: str | None = None
 
 
 class CacheSidecar(Protocol):

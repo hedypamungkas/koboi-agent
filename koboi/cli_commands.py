@@ -214,10 +214,7 @@ def cmd_capture(
     wf_name = name or Path(config_path).stem
     cache_dir = None
     if with_cache:
-        from koboi.config import Config
-
-        cfg = Config.from_yaml(config_path)
-        cache_dir = cfg.replay.get("cache_dir") or ".koboi/cache"
+        cache_dir = (raw.get("replay") or {}).get("cache_dir") or ".koboi/cache"
     wd, entries = capture_from_run(
         config_text=config_text,
         name=wf_name,

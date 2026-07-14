@@ -108,3 +108,17 @@ class TestValidateCapture:
         # may have the model_pin warning (no model_pin) but no capture-specific ones
         warnings = validate_capture(wd, entries)
         assert not any("no cache entries" in w for w in warnings)
+
+
+class TestCaptureEnvelopeWins:
+    def test_capture_from_bundle_keeps_new_envelope(self, tmp_path):
+        # Capturing from a bundle that already has a workflow: envelope must NOT
+        # keep the old envelope -- the new provenance (source_run_id) wins.
+        bundle_text = (
+            "workflow:\n  name: old\n  schema_version: '1.0'\n  provenance: {source_run_id: oldrun}\n"
+            "agent:\n  name: x\nllm:\n  provider: openai\n  model: m\n"
+        )
+        wd, _ = capture_from_run(config_text=bundle_text, name="cap", source_run_id="newrun")
+        out = wd.to_bundle_dict()
+        assert out["workflow"]["provenance"]["source_run_id"] == "newrun"
+        assert out["workflow"]["name"] == "cap"

@@ -3,8 +3,9 @@
 A workflow bundle is a koboi config YAML with a ``workflow:`` metadata envelope
 (schema_version / name / description / provenance) layered on top. It is
 re-runnable directly via ``KoboiAgent.from_config_string`` / ``koboi run <file>``.
-v1 ships the ``live`` replay mode (sampling pinning); ``cache`` / ``replay``
-arrive later (v2/v3).
+v1 ships the ``live`` replay mode (sampling pinning); v2 adds ``cache``
+(file-backed response cache + capture-from-run); pure offline ``replay`` arrives
+in v3.
 """
 
 from koboi.workflows.definition import (

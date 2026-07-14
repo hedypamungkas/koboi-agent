@@ -185,7 +185,9 @@ class ResponseCache:
         for key, payload in entries:
             path = self._path_for(key)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(str(tmp), str(path))
             n += 1
         return n
 

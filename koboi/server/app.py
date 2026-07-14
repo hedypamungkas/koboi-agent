@@ -587,7 +587,7 @@ def _register_routes(
             return _error_response(400, "capture_requires_workflow_ref", "v2 captures workflow_ref jobs only", request)
         wf = workflow_store.get(job["workflow_ref"], owner)
         if wf is None:
-            return _error_response(404, "workflow not found", "the job's workflow_ref no longer exists", request)
+            raise HTTPException(status_code=404, detail="workflow not found")
         cache_dir = job.get("cache_dir") if body.with_cache else None
         if body.with_cache and not cache_dir:
             return _error_response(
