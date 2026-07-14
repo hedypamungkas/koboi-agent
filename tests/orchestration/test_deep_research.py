@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from koboi.events import OrchestrationCompleteEvent, TextDeltaEvent
 from koboi.orchestration.dag_scheduler import DagScheduler
 from koboi.orchestration.orchestrator import Orchestrator
@@ -892,3 +894,53 @@ class TestMedium11WebConfProviderWiring:
         finally:
             if "__spy_test__" in search_provider_registry._entries:
                 del search_provider_registry._entries["__spy_test__"]
+
+
+class TestRunGuard:
+    """F9: the Orchestrator is not concurrent-safe (per-run mutable state); a reentrant run
+    on one instance must fail loudly instead of silently corrupting shared state."""
+
+    def _orch(self, tmp_path):
+        return Orchestrator(
+            client=_FakeClient(coverage_score=0.95),
+            router=KeywordRouter(),
+            research={"max_depth": 1, "coverage_threshold": 0.7},
+            dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "guard.db")),
+            default_mode="deep_research",
+        )
+
+    async def test_reentrant_run_raises(self, tmp_path):
+        # An in-flight run (flag set) rejects a second run() with a clear error.
+        from koboi.exceptions import AgentError
+
+        orch = self._orch(tmp_path)
+        orch._run_in_progress = True  # simulate an in-flight run holding the lock
+        with pytest.raises(AgentError, match="not concurrent-safe"):
+            await orch.run("q")
+        with pytest.raises(AgentError, match="not concurrent-safe"):
+            [e async for e in orch.run_stream("q")]  # run_stream guards too
+
+    async def test_run_clears_flag_after_completion(self, tmp_path):
+        # A normal run sets the flag for its duration + clears it on completion (finally),
+        # so a subsequent run on the same instance works.
+        orch = self._orch(tmp_path)
+        assert orch._run_in_progress is False
+        _ = await orch.run("Tell me about X", mode="deep_research")
+        assert orch._run_in_progress is False  # cleared after
+        # A second run on the same instance succeeds (flag was cleared).
+        _ = [e async for e in orch.run_stream("Tell me about Y")]
+        assert orch._run_in_progress is False
+
+    async def test_run_clears_flag_after_failure(self, tmp_path):
+        # The flag clears even if the run raises (finally), so a transient failure doesn't
+        # permanently lock the instance.
+        orch = self._orch(tmp_path)
+
+        async def _boom(query, mode):  # signature matches _run_impl
+            assert orch._run_in_progress is True  # guard set the flag before calling _run_impl
+            raise RuntimeError("boom")
+
+        orch._run_impl = _boom
+        with pytest.raises(RuntimeError, match="boom"):
+            await orch.run("q")
+        assert orch._run_in_progress is False  # finally cleared despite the raise
