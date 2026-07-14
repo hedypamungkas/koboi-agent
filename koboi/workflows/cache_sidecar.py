@@ -126,7 +126,7 @@ class SqliteCacheSidecar:
                     created_at=payload.get("created_at", ""),
                     payload=payload,
                 )
-            except Exception:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 continue
 
     def __len__(self) -> int:

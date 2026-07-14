@@ -21,7 +21,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 # --------------------------------------------------------------------------- #
@@ -173,7 +173,7 @@ def cmd_import_workflow(file: str, name: str | None = None, scope: str = "projec
         print(f"Error parsing workflow bundle: {e}", file=sys.stderr)
         return 1
     # Trust boundary: never persist secrets into the store.
-    wd.config = redact_config_for_export(wd.config)
+    wd.config = cast("dict", redact_config_for_export(wd.config))
     wf_name = name or wd.name or Path(file).stem
     for warning in validate_workflow(wd):
         print(f"warning: {warning}", file=sys.stderr)

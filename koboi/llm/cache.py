@@ -173,8 +173,8 @@ class ResponseCache:
             for f in sorted(shard.glob("*.json")):
                 try:
                     yield f.stem, json.loads(f.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
+                except (OSError, json.JSONDecodeError, ValueError, KeyError):
+                    continue  # skip corrupt/unreadable entries
 
     def count(self) -> int:
         return sum(1 for _ in self.iter_entries())
