@@ -287,7 +287,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (27)
+### Config sections (28)
 
 | Section | Controls |
 |---------|----------|
@@ -318,6 +318,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `embedding` | Embedding provider config for RAG semantic retrieval + proactive recall (inline or named `providers` ref) |
 | `subagent` | Parallel sub-agent delegation config |
 | `eval` | Evaluation suite cases/scorers (e.g. `eval_suite.yaml`, `benchmark_eval.yaml`) |
+| `handover` | Confidence-aware handover: `detection` (structural handover, B1.5), `digest` (warm-handoff summary, B4), `webhooks` (HMAC `handover.requested` callbacks) |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
@@ -585,6 +586,7 @@ The safety model has four layers: guardrails, policy engine, approval handler, a
 
 - `InputGuardrail` -- injection detection, length limits
 - `OutputGuardrail` -- content filtering, sensitive data detection
+- `GroundingGuardrail` -- runtime faithfulness (claim-decomposition + NLI; abstains when ungrounded; A3; opt-in via the `grounding_check` factory)
 
 Guardrails are composed via `GuardrailRegistry` and configured in YAML:
 
@@ -598,6 +600,17 @@ guardrails:
   rate_limit:
     max_calls_per_minute: 20
 ```
+
+### Confidence-awareness and human handover
+
+koboi can refuse to answer when it is not grounded, and yield to a human operator when it should:
+
+- **A3 grounding guardrail** (`GroundingGuardrail`, `guardrails/grounding.py`) -- an output guardrail (factory `grounding_check`) that decomposes the answer into atomic claims and NLI-checks each against the retrieved context via a side-LLM. If coverage (supported / total) < `threshold` (default 0.8) it returns `action="abstain"` and the loop swaps the output for a refusal instead of a confidently-retrieved-but-wrong answer. Fail-soft: any judge error passes through.
+- **B1 LLM-initiated handover** -- the `transfer_to_human` tool (`tools/builtin/handover.py`) raises `AgentHandoverError`.
+- **B1.5 structural handover** (`HandoverDetectionHook`, `hooks/handover_detection_hook.py`) -- fires handover without the LLM calling the tool: on an explicit user ask (PRE_INPUT) or low A3 grounding coverage (POST_OUTPUT). Config under `handover.detection` (`enabled`, `coverage_threshold` default 0.5, `ask_patterns`).
+- **Outcome**: `AgentHandoverError` propagates out of the run; the server converts it to a `HandoverEvent` (interactive SSE) or an `awaiting_human` job status, releasing `pool.session_lock` so a human operator can take over via `POST /transfer` + `GET .../stream` (B2 replay) + a new `/chat/stream`. The B4 warm-handoff digest (`handover.digest`) attaches a case-card summary; `handover.webhooks` fire HMAC-signed callbacks. See `docs/channel-bridge.md`.
+
+Confidence ladder: answer (coverage >= 0.8) -> abstain (0.5-0.8) -> handover (< coverage_threshold).
 
 ### PolicyEngine
 
@@ -941,7 +954,7 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
 
 ### Built-in scorers
 
-`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost`, `RAGNoise`, `ContextEfficiency`, `ToolSelection`, `TokenEfficiency`, `SkillTriggerAccuracy`, `RetrievalMetricScorer` (recall@k/precision@k/MRR/nDCG@k/hit), `CitationGroundingScorer` (ALCE-style citation resolution), `BootstrapCIScorer` (95% CI lower-bound gating) -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
+`ToolUsage`, `KeywordPresence`, `OutputLength`, `IterationEfficiency`, `HealthScore`, `LLMJudge`, `Cost`, `RAGNoise`, `ContextEfficiency`, `ToolSelection`, `TokenEfficiency`, `SkillTriggerAccuracy`, `RetrievalMetricScorer` (recall@k/precision@k/MRR/nDCG@k/hit), `CitationGroundingScorer` (ALCE-style citation resolution), `BootstrapCIScorer` (95% CI lower-bound gating), `DeepResearchFaithfulnessScorer` (deep-research faithfulness), `RecencyScorer` (time-decay weighting) -- plus framework-specific scorers for BFCL, GAIA, SWE-bench, RAGAS, and DeepEval.
 
 ---
 
@@ -953,7 +966,7 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
 
 ### Stream events (`koboi/events.py`)
 
-`TextDeltaEvent`, `ToolCallEvent`, `ToolResultEvent`, `CompleteEvent`, `ErrorEvent`, `IterationEvent`, `PendingApprovalEvent`, `RoutingDecisionEvent`, `AgentDispatchEvent`, `AgentResultEvent`, `OrchestrationCompleteEvent`
+`TextDeltaEvent`, `ToolCallEvent`, `ToolResultEvent`, `CompleteEvent`, `ErrorEvent`, `IterationEvent`, `PendingApprovalEvent`, `HandoverEvent`, `RoutingDecisionEvent`, `AgentDispatchEvent`, `AgentResultEvent`, `OrchestrationCompleteEvent`, `SearchEvent`, `FetchEvent`, `SourceEvent`, `CoverageEvent`
 
 ### Error hierarchy (`AgentError` in `koboi/exceptions.py`; `LLMError` in `koboi/llm/base.py`)
 
@@ -965,6 +978,7 @@ AgentError
   +-- AgentTimeoutError
   +-- AgentStreamError
   +-- AgentAbortedError
+  +-- AgentHandoverError
 
 LLMError
   +-- LLMConnectionError

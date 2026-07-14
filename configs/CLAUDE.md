@@ -49,7 +49,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`
+`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`
 
 ### Notable sub-sections (recently added)
 - `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
@@ -58,4 +58,8 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 - `context.safety_margin` — tokens of headroom reserved inside `manage()` so one large response can't push an over-budget payload (default 0).
 - `rag.rerank` — `bool | dict`. `true` (legacy) wraps the retriever in the heuristic keyword-overlap `RerankerRetriever`; a **dict** `{provider: jina|cohere|local, api_key, model, base_url, timeout, fetch_multiplier, score_threshold}` selects a true cross-encoder (`koboi/rag/rerank.py`). `provider` defaults `jina`; HTTP backends need `api_key`, `local`/BGE needs the `[rerank-local]` extra. Fail-soft (any hiccup → base results).
 - `rag.stopwords` / `rag.stemmer` — lexical-retriever normalization (Keyword/BM25/Hybrid). `stopwords: true|en|id` (id = ~80 function words); `stemmer: id` (Sastrawi via the `[indo-nlp]` extra; `True` is invalid for stemmer). Applied to both index and query tokens.
+- `grounding_check` (output guardrail) — opt-in runtime faithfulness (Wave 2 A3): `name: grounding_check` under `guardrails.output` with `provider`/`model`/`threshold` (default 0.8); decomposes the answer into claims, NLI-checks each vs retrieved context, and abstains (refuses) when coverage < threshold. Fail-soft.
+- `handover.detection` — opt-in structural handover (B1.5): `enabled`, `coverage_threshold` (A3 grounding coverage below this triggers handover; default 0.5), `ask_patterns` (regexes for explicit "talk to a human" requests). Pairs with `grounding_check`.
+- `handover.digest` — opt-in warm-handoff summary (B4): `enabled` generates a side-LLM case-card summary attached to `HandoverEvent.summary`.
+- `handover.webhooks` — HMAC-signed mid-conversation callbacks on `handover.requested` (see `docs/channel-bridge.md`).
 

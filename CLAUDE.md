@@ -20,7 +20,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (207 .py files)
+koboi/              Main package (229 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
@@ -48,12 +48,12 @@ koboi/              Main package (207 .py files)
   notifications.py  Notification system
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
-  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 20 specialized hooks
+  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover)
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 21 specialized hooks (incl. handover detection)
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid + BM25), cross-encoder rerank (jina/cohere/local -- rerank.py), augmentation, query-rewrite/HyDE, metadata filters, Indonesian stopwords/stemmer, registry, live (LiveCorpus/LiveRetriever), sources (file/http/s3/firecrawl)
   websearch/        Web search/fetch provider registries (@register_search_provider/@register_fetch_provider, Brave/Firecrawl/httpx/mock/ddg), types, base ABCs, providers/, counting (budget metering). "websearch" = external-web data I/O backends for the web_search/web_fetch tools -- NOT a web UI.
-  guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, registry
+  guardrails/       Input/output guardrails, rate limiter, audit trail, approval handlers, grounding (faithfulness) guardrail, registry
   harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
   sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry
   server/           FastAPI HTTP/SSE serving layer: app, jobs, pool, auth, ownership, idempotency, approvals, keys_cli, schema, sse, health, middleware, protocols
@@ -62,9 +62,9 @@ koboi/              Main package (207 .py files)
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (10), widgets/ (12)
-tests/              241 .py files (216 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
-configs/            28 YAML agent configs
-examples/           34 numbered example scripts (01-34) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
+tests/              281 .py files (251 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
+configs/            32 YAML agent configs
+examples/           35 numbered example scripts (01-35) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
@@ -129,4 +129,5 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - **`ToolDefinition.idempotent: bool = True`** (`types.py`, set via `@tool(..., idempotent=)`): `False` marks side-effecting tools that must not silently double-fire on crash-resume — `_repair_interrupted_turn` skips re-execution (records a synthetic result) for non-idempotent tools. Default `True` preserves prior behavior.
 - New memory/context knobs: `memory.retention.max_messages` (cap stored rows, default None=unbounded), `memory.owner` (tenant tag on stored rows, schema prep for multi-tenancy), `context.safety_margin` (headroom reserved inside `manage()` so one large response can't push an over-budget payload; default 0).
 - **Session REST surface** (`server/app.py`): `GET /v1/sessions` (list, owner-scoped + fails closed 401 when auth on but no caller identity), `POST /v1/sessions/{id}/fork` (rolls back DB+owner rows on any `get_or_create` failure), `DELETE /v1/sessions/{id}` (clears DB rows AND holds `pool.existing_session_lock` so a concurrent `/chat/stream` can't re-insert orphaned rows). `create_app` accepts externalized-state injection kwargs (`session_store`/`job_store`/`event_buffer`/`idempotency_store`/`ownership_store`/`approval_registry`, each default None → in-process impl).
+- **Confidence-awareness + handover** (PR #40, opt-in): `GroundingGuardrail` (`guardrails/grounding.py`, factory `grounding_check` in the `guardrails.output` slot) decomposes the answer into atomic claims and NLI-checks each against the retrieved context via a side-LLM; if coverage < `threshold` (default 0.8) it returns `action="abstain"` and the loop swaps the output for a refusal (fail-soft: any judge error passes-through, never breaks the run). The `transfer_to_human` tool (`tools/builtin/handover.py`) and `HandoverDetectionHook` (B1.5, `hooks/handover_detection_hook.py`; PRE_INPUT user-ask patterns + POST_OUTPUT low-coverage trigger) raise `AgentHandoverError` → `HandoverEvent` (interactive SSE) or an `awaiting_human` job status, releasing `pool.session_lock` (no Future is awaited, so the human's next `/chat/stream` can't deadlock). Config under `handover:` (`detection.enabled`/`coverage_threshold`/`ask_patterns`, `digest.enabled` for the B4 warm-handoff summary, `webhooks`). The B2 replay buffer (`GET /v1/sessions/{id}/stream`) replays history + digest to the operator. See `docs/channel-bridge.md` for the omnichannel webhook surfaces.
 

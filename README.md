@@ -16,7 +16,7 @@ koboi-agent's defensible position is the integration of five assets that are rar
 - **Crash/redeploy resume** — the SQLite `StepJournal` eagerly writes a `running` marker *before* each LLM call (WAL), so a SIGKILL/redeploy leaves a resumable state; `koboi run --resume <session>` rehydrates and continues, re-executing **only the missing tool calls**. Reproducible proof + wall-clock: `python benchmarks/crash_recovery/run.py`. (LangGraph markets "durable execution" only at the platform/LangSmith tier.)
 - **Seccomp HARD network isolation without a container** — the restricted sandbox denies egress at the syscall layer (`connect`/`connectat`/`sendto`/`sendmsg`, inherited across `execve`) plus rlimits + PATH allowlist + secret-stripped env, on Linux + the `python3-seccomp` system package. No peer ships this without spinning up a container.
 - **Self-hostable REST/SSE + autonomous-jobs server with a real security contract** — `koboi serve` exposes interactive SSE chat (human-in-the-loop approvals) + autonomous background jobs behind Bearer keys, per-session ownership, idempotency, and a graceful drain. The **C3 contract**: autonomous destructive jobs are *refused unless* `sandbox.backend='restricted'`, and approvals are deny-by-default without a Trust-DB rule.
-- **CI-native agent evaluation you treat like code** — the eve-style `t` authoring DSL (`koboi eval-test`) drives an agent and asserts outcomes (`calledTool`/`toolWasBlocked`/`retrievedChunk`/`blocked`/`warned`/`activatedSkill`/`completed`) with mock determinism (no API key burned on commit) and gate/soft severity, routed through 15 built-in scorers.
+- **CI-native agent evaluation you treat like code** — the eve-style `t` authoring DSL (`koboi eval-test`) drives an agent and asserts outcomes (`calledTool`/`toolWasBlocked`/`retrievedChunk`/`blocked`/`warned`/`activatedSkill`/`completed`) with mock determinism (no API key burned on commit) and gate/soft severity, routed through 17 built-in scorers.
 - **Supply-chain-hardened Skills** — agentskills.io-aligned, 3-tier progressive disclosure, with a shell-injection deny-list on SKILL.md `!cmd` preprocessing (the "ClawHavoc" ~1,200-malicious-skills marketplace attack is a real, documented threat).
 
 Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-only; auto-resolves `pending_approval` events) against `koboi serve configs/hitl_demo.yaml`.
@@ -27,10 +27,11 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 
 - **Multi-provider LLM**: OpenAI, Anthropic, Cloudflare Workers AI
 - **YAML-driven config** with `${ENV_VAR}` interpolation
-- **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task
+- **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover
 - **Hook lifecycle**: 15 event types for logging, guardrails, telemetry, plus declarative external-command hooks (`hooks:` YAML — no Python required)
 - **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/BM25/semantic/hybrid), cross-encoder rerank (jina/cohere/local), augmentation, query rewriting/HyDE, metadata filtering, Indonesian stopwords/stemmer, remote sources (HTTP/S3)
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
+- **Confidence-awareness + human handover**: opt-in grounding guardrail (claim-decomposition + NLI judge — abstains when ungrounded), the `transfer_to_human` tool, and structural handover detection — the bot yields to a human operator when it should (see [docs/channel-bridge.md](docs/channel-bridge.md))
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, dynamic (LLM-planned), and **deep_research** (coverage-gated, cited web research) execution
 - **Web research providers**: pluggable search + fetch backends for the `web_search`/`web_fetch` tools via `@register_search_provider`/`@register_fetch_provider` — built-in mock, DuckDuckGo, Brave, Firecrawl (search) + httpx/readability, Firecrawl (fetch)
 - **Context management**: truncation, smart truncation, key facts, sliding window
@@ -214,7 +215,7 @@ pytest --cov=koboi            # with coverage
 
 ## Examples
 
-`examples/` contains 34 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
+`examples/` contains 35 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
 
 | Range | Features |
 |-------|----------|
@@ -230,6 +231,7 @@ pytest --cov=koboi            # with coverage
 | 29-32 | Skills (enhanced), eval-test, tool selection, sandbox + resume |
 | 33 | Declarative external-command hooks (`hooks:` YAML) |
 | 34 | Modern RAG pipeline (BM25 + rewriting + filtering + reranking + caches) |
+| 35 | Confidence-aware CS with human handover (`configs/cs_confidence_handover.yaml`; the confidence ladder) |
 | configs/deep_research_demo.yaml | Deep research (coverage-gated cited web research; `koboi run` + `koboi serve`) |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 | hitl_client / workflow_graph_demo / dynamic_workflow_live / phase3_live_e2e | HITL client + DAG/workflow-graph demos |
@@ -257,6 +259,7 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **ContextManager** (`context/`) -- context window strategies
 - **AugmentationStrategy** (`rag/`) -- RAG pipeline
 - **Guardrails** (`guardrails/`) -- input/output validation
+- **Confidence-awareness** (`guardrails/grounding.py`, `hooks/handover_detection_hook.py`) -- runtime grounding guardrail (abstain when ungrounded) + structural handover detection; `transfer_to_human` yields to a human operator (see [docs/channel-bridge.md](docs/channel-bridge.md))
 - **PolicyEngine** (`harness/`) -- rule-based tool filtering
 - **SkillRegistry** (`skills/`) -- skill discovery
 - **ModeManager** (`modes.py`) -- chat/plan/act/auto/yolo modes
