@@ -630,7 +630,8 @@ async def _execute_workflow_job(
     # workflow has one (offline replay). prepare_captured_bundle points the bundle
     # at the per-job dir so CachedClient hits.
     effective_yaml = bundle_yaml
-    if replay_mode == "cache" or cfg.get("replay", "mode", default="live") == "cache":
+    _effective_mode = replay_mode or cfg.get("replay", "mode", default="live")
+    if _effective_mode in ("cache", "replay"):
         cache_dir = f".koboi/cache/jobs/{job_id}"
         _get_sidecar = getattr(workflow_store, "get_sidecar", None)
         if _get_sidecar is not None:
@@ -641,7 +642,7 @@ async def _execute_workflow_job(
                 ResponseCache(cache_dir).load_entries([(e.key, e.payload) for e in _sc.read()])
         from koboi.workflows import prepare_captured_bundle
 
-        effective_yaml = prepare_captured_bundle(bundle_yaml, cache_dir=cache_dir)
+        effective_yaml = prepare_captured_bundle(bundle_yaml, cache_dir=cache_dir, mode=_effective_mode)
         store.set_cache_dir(job_id, cache_dir)
     agent = KoboiAgent.from_config_string(effective_yaml)
     # Install the same deny-by-default handler as a regular autonomous job so a

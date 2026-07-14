@@ -228,3 +228,14 @@ class TestFacadeCacheWiring:
         assert cfg.replay == {}  # original untouched
         assert cfg2.replay.get("mode") == "cache"
         assert cfg2.replay.get("cache_dir") == "/tmp/x"
+
+    def test_from_dict_replay_mode_wraps_with_raise(self, tmp_path):
+        # replay mode = pure offline: CachedClient uses on_miss=RAISE (no live fallback).
+        from koboi.facade import KoboiAgent
+
+        from koboi.llm.cache import CacheMissPolicy, CachedClient
+
+        agent = KoboiAgent.from_dict(self._cfg(), replay_mode="replay", cache_dir=str(tmp_path / "c"))
+        client = agent._core.client
+        assert isinstance(client, CachedClient)
+        assert client._on_miss == CacheMissPolicy.RAISE

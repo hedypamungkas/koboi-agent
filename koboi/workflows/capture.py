@@ -72,18 +72,19 @@ def capture_from_run(
     return wd, entries
 
 
-def prepare_captured_bundle(bundle_yaml: str, cache_dir: str | None = None) -> str:
-    """Inject ``replay.mode=cache`` + ``replay.cache_dir`` into a bundle YAML.
+def prepare_captured_bundle(bundle_yaml: str, cache_dir: str | None = None, *, mode: str = "cache") -> str:
+    """Inject ``replay.mode`` + ``replay.cache_dir`` into a bundle YAML.
 
     The unifying re-run helper: a captured bundle re-run points its ``cache_dir``
-    at the sidecar (or a per-job dir) so every cached response is a hit. Returns
-    the bundle unchanged when ``cache_dir`` is None.
+    at the sidecar (or a per-job dir) so every cached response is a hit. ``mode``
+    is ``cache`` (live-on-miss) by default; pass ``replay`` for pure-offline
+    raise-on-miss. Returns the bundle unchanged when ``cache_dir`` is None.
     """
     if cache_dir is None:
         return bundle_yaml
     data = yaml.safe_load(bundle_yaml) or {}
     replay = data.setdefault("replay", {})
-    replay["mode"] = "cache"
+    replay["mode"] = mode
     replay["cache_dir"] = str(cache_dir)
     return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 

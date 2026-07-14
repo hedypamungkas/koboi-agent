@@ -692,16 +692,22 @@ def _resolve_cache_dir(config: Config) -> str:
 
 
 def _maybe_wrap_cache(client: Client, config: Config) -> Client:
-    """Wrap a chat client in ``CachedClient`` when the effective replay mode is
-    ``cache``. Idempotent (never double-wraps). Embeddings are NOT wrapped (they
-    flow through a separate builder)."""
-    if _resolve_replay_mode(config) != "cache":
+    """Wrap a chat client in ``CachedClient`` for ``cache`` / ``replay`` modes.
+
+    ``cache`` (STORE) memoizes live responses and replays on an identical request
+    (live on a miss). ``replay`` (RAISE) is pure-offline: a miss raises
+    ``CacheMissError`` (no live call, no API key for cached completions) -- the
+    honest signal that the run diverged from the cached trajectory. Idempotent
+    (never double-wraps). Embeddings are NOT wrapped (separate builder)."""
+    mode = _resolve_replay_mode(config)
+    if mode not in ("cache", "replay"):
         return client
-    from koboi.llm.cache import CachedClient, ResponseCache
+    from koboi.llm.cache import CacheMissPolicy, CachedClient, ResponseCache
 
     if isinstance(client, CachedClient):
         return client
-    return CachedClient(client, ResponseCache(_resolve_cache_dir(config)))
+    on_miss = CacheMissPolicy.RAISE if mode == "replay" else CacheMissPolicy.STORE
+    return CachedClient(client, ResponseCache(_resolve_cache_dir(config)), on_miss=on_miss)
 
 
 def _build_tools(config: Config) -> ToolRegistry:

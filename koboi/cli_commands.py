@@ -345,15 +345,10 @@ def cmd_run(
     if replay_mode not in ("live", "cache", "replay"):
         _print_error(f"unknown replay_mode {replay_mode!r}", print_mode=print_mode)
         return 1
-    # v2: 'cache' is the user-facing determinism mode; 'replay' runs a captured
-    # bundle in cache mode (pure offline raise-on-miss arrives in v3).
-    effective_mode = "cache" if replay_mode in ("cache", "replay") else "live"
-    if replay_mode == "replay":
-        print(
-            "note: replay_mode='replay' runs a captured bundle in cache mode "
-            "(pure offline raise-on-miss arrives in v3).",
-            file=sys.stderr,
-        )
+    # cache = memoize + replay (live on miss); replay = pure-offline (raise on
+    # miss, no API key for cached completions; requires a populated cache or a
+    # captured sidecar).
+    effective_mode = replay_mode if replay_mode in ("cache", "replay") else "live"
     if workflow_name and resume_session:
         _print_error(
             "--workflow and --resume are mutually exclusive (workflows are not session-resumable)",
@@ -369,10 +364,11 @@ def cmd_run(
             store = FileWorkflowStore(scope="project")
             bundle, cache_dir = store.load_with_cache(workflow_name)
             if cache_dir is not None:
-                # Captured bundle: force cache mode pointing at the sidecar so the
-                # re-run is byte-identical + offline (every response is a cache hit).
-                bundle = prepare_captured_bundle(bundle, cache_dir=str(cache_dir))
-                run_mode = "cache"
+                # Captured bundle with a sidecar: run in pure-offline replay mode
+                # (raise-on-miss) pointing at the sidecar -- every response is a hit,
+                # byte-identical, no API key.
+                bundle = prepare_captured_bundle(bundle, cache_dir=str(cache_dir), mode="replay")
+                run_mode = "replay"
             else:
                 run_mode = effective_mode
             agent = KoboiAgent.from_config_string(bundle, verbose=verbose, replay_mode=run_mode)
