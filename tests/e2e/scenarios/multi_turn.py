@@ -53,7 +53,10 @@ SCENARIOS: list[Scenario] = [
             Turn("What room types do you have available?", expect_keywords=["Standard"]),
             Turn("What's the rate for the Executive Suite?", expect_keywords=["320"]),
             Turn("What amenities come with the Executive Suite?", expect_keywords=["lounge"]),
-            Turn("Great. For now, please remember my booking is for 2 adults — confirm the party size.", expect_keywords=["2"]),
+            Turn(
+                "Great. For now, please remember my booking is for 2 adults — confirm the party size.",
+                expect_keywords=["2"],
+            ),
         ],
     ),
     Scenario(

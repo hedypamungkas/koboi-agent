@@ -133,6 +133,12 @@ class RagConfig(BaseModel):
     # heuristic RerankerRetriever; a DICT selects a true cross-encoder backend, e.g.
     # ``{provider: jina|cohere|local, api_key, model, ...}`` (see koboi/rag/rerank.py).
     rerank: bool | dict = False
+    # W3: opt-in live corpus -- the facade swaps the augmentation retriever for a LiveRetriever
+    # over a shared LiveCorpus + injects it as the ``live_corpus`` dep for the ingest_url tool.
+    live: bool = False
+    # W5: optional jsonl of a prior research run's findings (SourceStore.to_corpus_file output)
+    # to seed the live corpus -- the research->corpus convergence. Ignored unless ``live: true``.
+    live_seed_file: str | None = None
     # #5: opt-in on-disk embedding cache (JSON) so restarts don't re-embed the corpus.
     embedding_cache_path: str | None = None
     # #1: opt-in on-disk cache for fetched remote documents (avoids re-fetch per session).
@@ -145,6 +151,48 @@ class RagConfig(BaseModel):
     # #10: opt-in metadata filter for relevance scoping (NOT ACL). Operators:
     # scalar (equality), {"$gte"/"$lte"/"$gt"/"$lt": v}, {"$in": [...]}.
     filter: dict | None = None
+
+
+class WebSearchConfig(BaseModel):
+    """Top-level ``websearch:`` section -- search/fetch provider selection (koboi.websearch).
+
+    Cosmetic validation only at the top level; runtime resolution reads
+    ``websearch.search`` / ``websearch.fetch`` as plain dicts via
+    ``config.get("websearch", ...)`` in ``_build_tools`` (mirrors how ``RagConfig`` is
+    consumed by ``build_rag``). Defaults are offline-safe (no provider configured ->
+    ``mock`` search).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    search: dict = Field(default_factory=dict)
+    fetch: dict = Field(default_factory=dict)
+    # Dotted module paths imported so @register_search_provider/@register_fetch_provider
+    # decorators fire on import (mirrors rag.custom_modules).
+    custom_modules: list[str] = Field(default_factory=list)
+
+
+class ResearchConfig(BaseModel):
+    """Top-level ``research:`` section -- ``execution.mode: deep_research`` knobs (W2).
+
+    Cosmetic validation only; runtime reads these via ``config.get("research", ...)`` in
+    ``_build_orchestration`` (passed to the Orchestrator's ``research=`` kwarg).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    max_depth: int = Field(default=3, ge=1)
+    max_searches: int = Field(default=15, ge=1)
+    max_fetches: int = Field(default=20, ge=1)
+    max_tokens: int = Field(default=0, ge=0)  # 0 = not enforced
+    coverage_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    citations: str = "numbered"  # numbered | inline | none (W2 ships numbered)
+    # Optional override of the research node tool bundle (default: web_search + web_fetch).
+    tools: dict | None = None
+    search_provider: str | None = None
+    fetch_provider: str | None = None
+    # W3: path to write the run's gathered findings as jsonl (cross-session corpus reuse).
+    persist_findings: str | None = None
 
 
 class InputGuardrailConfig(BaseModel):
@@ -519,6 +567,8 @@ class KoboiConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     jobs: JobsConfig = Field(default_factory=JobsConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
+    websearch: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
 
     @model_validator(mode="before")
     @classmethod

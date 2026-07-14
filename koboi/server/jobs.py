@@ -561,10 +561,43 @@ async def _execute_job(
     Returns the final content (from ``CompleteEvent``) for ``result_json``
     persistence so completed jobs survive restart.
     """
-    from koboi.events import CompleteEvent
+    from koboi.events import CompleteEvent, OrchestrationCompleteEvent
 
     record = registry.get(job_id)
     agent = await pool.get_or_create(record.session_id)
+
+    # W5.1 B1-jobs middle path: orchestrated configs (core=None) run with a config-level
+    # sandbox check (not job-level AutonomousApprovalHandler). deep_research nodes carry
+    # their own sandbox/approval from factory build -- the AutonomousApprovalHandler only
+    # auto-approves write_file/delete_file (unused by deep_research nodes), so skipping it
+    # is safe. Single-agent configs (core is not None) fall through to the full job path below.
+    if agent._core is None:
+        backend = (
+            agent._config.get("sandbox", "backend", default="passthrough")
+            if hasattr(agent, "_config") and agent._config
+            else "passthrough"
+        )
+        if backend == "passthrough":
+            raise PermissionError(
+                "Autonomous jobs require sandbox.backend='restricted'; 'passthrough' is refused. "
+                "Configure the 'sandbox:' section before enabling jobs."
+            )
+        store.update_status(job_id, "running")
+        orchestrated_content: str | None = None
+        async with pool.session_lock(record.session_id):
+            if resume:
+                result = await agent.resume()
+                orchestrated_content = result.content
+            else:
+                async for event in agent.run_stream(message):
+                    registry.append_event(job_id, event)
+                    if isinstance(event, CompleteEvent):
+                        orchestrated_content = event.content
+                    elif isinstance(event, OrchestrationCompleteEvent):
+                        # deep_research/dynamic/dag emit OrchestrationCompleteEvent
+                        # (NOT CompleteEvent); the cited report is in final_answer.
+                        orchestrated_content = event.final_answer
+        return orchestrated_content
 
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network
     # isolation, so refuse it -- raise before running; run_job marks the job failed.

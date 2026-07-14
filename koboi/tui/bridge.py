@@ -16,10 +16,14 @@ from koboi.events import (
     AgentDispatchEvent,
     AgentResultEvent,
     CompleteEvent,
+    CoverageEvent,
     ErrorEvent,
+    FetchEvent,
     IterationEvent,
     OrchestrationCompleteEvent,
     RoutingDecisionEvent,
+    SearchEvent,
+    SourceEvent,
     TextDeltaEvent,
     ToolCallEvent,
     ToolResultEvent,
@@ -38,6 +42,45 @@ class StreamDelta(Message):
     def __init__(self, content: str) -> None:
         super().__init__()
         self.content = content
+
+
+class StreamSearch(Message):
+    """W5: a research node ran a web search."""
+
+    def __init__(self, query: str, results_count: int) -> None:
+        super().__init__()
+        self.query = query
+        self.results_count = results_count
+
+
+class StreamFetch(Message):
+    """W5: a research node fetched a URL."""
+
+    def __init__(self, url: str, status: int, chars: int) -> None:
+        super().__init__()
+        self.url = url
+        self.status = status
+        self.chars = chars
+
+
+class StreamSource(Message):
+    """W5: a finding was added to the research SourceStore."""
+
+    def __init__(self, citation_id: int, node_id: str, preview: str) -> None:
+        super().__init__()
+        self.citation_id = citation_id
+        self.node_id = node_id
+        self.preview = preview
+
+
+class StreamCoverage(Message):
+    """W5: a coverage-evaluation round completed."""
+
+    def __init__(self, depth: int, score: float, gaps: list) -> None:
+        super().__init__()
+        self.depth = depth
+        self.score = score
+        self.gaps = gaps
 
 
 class StreamToolCall(Message):
@@ -239,3 +282,17 @@ class StreamBridge:
                         agent_count=len(event.agent_results),
                     )
                 )
+
+            elif isinstance(event, SearchEvent):
+                self._app.post_message(StreamSearch(query=event.query, results_count=event.results_count))
+            elif isinstance(event, FetchEvent):
+                self._app.post_message(StreamFetch(url=event.url, status=event.status, chars=event.chars))
+            elif isinstance(event, SourceEvent):
+                self._app.post_message(
+                    StreamSource(citation_id=event.citation_id, node_id=event.node_id, preview=event.preview)
+                )
+            elif isinstance(event, CoverageEvent):
+                self._app.post_message(StreamCoverage(depth=event.depth, score=event.score, gaps=event.gaps))
+            else:
+                # Unknown event types are ignored -- explicit so future events don't silently regress.
+                pass

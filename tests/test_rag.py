@@ -424,7 +424,8 @@ class TestHybridRetrieverSynonyms:
         from koboi.rag.retriever import HybridRetriever
 
         doc = Document(
-            id="hotel", title="hotel",
+            id="hotel",
+            title="hotel",
             content="### Pet Policy\nSmall pets welcome. Pet fee: $25 per night.",
         )
         chunks = ParagraphChunker().chunk(doc)

@@ -69,8 +69,12 @@ async def test_in_corpus_query_retrieves(t):
     """
     await t.send("How many annual leave days does a permanent employee get?")
     rag = (t.last.metadata or {}).get("rag_results", []) or []
-    t.check(len(rag) > 0, Matches(fn=lambda n: n > 0, description="in-corpus retrieval non-empty"),
-            name="in_corpus_retrieval", severity=Severity.GATE)
+    t.check(
+        len(rag) > 0,
+        Matches(fn=lambda n: n > 0, description="in-corpus retrieval non-empty"),
+        name="in_corpus_retrieval",
+        severity=Severity.GATE,
+    )
 
 
 async def test_relevance_threshold_drops_low_score(t):

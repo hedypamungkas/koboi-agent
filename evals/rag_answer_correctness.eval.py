@@ -17,8 +17,7 @@ CONFIG = {
         "name": "rag-answer-correctness-eval",
         "description": "Live answer-correctness probe over the Acme corpus",
         "system_prompt": (
-            "Use ONLY the provided context to answer. If the context doesn't contain "
-            "the answer, say you don't know."
+            "Use ONLY the provided context to answer. If the context doesn't contain the answer, say you don't know."
         ),
         "max_iterations": 4,
     },

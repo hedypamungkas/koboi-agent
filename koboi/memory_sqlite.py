@@ -76,6 +76,37 @@ def ensure_tasks_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)")
 
 
+def ensure_research_context_table(conn: sqlite3.Connection) -> None:
+    """Create the ``research_context`` table (W2) for durable deep-research state.
+
+    One row per ``graph_run_id`` holding the journaled ``ResearchContext`` JSON, so a
+    ``--resume`` rehydrates sub-questions / SourceStore / coverage_map / budget and
+    continues at the recorded depth (no re-bill across completed depth rounds). Mirrors
+    ``ensure_tasks_table`` (CREATE IF NOT EXISTS + index).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS research_context (
+            graph_run_id TEXT PRIMARY KEY,
+            context_json TEXT NOT NULL,
+            updated_at REAL,
+            session_id TEXT
+        )
+        """
+    )
+    # Additive column for pre-existing DBs created before session scoping (so
+    # GET /v1/sessions/{id} can map a session to its deep-research context).
+    _migrate_research_session_id(conn)
+
+
+def _migrate_research_session_id(conn: sqlite3.Connection) -> None:
+    """Add the ``session_id`` column to an older ``research_context`` table if missing."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(research_context)").fetchall()}
+    if "session_id" not in cols:
+        conn.execute("ALTER TABLE research_context ADD COLUMN session_id TEXT")
+        conn.commit()
+
+
 class SQLiteMemory(ConversationMemory):
     """ConversationMemory backed by SQLite. Persists sessions across restarts.
 
@@ -192,6 +223,7 @@ class SQLiteMemory(ConversationMemory):
         """
         ensure_steps_table(conn)
         ensure_tasks_table(conn)
+        ensure_research_context_table(conn)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS session_meta ("
             "session_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, "

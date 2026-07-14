@@ -59,13 +59,21 @@ async def test_negation(t):
     if not t.require_live():
         return
     await t.send("Which products are NOT cloud-based?")
-    reply = (t.reply or "")
+    reply = t.reply or ""
     on_premise = "AtlasServer" in reply or "AtlasVault" in reply or "Rack" in reply
-    t.check(on_premise, Matches(fn=lambda _: on_premise, description="lists an on-premise product"),
-            name="negation_answer", severity=Severity.SOFT)
+    t.check(
+        on_premise,
+        Matches(fn=lambda _: on_premise, description="lists an on-premise product"),
+        name="negation_answer",
+        severity=Severity.SOFT,
+    )
     # Should NOT list cloud products as the answer.
-    t.check(("AtlasCloud" in reply), Matches(fn=lambda x: not x, description="does not list cloud as non-cloud"),
-            name="negation_no_false_positive", severity=Severity.SOFT)
+    t.check(
+        ("AtlasCloud" in reply),
+        Matches(fn=lambda x: not x, description="does not list cloud as non-cloud"),
+        name="negation_no_false_positive",
+        severity=Severity.SOFT,
+    )
     t.completed()
 
 
@@ -75,12 +83,16 @@ async def test_conflicting_evidence(t):
     if not t.require_live():
         return
     await t.send("What does WidgetX cost per year?")
-    reply = (t.reply or "")
+    reply = t.reply or ""
     authoritative = "$15,000" in reply or "15,000" in reply
     flags_conflict = any(w in reply.lower() for w in ("conflict", "discrepanc", "unverified", "two", "differ"))
     ok = authoritative or flags_conflict
-    t.check(ok, Matches(fn=lambda _: ok, description="picks authoritative $15,000 or flags conflict"),
-            name="conflict_resolution", severity=Severity.SOFT)
+    t.check(
+        ok,
+        Matches(fn=lambda _: ok, description="picks authoritative $15,000 or flags conflict"),
+        name="conflict_resolution",
+        severity=Severity.SOFT,
+    )
     t.completed()
 
 

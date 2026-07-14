@@ -19,7 +19,6 @@ class TestShippedEvalsGolden:
     async def test_evals_directory_outcomes(self):
         results = await run_tests(EVALS_DIR, threshold=0.6, mock=True)
 
-        # All mock-driven (R4 made RAG retrieval mock-safe via t.retrievedChunk).
         # Core samples (11): weather (2) + no_tools (1) + multi_turn (1)
         # + guardrail_block (2) + mode_blocked (1) + rag_retrieval (2)
         # + guardrail_output_warn (1) + skill_activation (1).
@@ -33,15 +32,16 @@ class TestShippedEvalsGolden:
         # + rag_abstention_live (1) + rag_noise_faithfulness (1) + rag_hyde_recall (1)
         # + ragas_ir_suite (1) + ragas_ir_adversarial (4) + ragas_ir_rerank (1)
         # + ragas_ir_id_native (1) -- NATIVE Indonesian (TyDi QA-id), caveat-free ID claim.
-        # (ragas_golden_suite + the Acme ragas_faithfulness evals were REMOVED -- superseded by
-        # the real-corpus N=128/N=48 measurements; their §7a numbers were self-inflated.)
-        # -- self-skip under mock via t.require_live() (live_skip), so they pass here
-        # and run for real on a manual `--tags live` run.
-        assert len(results) == 52
+        # Deep research mock eval (2): deep_research_mock + deep_research_citations/faithfulness
+        # self-skip under mock (DispatchingClient W6.1 + fail-fast OPENAI_API_KEY guard).
+        # Production smoke evals (4): deep_research_prod_{multifaceted,recency,comparative,adversarial}
+        # -- live-only, self-skip under mock (live_ready guard). Real-provider run is pre-release.
+        # (ragas_golden_suite + the Acme ragas_faithfulness evals were REMOVED.)
+        assert len(results) == 59
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 52
+        assert len(passed) == 59
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing

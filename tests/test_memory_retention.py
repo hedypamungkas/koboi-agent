@@ -14,9 +14,7 @@ class TestRetentionCap:
 
         # in-memory and DB both capped at 5, in lockstep
         assert len(mem._messages) == 5
-        rows = mem._ensure_conn().execute(
-            "SELECT COUNT(*) FROM messages WHERE session_id='S'"
-        ).fetchone()[0]
+        rows = mem._ensure_conn().execute("SELECT COUNT(*) FROM messages WHERE session_id='S'").fetchone()[0]
         assert rows == 5
         contents = [m["content"] for m in mem.get_messages()]
         assert "msg 0" not in contents  # oldest dropped

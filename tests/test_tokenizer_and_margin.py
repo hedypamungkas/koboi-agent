@@ -79,9 +79,11 @@ class TestSafetyMargin:
         assert len(out1) < len(msgs)  # trimmed
 
     async def test_zero_margin_preserves_old_behavior(self):
-        msgs = [{"role": "system", "content": "s"},
-                {"role": "user", "content": "u"},
-                {"role": "assistant", "content": "a"}]
+        msgs = [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "u"},
+            {"role": "assistant", "content": "a"},
+        ]
         mgr = TruncationManager(keep_last=2)
         mgr.last_actual_tokens = 100000  # force over budget
         out = await mgr.manage(msgs, max_tokens=10)

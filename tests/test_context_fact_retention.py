@@ -25,8 +25,7 @@ class TestSmartTruncationFactRetention:
         assert SECRET in blob  # issue #6: was dropped before
 
     async def test_first_user_still_anchored(self):
-        msgs = [{"role": "system", "content": "sys"},
-                {"role": "user", "content": "FIRST"}]
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "FIRST"}]
         for i in range(10):
             msgs.append({"role": "user", "content": f"u{i}"})
             msgs.append({"role": "assistant", "content": f"a{i}"})
@@ -36,8 +35,7 @@ class TestSmartTruncationFactRetention:
 
     async def test_truncation_caps_earlier_user_lines(self):
         long_msg = "X" * 1000
-        msgs = [{"role": "system", "content": "sys"},
-                {"role": "user", "content": "first"}]
+        msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "first"}]
         msgs.append({"role": "user", "content": long_msg})
         for i in range(10):
             msgs.append({"role": "user", "content": f"u{i}"})
@@ -71,8 +69,7 @@ class TestKeyFactsUserAssistant:
 
     async def test_tool_content_untruncated_by_default(self):
         long_tool = "Z" * 500
-        msgs = [{"role": "system", "content": "sys"},
-                {"role": "tool", "tool_call_id": "t", "content": long_tool}]
+        msgs = [{"role": "system", "content": "sys"}, {"role": "tool", "tool_call_id": "t", "content": long_tool}]
         for i in range(4):
             msgs.append({"role": "user", "content": f"q{i}"})
             msgs.append({"role": "assistant", "content": f"a{i}"})
@@ -83,8 +80,7 @@ class TestKeyFactsUserAssistant:
 
     async def test_truncation_when_configured(self):
         long_tool = "Z" * 500
-        msgs = [{"role": "system", "content": "sys"},
-                {"role": "tool", "tool_call_id": "t", "content": long_tool}]
+        msgs = [{"role": "system", "content": "sys"}, {"role": "tool", "tool_call_id": "t", "content": long_tool}]
         for i in range(4):
             msgs.append({"role": "user", "content": f"q{i}"})
             msgs.append({"role": "assistant", "content": f"a{i}"})
