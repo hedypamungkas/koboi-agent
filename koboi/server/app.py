@@ -477,31 +477,68 @@ def _check_job_access(
     return job, None
 
 
-
 def _media_request_from_body(body, idem_key):
     from koboi.media.types import MediaRequest
-    return MediaRequest(modality=body.modality, prompt=body.prompt, model=body.model, n=body.n, size=body.size, quality=body.quality, response_format=body.response_format, aspect_ratio=body.aspect_ratio, duration_seconds=body.duration_seconds, audio=body.audio, voice=body.voice, language_code=body.language_code, lyrics_prompt=body.lyrics_prompt, webhook_url=body.webhook_url, idempotency_key=idem_key)
+
+    return MediaRequest(
+        modality=body.modality,
+        prompt=body.prompt,
+        model=body.model,
+        n=body.n,
+        size=body.size,
+        quality=body.quality,
+        response_format=body.response_format,
+        aspect_ratio=body.aspect_ratio,
+        duration_seconds=body.duration_seconds,
+        audio=body.audio,
+        voice=body.voice,
+        language_code=body.language_code,
+        lyrics_prompt=body.lyrics_prompt,
+        webhook_url=body.webhook_url,
+        idempotency_key=idem_key,
+    )
 
 
 def _media_result_to_response(result):
-    return MediaGenerateResponse(request_id=result.request_id, modality=result.modality, status=result.status, local_path=result.local_path, url=result.url, url_expires_at=result.url_expires_at, content_type=result.content_type, width=result.width, height=result.height, duration_seconds=result.duration_seconds, cost_usd=float(result.cost_usd) if result.cost_usd is not None else None, billing_unit=result.billing_unit.value if result.billing_unit else None, billing_quantity=result.billing_quantity, safety_blocked=result.safety_blocked, rejection_reason=result.rejection_reason, model=result.model)
+    return MediaGenerateResponse(
+        request_id=result.request_id,
+        modality=result.modality,
+        status=result.status,
+        local_path=result.local_path,
+        url=result.url,
+        url_expires_at=result.url_expires_at,
+        content_type=result.content_type,
+        width=result.width,
+        height=result.height,
+        duration_seconds=result.duration_seconds,
+        cost_usd=float(result.cost_usd) if result.cost_usd is not None else None,
+        billing_unit=result.billing_unit.value if result.billing_unit else None,
+        billing_quantity=result.billing_quantity,
+        safety_blocked=result.safety_blocked,
+        rejection_reason=result.rejection_reason,
+        model=result.model,
+    )
 
 
 class _MediaJobTracker:
     def __init__(self):
         self._jobs = {}
+
     def create(self, job_id, owner, session_id):
-        self._jobs[job_id] = {'status': 'pending', 'result': None, 'owner': owner, 'session_id': session_id}
+        self._jobs[job_id] = {"status": "pending", "result": None, "owner": owner, "session_id": session_id}
+
     def set_result(self, job_id, status, result):
         rec = self._jobs.get(job_id)
         if rec:
-            rec['status'] = status
-            rec['result'] = result
+            rec["status"] = status
+            rec["result"] = result
+
     def get(self, job_id, owner):
         rec = self._jobs.get(job_id)
-        if rec is None or rec.get('owner') != owner:
+        if rec is None or rec.get("owner") != owner:
             return None
         return rec
+
 
 def _register_routes(
     app: FastAPI,
@@ -1485,7 +1522,8 @@ def _register_routes(
         owner = getattr(request.state, "api_key_id", "dev")
         if header_sid is not None:
             err = _check_owner(ownership, session_id, request)
-            if err: return err
+            if err:
+                return err
         try:
             agent = await pool.get_or_create(session_id)
         except PoolFull as exc:
@@ -1513,7 +1551,8 @@ def _register_routes(
         owner = getattr(request.state, "api_key_id", "dev")
         if header_sid is not None:
             err = _check_owner(ownership, session_id, request)
-            if err: return err
+            if err:
+                return err
         try:
             agent = await pool.get_or_create(session_id)
         except PoolFull as exc:
@@ -1528,12 +1567,14 @@ def _register_routes(
         media_jobs = request.app.state.media_jobs
         job_id = new_job_id()
         media_jobs.create(job_id, owner, session_id)
+
         async def _run_media_job():
             try:
                 result = await agent.media_generate(req)
                 media_jobs.set_result(job_id, "succeeded", result)
             except Exception:
                 media_jobs.set_result(job_id, "failed", None)
+
         task = asyncio.create_task(_run_media_job())
         stream_tasks.add(task)
         task.add_done_callback(stream_tasks.discard)

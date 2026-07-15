@@ -255,6 +255,7 @@ class McpServerListResponse(BaseModel):
 
 class MediaGenerateRequest(BaseModel):
     """POST /v1/media/generate body."""
+
     model_config = {"extra": "ignore"}
     modality: str = Field(default="image")
     prompt: str = Field(max_length=65536)
@@ -276,6 +277,7 @@ class MediaGenerateRequest(BaseModel):
 
 class MediaGenerateResponse(BaseModel):
     """POST /v1/media/generate response."""
+
     model_config = {"extra": "ignore"}
     request_id: str
     modality: str
@@ -297,6 +299,7 @@ class MediaGenerateResponse(BaseModel):
 
 class MediaJobResponse(BaseModel):
     """GET /v1/media/jobs/{id} response."""
+
     model_config = {"extra": "ignore"}
     job_id: str
     status: str

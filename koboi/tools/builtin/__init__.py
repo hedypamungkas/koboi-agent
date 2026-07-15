@@ -11,7 +11,6 @@ def register_all(registry: ToolRegistry) -> None:
         handover,
         ingest,
         media,
-        media,
         memory,
         search,
         shell,

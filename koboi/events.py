@@ -159,6 +159,7 @@ class SourceEvent:
 @dataclass
 class MediaGeneratedEvent:
     """W3: media generation event."""
+
     modality: str
     prompt: str
 
