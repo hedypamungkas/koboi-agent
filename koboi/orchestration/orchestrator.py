@@ -24,12 +24,22 @@ from koboi.events import (
     AgentResultEvent,
     CoverageEvent,
     FetchEvent,
+    MediaGeneratedEvent,
     OrchestrationCompleteEvent,
     RoutingDecisionEvent,
     SearchEvent,
     SourceEvent,
     TextDeltaEvent,
 )
+
+
+# W3: map media generation tool names to their modality for MediaGeneratedEvent emission.
+_MEDIA_MODALITY: dict[str, str] = {
+    "generate_image": "image",
+    "generate_video": "video",
+    "generate_music": "music",
+    "generate_speech": "speech",
+}
 
 
 @dataclass
@@ -166,6 +176,8 @@ class Orchestrator:
         # W4: web config so deep_research nodes get the CONFIGURED search/fetch providers
         # (Brave/Firecrawl), not the mock/inline default.
         websearch_conf: dict | None = None,
+        media_conf: dict | None = None,
+        media_backend: object | None = None,
         # W7: session_id tags persisted research_context rows so GET /v1/sessions/{id}
         # can map a session to its deep-research run. None for non-server callers.
         session_id: str | None = None,
@@ -197,6 +209,8 @@ class Orchestrator:
         self._sandbox = sandbox
         self._research = research or {}
         self._web_conf = websearch_conf or {}
+        self._media_conf = media_conf or {}
+        self._media_backend = media_backend
         self._resume_ctx_json: str | None = None
         self._session_id = session_id
         # F9: reentrancy guard. The Orchestrator holds per-run mutable state (_agents_map,
@@ -536,6 +550,10 @@ class Orchestrator:
                         yield SearchEvent(query=str(_args.get("query", "")), results_count=0)
                     elif tc.name == "web_fetch":
                         yield FetchEvent(url=str(_args.get("url", "")), status=200, chars=0)
+                    elif tc.name in _MEDIA_MODALITY:
+                        yield MediaGeneratedEvent(
+                            modality=_MEDIA_MODALITY[tc.name], prompt=str(_args.get("prompt", ""))
+                        )
                 # #2: record durable per-node completion for graph-cursor resume.
                 if self._dag_scheduler:
                     self._dag_scheduler.record_node_completion(result.agent_name, result.answer)

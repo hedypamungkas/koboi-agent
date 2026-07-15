@@ -58,6 +58,9 @@ from koboi.server.schema import (
     TransferResponse,
     JobStatusResponse,
     JobSubmitRequest,
+    MediaGenerateRequest,
+    MediaGenerateResponse,
+    MediaJobResponse,
     McpServerCreateRequest,
     McpServerListResponse,
     McpServerResponse,
@@ -364,7 +367,8 @@ def create_app(
     app.state.job_timeout = job_timeout
     app.state.health = health
     app.state.job_streams_per_owner = job_streams_per_owner  # M3
-    app.state.job_streams = {}  # M3: owner -> active job-stream count
+    app.state.job_streams = {}
+    app.state.media_jobs = _MediaJobTracker()  # M3: owner -> active job-stream count
     app.state.session_events = session_events  # B2: per-session replay buffer
     app.state.session_streams_per_owner = session_streams_per_owner  # B2 slowloris guard
     app.state.session_streams = {}  # B2: owner -> active session-stream count
@@ -471,6 +475,69 @@ def _check_job_access(
     if job["owner"] != owner:
         return None, _error_response(403, "forbidden", "not the job owner", request)
     return job, None
+
+
+def _media_request_from_body(body, idem_key):
+    from koboi.media.types import MediaRequest
+
+    return MediaRequest(
+        modality=body.modality,
+        prompt=body.prompt,
+        model=body.model,
+        n=body.n,
+        size=body.size,
+        quality=body.quality,
+        response_format=body.response_format,
+        aspect_ratio=body.aspect_ratio,
+        duration_seconds=body.duration_seconds,
+        audio=body.audio,
+        voice=body.voice,
+        language_code=body.language_code,
+        lyrics_prompt=body.lyrics_prompt,
+        webhook_url=body.webhook_url,
+        idempotency_key=idem_key,
+    )
+
+
+def _media_result_to_response(result):
+    return MediaGenerateResponse(
+        request_id=result.request_id,
+        modality=result.modality,
+        status=result.status,
+        local_path=result.local_path,
+        url=result.url,
+        url_expires_at=result.url_expires_at,
+        content_type=result.content_type,
+        width=result.width,
+        height=result.height,
+        duration_seconds=result.duration_seconds,
+        cost_usd=float(result.cost_usd) if result.cost_usd is not None else None,
+        billing_unit=result.billing_unit.value if result.billing_unit else None,
+        billing_quantity=result.billing_quantity,
+        safety_blocked=result.safety_blocked,
+        rejection_reason=result.rejection_reason,
+        model=result.model,
+    )
+
+
+class _MediaJobTracker:
+    def __init__(self):
+        self._jobs = {}
+
+    def create(self, job_id, owner, session_id):
+        self._jobs[job_id] = {"status": "pending", "result": None, "owner": owner, "session_id": session_id}
+
+    def set_result(self, job_id, status, result):
+        rec = self._jobs.get(job_id)
+        if rec:
+            rec["status"] = status
+            rec["result"] = result
+
+    def get(self, job_id, owner):
+        rec = self._jobs.get(job_id)
+        if rec is None or rec.get("owner") != owner:
+            return None
+        return rec
 
 
 def _register_routes(
@@ -1445,6 +1512,82 @@ def _register_routes(
             job_store.update_status(job_id, "cancelled")
             job_registry.set_terminal(job_id, "cancelled")
         return {"job_id": job_id, "status": "cancelled"}  # type: ignore[return-value]
+
+    @app.post("/v1/media/generate", response_model=MediaGenerateResponse)
+    async def media_generate_route(body: MediaGenerateRequest, request: Request) -> Response:
+        header_sid = request.headers.get("X-Session-Id")
+        if header_sid is not None and not is_safe_session_id(header_sid):
+            return _error_response(400, "bad_request", "invalid X-Session-Id", request)
+        session_id = body.session_id or header_sid or pool.new_session_id()
+        owner = getattr(request.state, "api_key_id", "dev")
+        if header_sid is not None:
+            err = _check_owner(ownership, session_id, request)
+            if err:
+                return err
+        try:
+            agent = await pool.get_or_create(session_id)
+        except PoolFull as exc:
+            return _error_response(429, "pool_full", str(exc), request)
+        idem_key = body.idempotency_key or request.headers.get("Idempotency-Key")
+        if idem_key:
+            if not chat_idem.check_and_record(f"{owner}:{session_id}:{idem_key}"):
+                return _error_response(409, "duplicate_request", "Idempotency-Key already used", request)
+        if ownership.get_owner(session_id) is None:
+            ownership.set_owner(session_id, owner)
+        req = _media_request_from_body(body, idem_key)
+        try:
+            async with pool.session_lock(session_id):
+                result = await agent.media_generate(req)
+        except Exception as exc:
+            return _error_response(500, "media_failed", str(exc), request)
+        return _media_result_to_response(result)  # type: ignore[return-value]
+
+    @app.post("/v1/media/jobs", status_code=202)
+    async def submit_media_job_route(body: MediaGenerateRequest, request: Request) -> Response:
+        header_sid = request.headers.get("X-Session-Id")
+        if header_sid is not None and not is_safe_session_id(header_sid):
+            return _error_response(400, "bad_request", "invalid X-Session-Id", request)
+        session_id = body.session_id or header_sid or pool.new_session_id()
+        owner = getattr(request.state, "api_key_id", "dev")
+        if header_sid is not None:
+            err = _check_owner(ownership, session_id, request)
+            if err:
+                return err
+        try:
+            agent = await pool.get_or_create(session_id)
+        except PoolFull as exc:
+            return _error_response(429, "pool_full", str(exc), request)
+        idem_key = body.idempotency_key or request.headers.get("Idempotency-Key")
+        if idem_key:
+            if not chat_idem.check_and_record(f"{owner}:{session_id}:{idem_key}"):
+                return _error_response(409, "duplicate_request", "Idempotency-Key already used", request)
+        if ownership.get_owner(session_id) is None:
+            ownership.set_owner(session_id, owner)
+        req = _media_request_from_body(body, idem_key)
+        media_jobs = request.app.state.media_jobs
+        job_id = new_job_id()
+        media_jobs.create(job_id, owner, session_id)
+
+        async def _run_media_job():
+            try:
+                result = await agent.media_generate(req)
+                media_jobs.set_result(job_id, "succeeded", result)
+            except Exception:
+                media_jobs.set_result(job_id, "failed", None)
+
+        task = asyncio.create_task(_run_media_job())
+        stream_tasks.add(task)
+        task.add_done_callback(stream_tasks.discard)
+        return {"job_id": job_id, "status": "pending"}  # type: ignore[return-value]
+
+    @app.get("/v1/media/jobs/{job_id}", response_model=MediaJobResponse)
+    async def get_media_job_route(job_id: str, request: Request) -> Response:
+        owner = getattr(request.state, "api_key_id", "dev")
+        rec = request.app.state.media_jobs.get(job_id, owner)
+        if rec is None:
+            return _error_response(404, "not_found", "unknown or foreign media job", request)
+        result_resp = _media_result_to_response(rec["result"]) if rec["result"] is not None else None
+        return MediaJobResponse(job_id=job_id, status=rec["status"], result=result_resp)  # type: ignore[return-value]
 
 
 async def _cancel_tasks(tasks: set[asyncio.Task]) -> None:

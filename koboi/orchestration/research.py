@@ -44,6 +44,151 @@ RESEARCH_NODE_PREAMBLE = (
     "5. Never fabricate sources or facts -- if you couldn't find something, say so explicitly."
 )
 
+
+# W3: map research.capabilities tokens to the generate_* tools research nodes may invoke.
+_CAPABILITY_TOOLS: dict[str, str] = {
+    "image": "generate_image",
+    "video": "generate_video",
+    "music": "generate_music",
+    "speech": "generate_speech",
+}
+
+_RESEARCH_MEDIA_PREAMBLE_CLAUSE = (
+    "\n6. When an illustration, diagram, short video, or audio clip would clarify a finding, "
+    "use the matching generate_* tool (image/video/music/speech) and cite the saved artifact "
+    "path in your findings. Keep media use sparse -- only when it genuinely aids understanding."
+)
+
+
+def media_tools_for_capabilities(capabilities: list[str]) -> list[str]:
+    """Return the ``generate_*`` tool names for the given research capability tokens.
+
+    Unknown tokens (e.g. ``"web"``) are ignored. ``web`` is the default capability and maps to
+    the web tools already in ``RESEARCH_TOOLS_CONFIG``.
+    """
+    return [tool for cap, tool in _CAPABILITY_TOOLS.items() if cap in capabilities]
+
+
+def preamble_with_media(capabilities: list[str]) -> str:
+    """Return the research node preamble, with a media clause appended when a media capability is set."""
+    if any(cap in _CAPABILITY_TOOLS for cap in capabilities):
+        return RESEARCH_NODE_PREAMBLE + _RESEARCH_MEDIA_PREAMBLE_CLAUSE
+    return RESEARCH_NODE_PREAMBLE
+
+
+# W4: automatic post-synthesis media briefing -- one structured LLM call picks per-kind
+# generation prompts from the synthesized report, then the orchestrator generates them.
+RESEARCH_MEDIA_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "image_prompts": {"type": "array", "items": {"type": "string"}},
+        "speech_texts": {"type": "array", "items": {"type": "string"}},
+        "video_prompts": {"type": "array", "items": {"type": "string"}},
+        "music_prompts": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [],
+}
+
+_RESEARCH_MEDIA_PROMPT = """You are selecting media to accompany a research report.
+
+For each requested kind, write concise generation prompts derived from the report's key findings:
+- image_prompts: visual descriptions (a diagram, chart, or illustration of a key concept).
+- speech_texts: one-sentence spoken summaries to read aloud (a voiceover).
+- video_prompts: short scene descriptions for a brief clip.
+- music_prompts: mood/genre descriptions for background audio.
+
+Return ONLY JSON. Omit kinds that were not requested. Requested kinds: {kinds}.
+
+REPORT:
+{report}
+"""
+
+
+def build_media_selection_prompt(report: str, kinds: list[str]) -> str:
+    """Build the LLM prompt asking for per-kind media generation prompts from the report."""
+    return _RESEARCH_MEDIA_PROMPT.format(report=report[:4000], kinds=", ".join(kinds))
+
+
+# kind -> (MediaBackend method name, RESEARCH_MEDIA_SCHEMA field, human label)
+_MEDIA_KIND_DISPATCH: dict[str, tuple[str, str, str]] = {
+    "image": ("generate_image", "image_prompts", "Image"),
+    "speech": ("generate_speech", "speech_texts", "Audio summary"),
+    "video": ("generate_video", "video_prompts", "Video"),
+    "music": ("generate_music", "music_prompts", "Music"),
+}
+
+
+async def generate_research_media(
+    client: Client,
+    report: str,
+    kinds: list[str],
+    max_items: int,
+    media_backend: object,
+    logger: logging.Logger | None = None,
+) -> tuple[str, list[dict]]:
+    """Pick per-kind generation prompts from the report (one LLM call), then generate.
+
+    Returns ``(media_section_text, artifacts)``. Fail-soft: any selection/generation failure yields
+    fewer or no artifacts; never raises. ``media_section_text`` is empty when nothing was generated
+    and is intended to be appended to the synthesized report.
+    """
+    if not media_backend or not kinds:
+        return "", []
+    try:
+        from koboi.media.types import MediaRequest
+
+        wanted = [k for k in kinds if k in _MEDIA_KIND_DISPATCH]
+        if not wanted:
+            return "", []
+        resp = await client.complete(
+            messages=[{"role": "user", "content": build_media_selection_prompt(report, wanted)}],
+            response_format=RESEARCH_MEDIA_SCHEMA,
+        )
+        data = extract_json(resp.content or "") or {}
+    except Exception as e:  # noqa: BLE001 - boundary: selection failure -> no media
+        if logger:
+            logger.warning("research media selection failed: %s", e)
+        return "", []
+
+    section_lines: list[str] = []
+    artifacts: list[dict] = []
+    for kind in kinds:
+        dispatch = _MEDIA_KIND_DISPATCH.get(kind)
+        if dispatch is None:
+            continue
+        method_name, field, label = dispatch
+        generate = getattr(media_backend, method_name, None)
+        if generate is None:
+            continue
+        for prompt in (data.get(field) or [])[:max_items]:
+            if not isinstance(prompt, str) or not prompt.strip():
+                continue
+            try:
+                result = await generate(MediaRequest(modality=kind, prompt=prompt))
+            except Exception as e:  # noqa: BLE001 - boundary: one artifact failure skips it
+                if logger:
+                    logger.warning("research media %s generation failed: %s", kind, e)
+                continue
+            if getattr(result, "status", None) != "ok":
+                continue
+            location = getattr(result, "local_path", None) or getattr(result, "url", None) or "(no artifact)"
+            section_lines.append(f"- {label}: {prompt[:80]} -> {location}")
+            cost = getattr(result, "cost_usd", None)
+            artifacts.append(
+                {
+                    "kind": kind,
+                    "prompt": prompt,
+                    "local_path": getattr(result, "local_path", None),
+                    "cost_usd": str(cost) if cost is not None else None,
+                    "billing_unit": getattr(getattr(result, "billing_unit", None), "value", None),
+                    "model": getattr(result, "model", None),
+                }
+            )
+    if not artifacts:
+        return "", []
+    return "\n\n## Generated media\n" + "\n".join(section_lines), artifacts
+
+
 # response_format schema for the coverage judge.
 COVERAGE_SCHEMA: dict = {
     "type": "object",
