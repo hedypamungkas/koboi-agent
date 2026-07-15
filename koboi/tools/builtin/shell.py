@@ -93,6 +93,10 @@ def _check_command_blocked(command: str) -> str | None:
     # (Matches .claude/rules/builtin-tools.md; was previously MODERATE -- a C2 fix.)
     risk_level=RiskLevel.DESTRUCTIVE,
     deps=["sandbox"],
+    # Issue #48: shell mutates the host fs/network; on crash-resume the loop's
+    # _repair_interrupted_turn must NOT silently replay it (duplicate commits,
+    # appends, deletes). Default ToolDefinition.idempotent=True is wrong here.
+    idempotent=False,
     parameters={
         "type": "object",
         "properties": {
