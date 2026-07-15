@@ -96,6 +96,7 @@ class AgentCore:
         journal: StepJournal | None = None,
         trust_db: TrustStore | None = None,
         output_schema: dict | None = None,
+        force_response_format_with_tools: bool = False,
         proactive_memory: ProactiveMemory | None = None,
         # Backward-compatible singular kwargs
         input_guardrail: BaseGuardrail | None = None,
@@ -128,6 +129,10 @@ class AgentCore:
         self.trust_db = trust_db
         # JSON Schema dict (provider-agnostic) for structured final output, or None.
         self.response_schema = output_schema
+        # Gap B: opt in to response_format even on tool-carrying iterations on
+        # providers that support it (OpenAI/Cloudflare); Anthropic keeps the
+        # suppression (RF is emulated via a forced tool_use). See _resolve_response_format.
+        self.force_response_format_with_tools = force_response_format_with_tools
         # Proactive long-term memory (opt-in; None unless memory.proactive.enabled).
         self.proactive_memory = proactive_memory
         # P2-A: turn counter. On a fresh agent this is 0; on resume it inherits
@@ -158,6 +163,24 @@ class AgentCore:
     def _log(self, msg: str) -> None:
         if self.verbose:
             _log.debug(msg)
+
+    def _resolve_response_format(self, tool_defs) -> dict | None:
+        """Decide the response_format to pass to the LLM this iteration.
+
+        Structured output shapes the FINAL answer; it is normally suppressed on
+        tool-carrying iterations (undefined mid-tool-chain; on Anthropic it is
+        emulated via a forced tool_use that is incompatible with real tool calls).
+        ``force_response_format_with_tools`` opts back in on providers that
+        support RF alongside tools (OpenAI/Cloudflare); Anthropic keeps the
+        suppression regardless of the flag.
+        """
+        if self.response_schema is None:
+            return None
+        if not tool_defs:
+            return self.response_schema
+        if self.force_response_format_with_tools and getattr(self.client, "provider", "openai") != "anthropic":
+            return self.response_schema
+        return None
 
     async def _emit(self, event: HookEvent, **kwargs) -> HookContext:
         info = AgentInfo(
@@ -600,11 +623,12 @@ class AgentCore:
             self._log(f"iteration {i + 1}: {len(messages)} messages, ~{tokens} tokens")
 
             await self._emit(HookEvent.PRE_LLM_CALL, iteration=i, messages=messages)
-            # Structured output (response_format) is applied only on tool-less
-            # iterations: it shapes the FINAL answer and is undefined mid-tool-chain
-            # (and on Anthropic it is emulated via a forced tool_use, incompatible
-            # with simultaneous real tool calls). Provider-enforced on OpenAI.
-            _rf = self.response_schema if not tool_defs else None
+            # Structured output (response_format): normally applied only on tool-less
+            # iterations (it shapes the FINAL answer and is undefined mid-tool-chain;
+            # on Anthropic it is emulated via a forced tool_use incompatible with real
+            # tool calls). force_response_format_with_tools opts back in on providers
+            # that support RF alongside tools (OpenAI/Cloudflare). See _resolve_response_format.
+            _rf = self._resolve_response_format(tool_defs)
             response = await self.client.complete(messages=messages, tools=tool_defs, response_format=_rf)
             await self._emit(HookEvent.POST_LLM_CALL, iteration=i, llm_response=response)
 
@@ -705,7 +729,7 @@ class AgentCore:
 
             delta_buffer: list[TextDeltaEvent] = []
             final_response = None
-            _rf = self.response_schema if not tool_defs else None
+            _rf = self._resolve_response_format(tool_defs)
             async for event in self.client.complete_stream(messages=messages, tools=tool_defs, response_format=_rf):
                 if isinstance(event, TextDeltaEvent):
                     if should_buffer:

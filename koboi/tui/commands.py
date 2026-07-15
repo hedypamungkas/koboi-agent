@@ -214,6 +214,40 @@ async def _cmd_export(ctx: CommandContext) -> CommandResult:
     return CommandResult()
 
 
+async def _cmd_capture(ctx: CommandContext) -> CommandResult:
+    """Capture the current agent's config as a reusable workflow bundle.
+
+    ``/capture [name] [--with-cache] [--redact-cache]`` -- saves a redacted
+    bundle (optionally freezing the run's response cache as a sidecar) into the
+    project workflow store. The bundle re-runs via ``koboi run --workflow <name>``.
+    """
+    parts = ctx.args.strip().split()
+    flags = {p for p in parts if p.startswith("--")}
+    name = next((p for p in parts if not p.startswith("--")), "") or ctx.agent.config.agent_name
+    with_cache = "--with-cache" in flags
+    redact_cache = "--redact-cache" in flags
+    from koboi.workflows import capture_from_run, validate_capture
+    from koboi.workflows.store import FileWorkflowStore
+
+    config_text = ctx.agent.config.to_yaml()
+    cache_dir = None
+    if with_cache:
+        cache_dir = ctx.agent.config.replay.get("cache_dir") or ".koboi/cache"
+    wd, entries = capture_from_run(
+        config_text=config_text,
+        name=name,
+        with_cache=with_cache,
+        cache_dir=cache_dir,
+        redact_cache=redact_cache,
+    )
+    for warning in validate_capture(wd, entries):
+        ctx.output(f"warning: {warning}")
+    path = FileWorkflowStore(scope="project").save(name, wd.to_bundle_yaml(), sidecar_entries=entries)
+    extra = f" (+{len(entries) if entries else 0} cached responses)" if with_cache else ""
+    ctx.output(f"Captured workflow '{name}' to {path}{extra}")
+    return CommandResult()
+
+
 async def _cmd_skills(ctx: CommandContext) -> CommandResult:
     core = ctx.agent.core
     skills_reg = getattr(core, "skills", None) if core else None
@@ -631,6 +665,7 @@ def build_registry() -> SlashCommandRegistry:
         (SlashCommand("/sessions", "Open session manager"), _cmd_sessions),
         (SlashCommand("/fork", "Fork current session"), _cmd_fork),
         (SlashCommand("/export", "Export conversation [md|json|html]"), _cmd_export),
+        (SlashCommand("/capture", "Capture this run as a workflow [--with-cache]"), _cmd_capture),
         (SlashCommand("/skills", "List discovered skills"), _cmd_skills),
         (SlashCommand("/mode", "Show/switch interaction mode"), _cmd_mode),
         (SlashCommand("/tasks", "List tasks"), _cmd_tasks),

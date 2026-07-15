@@ -146,6 +146,62 @@ class JobSubmitRequest(BaseModel):
     # autonomous (no-HITL) run must not drop the approval gate + rate limiter.
     mode: str | None = Field(default=None)
     max_iterations: int | None = Field(default=None, ge=1)
+    # Workflow export/import (v1): run a stored workflow bundle as an autonomous
+    # job instead of the server-level config. Owner-scoped; validated at submit.
+    workflow_ref: str | None = Field(default=None)
+    # v2/v3: run the job in cache/replay mode (file-backed response cache) so the
+    # completed run can be captured into a byte-deterministic bundle. Plain jobs
+    # build a fresh per-job agent (_execute_plain_cache_job); workflow_ref jobs
+    # hydrate the captured sidecar.
+    replay_mode: str | None = Field(default=None)
+
+
+class WorkflowCreateRequest(BaseModel):
+    """POST /v1/workflows body."""
+
+    model_config = {"extra": "ignore"}
+
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = None
+    bundle: str = Field(min_length=1)  # the workflow bundle YAML text
+
+
+class WorkflowListItem(BaseModel):
+    name: str
+    description: str | None = None
+    created_at: float
+    updated_at: float
+
+
+class WorkflowListResponse(BaseModel):
+    workflows: list[WorkflowListItem]
+
+
+class WorkflowResponse(BaseModel):
+    name: str
+    description: str | None = None
+    owner: str
+    created_at: float
+    updated_at: float
+
+
+class CaptureRequest(BaseModel):
+    """POST /v1/jobs/{id}/capture body."""
+
+    model_config = {"extra": "ignore"}
+
+    name: str | None = None
+    with_cache: bool = False
+    redact_cache: bool = False
+
+
+class CaptureResponse(BaseModel):
+    name: str
+    description: str | None = None
+    cache_entries: int = 0
+    cache_redacted: bool = False
+    created_at: float
+    updated_at: float
 
 
 class JobStatusResponse(BaseModel):

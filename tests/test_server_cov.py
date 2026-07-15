@@ -1081,7 +1081,19 @@ class TestResumeOnStartupPending:
         calls: list[tuple] = []
 
         async def fake_run_job(
-            job_id, pool, reg, st, message, timeout=1800, mode=None, max_iterations=None, resume=False, webhooks=None
+            job_id,
+            pool,
+            reg,
+            st,
+            message,
+            timeout=1800,
+            mode=None,
+            max_iterations=None,
+            resume=False,
+            webhooks=None,
+            workflow_ref=None,
+            workflow_store=None,
+            replay_mode=None,
         ):
             calls.append((job_id, resume))
 

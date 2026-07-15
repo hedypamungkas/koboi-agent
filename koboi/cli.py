@@ -143,6 +143,20 @@ def _build_parser():
     p.add_argument("--verbose", "-v", action="store_true", help="Show debug output")
     p.add_argument("--print", dest="print_mode", action="store_true", help="Stream JSON lines (pipe-friendly)")
     p.add_argument("--resume", dest="resume_session", default=None, help="Resume an interrupted session by ID")
+    p.add_argument(
+        "--workflow", default=None, metavar="NAME", help="Run a stored workflow by name instead of the config"
+    )
+    p.add_argument(
+        "--replay-mode",
+        dest="replay_mode",
+        choices=["live", "cache", "replay"],
+        default="live",
+        help="Determinism tier: live (default), cache (memoize+replay; live on miss), or replay (pure offline; raise on miss -- needs a populated/captured cache)",
+    )
+    p.add_argument("--input", default=None, help="JSON args for the workflow entry (e.g. '{\"message\": ...}')")
+    p.add_argument(
+        "--clear-cache", action="store_true", help="Clear the response cache before running (cache mode only)"
+    )
 
     # mcp-serve (core-only stdio; exposes koboi tools to external MCP clients)
     p = sub.add_parser(
@@ -215,6 +229,53 @@ def _build_parser():
     p.add_argument("config_path")
     p.add_argument("--format", choices=["mermaid", "json"], default="mermaid")
 
+    # export (core) -- export a config as a redacted, re-runnable workflow bundle
+    p = sub.add_parser("export", help="Export a config as a deterministic workflow bundle")
+    p.add_argument("config_path")
+    p.add_argument("--format", choices=["yaml", "json"], default="yaml")
+    p.add_argument("--name", default=None, help="Workflow name (default: config file stem)")
+    sink = p.add_mutually_exclusive_group()
+    sink.add_argument("--output", "-o", default=None, help="Write to FILE instead of stdout")
+    sink.add_argument("--save", action="store_true", help="Save into the workflow store")
+    p.add_argument("--scope", choices=["project", "user"], default="project")
+
+    # import (core) -- import a workflow bundle into the store
+    p = sub.add_parser("import", help="Import a workflow bundle into the store")
+    p.add_argument("file", help="Workflow bundle YAML/JSON file")
+    p.add_argument("--name", default=None, help="Stored name (default: bundle name / file stem)")
+    p.add_argument("--scope", choices=["project", "user"], default="project")
+
+    # capture (core) -- capture a run into a reusable workflow bundle (+ cache sidecar)
+    p = sub.add_parser("capture", help="Capture a run as a reusable workflow bundle (optionally with a frozen cache)")
+    p.add_argument("config_path")
+    p.add_argument("--name", default=None, help="Workflow name (default: config file stem)")
+    p.add_argument("--session", default=None, help="Session ID (recorded as provenance source_run_id)")
+    p.add_argument("--job", default=None, help="Job ID (recorded as provenance source_run_id)")
+    p.add_argument(
+        "--with-cache",
+        action="store_true",
+        help="Freeze the run's response cache as a sidecar (byte-identical re-run)",
+    )
+    p.add_argument(
+        "--redact-cache",
+        action="store_true",
+        help="Mask secrets in the frozen cache (share-safe; may diverge on replay)",
+    )
+    p_sink = p.add_mutually_exclusive_group()
+    p_sink.add_argument("--output", "-o", default=None, help="Write to FILE instead of stdout")
+    p_sink.add_argument("--save", action="store_true", help="Save into the workflow store (with sidecar)")
+    p.add_argument("--scope", choices=["project", "user"], default="project")
+
+    # workflows (core) -- list/show/delete stored workflows
+    p = sub.add_parser("workflows", help="Manage stored workflows (list/show/delete)")
+    p.add_argument("--scope", choices=["project", "user"], default="project")
+    wf_sub = p.add_subparsers(dest="workflows_command", required=True)
+    wf_sub.add_parser("list", help="List stored workflows")
+    p_show = wf_sub.add_parser("show", help="Print a stored workflow bundle")
+    p_show.add_argument("name")
+    p_del = wf_sub.add_parser("delete", help="Delete a stored workflow")
+    p_del.add_argument("name")
+
     # init-zsh (core)
     p = sub.add_parser("init-zsh", help="Install the ZSH plugin for :koboi prefix command")
     p.add_argument("--target", default=None, help="Custom plugin install directory")
@@ -253,7 +314,17 @@ def main() -> None:
         sys.exit(cli_commands.cmd_validate(args.config_path))
     if args.command == "run":
         sys.exit(
-            cli_commands.cmd_run(args.config_path, args.message, args.verbose, args.print_mode, args.resume_session)
+            cli_commands.cmd_run(
+                args.config_path,
+                args.message,
+                args.verbose,
+                args.print_mode,
+                args.resume_session,
+                workflow_name=args.workflow,
+                replay_mode=args.replay_mode,
+                input_json=args.input,
+                clear_cache=args.clear_cache,
+            )
         )
     if args.command == "mcp-serve":
         _run_mcp_serve(args)
@@ -279,6 +350,30 @@ def main() -> None:
         sys.exit(cli_commands.cmd_diagnostics(args.config_path, args.output))
     if args.command == "graph":
         sys.exit(cli_commands.cmd_graph(args.config_path, args.format))
+    if args.command == "export":
+        sys.exit(
+            cli_commands.cmd_export_workflow(
+                args.config_path, args.format, args.name, args.output, save=args.save, scope=args.scope
+            )
+        )
+    if args.command == "import":
+        sys.exit(cli_commands.cmd_import_workflow(args.file, args.name, scope=args.scope))
+    if args.command == "capture":
+        sys.exit(
+            cli_commands.cmd_capture(
+                args.config_path,
+                args.name,
+                args.session,
+                args.job,
+                args.with_cache,
+                args.redact_cache,
+                args.output,
+                args.save,
+                args.scope,
+            )
+        )
+    if args.command == "workflows":
+        sys.exit(cli_commands.cmd_workflows(args.workflows_command, scope=args.scope, name=getattr(args, "name", None)))
     if args.command == "init-zsh":
         sys.exit(cli_commands.cmd_init_zsh(args.target))
 

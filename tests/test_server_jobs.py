@@ -249,6 +249,9 @@ class TestResumeOnStartup:
             max_iterations=None,
             resume=False,
             webhooks=None,
+            workflow_ref=None,
+            workflow_store=None,
+            replay_mode=None,
         ):
             calls.append((job_id, resume))
             return None

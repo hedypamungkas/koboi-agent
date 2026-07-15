@@ -131,6 +131,18 @@ class JobStore:
             self._conn.execute("ALTER TABLE jobs ADD COLUMN mode TEXT")
         if "max_iterations" not in existing:
             self._conn.execute("ALTER TABLE jobs ADD COLUMN max_iterations INTEGER")
+        if "workflow_ref" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN workflow_ref TEXT")
+        # v2: cache-mode workflow jobs (replay_mode) + their per-job cache_dir (capture).
+        if "replay_mode" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN replay_mode TEXT")
+        if "cache_dir" not in existing:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN cache_dir TEXT")
+
+    def set_cache_dir(self, job_id: str, cache_dir: str) -> None:
+        """Record a cache-mode workflow job's per-job cache_dir (for capture)."""
+        self._conn.execute("UPDATE jobs SET cache_dir = ? WHERE job_id = ?", (cache_dir, job_id))
+        self._conn.commit()
 
     def insert(
         self,
@@ -141,14 +153,28 @@ class JobStore:
         idempotency_key: str | None = None,
         mode: str | None = None,
         max_iterations: int | None = None,
+        workflow_ref: str | None = None,
+        replay_mode: str | None = None,
     ) -> None:
         now = time.time()
         try:
             self._conn.execute(
                 "INSERT INTO jobs (job_id, session_id, owner, status, message, "
-                "idempotency_key, mode, max_iterations, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
-                (job_id, session_id, owner, message, idempotency_key, mode, max_iterations, now, now),
+                "idempotency_key, mode, max_iterations, workflow_ref, replay_mode, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    job_id,
+                    session_id,
+                    owner,
+                    message,
+                    idempotency_key,
+                    mode,
+                    max_iterations,
+                    workflow_ref,
+                    replay_mode,
+                    now,
+                    now,
+                ),
             )
             self._conn.commit()
         except sqlite3.IntegrityError as err:
@@ -548,6 +574,9 @@ async def run_job(
     max_iterations: int | None = None,
     resume: bool = False,
     webhooks: list[dict] | None = None,
+    workflow_ref: str | None = None,
+    workflow_store: Any | None = None,
+    replay_mode: str | None = None,
 ) -> None:
     """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events.
 
@@ -565,7 +594,19 @@ async def run_job(
 
     try:
         final_content = await asyncio.wait_for(
-            _execute_job(job_id, pool, registry, store, message, mode, max_iterations, resume=resume),
+            _execute_job(
+                job_id,
+                pool,
+                registry,
+                store,
+                message,
+                mode,
+                max_iterations,
+                resume=resume,
+                workflow_ref=workflow_ref,
+                workflow_store=workflow_store,
+                replay_mode=replay_mode,
+            ),
             timeout=timeout,
         )
         result_json = json.dumps({"content": final_content}) if final_content else None
@@ -608,6 +649,159 @@ async def run_job(
         _emit_job_webhooks(webhooks, store, job_id, "failed")
 
 
+async def _execute_workflow_job(
+    job_id: str,
+    registry: JobRegistry,
+    store: JobStore,
+    message: str,
+    workflow_ref: str,
+    workflow_store: Any | None,
+    owner: str,
+    resume: bool = False,
+    replay_mode: str | None = None,
+) -> str | None:
+    """Run a stored workflow bundle as an autonomous job.
+
+    Builds a fresh :class:`~koboi.facade.KoboiAgent` from the bundle YAML (NOT the
+    pooled server-level agent) and runs it via ``run_stream`` (works for both
+    single-agent and orchestrator-backed bundles). Enforces the C3 floor:
+    ``sandbox.backend='restricted'`` is required.
+
+    v1 limitations: the agent is rebuilt on every run (no pooled session memory),
+    so ``resume`` re-runs from scratch; per-sub-agent ``AutonomousApprovalHandler``
+    is not installed on orchestrator-backed bundles (the restricted sandbox is the
+    safety floor).
+    """
+    from koboi.events import CompleteEvent
+
+    if workflow_store is None:
+        raise ValueError("workflow jobs require a workflow_store")
+    wf = workflow_store.get(workflow_ref, owner)
+    if wf is None:
+        raise ValueError(f"unknown workflow {workflow_ref!r} for this owner")
+    from koboi.config import Config
+    from koboi.facade import KoboiAgent
+
+    bundle_yaml = wf["bundle_yaml"]
+    cfg = Config.from_string(bundle_yaml)
+    if cfg.get("sandbox", "backend", default="passthrough") != "restricted":
+        raise PermissionError(
+            "Autonomous workflow jobs require sandbox.backend='restricted'; 'passthrough' is refused."
+        )
+    # v2 cache mode: mint a per-job cache_dir; hydrate a captured sidecar if the
+    # workflow has one (offline replay). prepare_captured_bundle points the bundle
+    # at the per-job dir so CachedClient hits.
+    effective_yaml = bundle_yaml
+    _effective_mode = replay_mode or cfg.get("replay", "mode", default="live")
+    if _effective_mode in ("cache", "replay"):
+        cache_dir = f".koboi/cache/jobs/{job_id}"
+        _get_sidecar = getattr(workflow_store, "get_sidecar", None)
+        if _get_sidecar is not None:
+            _sc = _get_sidecar(owner, workflow_ref)
+            if _sc is not None:
+                from koboi.llm.cache import ResponseCache
+
+                _entries = [(e.key, e.payload) for e in _sc.read()]
+                ResponseCache(cache_dir).load_entries(_entries)
+                _logger.info("hydrated %d cached response(s) for job %s", len(_entries), job_id)
+            elif _effective_mode == "replay":
+                _logger.warning("replay mode but no sidecar for workflow %r -- will raise on miss", workflow_ref)
+        elif _effective_mode == "replay":
+            _logger.warning("workflow_store has no get_sidecar -- hydration skipped for job %s", job_id)
+        from koboi.workflows import prepare_captured_bundle
+
+        effective_yaml = prepare_captured_bundle(bundle_yaml, cache_dir=cache_dir, mode=_effective_mode)
+        store.set_cache_dir(job_id, cache_dir)
+    agent = KoboiAgent.from_config_string(effective_yaml)
+    # Install the same deny-by-default handler as a regular autonomous job so a
+    # single-agent workflow job is NOT more permissive (C3 + Trust-DB gate).
+    # Orchestrator-backed bundles (agent._core is None) keep the restricted
+    # sandbox as their floor; per-sub-agent handler install is deferred (v1).
+    if agent._core is not None:
+        from koboi.guardrails.approval import AutonomousApprovalHandler
+
+        agent._core.approval_handler = AutonomousApprovalHandler(
+            trust_db=agent.trust_db,
+            audit_trail=agent._core.audit_trail,
+            auto_approve_tools={"write_file", "delete_file"},
+        )
+    store.update_status(job_id, "running")
+    final_content: str | None = None
+    try:
+        async for event in agent.run_stream(message):
+            registry.append_event(job_id, event)
+            if isinstance(event, CompleteEvent):
+                final_content = event.content
+    finally:
+        await agent.close()
+    return final_content
+
+
+async def _execute_plain_cache_job(
+    job_id: str,
+    pool: AgentPool,
+    registry: JobRegistry,
+    store: JobStore,
+    message: str,
+    record: Any,
+    mode: str | None = None,
+    max_iterations: int | None = None,
+    replay_mode: str = "cache",
+) -> str | None:
+    """Run a PLAIN (non-workflow_ref) job in cache/replay mode with an isolated
+    per-job cache_dir (the pooled agent's shared client can't isolate a run).
+
+    Builds a fresh ``KoboiAgent`` from the server config (``with_replay`` + per-job
+    ``cache_dir``), enforces the C3 restricted-sandbox floor + the deny-by-default
+    ``AutonomousApprovalHandler``, and records the cache_dir so the run can be
+    captured with cache. v3 #4-a.
+    """
+    from koboi.events import CompleteEvent
+    from koboi.facade import KoboiAgent
+    from koboi.guardrails.approval import AutonomousApprovalHandler
+    from koboi.modes import AgentMode
+
+    cache_dir = f".koboi/cache/jobs/{job_id}"
+    cfg = pool._config.with_replay(replay_mode=replay_mode, cache_dir=cache_dir)
+    # Per-job isolation (mirror AgentPool._build_agent): stamp the session_id + a
+    # per-session workdir so concurrent plain cache jobs don't share memory/fs state.
+    import os
+
+    cfg._data.setdefault("memory", {})["session_id"] = record.session_id
+    workdir = pool.workdir_for(record.session_id)
+    cfg._data.setdefault("sandbox", {})["workdir"] = workdir
+    os.makedirs(workdir, exist_ok=True)
+    agent = KoboiAgent._from_config(cfg)
+    if agent._core is None:
+        raise PermissionError(
+            "plain cache/replay jobs require a single-agent server config "
+            "(orchestration-mode servers are unsupported for plain cache jobs)"
+        )
+    sb = agent._core.tools.get_dep("sandbox")
+    if getattr(sb, "name", "passthrough") == "passthrough":
+        raise PermissionError("Autonomous jobs require sandbox.backend='restricted'; 'passthrough' is refused.")
+    agent._core.approval_handler = AutonomousApprovalHandler(
+        trust_db=agent.trust_db,
+        audit_trail=agent._core.audit_trail,
+        auto_approve_tools={"write_file", "delete_file"},
+    )
+    if mode is not None:
+        agent._core.mode_manager.switch_mode(AgentMode(mode))
+    if max_iterations is not None:
+        agent._core.max_iterations = max_iterations
+    store.set_cache_dir(job_id, cache_dir)
+    store.update_status(job_id, "running")
+    final_content: str | None = None
+    try:
+        async for event in agent.run_stream(message):
+            registry.append_event(job_id, event)
+            if isinstance(event, CompleteEvent):
+                final_content = event.content
+    finally:
+        await agent.close()
+    return final_content
+
+
 async def _execute_job(
     job_id: str,
     pool: AgentPool,
@@ -617,15 +811,40 @@ async def _execute_job(
     mode: str | None = None,
     max_iterations: int | None = None,
     resume: bool = False,
+    workflow_ref: str | None = None,
+    workflow_store: Any | None = None,
+    replay_mode: str | None = None,
 ) -> str | None:
     """Inner execution: agent setup + run_stream → event buffer.
 
     Returns the final content (from ``CompleteEvent``) for ``result_json``
-    persistence so completed jobs survive restart.
+    persistence so completed jobs survive restart. When ``workflow_ref`` is set,
+    execution is delegated to :func:`_execute_workflow_job` (builds the agent from
+    the stored bundle instead of the pooled server-level agent).
     """
+    record = registry.get(job_id)
+    if workflow_ref:
+        return await _execute_workflow_job(
+            job_id,
+            registry,
+            store,
+            message,
+            workflow_ref,
+            workflow_store,
+            record.owner,
+            resume=resume,
+            replay_mode=replay_mode,
+        )
+    if replay_mode in ("cache", "replay"):
+        # v3 #4-a: a plain (non-workflow_ref) cache/replay job builds a fresh
+        # per-job agent (the pooled agent shares one client and can't isolate
+        # this run's cache). Restricted sandbox + AutonomousApprovalHandler apply.
+        return await _execute_plain_cache_job(
+            job_id, pool, registry, store, message, record, mode, max_iterations, replay_mode
+        )
+
     from koboi.events import CompleteEvent, OrchestrationCompleteEvent
 
-    record = registry.get(job_id)
     agent = await pool.get_or_create(record.session_id)
 
     # W5.1 B1-jobs middle path: orchestrated configs (core=None) run with a config-level
@@ -735,6 +954,7 @@ async def resume_on_startup(
     registry: JobRegistry,
     timeout: float,
     webhooks: list[dict] | None = None,
+    workflow_store: Any | None = None,
 ) -> int:
     """Resume interrupted jobs + requeue pending ones (#5: rehydrate-and-continue).
 
@@ -753,6 +973,22 @@ async def resume_on_startup(
 
     # #5: rehydrate-and-continue running jobs (was: mark running-as-failed).
     for job in store.list_by_status("running"):
+        if job.get("workflow_ref") or job.get("replay_mode") in ("cache", "replay"):
+            # workflow_ref + plain cache/replay jobs build a fresh agent per run and
+            # cannot rehydrate an interrupted loop, so resuming would duplicate side
+            # effects. Mark failed (retriable) so the operator re-submits.
+            store.update_status(
+                job["job_id"],
+                "failed",
+                error="cache/replay + workflow jobs cannot be resumed; re-submit the job",
+                error_class="WorkflowResumeUnsupported",
+                retriable=True,
+            )
+            registry.register(job["job_id"], job["session_id"], job["owner"])
+            registry.set_terminal(job["job_id"], "failed")
+            _logger.warning("Workflow job %s cannot be resumed in v1; marked failed", job["job_id"])
+            count += 1
+            continue
         registry.register(job["job_id"], job["session_id"], job["owner"])
         task = asyncio.create_task(
             run_job(
@@ -766,6 +1002,9 @@ async def resume_on_startup(
                 job.get("max_iterations"),
                 resume=True,
                 webhooks=webhooks,
+                workflow_ref=job.get("workflow_ref"),
+                workflow_store=workflow_store,
+                replay_mode=job.get("replay_mode"),
             )
         )
         registry.set_running(job["job_id"], task)
@@ -786,6 +1025,9 @@ async def resume_on_startup(
                 job.get("mode"),
                 job.get("max_iterations"),
                 webhooks=webhooks,
+                workflow_ref=job.get("workflow_ref"),
+                workflow_store=workflow_store,
+                replay_mode=job.get("replay_mode"),
             )
         )
         registry.set_running(job["job_id"], task)

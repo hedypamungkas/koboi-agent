@@ -253,6 +253,44 @@ class Config:
             return self._schema.model_dump()
         return dict(self._data)
 
+    def to_yaml(self) -> str:
+        """Full-fidelity YAML dump of the resolved raw config.
+
+        Dumps ``self._data`` (env-interpolated, provider-ref-expanded) with
+        ``yaml.safe_dump(sort_keys=False, allow_unicode=True)`` so the output is
+        human-readable and diff-friendly. Unlike :meth:`to_dict` (which returns
+        the lossy validated-schema view and drops forward-as-is LLM params such
+        as ``seed`` / ``top_p`` / ``response_format``), this preserves every key.
+
+        Note: ``${VAR:default}`` env placeholders are already resolved into
+        concrete values at construction time (see ``__init__``), so the dump
+        carries resolved values, not templates. Callers exporting a shareable
+        artifact should use :func:`koboi.workflows.build_from_config_path` (which
+        reads the un-interpolated source and redacts secrets).
+        """
+        return yaml.safe_dump(self._data, sort_keys=False, allow_unicode=True)
+
+    @property
+    def replay(self) -> dict:
+        """The ``replay:`` section (``{mode, cache_dir}``); ``{}`` when unset."""
+        return self.get("replay", default={}) or {}
+
+    def with_replay(self, *, replay_mode: str | None = None, cache_dir: str | None = None) -> Config:
+        """Return a NEW Config with the ``replay:`` section set (original untouched).
+
+        Used to inject a per-run cache mode (e.g. CLI ``--replay-mode cache``)
+        without mutating the shared pooled server Config. Only non-None args apply.
+        """
+        import copy
+
+        data = copy.deepcopy(self._data)
+        section = data.setdefault("replay", {})
+        if replay_mode is not None:
+            section["mode"] = replay_mode
+        if cache_dir is not None:
+            section["cache_dir"] = cache_dir
+        return Config.from_dict(data, validate=False)
+
     def get(self, *keys: str, default: Any = None) -> Any:
         node = self._data
         for key in keys:

@@ -86,19 +86,30 @@ class KoboiAgent:
         config_path: str | Path,
         verbose: bool = False,
         resume_session: str | None = None,
+        replay_mode: str | None = None,
+        cache_dir: str | None = None,
     ) -> KoboiAgent:
         """Factory method: create a KoboiAgent from YAML config.
 
         Pass ``resume_session`` to rehydrate-and-continue an interrupted session
         (P2-A): the SQLite memory reloads that session's conversation and the
         journal inherits its turn numbering. Call ``agent.resume()`` to actually
-        resume the loop.
+        resume the loop. ``replay_mode`` / ``cache_dir`` inject a per-run cache
+        mode (see ``koboi.llm.cache``) without mutating the source config.
         """
         config = Config.from_yaml(config_path)
-        return cls._from_config(config, verbose=verbose, resume_session=resume_session)
+        return cls._from_config(
+            config,
+            verbose=verbose,
+            resume_session=resume_session,
+            replay_mode=replay_mode,
+            cache_dir=cache_dir,
+        )
 
     @classmethod
-    def from_dict(cls, data: dict, verbose: bool = False) -> KoboiAgent:
+    def from_dict(
+        cls, data: dict, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None
+    ) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a Python dict.
 
         Usage:
@@ -108,10 +119,12 @@ class KoboiAgent:
             })
         """
         config = Config.from_dict(data)
-        return cls._from_config(config, verbose=verbose)
+        return cls._from_config(config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir)
 
     @classmethod
-    def from_config_string(cls, yaml_string: str, verbose: bool = False) -> KoboiAgent:
+    def from_config_string(
+        cls, yaml_string: str, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None
+    ) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a YAML string.
 
         Usage:
@@ -124,7 +137,7 @@ class KoboiAgent:
             ''')
         """
         config = Config.from_string(yaml_string)
-        return cls._from_config(config, verbose=verbose)
+        return cls._from_config(config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir)
 
     @classmethod
     def _from_config(
@@ -132,12 +145,18 @@ class KoboiAgent:
         config: Config,
         verbose: bool = False,
         resume_session: str | None = None,
+        replay_mode: str | None = None,
+        cache_dir: str | None = None,
     ) -> KoboiAgent:
         """Shared builder: assemble all subsystems from a Config object."""
         if resume_session:
             # Point the SQLite memory at the target session so it rehydrates that
             # conversation (and the journal inherits its turn numbering).
             config._data.setdefault("memory", {})["session_id"] = resume_session
+        if replay_mode is not None or cache_dir is not None:
+            # Inject a per-run cache mode on an immutable copy (the shared pooled
+            # server Config must not be mutated -- AgentCore is not concurrent-safe).
+            config = config.with_replay(replay_mode=replay_mode, cache_dir=cache_dir)
         # Orchestration mode: transparent to caller
         if config.orchestration.get("enabled"):
             return _build_orchestration(config, verbose=verbose)
@@ -677,6 +696,41 @@ def _resolve_chat_client(config: Config, logger: AgentLogger | None) -> Client:
     return _build_client(config, logger)
 
 
+def _resolve_replay_mode(config: Config) -> str:
+    """Effective replay mode. Precedence: top-level ``replay.mode`` (incl. the
+    CLI-injected value set by ``Config.with_replay``) > workflow-level
+    ``orchestration.determinism.replay_mode`` (when not ``live``) > ``live``."""
+    mode = config.replay.get("mode") or "live"
+    if mode == "live":
+        det = (config.orchestration.get("determinism") or {}).get("replay_mode")
+        if det and det != "live":
+            return det
+    return mode
+
+
+def _resolve_cache_dir(config: Config) -> str:
+    return config.replay.get("cache_dir") or ".koboi/cache"
+
+
+def _maybe_wrap_cache(client: Client, config: Config) -> Client:
+    """Wrap a chat client in ``CachedClient`` for ``cache`` / ``replay`` modes.
+
+    ``cache`` (STORE) memoizes live responses and replays on an identical request
+    (live on a miss). ``replay`` (RAISE) is pure-offline: a miss raises
+    ``CacheMissError`` (no live call, no API key for cached completions) -- the
+    honest signal that the run diverged from the cached trajectory. Idempotent
+    (never double-wraps). Embeddings are NOT wrapped (separate builder)."""
+    mode = _resolve_replay_mode(config)
+    if mode not in ("cache", "replay"):
+        return client
+    from koboi.llm.cache import CacheMissPolicy, CachedClient, ResponseCache
+
+    if isinstance(client, CachedClient):
+        return client
+    on_miss = CacheMissPolicy.RAISE if mode == "replay" else CacheMissPolicy.STORE
+    return CachedClient(client, ResponseCache(_resolve_cache_dir(config)), on_miss=on_miss)
+
+
 def _build_tools(config: Config) -> ToolRegistry:
     registry = ToolRegistry()
     builtin_list = config.get("tools", "builtin", default=[])
@@ -1059,7 +1113,7 @@ class AgentAssembler:
         return self.logger
 
     def build_client(self) -> Client:
-        self.client = _resolve_chat_client(self.config, self.logger)
+        self.client = _maybe_wrap_cache(_resolve_chat_client(self.config, self.logger), self.config)
         return self.client
 
     def build_memory(self) -> object:
@@ -1651,33 +1705,66 @@ def _build_command_hooks(config: Config, sandbox: BaseSandbox, hook_chain) -> No
 
 
 def _parse_agent_defs(config: Config) -> list:
-    """Parse AgentDef list from orchestration.agents config."""
+    """Parse AgentDef list from orchestration.agents config.
+
+    Applies the workflow-level determinism profile (``orchestration.determinism``)
+    merged with any per-node ``determinism`` block into each node's ``llm_config``
+    (via :func:`_apply_determinism`) so a dedicated pinned LLM client is built
+    through the existing ``_has_client_overrides`` path -- no change to
+    ``_agent_client_builder``. ``output_schema`` and
+    ``force_response_format_with_tools`` are captured here for the
+    response_format path (Gap A/B).
+    """
     from koboi.types import AgentDef
 
     agents_conf = config.orchestration.get("agents", [])
     if not agents_conf:
         raise ValueError("orchestration.agents must have at least one agent")
 
+    wf_det = config.orchestration.get("determinism") or {}
     defs = []
     for ac in agents_conf:
-        name = ac.get("name", "")
-        if not name:
+        if not ac.get("name", ""):
             raise ValueError("Each orchestration agent must have a 'name'")
-        defs.append(
-            AgentDef(
-                name=name,
-                system_prompt=ac.get("system_prompt", ""),
-                description=ac.get("description", ""),
-                keywords=ac.get("keywords", []),
-                tools_config=ac.get("tools"),
-                rag_config=ac.get("rag"),
-                llm_config=ac.get("llm"),
-                depends_on=ac.get("depends_on", []),
-                conditionals=ac.get("conditionals", []),
-                interrupt_after=ac.get("interrupt_after", False),
-            )
-        )
+        agent_def = AgentDef.from_dict(ac)
+        _apply_determinism(agent_def, wf_det)
+        defs.append(agent_def)
     return defs
+
+
+def _apply_determinism(agent_def, wf_det: dict) -> None:
+    """Merge workflow-level + per-node determinism into the node's ``llm_config``.
+
+    Per-node ``determinism`` overrides the workflow-level profile; explicit node
+    ``llm_config`` values are preserved (``setdefault``) so determinism only
+    fills gaps. The merged knobs (temperature/seed/top_p/model) make
+    ``_has_client_overrides`` return True, so the UNCHANGED ``_agent_client_builder``
+    builds a dedicated pinned client for this node. ``seed`` auto-forwards via
+    ``extract_extra_params`` (and is dropped on Anthropic by
+    ``_filter_extra_params_for_provider``).
+
+    A node whose ``llm_config`` is a string (a named ``providers:`` ref that fully
+    replaces the client) opts out of determinism pinning -- the knobs cannot merge
+    into a string, and the named ref already specifies provider/model.
+    """
+    from koboi.workflows import DeterminismProfile
+
+    node_profile = DeterminismProfile.from_dict(agent_def.determinism)
+    wf_profile = DeterminismProfile.from_dict(wf_det)
+    base = wf_profile or node_profile
+    if base is None:
+        return
+    effective = base.merge(node_profile) if (wf_profile and node_profile) else base
+    overrides = effective.to_llm_overrides()
+    if not overrides:
+        return
+    if isinstance(agent_def.llm_config, str):
+        # Named providers: ref -- determinism knobs can't merge into a string.
+        return
+    llm = dict(agent_def.llm_config or {})
+    for key, value in overrides.items():
+        llm.setdefault(key, value)  # explicit node llm values preserved
+    agent_def.llm_config = llm or None
 
 
 def _build_router(config: Config, client: Client, agent_defs: list):
@@ -1708,6 +1795,16 @@ def _build_orchestration(config: Config, verbose: bool = False):
     Reuses AgentAssembler for common subsystems (logger, client, guardrails,
     policy, hooks, skills, mode_manager, trust_db) so orchestration mode
     gets the same policy enforcement and guardrails as single-agent mode.
+
+    Cache/replay coverage (v2/v3): EVERY chat LLM call in orchestration flows
+    through ``_maybe_wrap_cache`` -- the shared ``assembler.client`` (router,
+    planner, synthesis, dynamic builder) via ``build_client``, and per-node
+    clients via ``_agent_client_builder``. Three call paths are currently
+    UNREACHABLE from here and therefore uncached: ``QualityEvaluator`` (only
+    constructed in tests), ``ProactiveExtractionHook`` (not attached in
+    orchestration mode), and ``deep_research`` (docs-only on this branch). If
+    any becomes reachable, route it through ``_maybe_wrap_cache`` or it
+    egresses live during a cache/replay run.
     """
     from koboi.orchestration.factory import AgentFactory
     from koboi.orchestration.orchestrator import Orchestrator
@@ -1739,12 +1836,15 @@ def _build_orchestration(config: Config, verbose: bool = False):
         # REPLACES the top-level client; an inline dict MERGES over it (today's
         # behavior). Pool specs (W2) raise.
         def _agent_client_builder(agent_llm: dict | str) -> Client:
+            c: Client
             if isinstance(agent_llm, str):
-                return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
-            if isinstance(agent_llm, dict) and "pool" in agent_llm:
-                return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
-            overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
-            return _build_client(config, assembler.logger, llm_overrides=overrides)
+                c = _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
+            elif isinstance(agent_llm, dict) and "pool" in agent_llm:
+                c = _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
+            else:
+                overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
+                c = _build_client(config, assembler.logger, llm_overrides=overrides)
+            return _maybe_wrap_cache(c, config)
 
     # G5: wire shared MCP clients into orchestration (default on). The shared clients
     # are connected once; the registrar re-registers their tools into each sub-agent's

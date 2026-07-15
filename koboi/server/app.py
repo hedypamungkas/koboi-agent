@@ -43,6 +43,7 @@ from koboi.server.jobs import (
 )
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
+from koboi.server.workflow_store import WorkflowStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
 from koboi.server.session_events import SessionEventRegistry
 from koboi.server.handoff_digest import HandoffDigest
@@ -67,6 +68,12 @@ from koboi.server.schema import (
     SessionListItem,
     SessionListResponse,
     SessionResponse,
+    WorkflowCreateRequest,
+    WorkflowListItem,
+    WorkflowListResponse,
+    WorkflowResponse,
+    CaptureRequest,
+    CaptureResponse,
 )
 from koboi.server.sse import sse_stream
 
@@ -180,6 +187,8 @@ def create_app(
     idempotency_store: Any | None = None,
     ownership_store: Any | None = None,
     approval_registry: Any | None = None,
+    workflow_store: Any | None = None,
+    config_source_text: str | None = None,
     session_event_buffer: Any | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
@@ -217,6 +226,8 @@ def create_app(
     ownership = ownership_store if ownership_store is not None else OwnershipStore(db_path=shared_db)
     if job_store is None:
         job_store = JobStore(db_path=shared_db)
+    if workflow_store is None:
+        workflow_store = WorkflowStore(db_path=shared_db)
 
     # 16.16: warn only in the genuinely-bad case — ephemeral sidecar can't resume.
     if shared_db == ":memory:":
@@ -302,12 +313,16 @@ def create_app(
         await pool.close_all()
         ownership.close()
         job_store.close()
+        if workflow_store is not None:
+            workflow_store.close()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # M4: resume pending jobs on startup (simplified: running→failed).
         if job_resume:
-            requeued = await resume_on_startup(job_store, pool, job_registry, job_timeout, job_webhooks)
+            requeued = await resume_on_startup(
+                job_store, pool, job_registry, job_timeout, job_webhooks, workflow_store=workflow_store
+            )
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
         # 16.24: workdir TTL GC + G5c-a: job TTL GC background sweeps.
@@ -343,6 +358,8 @@ def create_app(
     app.state.ownership = ownership
     app.state.job_store = job_store
     app.state.job_registry = job_registry
+    app.state.workflow_store = workflow_store
+    app.state.config_source_text = config_source_text  # v3 #4-b: for plain-job capture
     app.state.job_max_concurrent = job_max_concurrent
     app.state.job_timeout = job_timeout
     app.state.health = health
@@ -410,6 +427,7 @@ def create_app(
         memory_backend,
         shared_db,
         job_webhooks,
+        workflow_store,
         session_events,
         session_stream_timeout,
         session_streams_per_owner,
@@ -476,6 +494,7 @@ def _register_routes(
     memory_backend: str,
     shared_db: str,
     job_webhooks: list[dict] | None = None,
+    workflow_store: Any | None = None,
     session_events: Any | None = None,
     session_stream_timeout: float = 3600.0,
     session_streams_per_owner: int = 4,
@@ -518,6 +537,153 @@ def _register_routes(
             return err
         messages = await pool.get_messages(session_id)
         return SessionResponse(session_id=session_id, messages=messages)  # type: ignore[return-value]
+
+    # --- Workflow export/import (v1): owner-scoped CRUD on stored bundles ---
+
+    def _workflow_owner(request: Request) -> tuple[str | None, JSONResponse | None]:
+        """Resolve the caller owner; fail closed (401) when auth on + no identity."""
+        if auth_enabled:
+            owner = getattr(request.state, "api_key_id", None)
+            if not owner:
+                return None, _error_response(401, "unauthenticated", "no caller identity", request)
+            return owner, None
+        return getattr(request.state, "api_key_id", "dev"), None
+
+    @app.post("/v1/workflows", status_code=201, response_model=WorkflowResponse)
+    async def create_workflow(body: WorkflowCreateRequest, request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        # Validate the bundle parses + carries a workflow envelope; reject early.
+        try:
+            from koboi.workflows import WorkflowDefinition
+
+            wd = WorkflowDefinition.from_bundle_yaml(body.bundle)
+            # Validate the config body actually loads (catches invalid agent/llm/
+            # orchestration sections now, not at the first job run).
+            Config.from_string(body.bundle)
+        except Exception as exc:
+            return _error_response(400, "invalid_workflow", f"bundle parse failed: {exc}", request)
+        description = body.description or wd.description
+        # Trust boundary: re-redact before persisting (mirrors cmd_import_workflow).
+        from koboi.redact import redact_config_for_export
+        from typing import cast as _cast
+
+        redacted_config = _cast("dict", redact_config_for_export(wd.config))
+        wd.config = redacted_config
+        workflow_store.put(body.name, owner, wd.to_bundle_yaml(), description=description)
+        stored = workflow_store.get(body.name, owner) or {}
+        return WorkflowResponse(  # type: ignore[return-value]
+            name=body.name,
+            description=description,
+            owner=owner,
+            created_at=stored.get("created_at", time.time()),
+            updated_at=stored.get("updated_at", time.time()),
+        )
+
+    @app.get("/v1/workflows", response_model=WorkflowListResponse)
+    async def list_workflows(request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        items = [WorkflowListItem(**row) for row in workflow_store.list_by_owner(owner)]
+        return WorkflowListResponse(workflows=items)  # type: ignore[return-value]
+
+    @app.get("/v1/workflows/{name}", response_model=WorkflowResponse)
+    async def get_workflow(name: str, request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        wf = workflow_store.get(name, owner)  # owner-scoped; None = missing OR not-owner
+        if wf is None:
+            raise HTTPException(status_code=404, detail="workflow not found")
+        return WorkflowResponse(  # type: ignore[return-value]
+            name=wf["name"],
+            description=wf.get("description"),
+            owner=wf["owner"],
+            created_at=wf["created_at"],
+            updated_at=wf["updated_at"],
+        )
+
+    @app.delete("/v1/workflows/{name}")
+    async def delete_workflow(name: str, request: Request) -> Response:
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        if not workflow_store.delete(name, owner):
+            raise HTTPException(status_code=404, detail="workflow not found")
+        return {"deleted": name}  # type: ignore[return-value]
+
+    @app.post("/v1/jobs/{job_id}/capture", status_code=201, response_model=CaptureResponse)
+    async def capture_job(job_id: str, body: CaptureRequest, request: Request) -> Response:
+        """Capture a completed workflow_ref job into a reusable bundle (+ cache sidecar).
+
+        v2: only ``workflow_ref`` jobs can be captured (plain pooled jobs share one
+        client and can't isolate a run's cache). ``with_cache`` freezes the job's
+        per-job response cache into the bundle's SQLite sidecar so the captured
+        bundle re-runs byte-identical + offline.
+        """
+        owner, err = _workflow_owner(request)
+        if err:
+            return err
+        job = job_store.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job["owner"] != owner:
+            return _error_response(403, "forbidden", "not the job owner", request)
+        if job["status"] != "completed":
+            return _error_response(409, "job_not_complete", "only completed jobs can be captured", request)
+        if job.get("workflow_ref"):
+            wf = workflow_store.get(job["workflow_ref"], owner)
+            if wf is None:
+                raise HTTPException(status_code=404, detail="workflow not found")
+            config_text = wf["bundle_yaml"]
+            cache_dir = job.get("cache_dir") if body.with_cache else None
+            if body.with_cache and not cache_dir:
+                return _error_response(
+                    400, "no_cache_to_freeze", "the job did not run in cache mode (no cache_dir recorded)", request
+                )
+        else:
+            # v3 #4-b: plain job -- emit the server's un-interpolated config source
+            # (preserves ${VAR} templates; to_yaml() would carry resolved secrets).
+            # Plain jobs cannot isolate a run cache (shared pooled client).
+            config_text = app.state.config_source_text
+            if config_text is None:
+                return _error_response(
+                    400,
+                    "server_config_source_not_exposed",
+                    "the server was built via create_app(config) without config_source_text; "
+                    "plain-job capture needs the un-interpolated source",
+                    request,
+                )
+            cache_dir = None
+            if body.with_cache:
+                return _error_response(
+                    400, "no_cache_to_freeze", "plain (non-workflow_ref) jobs cannot isolate a run cache", request
+                )
+        from koboi.workflows import capture_from_run, validate_capture
+
+        wd, entries = capture_from_run(
+            config_text=config_text,
+            name=body.name or job_id,
+            source_run_id=job_id,
+            source_session_id=job["session_id"],
+            with_cache=body.with_cache,
+            cache_dir=cache_dir,
+            redact_cache=body.redact_cache,
+        )
+        for warning in validate_capture(wd, entries):
+            _logger.warning("capture %s: %s", job_id, warning)
+        workflow_store.put_with_sidecar(wd.name, owner, wd.to_bundle_yaml(), wd.description, entries or [])
+        stored = workflow_store.get(wd.name, owner) or {}
+        return CaptureResponse(  # type: ignore[return-value]
+            name=wd.name,
+            description=wd.description,
+            cache_entries=wd.provenance.cache_entries,
+            cache_redacted=wd.provenance.cache_redacted,
+            created_at=stored.get("created_at", time.time()),
+            updated_at=stored.get("updated_at", time.time()),
+        )
 
     # --- G6: per-session MCP server management ---
 
@@ -1056,6 +1222,9 @@ def _register_routes(
                 job.get("mode"),
                 job.get("max_iterations"),
                 webhooks=job_webhooks,
+                workflow_ref=job.get("workflow_ref"),
+                workflow_store=workflow_store,
+                replay_mode=job.get("replay_mode"),
             )
         )
         job_registry.set_running(job_id, task)
@@ -1080,6 +1249,16 @@ def _register_routes(
         except ValueError as exc:
             return _error_response(400, "invalid_mode", str(exc), request)
         job_max_iter = min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
+
+        # Workflow export/import (v1): validate the workflow_ref exists (owner-scoped).
+        if body.workflow_ref and workflow_store.get(body.workflow_ref, owner) is None:
+            return _error_response(400, "unknown_workflow", f"workflow {body.workflow_ref!r} not found", request)
+        # v2/v3: replay_mode cache/replay. Plain jobs build a fresh per-job agent
+        # (_execute_plain_cache_job); workflow_ref jobs hydrate the sidecar.
+        if body.replay_mode not in (None, "live", "cache", "replay"):
+            return _error_response(
+                400, "invalid_replay_mode", "replay_mode must be 'live', 'cache', or 'replay'", request
+            )
 
         # Idempotency: same key within window → return existing job.
         idem_key = request.headers.get("Idempotency-Key")
@@ -1123,10 +1302,14 @@ def _register_routes(
             if ownership.get_owner(session_id) is None:
                 ownership.set_owner(session_id, owner)
         else:
-            try:
-                await pool.get_or_create(session_id)
-            except PoolFull as exc:
-                return _error_response(429, "pool_full", str(exc), request)
+            # workflow_ref + plain cache/replay jobs build a fresh agent and never
+            # touch the pooled one, so skip materializing it (avoids wasting an LRU
+            # pool slot + a spurious pool_full under burst submit).
+            if not body.workflow_ref and body.replay_mode not in ("cache", "replay"):
+                try:
+                    await pool.get_or_create(session_id)
+                except PoolFull as exc:
+                    return _error_response(429, "pool_full", str(exc), request)
             # H1: dedicated new session — always acquires an owner.
             ownership.set_owner(session_id, owner)
 
@@ -1140,6 +1323,8 @@ def _register_routes(
                 idempotency_key=idem_key,
                 mode=job_mode.value if job_mode else None,
                 max_iterations=job_max_iter,
+                workflow_ref=body.workflow_ref,
+                replay_mode=body.replay_mode,
             )
         except DuplicateIdempotencyKey as exc:
             # M1: a concurrent same-key submit won the race -- return the canonical
@@ -1376,5 +1561,13 @@ def serve_app(config_path: str | Path, *, host: str | None = None, port: int | N
             "(KOBOI_API_KEYS or `koboi keys create`) before exposing to untrusted networks.",
             resolved_host,
         )
-    app = create_app(cfg)
+    # v3 #4-b: pass the un-interpolated source text so plain-job capture can emit
+    # a re-runnable bundle (Config.to_yaml() carries resolved secrets; this keeps
+    # the ${VAR} templates for share-safe re-runnability).
+    import yaml as _yaml
+
+    from koboi.config import _load_yaml_with_extends
+
+    _source = _yaml.safe_dump(_load_yaml_with_extends(Path(config_path)), sort_keys=False, allow_unicode=True)
+    app = create_app(cfg, config_source_text=_source)
     uvicorn.run(app, host=resolved_host, port=resolved_port)  # pragma: no cover (blocking server)

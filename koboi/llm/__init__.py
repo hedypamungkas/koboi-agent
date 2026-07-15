@@ -14,6 +14,14 @@ from koboi.llm.base import (
     LLMResponseParseError,
 )
 from koboi.llm.auth import AuthStrategy, BearerAuth, APIKeyHeaderAuth, CompositeAuth, StaticHeaderAuth
+from koboi.llm.cache import (
+    CacheEntry,
+    CacheMissError,
+    CacheMissPolicy,
+    CachedClient,
+    ResponseCache,
+    compute_cache_key,
+)
 from koboi.llm.factory import create_client
 from koboi.llm.registry import ProviderRegistry, register_builtin_providers
 
@@ -36,4 +44,10 @@ __all__ = [
     "StaticHeaderAuth",
     "create_client",
     "ProviderRegistry",
+    "CachedClient",
+    "ResponseCache",
+    "CacheEntry",
+    "CacheMissPolicy",
+    "CacheMissError",
+    "compute_cache_key",
 ]
