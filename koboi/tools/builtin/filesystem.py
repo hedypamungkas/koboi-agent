@@ -151,6 +151,9 @@ def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = 
     deps=["sandbox"],
     description="Write/create text file",
     risk_level=RiskLevel.DESTRUCTIVE,
+    # Issue #48: writing mutates the fs; on crash-resume the loop's
+    # _repair_interrupted_turn must NOT silently replay it (double writes).
+    idempotent=False,
     parameters={
         "type": "object",
         "properties": {
@@ -192,6 +195,9 @@ def write_file(path: str, content: str, _deps: dict | None = None) -> str:
     deps=["sandbox"],
     description="Delete file",
     risk_level=RiskLevel.DESTRUCTIVE,
+    # Issue #48: deleting mutates the fs; on crash-resume the loop's
+    # _repair_interrupted_turn must NOT silently replay it (double deletes).
+    idempotent=False,
     parameters={
         "type": "object",
         "properties": {
