@@ -22,6 +22,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from koboi.config import Config
+from koboi import tracing_context
 from koboi.events import ErrorEvent, HandoverEvent
 from koboi.exceptions import AgentHandoverError
 from koboi.types import RunResult
@@ -480,7 +481,7 @@ def create_app(
             allow_methods=cors_cfg.get("allow_methods", ["GET", "POST", "PUT", "DELETE", "OPTIONS"]),
             allow_headers=cors_cfg.get(
                 "allow_headers",
-                ["Authorization", "Content-Type", "X-Session-Id", "Idempotency-Key", "X-Request-Id"],
+                ["Authorization", "Content-Type", "X-Session-Id", "Idempotency-Key", "X-Request-Id", "traceparent"],
             ),
             allow_credentials=cors_cfg.get("allow_credentials", False),
             expose_headers=cors_cfg.get("expose_headers", []),
@@ -1099,8 +1100,16 @@ def _register_routes(
                 audit_trail=agent._core.audit_trail,
                 timeout=APPROVAL_TIMEOUT,
             )
-        # 16.21: enrich Langfuse trace with serving context.
-        _enrich_trace(agent, mode="interactive", request_id=getattr(request.state, "request_id", ""), owner=owner)
+        # P4: start/continue the W3C trace for this interactive run (honors inbound traceparent).
+        tracing_context.begin_request(request.headers.get("traceparent"))
+        # 16.21: enrich Langfuse trace with serving context (+ the W3C traceparent, for linkage).
+        _enrich_trace(
+            agent,
+            mode="interactive",
+            request_id=getattr(request.state, "request_id", ""),
+            owner=owner,
+            traceparent=tracing_context.current_traceparent() or "",
+        )
 
         async def _run_agent():
             try:
@@ -1235,10 +1244,27 @@ def _register_routes(
         except PoolFull as exc:
             return _error_response(429, "pool_full", str(exc), request)
 
+        # P4: continue the W3C trace (honors an inbound traceparent) + link it into Langfuse.
+        tracing_context.begin_request(request.headers.get("traceparent"))
+        _enrich_trace(
+            agent,
+            mode="peer",
+            peer_id=peer_id,
+            request_id=getattr(request.state, "request_id", ""),
+            traceparent=tracing_context.current_traceparent() or "",
+        )
+
         try:
             async with pool.session_lock(session_id):
                 result = await _run_peer_agent(agent, body.message, effective_mode, effective_max_iter)
-            return JSONResponse({"content": result.content, "peer_id": peer_id, "session_id": session_id})
+            return JSONResponse(
+                {
+                    "content": result.content,
+                    "peer_id": peer_id,
+                    "session_id": session_id,
+                    "trace_id": str(result.metadata.get("trace_id", "")) if isinstance(result.metadata, dict) else "",
+                }
+            )
         except Exception as exc:  # noqa: BLE001 -- surface any run failure as a 500 envelope
             _logger.exception("A2A peer invoke failed (session=%s)", session_id)
             return _error_response(500, "peer_invoke_failed", str(exc), request)

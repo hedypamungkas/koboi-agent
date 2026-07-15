@@ -852,6 +852,12 @@ async def _execute_job(
     # their own sandbox/approval from factory build -- the AutonomousApprovalHandler only
     # auto-approves write_file/delete_file (unused by deep_research nodes), so skipping it
     # is safe. Single-agent configs (core is not None) fall through to the full job path below.
+    # P4: mint a root W3C trace BEFORE branching so BOTH paths propagate it -- the
+    # orchestrated path fans out to remote nodes (RemoteAgentProxy -> invoke_peer) and
+    # must carry the traceparent just like the single-agent path.
+    from koboi import tracing_context
+
+    job_trace = tracing_context.begin_request(None)
     if agent._core is None:
         backend = (
             agent._config.get("sandbox", "backend", default="passthrough")
@@ -890,14 +896,17 @@ async def _execute_job(
         )
 
     store.update_status(job_id, "running")
-    # 16.21: enrich Langfuse trace with job context.
+    # 16.21: enrich Langfuse trace with job context (+ the W3C traceparent, for linkage).
     if agent._core and agent._core.hooks:
         lf_hook = agent._core.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
         if lf_hook:
             # find_hook returns the base Hook type; cast to the duck-typed langfuse
             # hook (looked up by class name) to satisfy mypy's attr-defined check.
             cast("LangfuseTracingHook", lf_hook).set_serving_metadata(
-                mode="autonomous", job_id=job_id, owner=record.owner
+                mode="autonomous",
+                job_id=job_id,
+                owner=record.owner,
+                traceparent=job_trace.as_traceparent(),
             )
     final_content: str | None = None
     async with pool.session_lock(record.session_id):

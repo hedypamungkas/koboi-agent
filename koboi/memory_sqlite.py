@@ -38,6 +38,7 @@ def ensure_steps_table(conn: sqlite3.Connection) -> None:
             error TEXT,
             graph_run_id TEXT,
             node_id TEXT,
+            trace_id TEXT,
             created_at REAL DEFAULT (julianday('now'))
         )
     """)
@@ -45,6 +46,7 @@ def ensure_steps_table(conn: sqlite3.Connection) -> None:
     for _stmt in (
         "ALTER TABLE steps ADD COLUMN graph_run_id TEXT",
         "ALTER TABLE steps ADD COLUMN node_id TEXT",
+        "ALTER TABLE steps ADD COLUMN trace_id TEXT",  # P4: W3C trace-id (cross-instance correlation)
     ):
         try:
             conn.execute(_stmt)

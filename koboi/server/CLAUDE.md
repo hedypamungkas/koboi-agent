@@ -25,7 +25,8 @@ approvals.py       HITL bridge -- ApprovalCoordinator (PendingApprovalEvent -> S
 auth.py            KeyStore (file+env, SHA-256 hashed) + make_auth_middleware (Bearer, fail-closed)
 ownership.py       OwnershipStore -- SQLite 'session_owners' sidecar (session_id -> owner) for tenant isolation
 peers.py           PeerRegistry (outbound peers + hashed inbound tokens; `peers:` config, SSRF-gated) + `invoke_peer`
-                   (shared A2A HTTP path to /v1/peer/invoke, used by the call_peer_agent tool + RemoteAgentProxy)
+                   (shared A2A HTTP path to /v1/peer/invoke, used by the call_peer_agent tool + RemoteAgentProxy; P4:
+                   invoke_peer stamps a child W3C `traceparent` header from `tracing_context`; returns PeerInvokeResult)
 agent_card.py      Self-describing signed agent-card (CARD_PATH, build_agent_card/sign_card/verify_card; HMAC-SHA256
                    org-claim via peers.org_secret; PeerRegistry.verify_all gates verified-only peers; _a2a_refresh_loop
                    in app.py re-stamps the card + re-verifies hourly so it never ages out)

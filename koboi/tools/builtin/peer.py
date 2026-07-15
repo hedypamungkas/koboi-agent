@@ -72,7 +72,8 @@ async def call_peer_agent(calls: list[dict], _deps: dict | None = None) -> str:
         if peer is None:
             return f"[{name}] (FAILED: unknown peer)\nAnswer: <error>"
         try:
-            answer = await asyncio.wait_for(invoke_peer(peer, message), timeout=peer.timeout)
+            res = await asyncio.wait_for(invoke_peer(peer, message), timeout=peer.timeout)
+            answer = getattr(res, "content", res)  # PeerInvokeResult or a str (test fakes)
             return f"[{peer.name}] (OK)\nAnswer: {answer}"
         except Exception as exc:  # noqa: BLE001 -- isolate: timeout/http/parse errors stay in this slot
             _logger.warning("A2A call to peer '%s' failed: %s", peer.name, exc)

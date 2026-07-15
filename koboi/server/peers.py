@@ -38,6 +38,20 @@ class PeerConfig:
     verified: bool = False  # P3: True once the peer's agent-card org-claim is verified
 
 
+@dataclass
+class PeerInvokeResult:
+    """Result of an A2A invoke: the peer's answer + its Langfuse trace-id (if configured).
+
+    ``trace_id`` is the receiver's LANGFUSE trace-id (for direct lookup in its Langfuse
+    project; empty if Langfuse isn't configured) -- NOT the W3C correlation key. The
+    shared W3C trace-id (which both instances stamp in their step journals) is identical
+    on both sides; a caller already holds it via ``tracing_context.current_trace_id()``.
+    """
+
+    content: str
+    trace_id: str = ""
+
+
 class PeerRegistry:
     """Outbound ``name -> PeerConfig`` + inbound ``token_hash -> peer_id``.
 
@@ -220,18 +234,24 @@ class PeerRegistry:
             return False
 
 
-async def invoke_peer(peer: PeerConfig, message: str) -> str:
-    """POST a peer instance's ``/v1/peer/invoke`` receiver and return its answer.
+async def invoke_peer(peer: PeerConfig, message: str) -> PeerInvokeResult:
+    """POST a peer instance's ``/v1/peer/invoke`` receiver and return its answer + trace-id.
 
     The single A2A HTTP path, shared by the ``call_peer_agent`` tool and
-    :class:`koboi.orchestration.remote_proxy.RemoteAgentProxy` so there is one
-    place to evolve. Raises ``httpx.HTTPStatusError`` on a non-2xx response and
-    ``ValueError`` on a malformed body; callers decide how to surface failures.
+    :class:`koboi.orchestration.remote_proxy.RemoteAgentProxy`. Propagates the current
+    W3C trace as a child ``traceparent`` header (P4). Raises ``httpx.HTTPStatusError``
+    on a non-2xx response and ``ValueError`` on a malformed body; callers surface failures.
     """
     import httpx  # lazy: peers.py stays importable without httpx at module load
 
+    from koboi import tracing_context
+
     url = peer.url.rstrip("/") + "/v1/peer/invoke"
     headers = {"Authorization": f"Bearer {peer.token}"}
+    # P4: carry the W3C trace as a child traceparent (same trace-id, fresh parent-id).
+    tc = tracing_context.current()
+    if tc is not None:
+        headers["traceparent"] = tracing_context.child(tc).as_traceparent()
     body: dict = {"message": message}
     if peer.agent_name:
         body["agent_name"] = peer.agent_name  # routing hint (informational)
@@ -242,4 +262,4 @@ async def invoke_peer(peer: PeerConfig, message: str) -> str:
     content = data.get("content")
     if not isinstance(content, str):
         raise ValueError(f"peer returned no string content: {data!r}")
-    return content
+    return PeerInvokeResult(content=content, trace_id=str(data.get("trace_id") or ""))

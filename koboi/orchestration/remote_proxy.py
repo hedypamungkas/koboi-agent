@@ -52,8 +52,9 @@ class RemoteAgentProxy:
         try:
             from koboi.server.peers import invoke_peer
 
-            content = await invoke_peer(peer, query)
-            return RunResult(content=content)
+            res = await invoke_peer(peer, query)
+            content = getattr(res, "content", res)  # PeerInvokeResult or a str (test fakes)
+            return RunResult(content=content, metadata={"peer_trace_id": getattr(res, "trace_id", "")})
         except Exception as exc:  # noqa: BLE001 -- isolate peer failures so the run continues
             _logger.warning("A2A node '%s' -> peer '%s' failed: %s", self.name, self.peer_name, exc)
             return RunResult(
