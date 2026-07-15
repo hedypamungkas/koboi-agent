@@ -67,6 +67,16 @@ class TestSkillRegistry:
         out = _preprocess_shell_commands(body)
         assert "[command blocked:" in out
 
+    def test_preprocess_blocks_bypass_variant(self):
+        # Issue #46 (hardened by the #45 fix): the skill `!`cmd`` path reuses
+        # `_check_command_blocked`, so a trivial bypass variant of the interpreter
+        # deny-list must also be blocked -- not executed.
+        from koboi.skills.registry import _preprocess_shell_commands
+
+        body = "Do !`python3 -W ignore -c 'print(1)'` now"
+        out = _preprocess_shell_commands(body)
+        assert "[command blocked:" in out
+
     def test_get(self):
         registry = SkillRegistry()
         skill = SkillDefinition(name="x", description="X", skill_dir="/tmp")

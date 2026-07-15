@@ -10,7 +10,6 @@ import subprocess
 
 from koboi.tools.registry import tool, truncate_text
 from koboi.types import RiskLevel
-from koboi.harness.policy import COMMAND_DENY_PATTERNS, SENSITIVE_PATHS
 from koboi.harness.env import build_safe_env
 
 MAX_OUTPUT = 10000
@@ -71,16 +70,15 @@ def _format_result(result, timeout: int) -> str:
 
 
 def _check_command_blocked(command: str) -> str | None:
-    """Quick inline safety check. Returns error message if blocked, None if OK."""
-    cmd_lower = command.lower()
-    for path in SENSITIVE_PATHS:
-        if path.lower() in cmd_lower:
-            return f"Blocked: command references sensitive path ({path})"
-    for pattern in COMMAND_DENY_PATTERNS:
-        match = pattern.search(cmd_lower)
-        if match:
-            return f"Blocked: command matches deny pattern ({match.group()[:50]})"
-    return None
+    """Quick inline safety check. Returns error message if blocked, None if OK.
+
+    Delegates to the shared token-aware gate in ``koboi.harness.policy`` so the
+    shell tool, the PolicyEngine, and the skill ``!`cmd` `` path all share ONE
+    implementation (and the same defense against bypass variants).
+    """
+    from koboi.harness.policy import check_command_blocked
+
+    return check_command_blocked(command)
 
 
 @tool(
