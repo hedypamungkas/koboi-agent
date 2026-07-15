@@ -363,3 +363,45 @@ class TestLockCleanup:
             asyncio.run(client.complete([{"role": "user", "content": f"q-{i}"}]))
 
         assert len(client._locks) == 0  # all cleaned up, no unbounded growth
+
+
+class TestPutFailureResilience:
+    def test_put_failure_returns_response(self, tmp_path, monkeypatch):
+        # The #1 critical fix: a cache.put() failure must NEVER discard a paid response.
+        import pytest
+        from unittest.mock import patch
+
+        inner = MockClient([_resp("paid-answer")])
+        client = CachedClient(inner, ResponseCache(tmp_path / "c"))
+
+        # Force put() to raise OSError
+        original_put = client._cache.put
+        def failing_put(key, response, **kw):
+            raise OSError("disk full")
+        monkeypatch.setattr(client._cache, "put", failing_put)
+
+        result = asyncio.run(client.complete([{"role": "user", "content": "hi"}]))
+        assert result.content == "paid-answer"  # response returned despite put failure
+        assert inner.call_count == 1  # inner was called (not cached)
+
+    def test_put_failure_lock_retained_for_next_caller(self, tmp_path, monkeypatch):
+        # Fix #2: lock is NOT popped when put fails, so the next coalesced caller
+        # retries serially (no double-spend). On a subsequent call where put succeeds,
+        # the lock IS cleaned up.
+        inner = MockClient([_resp("a"), _resp("b")])
+        client = CachedClient(inner, ResponseCache(tmp_path / "c"))
+        msgs = [{"role": "user", "content": "hi"}]
+
+        call_count = [0]
+        original_put = client._cache.put
+        def maybe_fail_put(key, response, **kw):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise OSError("disk full on first put")
+            original_put(key, response, **kw)
+        monkeypatch.setattr(client._cache, "put", maybe_fail_put)
+
+        # First call: put fails, response returned, lock retained
+        r1 = asyncio.run(client.complete(msgs))
+        assert r1.content == "a"
+        assert len(client._locks) == 1  # lock NOT popped (put failed)

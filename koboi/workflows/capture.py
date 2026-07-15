@@ -101,4 +101,10 @@ def validate_capture(definition: WorkflowDefinition, entries: list[tuple[str, di
             "cache_redacted=True: the sidecar was redacted, so a re-run may diverge "
             "from the original (redaction can mask load-bearing content)."
         )
+    if definition.provenance.with_cache and entries and not definition.provenance.cache_redacted:
+        warnings.append(
+            "cache sidecar is UNREDACTED: it carries verbatim LLM responses/tool args "
+            "(may contain secrets or PII). Use --redact-cache for a share-safe bundle "
+            "(note: redaction may break byte-identical replay)."
+        )
     return warnings

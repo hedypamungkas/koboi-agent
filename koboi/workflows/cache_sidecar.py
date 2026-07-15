@@ -22,6 +22,10 @@ from typing import Protocol
 
 from koboi.llm.cache import CacheEntry, ResponseCache
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class CacheSidecarManifest:
@@ -126,7 +130,8 @@ class SqliteCacheSidecar:
                     created_at=payload.get("created_at", ""),
                     payload=payload,
                 )
-            except (json.JSONDecodeError, KeyError, TypeError):
+            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                _logger.warning("sqlite sidecar skip for %s: %s", r["cache_key"][:8], exc)
                 continue
 
     def __len__(self) -> int:
