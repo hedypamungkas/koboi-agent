@@ -91,6 +91,7 @@ class AgentCore:
         memory: ConversationMemory | None = None,
         tools: ToolRegistry | None = None,
         max_iterations: int = 10,
+        empty_response_reask_limit: int = 1,
         verbose: bool = False,
         logger: AgentLogger | None = None,
         system_prompt: str | None = None,
@@ -119,6 +120,10 @@ class AgentCore:
         self.memory = memory if memory is not None else ConversationMemory(logger=logger, system_prompt=system_prompt)
         self.tools = tools if tools is not None else ToolRegistry()
         self.max_iterations = max_iterations
+        # Self-healing P0-C: bounded re-ask budget for complete-but-empty responses
+        # (default 1 = default-ON; 0 disables). An empty answer is never useful.
+        self.empty_response_reask_limit = empty_response_reask_limit
+        self._empty_response_reasked = 0
         self.verbose = verbose
         self.context_manager = context_manager
         self.max_context_tokens = max_context_tokens
@@ -334,6 +339,21 @@ class AgentCore:
         if _hr:
             raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
 
+    def _is_empty_terminal(self, response: AgentResponse) -> bool:
+        """A complete response with no usable content (self-healing P0-C).
+
+        ``is_complete`` only checks ``not tool_calls``; content is ignored, so an
+        empty/whitespace response is silently treated as a successful completion.
+        """
+        return response.is_complete and not (response.content and response.content.strip())
+
+    def _nudge_empty_response(self) -> None:
+        """Inject a context nudge so the next iteration doesn't repeat the empty turn."""
+        self.memory.add_context_message(
+            "Your previous response was empty. Provide a direct response or call an appropriate tool.",
+            label="empty_response_nudge",
+        )
+
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
         """Run output guardrails, emit POST_OUTPUT, save to memory.
 
@@ -514,6 +534,9 @@ class AgentCore:
             "resumed": resumed,
             "turn_index": self._turn_index,
             "last_step": last_step,
+            # Self-healing P0-C: observability -- how many empty-response re-asks
+            # happened this run (0 = none / disabled).
+            "empty_response_reasked": getattr(self, "_empty_response_reasked", 0),
         }
         # R4: stamp retrieved chunks so evals can assert on retrieval (t.retrievedChunk)
         # without a live LLM. last_results is overwritten each retrieval (not accumulated).
@@ -630,6 +653,8 @@ class AgentCore:
         pipeline_outcomes: list[dict] = []
         total_usage: TokenUsage | None = None
         self._last_output_guardrail = None  # R2: reset per run
+        empty_reasks = 0  # self-healing P0-C: bounded re-ask counter for empty responses
+        self._empty_response_reasked = 0
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
@@ -654,6 +679,25 @@ class AgentCore:
                 continue
 
             if response.is_complete:
+                # Self-healing P0-C: a complete-but-empty response is degenerate --
+                # an empty answer is never useful. Re-ask within budget AND only
+                # while a next iteration remains; otherwise fall through to normal
+                # handling (back-compat: still success=True). The (i+1) < max guard
+                # ensures an empty response on the final iteration never turns a
+                # previously-successful run into an AgentMaxIterationsError.
+                if (
+                    self._is_empty_terminal(response)
+                    and empty_reasks < self.empty_response_reask_limit
+                    and (i + 1) < self.max_iterations
+                ):
+                    empty_reasks += 1
+                    self._empty_response_reasked = empty_reasks
+                    self._log(
+                        f"Empty response; nudging and re-asking ({empty_reasks}/{self.empty_response_reask_limit})"
+                    )
+                    self._nudge_empty_response()
+                    self._journal_step(i, status="empty_reask", response=response)
+                    continue
                 output = await self._process_output(response.content, response, i)
                 self._journal_step(i, status="complete", response=response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
@@ -730,6 +774,8 @@ class AgentCore:
             return
 
         self._last_output_guardrail = None  # R2: reset per run (parity with _run_loop)
+        empty_reasks = 0  # self-healing P0-C: bounded re-ask counter for empty responses
+        self._empty_response_reasked = 0
         _stream_tools_used: list[str] = []
         # G8b: when output guardrails are configured, buffer TextDeltas and flush
         # them only after _process_output passes -- otherwise the tokens stream
@@ -780,6 +826,22 @@ class AgentCore:
                 continue
 
             if final_response.is_complete:
+                # Self-healing P0-C: re-ask a complete-but-empty response within
+                # budget + while a next iteration remains (parity with the non-stream
+                # path); otherwise fall through (never raise on the last iteration).
+                if (
+                    self._is_empty_terminal(final_response)
+                    and empty_reasks < self.empty_response_reask_limit
+                    and (i + 1) < self.max_iterations
+                ):
+                    empty_reasks += 1
+                    self._empty_response_reasked = empty_reasks
+                    self._log(
+                        f"Empty response; nudging and re-asking ({empty_reasks}/{self.empty_response_reask_limit})"
+                    )
+                    self._nudge_empty_response()
+                    self._journal_step(i, status="empty_reask", response=final_response)
+                    continue
                 # May raise AgentGuardrailError (block) -- the buffer is then
                 # discarded, so the blocked tokens never reach the stream.
                 output = await self._process_output(final_response.content or "", final_response, i)

@@ -339,12 +339,31 @@ class SkillsConfig(BaseModel):
     budget_chars: int = Field(default=8000, ge=0)
 
 
+class ExecutionConfig(BaseModel):
+    """Typed view of ``orchestration.execution`` (self-healing P0-B).
+
+    ``extra="allow"`` so the many untyped execution keys (mode, full_graph,
+    research caps, ...) pass through unchanged; this model only validates +
+    documents the knobs we care about. The facade still reads the raw dict via
+    ``config.get("orchestration", "execution", ...)`` -- this is the validated
+    surface for those same keys.
+    """
+
+    model_config = {"extra": "allow"}
+
+    max_replans: int = 0  # dynamic-mode re-plan budget on node failure (0 = opt-in/off)
+    max_revisions: int = 2
+    use_revision: bool = False
+    full_graph: bool = False
+    mode: str | None = None
+
+
 class OrchestrationConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     enabled: bool = False
     router: dict = Field(default_factory=dict)
-    execution: dict = Field(default_factory=dict)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     agents: list[dict] = Field(default_factory=list)
     share_mcp: bool = True  # G5: wire shared MCP clients into orchestration sub-agents
 

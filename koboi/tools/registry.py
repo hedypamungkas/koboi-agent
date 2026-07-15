@@ -31,7 +31,7 @@ from collections.abc import Callable
 from typing import Any
 
 from koboi.exceptions import AgentHandoverError
-from koboi.types import ToolDefinition, RiskLevel
+from koboi.types import ToolDefinition, RiskLevel, ToolExecOutcome
 
 # Short YAML override keys -> canonical registered tool names.
 # Only 1:1 aliases are safe here; N:1 (e.g. git -> git_status/git_log/git_diff)
@@ -194,14 +194,22 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
-    async def execute(self, name: str, arguments_json: str) -> str:
+    async def execute_outcome(self, name: str, arguments_json: str) -> ToolExecOutcome:
+        """Execute a tool and return a structured outcome (self-healing P0-D).
+
+        ``execute()`` delegates here and returns ``.content`` so the public
+        ``-> str`` contract is preserved (MCP bridge / tests / consumers
+        unchanged). Callers that need to distinguish a real failure from a tool
+        that legitimately returns ``"Error: ..."`` text read ``errored`` /
+        ``error_kind`` instead of string-matching.
+        """
         if name not in self._handlers:
-            return f"Error: tool '{name}' not found"
+            return ToolExecOutcome(f"Error: tool '{name}' not found", errored=True, error_kind="tool_not_found")
 
         try:
             args = json.loads(arguments_json)
         except json.JSONDecodeError as e:
-            return f"Error: invalid arguments JSON: {e}"
+            return ToolExecOutcome(f"Error: invalid arguments JSON: {e}", errored=True, error_kind="invalid_args")
 
         # Strip unknown params
         schema_props = self._tools[name].parameters.get("properties", {})
@@ -225,9 +233,13 @@ class ToolRegistry:
             else:
                 result = await coro if asyncio.iscoroutinefunction(handler) else await coro
 
-            return str(result)
+            return ToolExecOutcome(str(result))
         except asyncio.TimeoutError:
-            return f"Error: tool '{name}' timed out after {effective_timeout}s"
+            return ToolExecOutcome(
+                f"Error: tool '{name}' timed out after {effective_timeout}s",
+                errored=True,
+                error_kind="timeout",
+            )
         except AgentHandoverError:
             # B1: a control-flow signal, not a tool failure -- must propagate out of
             # execute -> execute_tool_call -> the loop -> _run_agent/run_job (which
@@ -239,7 +251,19 @@ class ToolRegistry:
             raise
         except Exception as e:
             tb = traceback.format_exc() if os.environ.get("KOBOI_VERBOSE") else ""
-            return f"Error executing '{name}': {e}" + (f"\n{tb}" if tb else "")
+            return ToolExecOutcome(
+                f"Error executing '{name}': {e}" + (f"\n{tb}" if tb else ""),
+                errored=True,
+                error_kind="execution_error",
+            )
+
+    async def execute(self, name: str, arguments_json: str) -> str:
+        """Execute a tool and return its string result (back-compat wrapper).
+
+        Delegates to :meth:`execute_outcome` and returns ``.content``. Prefer
+        ``execute_outcome`` when you need the structured error signal.
+        """
+        return (await self.execute_outcome(name, arguments_json)).content
 
 
 def truncate_text(text: str, max_chars: int) -> str:

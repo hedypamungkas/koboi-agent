@@ -479,14 +479,20 @@ class Orchestrator:
 
         start = time.time()
         tool_calls_made: list = []
+        failed = False
 
         try:
             result = await agent.run(query)
             answer = result.content if hasattr(result, "content") else str(result)
             tool_calls_made = getattr(result, "tool_calls_made", [])
+            # Self-healing P0-A: an upstream signal of failure (RunResult.success
+            # is False without raising) is also a node failure, not just a crash.
+            if getattr(result, "success", True) is False:
+                failed = True
         except Exception as e:
             logger.error("Agent %s failed: %s", agent_name, e, exc_info=True)
             answer = f"Error: {e}"
+            failed = True
 
         elapsed = time.time() - start
         try:
@@ -508,6 +514,7 @@ class Orchestrator:
             is_dynamic=is_dynamic,
             domain_label=domain_label,
             tool_calls=tool_calls_made,
+            failed=failed,
         )
 
     async def _run_dag_waves_with_flow(
@@ -816,7 +823,13 @@ class Orchestrator:
                     results.append(event.agent_result)
                 yield event
             routing_agents = step_ids
-            # #3: re-plan on node failure (bounded by max_replans).
+            # #3: re-plan on node failure (bounded by max_replans). Opt-in (default
+            # 0 = off). CAVEAT (self-healing P0-A unblocked this loop): on a node
+            # crash this re-runs the WHOLE freshly-planned graph under a new
+            # graph_run_id (no cursor-skip of already-succeeded nodes), so
+            # side-effecting non-idempotent tools in succeeded nodes can double-fire.
+            # Keep dynamic nodes read-only, or leave max_replans=0 until P2 adds
+            # per-node/subtree retry. TODO(P2): cache succeeded-node results.
             replans_left = self._max_replans
             while replans_left > 0 and any(r.failed for r in results):
                 replans_left -= 1
@@ -1154,9 +1167,10 @@ class Orchestrator:
                 "plan_nodes": len(routing_agents),
                 "used_searches": budget.used_searches,
                 "used_fetches": budget.used_fetches,
-                # _run_single catches node exceptions + returns AgentResult(answer="Error: ...",
-                # failed=False), so r.failed never reflects crashes. Detect via the same
-                # "Error:" answer prefix the citation path uses (line ~502).
+                # Self-healing P0-A: _run_single now sets failed=True on a crash, so
+                # r.failed reflects crashes for the standard path. Kept as a string
+                # match on "Error:" too (belt-and-suspenders for custom agent classes
+                # that return a real answer with success=False). TODO(P1): prefer r.failed.
                 "nodes_failed": sum(1 for r in results_by_name.values() if (r.answer or "").startswith("Error:")),
             },
         )

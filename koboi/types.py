@@ -52,6 +52,20 @@ class ToolResult:
 
 
 @dataclass
+class ToolExecOutcome:
+    """Structured outcome of executing a tool (self-healing P0-D).
+
+    ``content`` is always the LLM-facing string (so ``ToolRegistry.execute()``
+    keeps its ``-> str`` contract). ``errored`` / ``error_kind`` let the pipeline
+    flag a failure WITHOUT fragile string-matching of the ``"Error:"`` prefix.
+    """
+
+    content: str
+    errored: bool = False
+    error_kind: str | None = None
+
+
+@dataclass
 class TokenUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
