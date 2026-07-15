@@ -210,6 +210,7 @@ class AgentFactory:
         mcp_registrar: Callable[[object], None] | None = None,
         search_provider: object | None = None,
         fetch_provider: object | None = None,
+        media_provider: object | None = None,
     ) -> Agent:
         """Build an AgentCore from an AgentDef (config-driven).
 
@@ -242,6 +243,7 @@ class AgentFactory:
             sandbox=sandbox,
             search_provider=search_provider,
             fetch_provider=fetch_provider,
+            media_provider=media_provider,
         )
 
         # G5: register shared MCP tools into this sub-agent's registry (one set of
@@ -309,6 +311,7 @@ class AgentFactory:
         sandbox: object | None = None,
         search_provider: object | None = None,
         fetch_provider: object | None = None,
+        media_provider: object | None = None,
     ):
         """Build a ToolRegistry from agent-level tools config."""
         if not tools_config:
@@ -351,6 +354,8 @@ class AgentFactory:
             registry.set_dep("search_provider", search_provider)
         if fetch_provider is not None:
             registry.set_dep("fetch_provider", fetch_provider)
+        if media_provider is not None:
+            registry.set_dep("media_provider", media_provider)
         # Apply defaults/overrides/disabled/groups via the shared helper so this
         # path stays in lock-step with facade._build_tools.
         from koboi.tools.registry import apply_tool_selection

@@ -48,6 +48,7 @@ eval-all = ["ragas>=0.2", "datasets>=2.14", "pandas>=2.0", "deepeval>=0.20"]
 # RAG document ingestion: format parsers + remote object storage (all optional).
 rag = ["pypdf>=4.0", "python-docx>=1.1", "pdfplumber>=0.11"]
 rag-cloud = ["boto3>=1.34"]
+media-cloud = ["boto3>=1.34"]
 # Optional local cross-encoder rerank (heavy: pulls torch + sentence-transformers).
 # Default rerank backends are the hosted Jina/Cohere APIs (no extra needed); this enables
 # `rag.rerank.provider: local` for no-egress/sovereignty deployments.

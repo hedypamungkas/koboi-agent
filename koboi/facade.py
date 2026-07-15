@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from koboi.hooks.chain import HookChain
     from koboi.journal import StepJournal
     from koboi.loop import AgentCore
+    from koboi.media.types import MediaRequest, MediaResult
     from koboi.mcp.base import BaseMCPClient
     from koboi.orchestration.orchestrator import Orchestrator
     from koboi.rag.augmentation import AugmentationStrategy
@@ -94,22 +95,13 @@ class KoboiAgent:
         Pass ``resume_session`` to rehydrate-and-continue an interrupted session
         (P2-A): the SQLite memory reloads that session's conversation and the
         journal inherits its turn numbering. Call ``agent.resume()`` to actually
-        resume the loop. ``replay_mode`` / ``cache_dir`` inject a per-run cache
-        mode (see ``koboi.llm.cache``) without mutating the source config.
+        resume the loop.
         """
         config = Config.from_yaml(config_path)
-        return cls._from_config(
-            config,
-            verbose=verbose,
-            resume_session=resume_session,
-            replay_mode=replay_mode,
-            cache_dir=cache_dir,
-        )
+        return cls._from_config(config, verbose=verbose, resume_session=resume_session)
 
     @classmethod
-    def from_dict(
-        cls, data: dict, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None
-    ) -> KoboiAgent:
+    def from_dict(cls, data: dict, verbose: bool = False) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a Python dict.
 
         Usage:
@@ -122,9 +114,7 @@ class KoboiAgent:
         return cls._from_config(config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir)
 
     @classmethod
-    def from_config_string(
-        cls, yaml_string: str, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None
-    ) -> KoboiAgent:
+    def from_config_string(cls, yaml_string: str, verbose: bool = False) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a YAML string.
 
         Usage:
@@ -153,10 +143,6 @@ class KoboiAgent:
             # Point the SQLite memory at the target session so it rehydrates that
             # conversation (and the journal inherits its turn numbering).
             config._data.setdefault("memory", {})["session_id"] = resume_session
-        if replay_mode is not None or cache_dir is not None:
-            # Inject a per-run cache mode on an immutable copy (the shared pooled
-            # server Config must not be mutated -- AgentCore is not concurrent-safe).
-            config = config.with_replay(replay_mode=replay_mode, cache_dir=cache_dir)
         # Orchestration mode: transparent to caller
         if config.orchestration.get("enabled"):
             return _build_orchestration(config, verbose=verbose)
@@ -205,16 +191,7 @@ class KoboiAgent:
                     raise AgentError("Cannot resume deep_research: no db_path (memory.backend must be sqlite)")
                 from koboi.orchestration.dag_scheduler import DagScheduler
 
-                # Session-scoped first (avoid a cross-session leak: a shared koboi_memory.db
-                # holds every session's research_context rows; the global latest would return
-                # whichever session ran most recently). Fall back to the global latest only for
-                # non-server callers whose rows carry no session_id tag.
-                resume_session_id = getattr(self._orchestrator, "_session_id", None)
-                ctx_json = (
-                    DagScheduler.load_research_context_for_session(db_path, resume_session_id)
-                    if resume_session_id
-                    else DagScheduler.load_latest_research_context(db_path)
-                )
+                ctx_json = DagScheduler.load_latest_research_context(db_path)
                 if not ctx_json:
                     raise AgentError("No research context found to resume (run deep_research first)")
                 self._orchestrator._resume_ctx_json = ctx_json  # type: ignore[attr-defined]
@@ -281,6 +258,13 @@ class KoboiAgent:
                 agent_client = getattr(agent, "client", None)
                 if agent_client is not None and agent_client is not shared_client and hasattr(agent_client, "close"):
                     await agent_client.close()
+            # W5a: close the shared orchestration media backend (static-agent path).
+            _orch_media = getattr(self._orchestrator, "_media_backend", None)
+            if _orch_media is not None and hasattr(_orch_media, "close"):
+                try:
+                    await _orch_media.close()
+                except Exception as e:  # nosec B110 - best-effort teardown
+                    logging.getLogger(__name__).debug("Orchestration media close failed: %s", e, exc_info=True)
             await shared_client.close()
         elif self._core is not None:
             if hasattr(self._core.memory, "close"):
@@ -298,6 +282,15 @@ class KoboiAgent:
                     await retriever.close()
                 except Exception as e:  # nosec B110 - best-effort teardown; logged for diagnostics
                     logging.getLogger(__name__).debug("Augmentation retriever close failed: %s", e, exc_info=True)
+            # Close the media backend (gateway HTTP transport) if media is enabled. The
+            # backend lives on the tool registry's dep store (set in _build_tools).
+            _media_tools = getattr(self._core, "tools", None)
+            _media_backend = _media_tools.get_dep("media_provider") if _media_tools is not None else None
+            if _media_backend is not None and hasattr(_media_backend, "close"):
+                try:
+                    await _media_backend.close()
+                except Exception as e:  # nosec B110 - best-effort teardown; logged for diagnostics
+                    logging.getLogger(__name__).debug("Media backend close failed: %s", e, exc_info=True)
             await self._core.client.close()
         # Clean up logger
         if self._logger is not None:
@@ -564,6 +557,35 @@ class KoboiAgent:
             )
         return entries
 
+    async def media_generate(self, req: MediaRequest) -> MediaResult:
+        """Programmatic media generation (W5a) -- generate without the LLM in the loop.
+
+        Reaches the backend: single-agent via the tool-registry dep store; orchestration via the
+        shared ``orchestrator._media_backend``. Returns a not-configured result if media is off.
+        """
+        backend = self._media_backend()
+        if backend is None:
+            from koboi.media.backend import _not_configured
+
+            return _not_configured(req, (req.modality or "image"))
+        return await backend.generate(req)
+
+    async def media_transcribe(self, audio: bytes, **opts) -> str:
+        """Programmatic STT (W5a) -- transcribe audio bytes to text without the LLM in the loop."""
+        backend = self._media_backend()
+        if backend is None:
+            raise RuntimeError("media not configured (enable media.transcription)")
+        return await backend.transcribe(audio, **opts)
+
+    def _media_backend(self):
+        """Reach the active MediaBackend: single-agent dep store, or orchestration shared slot."""
+        if self._orchestrator is not None:
+            return getattr(self._orchestrator, "_media_backend", None)
+        if self._core is not None:
+            _tools = getattr(self._core, "tools", None)
+            return _tools.get_dep("media_provider") if _tools is not None else None
+        return None
+
     @staticmethod
     def _mcp_conf_endpoint(server_conf: dict) -> str:
         """Identity endpoint string for a configured server (matches client.endpoint)."""
@@ -696,41 +718,6 @@ def _resolve_chat_client(config: Config, logger: AgentLogger | None) -> Client:
     return _build_client(config, logger)
 
 
-def _resolve_replay_mode(config: Config) -> str:
-    """Effective replay mode. Precedence: top-level ``replay.mode`` (incl. the
-    CLI-injected value set by ``Config.with_replay``) > workflow-level
-    ``orchestration.determinism.replay_mode`` (when not ``live``) > ``live``."""
-    mode = config.replay.get("mode") or "live"
-    if mode == "live":
-        det = (config.orchestration.get("determinism") or {}).get("replay_mode")
-        if det and det != "live":
-            return det
-    return mode
-
-
-def _resolve_cache_dir(config: Config) -> str:
-    return config.replay.get("cache_dir") or ".koboi/cache"
-
-
-def _maybe_wrap_cache(client: Client, config: Config) -> Client:
-    """Wrap a chat client in ``CachedClient`` for ``cache`` / ``replay`` modes.
-
-    ``cache`` (STORE) memoizes live responses and replays on an identical request
-    (live on a miss). ``replay`` (RAISE) is pure-offline: a miss raises
-    ``CacheMissError`` (no live call, no API key for cached completions) -- the
-    honest signal that the run diverged from the cached trajectory. Idempotent
-    (never double-wraps). Embeddings are NOT wrapped (separate builder)."""
-    mode = _resolve_replay_mode(config)
-    if mode not in ("cache", "replay"):
-        return client
-    from koboi.llm.cache import CacheMissPolicy, CachedClient, ResponseCache
-
-    if isinstance(client, CachedClient):
-        return client
-    on_miss = CacheMissPolicy.RAISE if mode == "replay" else CacheMissPolicy.STORE
-    return CachedClient(client, ResponseCache(_resolve_cache_dir(config)), on_miss=on_miss)
-
-
 def _build_tools(config: Config) -> ToolRegistry:
     registry = ToolRegistry()
     builtin_list = config.get("tools", "builtin", default=[])
@@ -748,6 +735,7 @@ def _build_tools(config: Config) -> ToolRegistry:
             load_custom_components(websearch_conf["custom_modules"])
         registry.set_dep("search_provider", build_search_provider(websearch_conf))
         registry.set_dep("fetch_provider", build_fetch_provider(websearch_conf))
+
         # Inject per-agent memory store so agents don't share state
         from koboi.tools.builtin.memory import _MemoryStore
 
@@ -755,6 +743,18 @@ def _build_tools(config: Config) -> ToolRegistry:
         registry.set_dep("memory_store_ref", _MemoryStore(filepath=memory_file))
         if builtin_list and isinstance(builtin_list, list):
             registry.keep_only(builtin_list)
+
+    # W0/W5b: inject the media backend whenever media is enabled -- OUTSIDE the builtin_list
+    # gate so the programmatic API (agent.media_generate) + REST /v1/media/generate work even
+    # when no builtin tools are configured (direct generation, no LLM tool surface). The
+    # generate_* tools resolve this dep; absent/disabled media -> "media not configured".
+    media_conf = config.get("media", default={})
+    if media_conf and media_conf.get("enabled"):
+        from koboi.media import build_media
+
+        media_backend = build_media(media_conf)
+        if media_backend is not None:
+            registry.set_dep("media_provider", media_backend)
 
     custom_list = config.get("tools", "custom", default=[])
     if custom_list:
@@ -1113,7 +1113,7 @@ class AgentAssembler:
         return self.logger
 
     def build_client(self) -> Client:
-        self.client = _maybe_wrap_cache(_resolve_chat_client(self.config, self.logger), self.config)
+        self.client = _resolve_chat_client(self.config, self.logger)
         return self.client
 
     def build_memory(self) -> object:
@@ -1357,28 +1357,6 @@ class AgentAssembler:
             from koboi.hooks.proactive_extraction_hook import ProactiveExtractionHook
 
             self.hook_chain.add(ProactiveExtractionHook(proactive=self.proactive_memory))
-
-        # B1.5: structural handover detection (opt-in). A3-fed (GroundingGuardrail ref).
-        if self.hook_chain and self.config.get("handover", "detection", "enabled", default=False):
-            from koboi.guardrails.grounding import GroundingGuardrail
-            from koboi.hooks.handover_detection_hook import HandoverDetectionHook
-
-            grounding = next(
-                (g for g in (self.output_guardrails or []) if isinstance(g, GroundingGuardrail)),
-                None,
-            )
-            if grounding is None:
-                logging.getLogger(__name__).warning(
-                    "handover.detection enabled without a grounding_check output guardrail "
-                    "-- coverage-based handover will be inert; only explicit user-ask will trigger"
-                )
-            self.hook_chain.add(
-                HandoverDetectionHook(
-                    grounding=grounding,
-                    coverage_threshold=self.config.get("handover", "detection", "coverage_threshold", default=0.5),
-                    ask_patterns=self.config.get("handover", "detection", "ask_patterns", default=None),
-                )
-            )
 
         from koboi.loop import AgentCore
 
@@ -1705,66 +1683,33 @@ def _build_command_hooks(config: Config, sandbox: BaseSandbox, hook_chain) -> No
 
 
 def _parse_agent_defs(config: Config) -> list:
-    """Parse AgentDef list from orchestration.agents config.
-
-    Applies the workflow-level determinism profile (``orchestration.determinism``)
-    merged with any per-node ``determinism`` block into each node's ``llm_config``
-    (via :func:`_apply_determinism`) so a dedicated pinned LLM client is built
-    through the existing ``_has_client_overrides`` path -- no change to
-    ``_agent_client_builder``. ``output_schema`` and
-    ``force_response_format_with_tools`` are captured here for the
-    response_format path (Gap A/B).
-    """
+    """Parse AgentDef list from orchestration.agents config."""
     from koboi.types import AgentDef
 
     agents_conf = config.orchestration.get("agents", [])
     if not agents_conf:
         raise ValueError("orchestration.agents must have at least one agent")
 
-    wf_det = config.orchestration.get("determinism") or {}
     defs = []
     for ac in agents_conf:
-        if not ac.get("name", ""):
+        name = ac.get("name", "")
+        if not name:
             raise ValueError("Each orchestration agent must have a 'name'")
-        agent_def = AgentDef.from_dict(ac)
-        _apply_determinism(agent_def, wf_det)
-        defs.append(agent_def)
+        defs.append(
+            AgentDef(
+                name=name,
+                system_prompt=ac.get("system_prompt", ""),
+                description=ac.get("description", ""),
+                keywords=ac.get("keywords", []),
+                tools_config=ac.get("tools"),
+                rag_config=ac.get("rag"),
+                llm_config=ac.get("llm"),
+                depends_on=ac.get("depends_on", []),
+                conditionals=ac.get("conditionals", []),
+                interrupt_after=ac.get("interrupt_after", False),
+            )
+        )
     return defs
-
-
-def _apply_determinism(agent_def, wf_det: dict) -> None:
-    """Merge workflow-level + per-node determinism into the node's ``llm_config``.
-
-    Per-node ``determinism`` overrides the workflow-level profile; explicit node
-    ``llm_config`` values are preserved (``setdefault``) so determinism only
-    fills gaps. The merged knobs (temperature/seed/top_p/model) make
-    ``_has_client_overrides`` return True, so the UNCHANGED ``_agent_client_builder``
-    builds a dedicated pinned client for this node. ``seed`` auto-forwards via
-    ``extract_extra_params`` (and is dropped on Anthropic by
-    ``_filter_extra_params_for_provider``).
-
-    A node whose ``llm_config`` is a string (a named ``providers:`` ref that fully
-    replaces the client) opts out of determinism pinning -- the knobs cannot merge
-    into a string, and the named ref already specifies provider/model.
-    """
-    from koboi.workflows import DeterminismProfile
-
-    node_profile = DeterminismProfile.from_dict(agent_def.determinism)
-    wf_profile = DeterminismProfile.from_dict(wf_det)
-    base = wf_profile or node_profile
-    if base is None:
-        return
-    effective = base.merge(node_profile) if (wf_profile and node_profile) else base
-    overrides = effective.to_llm_overrides()
-    if not overrides:
-        return
-    if isinstance(agent_def.llm_config, str):
-        # Named providers: ref -- determinism knobs can't merge into a string.
-        return
-    llm = dict(agent_def.llm_config or {})
-    for key, value in overrides.items():
-        llm.setdefault(key, value)  # explicit node llm values preserved
-    agent_def.llm_config = llm or None
 
 
 def _build_router(config: Config, client: Client, agent_defs: list):
@@ -1795,16 +1740,6 @@ def _build_orchestration(config: Config, verbose: bool = False):
     Reuses AgentAssembler for common subsystems (logger, client, guardrails,
     policy, hooks, skills, mode_manager, trust_db) so orchestration mode
     gets the same policy enforcement and guardrails as single-agent mode.
-
-    Cache/replay coverage (v2/v3): EVERY chat LLM call in orchestration flows
-    through ``_maybe_wrap_cache`` -- the shared ``assembler.client`` (router,
-    planner, synthesis, dynamic builder) via ``build_client``, and per-node
-    clients via ``_agent_client_builder``. Three call paths are currently
-    UNREACHABLE from here and therefore uncached: ``QualityEvaluator`` (only
-    constructed in tests), ``ProactiveExtractionHook`` (not attached in
-    orchestration mode), and ``deep_research`` (docs-only on this branch). If
-    any becomes reachable, route it through ``_maybe_wrap_cache`` or it
-    egresses live during a cache/replay run.
     """
     from koboi.orchestration.factory import AgentFactory
     from koboi.orchestration.orchestrator import Orchestrator
@@ -1836,15 +1771,12 @@ def _build_orchestration(config: Config, verbose: bool = False):
         # REPLACES the top-level client; an inline dict MERGES over it (today's
         # behavior). Pool specs (W2) raise.
         def _agent_client_builder(agent_llm: dict | str) -> Client:
-            c: Client
             if isinstance(agent_llm, str):
-                c = _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
-            elif isinstance(agent_llm, dict) and "pool" in agent_llm:
-                c = _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
-            else:
-                overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
-                c = _build_client(config, assembler.logger, llm_overrides=overrides)
-            return _maybe_wrap_cache(c, config)
+                return _build_client_from_dict(resolve_llm_spec(agent_llm, config), assembler.logger)
+            if isinstance(agent_llm, dict) and "pool" in agent_llm:
+                return _build_pool_from_spec(agent_llm["pool"], config, assembler.logger)
+            overrides = {k: v for k, v in agent_llm.items() if k != "max_context_tokens"}
+            return _build_client(config, assembler.logger, llm_overrides=overrides)
 
     # G5: wire shared MCP clients into orchestration (default on). The shared clients
     # are connected once; the registrar re-registers their tools into each sub-agent's
@@ -1854,6 +1786,10 @@ def _build_orchestration(config: Config, verbose: bool = False):
     shared_mcp_clients = [client for client, _ in mcp_pairs]
     mcp_registrar = _mcp_registrar_for_pairs(mcp_pairs, config)
 
+    # W5a: shared media backend for static-agent orchestration nodes (create_all_configured parity).
+    from koboi.media import build_media
+
+    orch_media = build_media(config.get("media", default={}))
     if agent_defs:
         agents_map = AgentFactory.create_all_configured(
             agent_defs,
@@ -1865,6 +1801,7 @@ def _build_orchestration(config: Config, verbose: bool = False):
             embedding_config=config.get("embedding"),
             client_builder=_agent_client_builder,
             mcp_registrar=mcp_registrar,
+            media_provider=orch_media,
         )
     else:
         agents_map = {}
@@ -1912,6 +1849,8 @@ def _build_orchestration(config: Config, verbose: bool = False):
         sandbox=assembler.sandbox,
         research=config.get("research", default={}),
         websearch_conf=config.get("websearch", default={}),
+        media_conf=config.get("media", default={}),
+        media_backend=orch_media,
         session_id=config.get("memory", "session_id", default=None),
     )
 

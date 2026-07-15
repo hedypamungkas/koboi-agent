@@ -73,6 +73,7 @@ class KoboiApp(App):
 
         self._bindings_list = load_keybindings(agent.config)
         self._bindings = BindingsMap(self._bindings_list)
+        self._media_artifacts: list[dict] = []  # W5c #2: generated artifacts for the f3 gallery
 
         # Phase 4: Mode manager (from agent or create default)
         self._mode_manager: ModeManager = agent.mode_manager or ModeManager()
@@ -430,6 +431,12 @@ class KoboiApp(App):
         entries = self._agent.mcp_status() if self._agent is not None else []
         self.push_screen(McpStatusScreen(entries))
 
+    def action_media_gallery(self) -> None:
+        """Open the media gallery (W5c #2) -- generated artifacts this session."""
+        from koboi.tui.screens.media_gallery import MediaGalleryScreen
+
+        self.push_screen(MediaGalleryScreen(list(self._media_artifacts)))
+
     def action_focus_input(self) -> None:
         """Focus the input box."""
         self.query_one("#input-box").focus()
@@ -598,6 +605,12 @@ class KoboiApp(App):
     def on_stream_tool_result(self, event: StreamToolResult) -> None:
         chat = self.query_one("#chat-area", ChatLog)
         chat.update_tool_result(event.tool_call_id, event.result)
+        # W5c #2: record generated media for the f3 gallery.
+        from koboi.tui.screens.media_gallery import parse_media_artifact
+
+        artifact = parse_media_artifact(event.tool_name, event.result)
+        if artifact is not None:
+            self._media_artifacts.append(artifact)
         status = self.query_one("#status-bar", StatusBar)
         status.state = "streaming"
         status.current_tool = ""

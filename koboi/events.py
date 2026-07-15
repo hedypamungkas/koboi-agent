@@ -157,6 +157,13 @@ class SourceEvent:
 
 
 @dataclass
+class MediaGeneratedEvent:
+    """W3: media generation event."""
+    modality: str
+    prompt: str
+
+
+@dataclass
 class CoverageEvent:
     """W2: a coverage-evaluation round completed."""
 
@@ -182,6 +189,7 @@ StreamEvent = (
     | FetchEvent
     | SourceEvent
     | CoverageEvent
+    | MediaGeneratedEvent
 )
 
 
@@ -202,6 +210,7 @@ _EVENT_TYPE_MAP: dict[type, str] = {
     FetchEvent: "fetch",
     SourceEvent: "source",
     CoverageEvent: "coverage",
+    MediaGeneratedEvent: "media_generated",
 }
 
 # Fields that need rounding to 2 decimal places
