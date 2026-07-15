@@ -101,7 +101,7 @@ class KoboiAgent:
         return cls._from_config(config, verbose=verbose, resume_session=resume_session)
 
     @classmethod
-    def from_dict(cls, data: dict, verbose: bool = False) -> KoboiAgent:
+    def from_dict(cls, data: dict, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a Python dict.
 
         Usage:
@@ -114,7 +114,7 @@ class KoboiAgent:
         return cls._from_config(config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir)
 
     @classmethod
-    def from_config_string(cls, yaml_string: str, verbose: bool = False) -> KoboiAgent:
+    def from_config_string(cls, yaml_string: str, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a YAML string.
 
         Usage:

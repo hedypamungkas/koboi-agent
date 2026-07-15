@@ -337,7 +337,14 @@ def register_decorated(registry: ToolRegistry, module: Any) -> None:
             dep_names = getattr(obj, "_tool_deps", [])
             fn = _wrap_with_deps(obj, dep_names, registry)
             registry.register(
-                td.name, td.description, td.parameters, fn, risk_level=td.risk_level, timeout=td.timeout, group=td.group
+                td.name,
+                td.description,
+                td.parameters,
+                fn,
+                risk_level=td.risk_level,
+                timeout=td.timeout,
+                group=td.group,
+                idempotent=td.idempotent,
             )
 
 

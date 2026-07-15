@@ -251,3 +251,53 @@ class McpServerListResponse(BaseModel):
     model_config = {"extra": "ignore"}
 
     servers: list[McpServerResponse] = Field(default_factory=list)
+
+
+class MediaGenerateRequest(BaseModel):
+    """POST /v1/media/generate body."""
+    model_config = {"extra": "ignore"}
+    modality: str = Field(default="image")
+    prompt: str = Field(max_length=65536)
+    model: str | None = None
+    n: int = Field(default=1, ge=1, le=20)
+    size: str | None = None
+    quality: str | None = None
+    response_format: str | None = None
+    aspect_ratio: str | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
+    audio: bool | None = None
+    voice: str | None = None
+    language_code: str | None = None
+    lyrics_prompt: str | None = Field(default=None, max_length=65536)
+    webhook_url: str | None = None
+    idempotency_key: str | None = None
+    session_id: str | None = None
+
+
+class MediaGenerateResponse(BaseModel):
+    """POST /v1/media/generate response."""
+    model_config = {"extra": "ignore"}
+    request_id: str
+    modality: str
+    status: str
+    local_path: str | None = None
+    url: str | None = None
+    url_expires_at: float | None = None
+    content_type: str | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_seconds: float | None = None
+    cost_usd: float | None = None
+    billing_unit: str | None = None
+    billing_quantity: float | None = None
+    safety_blocked: bool = False
+    rejection_reason: str | None = None
+    model: str | None = None
+
+
+class MediaJobResponse(BaseModel):
+    """GET /v1/media/jobs/{id} response."""
+    model_config = {"extra": "ignore"}
+    job_id: str
+    status: str
+    result: MediaGenerateResponse | None = None

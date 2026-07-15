@@ -278,6 +278,7 @@ class AgentFactory:
         mcp_registrar: Callable[[object], None] | None = None,
         search_provider: object | None = None,
         fetch_provider: object | None = None,
+        media_provider: object | None = None,
     ) -> dict[str, Agent]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -302,6 +303,7 @@ class AgentFactory:
                 mcp_registrar=mcp_registrar,
                 search_provider=search_provider,
                 fetch_provider=fetch_provider,
+                media_provider=media_provider,
             )
         return agents
 
