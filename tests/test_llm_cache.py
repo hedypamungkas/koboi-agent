@@ -331,3 +331,35 @@ class TestResolveReplayModePrecedence:
             }
         )
         assert _resolve_replay_mode(cfg) == "live"
+
+
+class TestLockCleanup:
+    def test_lock_cleaned_up_after_miss(self, tmp_path):
+        # The per-key lock is cleaned up after use so the dict doesn't grow unbounded
+        # in long-running cache-mode servers (suggestion #3 from PR review).
+        inner = MockClient([_resp("hello")])
+        client = CachedClient(inner, ResponseCache(tmp_path / "c"))
+        msgs = [{"role": "user", "content": "hi"}]
+        asyncio.run(client.complete(msgs))
+        assert len(client._locks) == 0  # lock was cleaned up after the store
+
+    def test_lock_cleaned_up_after_concurrent(self, tmp_path):
+        inner = MockClient([_resp("a")])
+        client = CachedClient(inner, ResponseCache(tmp_path / "c"))
+        msgs = [{"role": "user", "content": "hi"}]
+
+        async def run():
+            await asyncio.gather(client.complete(msgs), client.complete(msgs))
+
+        asyncio.run(run())
+        assert len(client._locks) == 0  # coalesced + cleaned up
+
+    def test_locks_bounded_across_many_keys(self, tmp_path):
+        # 100 different prompts → 100 cache misses → locks created + cleaned up
+        inner = MockClient([_resp(f"resp-{i}") for i in range(100)])
+        client = CachedClient(inner, ResponseCache(tmp_path / "c"))
+
+        for i in range(100):
+            asyncio.run(client.complete([{"role": "user", "content": f"q-{i}"}]))
+
+        assert len(client._locks) == 0  # all cleaned up, no unbounded growth

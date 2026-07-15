@@ -266,16 +266,21 @@ class CachedClient(LLMClient):
         if self._on_miss == CacheMissPolicy.RAISE:
             raise CacheMissError(f"cache miss for key {key[:8]} (offline replay mode)")
         # Per-key lock coalesces concurrent identical misses (no double-spend).
-        async with self._lock_for(key):
-            cached = self._cache.get(key)  # double-check after acquiring
-            if cached is not None:
-                return cached
-            response = await self._inner.complete(messages, tools, response_format=response_format)
-            try:
-                self._cache.put(key, response, model=self._inner.model)
-            except OSError as exc:
-                _logger.warning("cache write failed for key %s: %s (response returned uncached)", key[:8], exc)
-            return response
+        # The lock is cleaned up after use (try/finally) so the dict doesn't grow
+        # unbounded in long-running cache-mode servers.
+        try:
+            async with self._lock_for(key):
+                cached = self._cache.get(key)  # double-check after acquiring
+                if cached is not None:
+                    return cached
+                response = await self._inner.complete(messages, tools, response_format=response_format)
+                try:
+                    self._cache.put(key, response, model=self._inner.model)
+                except OSError as exc:
+                    _logger.warning("cache write failed for key %s: %s (response returned uncached)", key[:8], exc)
+                return response
+        finally:
+            self._locks.pop(key, None)
 
     async def get_embeddings(self, text: str) -> list[float] | None:
         # Embeddings are NEVER cached (chat-only scope).
