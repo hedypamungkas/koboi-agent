@@ -380,6 +380,38 @@ class MCPConfig(BaseModel):
     allowlist_commands: list[str] = Field(default_factory=list)  # extra stdio runners (basename)
 
 
+class PeerConfig(BaseModel):
+    """A peer koboi instance for cross-instance agent-to-agent (A2A) calls.
+
+    Each registered peer URL is trusted as same-org/owner (static Bearer per peer).
+    The ``token`` is the OUTBOUND credential presented to the peer; inbound peer
+    tokens are listed separately under ``PeersConfig.inbound_tokens``.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    name: str  # unique peer key (used by the call_peer_agent tool)
+    url: str  # remote instance base URL (e.g. http://peer-y:8000)
+    token: str = ""  # outbound bearer presented to the peer (plaintext; same-org trust)
+    agent_name: str = ""  # optional routing hint (which named agent to target on the peer)
+    org: str = ""  # documentation/audit only (same-org grouping)
+    timeout: float = Field(default=30.0, gt=0)  # outbound invoke timeout (seconds)
+
+
+class PeersConfig(BaseModel):
+    """Cross-instance A2A configuration (opt-in; inert by default)."""
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    peers: list[PeerConfig] = Field(default_factory=list)  # outbound peers
+    inbound_tokens: list[str] = Field(default_factory=list)  # plaintext tokens accepted from peers (hashed at load)
+    # Same-org peers often live on private networks / localhost (dev, internal clusters).
+    # Default False = strict SSRF (reject private/loopback URLs at load). Set True when the
+    # operator vouches for these URLs; strict SSRF is reserved for untrusted discovery (P3).
+    allow_private_network: bool = False
+
+
 class RlimitsConfig(BaseModel):
     """POSIX resource limits applied to restricted sandbox subprocesses.
 
@@ -569,6 +601,7 @@ class KoboiConfig(BaseModel):
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     websearch: WebSearchConfig = Field(default_factory=WebSearchConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
+    peers: PeersConfig = Field(default_factory=PeersConfig)
 
     @model_validator(mode="before")
     @classmethod

@@ -1,0 +1,41 @@
+# Cross-instance Agent-to-Agent (A2A) -- Instance X (agent A)
+#
+# Run:  koboi serve configs/a2a_instance_x.yaml
+# Then prompt A (from another terminal / client) to collaborate with peer C.
+#
+# A calls peer agents via the `call_peer_agent` tool. Each registered peer URL is
+# trusted as same-org (static Bearer per peer). `allow_private_network: true`
+# because peers are on localhost/private net here; set false + public URLs in prod.
+
+agent:
+  name: A
+  mode: act  # call_peer_agent is MODERATE -> needs act+ (or allowlist via mode.read_only_tools)
+  system_prompt: |
+    You are agent A on instance X. You collaborate with a peer agent C on instance Y.
+    When a task benefits from C's input, use the `call_peer_agent` tool to ask C
+    (pass calls: [{peer: "C", message: "..."}]); you may fan out to several peers.
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: "${OPENAI_API_KEY:}"
+memory:
+  backend: sqlite
+  db_path: ./workspace/a2a_x.db
+sandbox:
+  backend: passthrough
+  workdir: ./workspace/a2a_x
+peers:
+  enabled: true
+  allow_private_network: true
+  inbound_tokens:
+    - "tok-x"           # tokens accepted FROM other peer instances (same org)
+  peers:
+    - name: C
+      url: "http://localhost:8002"
+      token: "tok-y"    # outbound credential presented TO instance Y
+      agent_name: C
+      org: acme
+server:
+  host: 127.0.0.1
+  port: 8000
+  auth_required: true

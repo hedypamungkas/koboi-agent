@@ -485,6 +485,10 @@ class Config:
         return self.get("orchestration", default={})
 
     @property
+    def peers(self) -> dict:
+        return self.get("peers", default={})
+
+    @property
     def keybindings(self) -> dict:
         return self.get("keybindings", default={})
 

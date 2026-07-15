@@ -12,6 +12,7 @@ import hmac
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from fastapi.responses import JSONResponse
 
@@ -89,7 +90,7 @@ class KeyStore:
         return len(self._keys) > 0
 
 
-def make_auth_middleware(key_store: KeyStore, *, auth_required: bool = True):
+def make_auth_middleware(key_store: KeyStore, *, auth_required: bool = True, peer_registry: Any | None = None):
     """Build a Starlette HTTP middleware that validates ``Bearer`` tokens.
 
     ``auth_required`` (default True, mirrors ``server.auth_required``): when no
@@ -97,6 +98,11 @@ def make_auth_middleware(key_store: KeyStore, *, auth_required: bool = True):
     with a missing/unreadable keys file is never left open. Set
     ``auth_required: false`` to opt into dev mode (no auth) -- intended only for
     trusted loopback local development.
+
+    ``peer_registry`` (A2A): when provided, an ``Authorization: Bearer`` token
+    matching a configured inbound peer token authenticates the caller as a
+    same-org peer (``request.state.peer_id``), distinct from a tenant API key.
+    Tried before ``key_store.validate`` so peer tokens never collide with API keys.
     """
 
     _warned = False
@@ -105,7 +111,10 @@ def make_auth_middleware(key_store: KeyStore, *, auth_required: bool = True):
         nonlocal _warned
         if request.url.path in OPEN_PATHS:
             return await call_next(request)
-        if not key_store.has_keys:
+        has_api_keys = key_store.has_keys
+        has_peer_auth = peer_registry is not None and peer_registry.has_peers
+        # No credentials of any kind configured: fail closed (or dev mode).
+        if not has_api_keys and not has_peer_auth:
             if auth_required:
                 # Fail closed: no keys + auth_required=true → never serve open.
                 return _unauthorized(request, "no API keys configured (auth_required is true)")
@@ -121,6 +130,18 @@ def make_auth_middleware(key_store: KeyStore, *, auth_required: bool = True):
         if not auth_header.startswith("Bearer "):
             return _unauthorized(request, "missing or invalid Authorization header")
         token = auth_header[7:]
+        # A2A: a valid inbound peer token authenticates as a same-org peer caller
+        # (distinct from a tenant API key). Tried before key_store.validate so peer
+        # tokens never collide with API keys; stamps request.state.peer_id.
+        if peer_registry is not None:
+            peer_id = peer_registry.validate_inbound_token(token)
+            if peer_id is not None:
+                request.state.peer_id = peer_id
+                request.state.api_key_id = peer_id  # caller identity for ownership checks
+                return await call_next(request)
+        if not has_api_keys:
+            # Peer-only instance: the token was not a valid peer token.
+            return _unauthorized(request, "invalid peer token")
         key_id = key_store.validate(token)
         if key_id is None:
             return _unauthorized(request, "invalid API key")

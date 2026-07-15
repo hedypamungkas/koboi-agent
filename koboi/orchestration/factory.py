@@ -210,6 +210,7 @@ class AgentFactory:
         mcp_registrar: Callable[[object], None] | None = None,
         search_provider: object | None = None,
         fetch_provider: object | None = None,
+        peer_registry: object | None = None,
     ) -> Agent:
         """Build an AgentCore from an AgentDef (config-driven).
 
@@ -242,6 +243,7 @@ class AgentFactory:
             sandbox=sandbox,
             search_provider=search_provider,
             fetch_provider=fetch_provider,
+            peer_registry=peer_registry,
         )
 
         # G5: register shared MCP tools into this sub-agent's registry (one set of
@@ -276,6 +278,7 @@ class AgentFactory:
         mcp_registrar: Callable[[object], None] | None = None,
         search_provider: object | None = None,
         fetch_provider: object | None = None,
+        peer_registry: object | None = None,
     ) -> dict[str, Agent]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -300,6 +303,7 @@ class AgentFactory:
                 mcp_registrar=mcp_registrar,
                 search_provider=search_provider,
                 fetch_provider=fetch_provider,
+                peer_registry=peer_registry,
             )
         return agents
 
@@ -309,6 +313,7 @@ class AgentFactory:
         sandbox: object | None = None,
         search_provider: object | None = None,
         fetch_provider: object | None = None,
+        peer_registry: object | None = None,
     ):
         """Build a ToolRegistry from agent-level tools config."""
         if not tools_config:
@@ -351,6 +356,9 @@ class AgentFactory:
             registry.set_dep("search_provider", search_provider)
         if fetch_provider is not None:
             registry.set_dep("fetch_provider", fetch_provider)
+        # A2A: inject the shared peer registry so orchestrated sub-agents can call_peer_agent.
+        if peer_registry is not None:
+            registry.set_dep("peer_registry", peer_registry)
         # Apply defaults/overrides/disabled/groups via the shared helper so this
         # path stays in lock-step with facade._build_tools.
         from koboi.tools.registry import apply_tool_selection

@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from koboi.config import Config
 from koboi.events import ErrorEvent, HandoverEvent
 from koboi.exceptions import AgentHandoverError
+from koboi.types import RunResult
 from koboi.guardrails.approval import AsyncCallbackApprovalHandler
 from koboi.guardrails.approval_types import ApprovalResponse
 from koboi.modes import AgentMode, ModeManager
@@ -47,6 +48,7 @@ from koboi.server.workflow_store import WorkflowStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
 from koboi.server.session_events import SessionEventRegistry
 from koboi.server.handoff_digest import HandoffDigest
+from koboi.server.peers import PeerRegistry
 from koboi.server.schema import (
     ApproveRequest,
     ApproveResponse,
@@ -61,6 +63,7 @@ from koboi.server.schema import (
     McpServerCreateRequest,
     McpServerListResponse,
     McpServerResponse,
+    PeerInvokeRequest,
     ReadyzCheck,
     ReadyzResponse,
     SessionDeletedResponse,
@@ -190,6 +193,7 @@ def create_app(
     workflow_store: Any | None = None,
     config_source_text: str | None = None,
     session_event_buffer: Any | None = None,
+    peer_registry: Any | None = None,
 ) -> FastAPI:
     """Build the FastAPI app (composition root -- single place wiring happens).
 
@@ -286,6 +290,14 @@ def create_app(
     allowed_modes = _resolve_allowed_modes(config.get("server", "allowed_modes", default=None))
     max_iter_cap = int(config.get("server", "limits", "max_iterations_cap", default=25))
 
+    # A2A: cross-instance peer registry (opt-in via peers: config). Built from config
+    # when not injected; holds outbound peer URLs/tokens + validates inbound peer tokens.
+    if peer_registry is None:
+        peer_registry = PeerRegistry()
+        peers_cfg = config.get("peers", default={})
+        if peers_cfg and peers_cfg.get("enabled"):
+            peer_registry.load_from_config(peers_cfg)
+
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
     health.register("db", make_db_check(ownership, backend=memory_backend))
@@ -370,6 +382,7 @@ def create_app(
     app.state.session_streams = {}  # B2: owner -> active session-stream count
     app.state.session_stream_timeout = session_stream_timeout  # B2: stream deadline
     app.state.mcp_registries = {}  # G6: session_id -> SessionMcpRegistry
+    app.state.peer_registry = peer_registry  # A2A: outbound peers + inbound token validation
 
     # Middleware: registration order is the REVERSE of execution order.
     # auth is registered FIRST → executes LAST (innermost, closest to routes).
@@ -379,7 +392,7 @@ def create_app(
     # intercepts OPTIONS preflights before auth runs. Pure ASGI middleware
     # (CORSMiddleware) must be outermost; BaseHTTPMiddleware.call_next does not
     # chain into it reliably in Starlette 1.x when it sits innermost.
-    app.middleware("http")(make_auth_middleware(key_store, auth_required=auth_required))
+    app.middleware("http")(make_auth_middleware(key_store, auth_required=auth_required, peer_registry=peer_registry))
     for mw in extra_middleware:
         app.middleware("http")(mw)
     app.middleware("http")(request_id_middleware)
@@ -433,6 +446,7 @@ def create_app(
         session_streams_per_owner,
         handoff_digest,
         handover_webhooks,
+        peer_registry,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -500,6 +514,7 @@ def _register_routes(
     session_streams_per_owner: int = 4,
     handoff_digest: Any | None = None,
     handover_webhooks: list[dict] | None = None,
+    peer_registry: Any | None = None,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -1113,6 +1128,57 @@ def _register_routes(
             },
         )
 
+    @app.post("/v1/peer/invoke")
+    async def peer_invoke(body: PeerInvokeRequest, request: Request) -> Response:
+        """A2A inbound receiver: a peer koboi instance runs the configured agent on
+        ``message`` and gets its final answer as JSON (sync, not SSE).
+
+        Auth stamps ``request.state.peer_id`` (peer branch in the auth middleware);
+        this route never calls ``_check_owner`` -- the peer owns the (ephemeral)
+        session it creates, so there is no tenant-owner IDOR surface.
+        """
+        if peer_registry is None or not peer_registry.has_peers:
+            return _error_response(404, "peers_disabled", "A2A peers not configured on this instance", request)
+        peer_id = getattr(request.state, "peer_id", None)
+        if peer_id is None:
+            return _error_response(401, "unauthorized", "valid peer token required", request)
+
+        # Fresh ephemeral session per call (isolation, no history bleed); optional
+        # X-Session-Id for cross-call continuity.
+        header_sid = request.headers.get("X-Session-Id")
+        if header_sid is not None and not is_safe_session_id(header_sid):
+            return _error_response(400, "bad_request", "invalid X-Session-Id", request)
+        session_id = header_sid or f"peer-{pool.new_session_id()}"
+        ephemeral = header_sid is None
+
+        try:
+            effective_mode = _resolve_mode(body.mode, allowed_modes, allow_yolo=False)
+        except ValueError as exc:
+            return _error_response(400, "invalid_mode", str(exc), request)
+        effective_max_iter = min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
+
+        try:
+            agent = await pool.get_or_create(session_id)
+        except PoolFull as exc:
+            return _error_response(429, "pool_full", str(exc), request)
+
+        try:
+            async with pool.session_lock(session_id):
+                result = await _run_peer_agent(agent, body.message, effective_mode, effective_max_iter)
+            return JSONResponse({"content": result.content, "peer_id": peer_id, "session_id": session_id})
+        except Exception as exc:  # noqa: BLE001 -- surface any run failure as a 500 envelope
+            _logger.exception("A2A peer invoke failed (session=%s)", session_id)
+            return _error_response(500, "peer_invoke_failed", str(exc), request)
+        finally:
+            # Evict ephemeral sessions so peer fan-out (N parallel inbound calls into
+            # this instance) cannot bloat the pool toward cap. Continuity sessions
+            # (explicit X-Session-Id) are left for LRU.
+            if ephemeral:
+                try:
+                    await pool.evict(session_id)
+                except Exception:  # noqa: BLE001 -- best-effort cleanup; never fail the response
+                    _logger.debug("ephemeral peer session evict failed: %s", session_id)
+
     @app.post("/v1/sessions/{session_id}/approve", response_model=ApproveResponse)
     async def approve(session_id: str, body: ApproveRequest, request: Request) -> Response:
         if not is_safe_session_id(session_id):
@@ -1523,6 +1589,47 @@ def _resolve_mode(
     if mode is AgentMode.YOLO and not allow_yolo:
         raise ValueError("yolo mode is not allowed for autonomous jobs")
     return mode
+
+
+async def _run_peer_agent(agent: Any, message: str, mode: AgentMode | None, max_iterations: int | None) -> RunResult:
+    """Run an inbound A2A call to completion and return the final answer.
+
+    Orchestrated agents (``agent._core is None``) run transparently via
+    ``agent.run()``. For a single-agent core, install an
+    ``AutonomousApprovalHandler`` (deny destructive) and snapshot/restore
+    ``mode``/``max_iterations``/``_tool_pipeline``/``approval_handler`` -- the
+    pooled agent is reused, so without restore a later request inherits this
+    call's mode (mirror of jobs.py:903-947).
+    """
+    if agent._core is None:
+        return await agent.run(message)
+
+    prior_handler = agent._core.approval_handler
+    had_pipeline = hasattr(agent._core, "_tool_pipeline")
+    prior_pipeline = getattr(agent._core, "_tool_pipeline", None)
+    prior_mode = agent._core.mode_manager.current_mode
+    prior_max_iter = agent._core.max_iterations
+    try:
+        if had_pipeline:
+            del agent._core._tool_pipeline
+        from koboi.guardrails.approval import AutonomousApprovalHandler
+
+        agent._core.approval_handler = AutonomousApprovalHandler(
+            trust_db=agent.trust_db,
+            audit_trail=agent._core.audit_trail,
+            auto_approve_tools={"write_file", "delete_file"},
+        )
+        if mode is not None:
+            agent._core.mode_manager.switch_mode(mode)
+        if max_iterations is not None:
+            agent._core.max_iterations = max_iterations
+        return await agent.run(message)
+    finally:
+        agent._core.approval_handler = prior_handler
+        if had_pipeline:
+            agent._core._tool_pipeline = prior_pipeline
+        agent._core.mode_manager.switch_mode(prior_mode)
+        agent._core.max_iterations = prior_max_iter
 
 
 def _resolve_bind(config: Config, host: str | None, port: int | None) -> tuple[str, int]:
