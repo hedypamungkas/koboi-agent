@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from collections.abc import Callable
 
 from koboi.rag.chunker import ParagraphChunker
@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from koboi.hooks.chain import HookChain
     from koboi.logger import AgentLogger
     from koboi.loop import AgentCore as Agent
+    from koboi.orchestration.remote_proxy import RemoteAgentProxy
+    from koboi.server.peers import PeerRegistry
 
 
 CHUNKER = ParagraphChunker(max_chunk_size=1000)
@@ -211,13 +213,33 @@ class AgentFactory:
         search_provider: object | None = None,
         fetch_provider: object | None = None,
         peer_registry: object | None = None,
-    ) -> Agent:
-        """Build an AgentCore from an AgentDef (config-driven).
+    ) -> Agent | RemoteAgentProxy:
+        """Build an AgentCore (or RemoteAgentProxy) from an AgentDef (config-driven).
 
-        When ``client_builder`` is supplied and ``agent_def.llm_config`` carries
-        LLM knobs beyond ``max_context_tokens``, a dedicated client is built from
-        that config; otherwise the shared ``client`` is reused.
+        When ``agent_def.endpoint`` is set, the node is a REMOTE peer agent: a
+        :class:`RemoteAgentProxy` is returned (the peer runs its own rag/client/
+        tools). Otherwise a local ``AgentCore`` is built; when ``client_builder``
+        is supplied and ``agent_def.llm_config`` carries knobs beyond
+        ``max_context_tokens``, a dedicated client is built, else the shared one.
         """
+        # P2 (A2A): an endpoint-bearing node is a REMOTE peer agent, not a local
+        # AgentCore. Everything below (rag/client/tools/mcp) runs on the peer.
+        if agent_def.endpoint:
+            if peer_registry is None:
+                raise ValueError(
+                    f"Agent '{agent_def.name}' declares endpoint '{agent_def.endpoint}' "
+                    "but no peers: registry is configured on this instance"
+                )
+            from koboi.orchestration.remote_proxy import RemoteAgentProxy
+
+            return RemoteAgentProxy(
+                name=agent_def.name,
+                peer_name=agent_def.endpoint,
+                # facade always passes a real PeerRegistry; the param is typed `object`
+                # to mirror the sibling injected deps (sandbox/search_provider/...).
+                peer_registry=cast("PeerRegistry", peer_registry),
+            )
+
         from koboi.loop import AgentCore as Agent
 
         augmentation = cls.build_rag_from_config(
@@ -279,7 +301,7 @@ class AgentFactory:
         search_provider: object | None = None,
         fetch_provider: object | None = None,
         peer_registry: object | None = None,
-    ) -> dict[str, Agent]:
+    ) -> dict[str, Agent | RemoteAgentProxy]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
         for ad in agent_defs:

@@ -147,3 +147,28 @@ class PeerRegistry:
                 exc,
             )
             return False
+
+
+async def invoke_peer(peer: PeerConfig, message: str) -> str:
+    """POST a peer instance's ``/v1/peer/invoke`` receiver and return its answer.
+
+    The single A2A HTTP path, shared by the ``call_peer_agent`` tool and
+    :class:`koboi.orchestration.remote_proxy.RemoteAgentProxy` so there is one
+    place to evolve. Raises ``httpx.HTTPStatusError`` on a non-2xx response and
+    ``ValueError`` on a malformed body; callers decide how to surface failures.
+    """
+    import httpx  # lazy: peers.py stays importable without httpx at module load
+
+    url = peer.url.rstrip("/") + "/v1/peer/invoke"
+    headers = {"Authorization": f"Bearer {peer.token}"}
+    body: dict = {"message": message}
+    if peer.agent_name:
+        body["agent_name"] = peer.agent_name  # routing hint (informational)
+    async with httpx.AsyncClient(timeout=peer.timeout) as client:
+        resp = await client.post(url, json=body, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+    content = data.get("content")
+    if not isinstance(content, str):
+        raise ValueError(f"peer returned no string content: {data!r}")
+    return content

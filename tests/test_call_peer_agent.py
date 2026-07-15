@@ -1,6 +1,6 @@
 """Unit tests for the call_peer_agent tool (cross-instance A2A).
 
-Fan-out + error isolation are tested by monkeypatching ``_call_one`` so we control
+Fan-out + error isolation are tested by monkeypatching ``invoke_peer`` so we control
 each peer's answer/failure without real HTTP. The real HTTP path is exercised
 end-to-end in ``test_a2a_integration.py``.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-import koboi.tools.builtin.peer as peer_mod
+import koboi.server.peers as peers_mod
 from koboi.server.peers import PeerRegistry
 from koboi.tools.builtin import register_all
 from koboi.tools.registry import ToolRegistry
@@ -46,7 +46,7 @@ class TestCallPeerAgent:
         async def fake_call(peer, msg):  # never reached for unknown peer
             return "should-not-reach"
 
-        monkeypatch.setattr(peer_mod, "_call_one", fake_call)
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake_call)
         out = await r.execute("call_peer_agent", json.dumps({"calls": [{"peer": "Z", "message": "hi"}]}))
         assert "unknown peer" in out.lower()
 
@@ -56,7 +56,7 @@ class TestCallPeerAgent:
         async def fake_call(peer, msg):
             return f"answer-from-{peer.name}:{msg}"
 
-        monkeypatch.setattr(peer_mod, "_call_one", fake_call)
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake_call)
         out = await r.execute("call_peer_agent", json.dumps({"calls": [{"peer": "C", "message": "hi"}]}))
         assert "(OK)" in out
         assert "answer-from-C:hi" in out
@@ -72,7 +72,7 @@ class TestCallPeerAgent:
         async def fake_call(peer, msg):
             return f"{peer.name}-ans"
 
-        monkeypatch.setattr(peer_mod, "_call_one", fake_call)
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake_call)
         out = await r.execute(
             "call_peer_agent",
             json.dumps({"calls": [{"peer": "B", "message": "m"}, {"peer": "C", "message": "m"}]}),
@@ -94,7 +94,7 @@ class TestCallPeerAgent:
                 raise RuntimeError("boom")
             return "B-ok"
 
-        monkeypatch.setattr(peer_mod, "_call_one", fake_call)
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake_call)
         out = await r.execute(
             "call_peer_agent",
             json.dumps({"calls": [{"peer": "B", "message": "m"}, {"peer": "C", "message": "m"}]}),
@@ -116,7 +116,7 @@ class TestCallPeerAgent:
                 await asyncio.sleep(1)
             return f"{peer.name}-ok"
 
-        monkeypatch.setattr(peer_mod, "_call_one", fake_call)
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake_call)
         out = await r.execute(
             "call_peer_agent",
             json.dumps({"calls": [{"peer": "B", "message": "m"}, {"peer": "C", "message": "m"}]}),

@@ -61,6 +61,8 @@ async def call_peer_agent(calls: list[dict], _deps: dict | None = None) -> str:
     if registry is None:
         return "Error: A2A peers not configured. Cannot call peer agents."
 
+    from koboi.server.peers import invoke_peer  # shared A2A HTTP path (also used by RemoteAgentProxy)
+
     # Each slot resolves its own peer + isolates failures/timeouts, so gather can
     # never raise -- a bad peer becomes an error string in its own slot only.
     async def _slot(call: dict) -> str:
@@ -70,7 +72,7 @@ async def call_peer_agent(calls: list[dict], _deps: dict | None = None) -> str:
         if peer is None:
             return f"[{name}] (FAILED: unknown peer)\nAnswer: <error>"
         try:
-            answer = await asyncio.wait_for(_call_one(peer, message), timeout=peer.timeout)
+            answer = await asyncio.wait_for(invoke_peer(peer, message), timeout=peer.timeout)
             return f"[{peer.name}] (OK)\nAnswer: {answer}"
         except Exception as exc:  # noqa: BLE001 -- isolate: timeout/http/parse errors stay in this slot
             _logger.warning("A2A call to peer '%s' failed: %s", peer.name, exc)
@@ -78,22 +80,3 @@ async def call_peer_agent(calls: list[dict], _deps: dict | None = None) -> str:
 
     parts = await asyncio.gather(*[_slot(c) for c in calls])
     return "\n\n---\n\n".join(parts)
-
-
-async def _call_one(peer, message: str) -> str:
-    """POST the peer's ``/v1/peer/invoke`` receiver and return the peer's answer."""
-    import httpx  # lazy import: keeps tool registration from hard-requiring httpx at import time
-
-    url = peer.url.rstrip("/") + "/v1/peer/invoke"
-    headers = {"Authorization": f"Bearer {peer.token}"}
-    body: dict = {"message": message}
-    if peer.agent_name:
-        body["agent_name"] = peer.agent_name  # routing hint (harmless if the peer ignores it)
-    async with httpx.AsyncClient(timeout=peer.timeout) as client:
-        resp = await client.post(url, json=body, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-    content = data.get("content")
-    if not isinstance(content, str):
-        return f"Error: peer returned no content: {data}"
-    return content

@@ -14,6 +14,10 @@ router.py         BaseRouter ABC + KeywordRouter/LLMRouter/HybridRouter (return 
 orchestrator.py   Orchestrator (sequential/parallel/dag/conditional/dynamic/deep_research) +
                   QualityEvaluator; run()/run_stream(); _run_deep_research loop + _synthesize_research
 factory.py        AgentFactory (builds an AgentCore per agent) + DynamicAgentBuilder
+remote_proxy.py   RemoteAgentProxy -- an AgentDef with `endpoint: <peer_name>` becomes a proxy that
+                  POSTs a peer's /v1/peer/invoke; duck-types as a node (`await node.run(query) -> RunResult`).
+                  Graph modes only (seq/parallel/dag/conditional); dynamic/deep_research rebuild local
+                  agents per-query so `endpoint` is ignored there. Peer failure -> RunResult(content="Error:...")
 dag_scheduler.py  DagScheduler -- topological wave grouping from AgentDef.depends_on; persists a
                   durable graph plan + per-node completion to the `steps` table (graph-cursor-resume primitives)
 planner.py        plan_or_skip() + plan_research() -- one LLM call (response_format) decides
@@ -113,6 +117,11 @@ Built-in routers:
 - Per-agent LLM client: `create_configured_agent` builds a dedicated client only when `client_builder`
   is supplied AND `agent_def.llm_config` has keys beyond `max_context_tokens` (or is a `providers:` string
   ref); otherwise the shared orchestrator client is reused.
+- Remote nodes (A2A): `AgentDef.endpoint: <peer_name>` makes a node a REMOTE peer agent --
+  `create_configured_agent` returns a `RemoteAgentProxy` (no local client/rag/tools; the peer runs those)
+  that POSTs the peer's `/v1/peer/invoke`. Applies to seq/parallel/dag/conditional only (dynamic/deep_research
+  rebuild local agents per-query, so `endpoint` is ignored). Peer failure -> `RunResult(content="Error:...")`;
+  the orchestrator detects it via the `"Error:"` prefix sniff. The peer registry is threaded from `peers:` config.
 - Execution modes beyond seq/parallel: `dag` (dependency-ordered, wave-parallel via `DagScheduler`
   from `AgentDef.depends_on`), `conditional` (output-predicate branching via
   `dag_scheduler.conditionals`), `dynamic` (LLM `plan_or_skip` extracts the graph per query). Demos:

@@ -35,6 +35,9 @@ web_brave.yaml            Brave Search provider demo (`websearch.search.provider
 web_firecrawl.yaml        Firecrawl search+fetch provider demo (`websearch.search.provider: firecrawl`)
 deep_research_demo.yaml   Deep research demo (`execution.mode: deep_research`; coverage-gated cited web research)
 workflow_export_demo.yaml  Deterministic workflow export demo (sentiment-routing DAG; `orchestration.determinism` + node `output_schema`; `koboi export`/`import` + `run --workflow`)
+a2a_instance_x.yaml        Cross-instance A2A -- instance X (agent A; `peers:` outbound to peer C; `call_peer_agent` tool)
+a2a_instance_y.yaml        Cross-instance A2A -- instance Y (agent C; accepts peer calls via `POST /v1/peer/invoke`, `inbound_tokens`)
+a2a_dag_remote.yaml        Cross-instance A2A -- DAG with a REMOTE node (`orchestration.agents[].endpoint: peerY`); run alongside a2a_instance_y.yaml
 ```
 **Server configs** (`server_simple.yaml`, `server_deploy.yaml`) drive `koboi serve`.
 `server_deploy.yaml` is the production reference for `server:`/`jobs:`/`sandbox:`/`tracing:`; the Dockerfile `CMD` defaults to `server_simple.yaml` (override at run time via `KOBOI_CONFIG=/app/configs/server_deploy.yaml`).
@@ -50,7 +53,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`
+`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `peers`
 
 ### Notable sub-sections (recently added)
 - `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
@@ -66,4 +69,5 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 - `orchestration.determinism` — `{temperature, seed, top_p, model_pin, replay_mode}`: workflow-level determinism default; a per-node `determinism:` overrides via `DeterminismProfile.merge` (node wins). Drives the cache/replay tiers. No `seed` on Anthropic.
 - `orchestration.agents[].output_schema` — structured output (JSON schema) on a node; `force_response_format_with_tools` forces it even with tools (Gap A+B).
 - `replay:` — `{mode: live|cache|replay, cache_dir}` set by `koboi run --replay-mode`; `replay` is offline (raise-on-miss, no API key).
+- `peers` — opt-in cross-instance agent-to-agent (A2A): `enabled`, `allow_private_network` (default false = strict SSRF; true permits same-org localhost/private-net peers), `inbound_tokens` (plaintext tokens accepted FROM peers, hashed at load), `peers[]` (`{name, url, token, agent_name, org, timeout}`). The `call_peer_agent` tool fans out to peers (`POST /v1/peer/invoke`); `orchestration.agents[].endpoint: <peer_name>` makes a node REMOTE (a `RemoteAgentProxy`). See `configs/a2a_*.yaml`.
 
