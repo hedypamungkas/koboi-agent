@@ -4,7 +4,8 @@
 LLM HTTP clients for OpenAI-compatible, Anthropic, and Cloudflare (Workers AI) APIs. Pluggable
 provider registry + adapter ABC; an in-memory failover `ProviderPool` for multi-provider setups.
 The agent loop talks to a single `LLMClient` (a `RetryClient` or a `ProviderPool`) -- the pool is a
-drop-in that implements the same interface.
+drop-in that implements the same interface. An optional `CachedClient` (`cache.py`) wraps the client
+for `replay_mode: cache|replay` (workflow-export determinism).
 
 ## Key files
 ```
@@ -17,6 +18,7 @@ openai_adapter.py    OpenAIAdapter (LLMClient) -- OpenAI-compatible chat/embeddi
 anthropic_adapter.py AnthropicAdapter (LLMClient) -- Anthropic Messages API; no embeddings
 resolve.py           resolve_llm_spec() -- normalize llm:/embedding: spec (inline dict | named providers: ref)
 pool.py              ProviderPool (LLMClient) + FailoverPolicy + CircuitBreaker; ProviderPoolExhausted
+cache.py             ResponseCache (SHA-256-keyed LLM response memo) + CachedClient (LLMClient wrapper for cache/replay determinism)
 __init__.py          Re-exports public surface; calls register_builtin_providers() at import
 ```
 

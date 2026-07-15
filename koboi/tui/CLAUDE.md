@@ -12,7 +12,7 @@ NOT touch this package. Requires the `[tui]` extra (`rich` for the legacy
 ## Key files
 ```
 app.py              Interactive chat surface: run_chat_interactive() + _build_welcome_panel() + legacy _run_interactive() Rich loop (no click; dispatch is in cli.py)
-commands.py          Slash-command registry (/help, /reset, /mode, /skills, etc.)
+commands.py          Slash-command registry (/help, /reset, /mode, /skills, /capture, etc.)
 approval.py          TUIApprovalHandler -- Textual message-based handler that replaces CLIApprovalHandler's stdin prompt; swapped in by textual_app when guardrails.approval.handler is cli or callback
 textual_app.py      Textual App subclass, screen management
 keybindings.py       Configurable keybindings loaded from the YAML `keybindings:` section (14 defaults); load_keybindings()/get_keybinding_display()

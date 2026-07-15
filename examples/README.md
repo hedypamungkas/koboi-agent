@@ -91,6 +91,9 @@ koboi chat examples/01_simple_chat.yaml
 | 32 | [Sandbox + Resume](32_sandbox_and_resume.py) | Restricted sandbox (soft + seccomp) + step-journal resume | `python examples/32_sandbox_and_resume.py` |
 | 33 | [Command Hook Messaging](33_command_hook_messaging.py) | Declarative `hooks:` YAML -- external-command hook forwards LLM responses | `python examples/33_command_hook_messaging.py` |
 | 34 | [Modern RAG Pipeline](34_rag_modern_pipeline.py) | BM25 + rewriting + filtering + reranking + caches | `python examples/34_rag_modern_pipeline.py` |
+| 35 | [Confidence + Handover](35_confidence_handover_demo.py) | Confidence-aware CS + human handover (grounding, transfer_to_human) | `python examples/35_confidence_handover_demo.py` |
+| 36 | [Workflow Export/Import](36_workflow_export_import.py) | Deterministic workflow bundle (`koboi export`/`import`) | `python examples/36_workflow_export_import.py` |
+| 37 | [Workflow Cache + Replay](37_workflow_cache_capture_replay.py) | Capture response cache + offline `replay` (no API key) | `python examples/37_workflow_cache_capture_replay.py` |
 
 ### Server
 
@@ -139,6 +142,9 @@ koboi chat examples/01_simple_chat.yaml
 | Sandbox isolation (soft + seccomp) + step-journal resume | 32 |
 | Declarative external-command hooks (`hooks:` YAML) | 33 |
 | Modern RAG pipeline (BM25, rewriting, filtering, reranking, caches) | 34 |
+| Confidence-aware + human handover | 35 |
+| Deterministic workflow export/import | 36 |
+| Workflow cache + capture + offline replay | 37 |
 | HTTP/SSE server (built-in + code-customized) | server_built_in, server_customize |
 
 ## Notes

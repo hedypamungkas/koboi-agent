@@ -34,6 +34,7 @@ proactive_memory.yaml     Proactive long-term memory demo (D extract + C recall 
 web_brave.yaml            Brave Search provider demo (`websearch.search.provider: brave`)
 web_firecrawl.yaml        Firecrawl search+fetch provider demo (`websearch.search.provider: firecrawl`)
 deep_research_demo.yaml   Deep research demo (`execution.mode: deep_research`; coverage-gated cited web research)
+workflow_export_demo.yaml  Deterministic workflow export demo (sentiment-routing DAG; `orchestration.determinism` + node `output_schema`; `koboi export`/`import` + `run --workflow`)
 ```
 **Server configs** (`server_simple.yaml`, `server_deploy.yaml`) drive `koboi serve`.
 `server_deploy.yaml` is the production reference for `server:`/`jobs:`/`sandbox:`/`tracing:`; the Dockerfile `CMD` defaults to `server_simple.yaml` (override at run time via `KOBOI_CONFIG=/app/configs/server_deploy.yaml`).
@@ -62,4 +63,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 - `handover.detection` — opt-in structural handover (B1.5): `enabled`, `coverage_threshold` (A3 grounding coverage below this triggers handover; default 0.5), `ask_patterns` (regexes for explicit "talk to a human" requests). Pairs with `grounding_check` — without it the coverage trigger is inert (only explicit user-ask fires) and `facade.py` logs a build-time warning.
 - `handover.digest` — opt-in warm-handoff summary (B4): `enabled` generates a side-LLM case-card summary attached to `HandoverEvent.summary`.
 - `handover.webhooks` — HMAC-signed mid-conversation callbacks on `handover.requested` (see `docs/channel-bridge.md`).
+- `orchestration.determinism` — `{temperature, seed, top_p, model_pin, replay_mode}`: workflow-level determinism default; a per-node `determinism:` overrides via `DeterminismProfile.merge` (node wins). Drives the cache/replay tiers. No `seed` on Anthropic.
+- `orchestration.agents[].output_schema` — structured output (JSON schema) on a node; `force_response_format_with_tools` forces it even with tools (Gap A+B).
+- `replay:` — `{mode: live|cache|replay, cache_dir}` set by `koboi run --replay-mode`; `replay` is offline (raise-on-miss, no API key).
 

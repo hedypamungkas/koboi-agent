@@ -88,6 +88,10 @@ Built-in routers:
 
 ## Conventions
 - `RoutingDecision`, `AgentResult`, `OrchestratorResult`, `AgentBlueprint`, `AgentDef` live in `koboi/types.py`.
+- **Determinism / structured output (workflow export)**: `orchestration.determinism`
+  (`temperature`/`seed`/`top_p`/`model_pin`/`replay_mode`) is a workflow-level default merged per-node via
+  `DeterminismProfile.merge` (node wins) in `facade._parse_agent_defs`; per-node `output_schema` +
+  `force_response_format_with_tools` set structured output (Gap A+B). See `koboi/workflows/CLAUDE.md`.
 - `RoutingDecision.method` is a `Literal["keyword","llm","hybrid(keyword)","hybrid(llm)","hybrid(keyword+llm)"]`.
 - Parallel runs use `asyncio.gather(return_exceptions=True)` / `asyncio.wait(FIRST_COMPLETED)`; a
   failing agent becomes `AgentResult(answer="Error: ...", failed=True)` and never crashes the run.

@@ -304,7 +304,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `skills` | Search paths |
 | `mcp` | MCP server connections, per-server `risk_level`/`risk_heuristic` |
 | `memory` | Backend (sqlite/in_memory), db_path, `retention` (max_messages cap), `owner` (tenant tag), `proactive` (opt-in extract/recall/core_block long-term memory) |
-| `orchestration` | Router type, agents, execution mode (`sequential`/`parallel`/`dag`/`conditional`/`dynamic`/`deep_research`) |
+| `orchestration` | Router type, agents, execution mode (`sequential`/`parallel`/`dag`/`conditional`/`dynamic`/`deep_research`); `determinism` (workflow + per-node merge), node `output_schema` (workflow export) |
 | `websearch` | Pluggable search/fetch providers for `web_search`/`web_fetch` (`search.provider` brave/firecrawl/ddg/mock, `fetch.provider` httpx/firecrawl) |
 | `research` | deep_research knobs: `max_depth`, `max_searches`/`max_fetches`, `coverage_threshold`, `citations`, `persist_findings` |
 | `sandbox` | Backend (passthrough/restricted), workdir strategy, network, network_isolation (seccomp), rlimits |
@@ -328,7 +328,7 @@ For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
 The `koboi` console script (`koboi.cli:main`) is a single argparse dispatcher. Every no-TUI
 subcommand (`validate`, `run`, `chat --print`, `sessions`, `keys`, `mcp-serve`, `eval`, `eval-test`,
-`graph`, `diagnostics`, `init-zsh`) works on a bare `pip install koboi-agent` (no extras). Only `serve` (lazy-imports
+`graph`, `diagnostics`, `init-zsh`, `export`, `import`, `capture`, `workflows`) works on a bare `pip install koboi-agent` (no extras). Only `serve` (lazy-imports
 `koboi.server.app`, needs `[api]`) and interactive `chat` (lazy-imports `koboi.tui.app`,
 needs `[tui]`) require extras; both fail with a clear install hint instead of a traceback.
 `python -m koboi` routes through `cli.main` too.
@@ -384,6 +384,10 @@ so there is no `AgentCore`/HITL pipeline. Every `_core` access is guarded: inter
 captured from `OrchestrationCompleteEvent.final_answer`. `GET /v1/sessions/{id}` surfaces the
 deep_research query + cited report via the session-tagged `research_context` table
 (`pool._deep_research_messages`).
+
+**Workflow export/store**: `POST/GET/GET{name}/DELETE /v1/workflows` (owner-scoped SQLite `workflow_store.py`),
+`POST /v1/jobs/{id}/capture` (freeze a completed `workflow_ref` job into a bundle + cache sidecar), and
+`workflow_ref` + `replay_mode` (`live`/`cache`/`replay`) on `POST /v1/jobs`.
 
 Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
 (`fastapi`, `uvicorn`). See `koboi/server/CLAUDE.md` for routes/conventions/gotchas and
@@ -760,6 +764,10 @@ render any with `koboi graph <config>`.
 
 ## LLM Providers
 
+Optional determinism tier: `koboi/llm/cache.py` (`ResponseCache` + `CachedClient` decorator, wired by
+`facade._maybe_wrap_cache`) memoizes `complete()` by a SHA-256 of model+messages+tools+response_format
+for the `cache`/`replay` workflow-export modes.
+
 ### LLMClient ABC
 
 `koboi/llm/base.py` defines the provider interface:
@@ -963,6 +971,10 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
 ### Core dataclasses (`koboi/types.py`)
 
 `RunResult`, `AgentResponse`, `ToolCall`, `ToolDefinition`, `TokenUsage`, `GuardrailResult`, `AuditEntry`, `RateLimitConfig`, `RoutingDecision`, `AgentResult`, `OrchestratorResult`, `EvalCase`, `EvalScore`, `EvalResult`, `SkillDefinition`, `MCPToolInfo`
+
+### Workflow export (`koboi/workflows/definition.py`)
+
+`WorkflowDefinition` (envelope: schema_version/name/description/provenance/config), `DeterminismProfile` (temperature/seed/top_p/model_pin/replay_mode), `WorkflowProvenance`; server models `WorkflowCreateRequest`/`WorkflowResponse`/`WorkflowListResponse`/`CaptureRequest`/`CaptureResponse` (`koboi/server/schema.py`).
 
 ### Stream events (`koboi/events.py`)
 

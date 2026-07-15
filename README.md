@@ -33,6 +33,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Confidence-awareness + human handover**: opt-in grounding guardrail (claim-decomposition + NLI judge — abstains when ungrounded), the `transfer_to_human` tool, and structural handover detection — the bot yields to a human operator when it should (see [docs/channel-bridge.md](docs/channel-bridge.md))
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, dynamic (LLM-planned), and **deep_research** (coverage-gated, cited web research) execution
+- **Deterministic workflow export**: freeze a run into a re-runnable config bundle (`koboi export`/`import`), and optionally capture the LLM response cache for byte-identical **offline** replay (`koboi capture --with-cache`, `run --replay-mode replay` — no API key)
 - **Web research providers**: pluggable search + fetch backends for the `web_search`/`web_fetch` tools via `@register_search_provider`/`@register_fetch_provider` — built-in mock, DuckDuckGo, Brave, Firecrawl (search) + httpx/readability, Firecrawl (fetch)
 - **Context management**: truncation, smart truncation, key facts, sliding window
 - **Sandboxed execution**: pluggable passthrough/restricted backends (per-session workdir, network/rlimit isolation)
@@ -46,7 +47,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 ### Install
 
 ```bash
-pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, mcp-serve, eval, eval-test, graph, diagnostics, init-zsh
+pip install koboi-agent            # bare install: --help, validate, run, sessions, keys, mcp-serve, eval, eval-test, graph, diagnostics, init-zsh, export, import, capture, workflows
 # Extras (optional):
 #   pip install koboi-agent[tui]   # interactive `koboi chat` (Textual TUI)
 #   pip install koboi-agent[api]   # `koboi serve` (HTTP/SSE server; `koboi keys` works on bare install)
@@ -215,7 +216,7 @@ pytest --cov=koboi            # with coverage
 
 ## Examples
 
-`examples/` contains 35 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
+`examples/` contains 37 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
 
 | Range | Features |
 |-------|----------|
@@ -232,6 +233,8 @@ pytest --cov=koboi            # with coverage
 | 33 | Declarative external-command hooks (`hooks:` YAML) |
 | 34 | Modern RAG pipeline (BM25 + rewriting + filtering + reranking + caches) |
 | 35 | Confidence-aware CS with human handover (`configs/cs_confidence_handover.yaml`; the confidence ladder) |
+| 36 | Deterministic workflow export/import (`koboi export`/`import`; bundle = config + determinism profile) |
+| 37 | Workflow cache + capture + offline replay (`koboi capture --with-cache`; `run --replay-mode replay`, no API key) |
 | configs/deep_research_demo.yaml | Deep research (coverage-gated cited web research; `koboi run` + `koboi serve`) |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 | hitl_client / workflow_graph_demo / dynamic_workflow_live / phase3_live_e2e | HITL client + DAG/workflow-graph demos |
@@ -271,6 +274,7 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **Server** (`server/`) -- FastAPI HTTP/SSE serving (interactive chat + autonomous jobs)
 - **Orchestrator** (`orchestration/`) -- multi-agent coordination; `deep_research` mode plans + runs cited web research (plan → DAG waves → coverage eval → synthesize)
 - **Websearch providers** (`websearch/`) -- pluggable search/fetch backends (Brave/Firecrawl/ddg/mock + httpx/firecrawl) behind the `web_search`/`web_fetch` tools
+- **Workflow export** (`workflows/`) -- deterministic run capture: `WorkflowDefinition` bundle + `DeterminismProfile` + response-cache sidecar (`koboi export`/`capture`; offline `replay` mode); see [docs/deterministic-workflow-export-strategy.md](docs/deterministic-workflow-export-strategy.md)
 - **SubAgentManager** (`subagent.py`) -- parallel sub-agent delegation
 - **MCP clients** (`mcp/`) -- external tool servers
 

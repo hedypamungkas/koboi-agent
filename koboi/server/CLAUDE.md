@@ -33,6 +33,7 @@ middleware.py      X-Request-Id middleware (mint/honor/echo; stashed on request.
 keys_cli.py        `koboi keys create|list|revoke|rotate` -> ~/.koboi/keys.json (hashed, 0600 atomic writes)
 protocols.py       M5 forward-only Protocols (SessionStore/LockProvider/EventBuffer) for a future Redis/SaaS swap
 session_events.py  SessionEventRegistry -- per-session capped B2 replay buffer (monotonic seq; get_events_since)
+workflow_store.py  WorkflowStore -- SQLite owner-scoped workflow bundles + cache sidecar (drives /v1/workflows)
 ```
 
 ## Endpoints
@@ -53,11 +54,16 @@ POST   /v1/chat/stream                Interactive SSE chat (lock + HITL + idempo
 POST   /v1/sessions/{id}/approve      Resolve a pending HITL approval
 POST   /v1/sessions/{id}/transfer     Reassign session ownership to a human operator (handover take-over)
 GET    /v1/sessions/{id}/stream        Replay buffered events (B2: history + B4 warm-handoff digest) for an operator
-POST   /v1/jobs                       Submit autonomous job (202; admission + idempotency)
+POST   /v1/jobs                       Submit autonomous job (202; admission + idempotency; `workflow_ref` + `replay_mode` body fields)
 GET    /v1/jobs                       List caller's jobs
 GET    /v1/jobs/{id}                  Job status (result/error/retriable)
 GET    /v1/jobs/{id}/stream           SSE replay + live tail (per-owner stream cap)
 POST   /v1/jobs/{id}/cancel           Cancel pending/running job
+POST   /v1/workflows                  Import a workflow bundle (201; owner-scoped SQLite store)
+GET    /v1/workflows                  List caller's workflows
+GET    /v1/workflows/{name}           Show a workflow bundle
+DELETE /v1/workflows/{name}           Delete a workflow
+POST   /v1/jobs/{id}/capture          Capture a completed workflow_ref job into a bundle + cache sidecar
 ```
 
 ## The two execution modes
@@ -159,3 +165,9 @@ POST   /v1/jobs/{id}/cancel           Cancel pending/running job
     the session-tagged `research_context` table (returns `[]` only when no research run exists).
   - `pool.py` `_client_factory`/`_approval_handler` seams are guarded too (skipped for core=None).
   See `docs/deep-research-smoke.md` for the production bar.
+- **Workflow export/store** (`/v1/workflows`, PR #42): owner-scoped SQLite bundles (`workflow_store.py`).
+  `POST /v1/jobs` accepts `workflow_ref` (run a stored bundle as a job) + `replay_mode`
+  (`live`/`cache`/`replay`); `POST /v1/jobs/{id}/capture` freezes a completed `workflow_ref` job into a
+  bundle + cache sidecar. Plain (non-`workflow_ref`) jobs cannot isolate a run cache — only `workflow_ref`
+  jobs freeze a per-job sidecar. The CLI store is filesystem (`KOBOI_WORKFLOWS_DIR`), separate from this
+  SQLite store. See `koboi/workflows/CLAUDE.md`.

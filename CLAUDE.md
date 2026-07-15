@@ -20,12 +20,12 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (229 .py files)
+koboi/              Main package (236 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
-  cli.py            Console-script entry (`koboi`): argparse dispatcher routing serve/keys/mcp-serve/validate/run/chat/sessions/eval/eval-test/graph/diagnostics/init-zsh; bare-install works for all no-TUI commands (bodies in cli_commands.py; `serve`/`keys`/`mcp-serve`/interactive `chat` live in cli.py, the rest in cli_commands.py)
-  cli_commands.py   Core (no-extra) command bodies for validate/run/chat-print/sessions/eval/eval-test/graph/diagnostics/init-zsh -- stdlib print() output, returns exit codes
+  cli.py            Console-script entry (`koboi`): argparse dispatcher routing serve/keys/mcp-serve/validate/run/chat/sessions/eval/eval-test/graph/diagnostics/init-zsh/export/import/capture/workflows; bare-install works for all no-TUI commands (bodies in cli_commands.py; `serve`/`keys`/`mcp-serve`/interactive `chat` live in cli.py, the rest in cli_commands.py)
+  cli_commands.py   Core (no-extra) command bodies for validate/run/chat-print/sessions/eval/eval-test/graph/diagnostics/init-zsh/export/import/capture/workflows -- stdlib print() output, returns exit codes
   loop.py           AgentCore -- async agent loop, hook integration
   loop_pipeline.py  ToolExecutionPipeline -- 8-step tool execution flow
   client.py         RetryClient -- LLM HTTP transport with exponential backoff
@@ -47,7 +47,7 @@ koboi/              Main package (229 .py files)
   diagnostics.py    Session diagnostic export
   notifications.py  Notification system
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
-  llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver)
+  llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver), cache (ResponseCache/CachedClient -- replay/cache determinism)
   tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover)
   hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 21 specialized hooks (incl. handover detection)
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
@@ -57,14 +57,15 @@ koboi/              Main package (229 .py files)
   harness/          Telemetry, carryover state, doom loop detection, policy engine, env hygiene (env.py)
   sandbox/          Pluggable subprocess/fs isolation backends (passthrough default, restricted); reuses ComponentRegistry
   server/           FastAPI HTTP/SSE serving layer: app, jobs, pool, auth, ownership, idempotency, approvals, keys_cli, schema, sse, health, middleware, protocols
-  orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator (sequential/parallel/dag/conditional/dynamic/deep_research), factory, dynamic agent builder, dag_scheduler (wave-parallel DAG), planner (LLM plan-or-skip + plan_research), workflow_graph (programmatic builder), research (ResearchBudget/SourceStore/ResearchContext/CoverageEvaluator -- deep_research mode)
+  orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator (sequential/parallel/dag/conditional/dynamic/deep_research), factory, dynamic agent builder, dag_scheduler (wave-parallel DAG), planner (LLM plan-or-skip + plan_research), workflow_graph (programmatic builder), research (ResearchBudget/SourceStore/ResearchContext/CoverageEvaluator -- deep_research mode); per-node determinism/output_schema (workflow export)
+  workflows/        Deterministic workflow export/import: WorkflowDefinition bundle + DeterminismProfile + FileWorkflowStore + capture_from_run + cache sidecar (`koboi export/import/capture/workflows`)
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (10), widgets/ (12)
-tests/              281 .py files (251 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
-configs/            32 YAML agent configs
-examples/           35 numbered example scripts (01-35) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
+tests/              298 .py files (268 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
+configs/            33 YAML agent configs
+examples/           37 numbered example scripts (01-37) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
@@ -130,4 +131,5 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - New memory/context knobs: `memory.retention.max_messages` (cap stored rows, default None=unbounded), `memory.owner` (tenant tag on stored rows, schema prep for multi-tenancy), `context.safety_margin` (headroom reserved inside `manage()` so one large response can't push an over-budget payload; default 0).
 - **Session REST surface** (`server/app.py`): `GET /v1/sessions` (list, owner-scoped + fails closed 401 when auth on but no caller identity), `POST /v1/sessions/{id}/fork` (rolls back DB+owner rows on any `get_or_create` failure), `DELETE /v1/sessions/{id}` (clears DB rows AND holds `pool.existing_session_lock` so a concurrent `/chat/stream` can't re-insert orphaned rows). `create_app` accepts externalized-state injection kwargs (`session_store`/`job_store`/`event_buffer`/`idempotency_store`/`ownership_store`/`approval_registry`, each default None → in-process impl).
 - **Confidence-awareness + handover** (PR #40, opt-in): `GroundingGuardrail` (`guardrails/grounding.py`, factory `grounding_check` in the `guardrails.output` slot) decomposes the answer into atomic claims and NLI-checks each against the retrieved context via a side-LLM; if coverage < `threshold` (default 0.8) it returns `action="abstain"` and the loop swaps the output for a refusal (fail-soft: any judge error passes-through, never breaks the run). The `transfer_to_human` tool (`tools/builtin/handover.py`) and `HandoverDetectionHook` (B1.5, `hooks/handover_detection_hook.py`; PRE_INPUT user-ask patterns + POST_OUTPUT low-coverage trigger) raise `AgentHandoverError` → `HandoverEvent` (interactive SSE) or an `awaiting_human` job status, releasing `pool.session_lock` (no Future is awaited, so the human's next `/chat/stream` can't deadlock). Config under `handover:` (`detection.enabled`/`coverage_threshold`/`ask_patterns`, `digest.enabled` for the B4 warm-handoff summary, `webhooks`). The B2 replay buffer (`GET /v1/sessions/{id}/stream`) replays history + digest to the operator. See `docs/channel-bridge.md` for the omnichannel webhook surfaces.
+- **Deterministic workflow export** (PR #42, opt-in): `koboi export <config>` freezes a run into a `WorkflowDefinition` bundle (config + `DeterminismProfile` + provenance; redacted; un-interpolated `${VAR}` templates preserved); `koboi capture --with-cache` additionally freezes the `ResponseCache` (`koboi/llm/cache.py`) as a sidecar so `koboi run --workflow <name> --replay-mode replay` re-runs **offline** (no API key; raises `CacheMissError` on cache miss). There is **no top-level `workflows:` section** — determinism lives in `orchestration.determinism` (workflow-level + per-node `DeterminismProfile.merge`, node wins) and node `output_schema`. CLI store resolves `KOBOI_WORKFLOWS_DIR` → `~/.koboi/workflows` → `cwd/.koboi/workflows`; the server store is SQLite (`workflow_store.py`, owner-scoped) surfaced via `/v1/workflows` + `POST /v1/jobs/{id}/capture`. See `koboi/workflows/CLAUDE.md`.
 
