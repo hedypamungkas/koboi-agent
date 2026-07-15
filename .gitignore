@@ -36,6 +36,9 @@ Desktop.ini
 # === Testing / Coverage ===
 .pytest_cache/
 .coverage
+.coverage.json
+coverage.json
+coverage.xml
 htmlcov/
 coverage_baseline.json
 test_output.txt
