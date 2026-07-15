@@ -27,6 +27,9 @@ sandbox:
 peers:
   enabled: true
   allow_private_network: true
+  org: acme
+  org_secret: "shared-acme-secret"   # P3: shared across same-org instances; enables verified-only peer calls
+  public_base_url: "http://localhost:8000"   # advertised in this instance's agent-card
   inbound_tokens:
     - "tok-x"           # tokens accepted FROM other peer instances (same org)
   peers:

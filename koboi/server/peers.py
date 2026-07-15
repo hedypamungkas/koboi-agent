@@ -35,6 +35,7 @@ class PeerConfig:
     agent_name: str = ""
     org: str = ""
     timeout: float = 30.0
+    verified: bool = False  # P3: True once the peer's agent-card org-claim is verified
 
 
 class PeerRegistry:
@@ -48,6 +49,9 @@ class PeerRegistry:
     def __init__(self) -> None:
         self._peers: dict[str, PeerConfig] = {}
         self._inbound: dict[str, str] = {}  # token_hash -> peer_id
+        # P3: when an org_secret is set, declared peers must be org-verified at startup.
+        self._org_secret: str = ""
+        self._require_verification: bool = False
 
     def load_from_config(self, peers_cfg: Any) -> int:
         """Load outbound peers + inbound tokens from a ``peers:`` config block.
@@ -58,6 +62,10 @@ class PeerRegistry:
         """
         cfg = self._as_dict(peers_cfg)
         allow_private = bool(cfg.get("allow_private_network", False))
+        # P3: org_secret enables verified-only -- declared peers start unverified and
+        # must pass agent-card org-claim verification (verify_all) before they're callable.
+        self._org_secret = str(cfg.get("org_secret", "") or "")
+        self._require_verification = bool(self._org_secret)
 
         # Outbound peers
         loaded = 0
@@ -70,6 +78,7 @@ class PeerRegistry:
                     agent_name=str(raw.get("agent_name", "")),
                     org=str(raw.get("org", "")),
                     timeout=float(raw.get("timeout", 30.0) or 30.0),
+                    verified=not self._require_verification,
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 _logger.warning("Skipping malformed peer entry %r: %s", raw, exc)
@@ -89,8 +98,65 @@ class PeerRegistry:
         return loaded
 
     def get(self, name: str) -> PeerConfig | None:
-        """Resolve an outbound peer by name (returns None if unknown)."""
-        return self._peers.get(name)
+        """Resolve a CALLABLE outbound peer by name.
+
+        Returns None if unknown or -- when org-claim verification is enabled
+        (``org_secret`` set) -- if the peer's agent-card has not yet been verified.
+        """
+        peer = self._peers.get(name)
+        if peer is None:
+            return None
+        if self._require_verification and not peer.verified:
+            return None
+        return peer
+
+    async def verify_all(self) -> int:
+        """P3: fetch + HMAC-verify each declared peer's agent-card (call at startup).
+
+        Only does work when an ``org_secret`` is configured. Concurrent
+        (``asyncio.gather``), per-peer timeout, non-fatal -- a peer that fails
+        verification stays ``verified=False`` (uncallable via :meth:`get`) but never
+        crashes boot. Returns the number of peers verified.
+        """
+        if not self._require_verification or not self._peers:
+            return 0
+        import asyncio
+
+        results = await asyncio.gather(
+            *(self._verify_one(p) for p in list(self._peers.values())),
+            return_exceptions=True,
+        )
+        verified = sum(1 for r in results if r is True)
+        if verified != len(self._peers):
+            _logger.warning(
+                "A2A org-claim verification: %d/%d peers verified; unverified peers are uncallable",
+                verified,
+                len(self._peers),
+            )
+        return verified
+
+    async def _verify_one(self, peer: PeerConfig) -> bool:
+        import httpx
+
+        from koboi.server.agent_card import CARD_PATH, verify_card
+
+        url = peer.url.rstrip("/") + CARD_PATH
+        try:
+            async with httpx.AsyncClient(timeout=peer.timeout) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                card = resp.json()
+        except Exception as exc:  # noqa: BLE001 -- unreachable/bad peer -> not verified
+            _logger.warning("A2A peer '%s' card fetch failed: %s", peer.name, exc)
+            return False
+        if not isinstance(card, dict) or not verify_card(card, self._org_secret):
+            _logger.warning("A2A peer '%s' failed org-claim verification (rejected)", peer.name)
+            return False
+        peer.verified = True
+        # Fill agent_name from the card if the operator left it blank.
+        if not peer.agent_name:
+            peer.agent_name = str(card.get("agent_name", "")) or peer.agent_name
+        return True
 
     def validate_inbound_token(self, token: str) -> str | None:
         """Return the peer_id if ``token`` matches a configured inbound token, else None.
@@ -107,6 +173,11 @@ class PeerRegistry:
     def has_peers(self) -> bool:
         """True if any outbound peer OR inbound token is configured."""
         return bool(self._peers) or bool(self._inbound)
+
+    @property
+    def requires_verification(self) -> bool:
+        """True when an org_secret is set (declared peers must be org-verified)."""
+        return self._require_verification
 
     @staticmethod
     def _as_dict(peers_cfg: Any) -> dict:

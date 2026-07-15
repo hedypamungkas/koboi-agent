@@ -410,6 +410,12 @@ class PeersConfig(BaseModel):
     # Default False = strict SSRF (reject private/loopback URLs at load). Set True when the
     # operator vouches for these URLs; strict SSRF is reserved for untrusted discovery (P3).
     allow_private_network: bool = False
+    # P3 (self-observing org-claim): the instance's org label + a shared HMAC secret.
+    # When org_secret is set, each declared peer's agent-card is fetched at startup
+    # and its HMAC org-claim verified; only verified peers are callable (verified-only).
+    org: str = ""  # human-readable org label advertised in this instance's agent-card
+    org_secret: str = ""  # shared HMAC-SHA256 secret proving same-org membership
+    public_base_url: str = ""  # advertised base URL for this instance's agent-card peer_invoke_url
 
 
 class RlimitsConfig(BaseModel):

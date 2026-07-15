@@ -26,6 +26,9 @@ auth.py            KeyStore (file+env, SHA-256 hashed) + make_auth_middleware (B
 ownership.py       OwnershipStore -- SQLite 'session_owners' sidecar (session_id -> owner) for tenant isolation
 peers.py           PeerRegistry (outbound peers + hashed inbound tokens; `peers:` config, SSRF-gated) + `invoke_peer`
                    (shared A2A HTTP path to /v1/peer/invoke, used by the call_peer_agent tool + RemoteAgentProxy)
+agent_card.py      Self-describing signed agent-card (CARD_PATH, build_agent_card/sign_card/verify_card; HMAC-SHA256
+                   org-claim via peers.org_secret; PeerRegistry.verify_all gates verified-only peers; _a2a_refresh_loop
+                   in app.py re-stamps the card + re-verifies hourly so it never ages out)
 mcp_registry.py    SessionMcpRegistry -- in-process per-session MCP server attach/detach/reconnect (/v1/sessions/{id}/mcp/servers)
 idempotency.py     IdempotencyRegistry -- in-memory TTL for /chat/stream Idempotency-Key (409-reject)
 schema.py          Pure-Pydantic-v2 request/response models + ErrorResponse/ErrorDetail envelope
@@ -54,6 +57,7 @@ DELETE /v1/sessions/{id}/mcp/servers/{sid}  Detach a session MCP server
 POST   /v1/sessions/{id}/mcp/servers/{sid}/reconnect  Reconnect a session MCP server
 POST   /v1/chat/stream                Interactive SSE chat (lock + HITL + idempotency + per-request mode/cap)
 POST   /v1/peer/invoke                A2A inbound receiver (sync JSON; peer-token auth via peers.inbound_tokens; AutonomousApprovalHandler; ephemeral session)
+GET    /.well-known/agent-card      This instance's signed agent-card (OPEN, no Bearer; HMAC org-claim; trust via peers.org_secret). Served regardless of peers.enabled (metadata only -- no secrets)
 POST   /v1/sessions/{id}/approve      Resolve a pending HITL approval
 POST   /v1/sessions/{id}/transfer     Reassign session ownership to a human operator (handover take-over)
 GET    /v1/sessions/{id}/stream        Replay buffered events (B2: history + B4 warm-handoff digest) for an operator

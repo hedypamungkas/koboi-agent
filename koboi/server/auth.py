@@ -16,10 +16,12 @@ from typing import Any
 
 from fastapi.responses import JSONResponse
 
+from koboi.server.agent_card import CARD_PATH
+
 _logger = logging.getLogger(__name__)
 
-#: Endpoints that bypass auth (health probes don't send Bearer tokens).
-OPEN_PATHS = frozenset({"/healthz", "/readyz"})
+#: Endpoints that bypass auth (health probes + the open agent-card; trust via HMAC org-claim).
+OPEN_PATHS = frozenset({"/healthz", "/readyz", CARD_PATH})
 
 
 def _hash_token(token: str) -> str:

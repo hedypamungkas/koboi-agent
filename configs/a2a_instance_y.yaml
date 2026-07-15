@@ -21,6 +21,9 @@ sandbox:
   workdir: ./workspace/a2a_y
 peers:
   enabled: true
+  org: acme
+  org_secret: "shared-acme-secret"   # P3: shared across same-org instances (matches instance X)
+  public_base_url: "http://localhost:8002"   # advertised in this instance's agent-card
   inbound_tokens:
     - "tok-y"           # token instance X presents; accepted here (same org)
 server:

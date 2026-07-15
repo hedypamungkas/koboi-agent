@@ -49,6 +49,7 @@ from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
 from koboi.server.session_events import SessionEventRegistry
 from koboi.server.handoff_digest import HandoffDigest
 from koboi.server.peers import PeerRegistry
+from koboi.server.agent_card import CARD_PATH, build_agent_card
 from koboi.server.schema import (
     ApproveRequest,
     ApproveResponse,
@@ -129,6 +130,45 @@ async def _job_ttl_gc_loop(
         if reaped:
             job_registry.forget(reaped)
             _logger.info("Job TTL GC: reaped %d terminal job(s)", len(reaped))
+
+
+#: P3: how often the A2A background loop refreshes this instance's card + re-verifies peers.
+_A2A_REFRESH_INTERVAL = 3600.0
+
+
+async def _a2a_refresh_once(
+    app: FastAPI, config: Config, org_secret: str, public_base_url: str, peer_registry: Any | None
+) -> None:
+    """One iteration: re-stamp this instance's card + re-verify declared peers.
+
+    Keeps the served card fresh (a once-built card would otherwise age out of the
+    freshness window after hours of uptime) and re-runs org-claim verification
+    (retries transient startup failures + drops peers whose card expired/rotated).
+    Never raises -- both steps are best-effort.
+    """
+    try:
+        app.state.agent_card = build_agent_card(config, org_secret, public_base_url)
+    except Exception:  # noqa: BLE001 -- best-effort refresh
+        _logger.debug("A2A agent-card refresh failed", exc_info=True)
+    if peer_registry is not None and peer_registry.requires_verification:
+        try:
+            await peer_registry.verify_all()
+        except Exception:  # noqa: BLE001 -- best-effort re-verify
+            _logger.debug("A2A peer re-verify failed", exc_info=True)
+
+
+async def _a2a_refresh_loop(
+    app: FastAPI,
+    config: Config,
+    org_secret: str,
+    public_base_url: str,
+    peer_registry: Any | None,
+    interval: float = _A2A_REFRESH_INTERVAL,
+) -> None:
+    """Periodic A2A maintenance: refresh the card + re-verify peers every ``interval`` s."""
+    while True:
+        await asyncio.sleep(interval)
+        await _a2a_refresh_once(app, config, org_secret, public_base_url, peer_registry)
 
 
 def _build_key_store(config: Config, api_keys: list[str] | None = None) -> KeyStore:
@@ -298,6 +338,13 @@ def create_app(
         if peers_cfg and peers_cfg.get("enabled"):
             peer_registry.load_from_config(peers_cfg)
 
+    # P3: build this instance's signed agent-card once (served at GET /.well-known/agent-card).
+    org_secret = str(config.get("peers", "org_secret", default="") or "")
+    public_base_url = str(config.get("peers", "public_base_url", default="") or "") or (
+        f"http://{config.get('server', 'host', default='127.0.0.1')}:{config.get('server', 'port', default=8000)}"
+    )
+    agent_card = build_agent_card(config, org_secret, public_base_url)
+
     health = HealthRegistry()
     health.register("pool", make_pool_alive_check(pool))
     health.register("db", make_db_check(ownership, backend=memory_backend))
@@ -337,17 +384,37 @@ def create_app(
             )
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
+        # P3: verify each declared peer's agent-card org-claim before serving (verified-only).
+        # Bounded by per-peer timeouts (concurrent gather); never fatal to startup.
+        if peer_registry is not None and peer_registry.requires_verification:
+            try:
+                await peer_registry.verify_all()
+            except Exception:  # noqa: BLE001 -- verification must not block/crash startup
+                _logger.warning("A2A peer org-claim verification failed at startup", exc_info=True)
         # 16.24: workdir TTL GC + G5c-a: job TTL GC background sweeps.
         workdir_gc = asyncio.create_task(_workdir_gc_loop(workspace_root, workdir_ttl))
         job_gc = asyncio.create_task(_job_ttl_gc_loop(job_store, job_registry, job_ttl))
+        # P3: keep this instance's card fresh + re-verify peers hourly (only when org_secret set).
+        a2a_refresh = (
+            asyncio.create_task(_a2a_refresh_loop(app, config, org_secret, public_base_url, peer_registry))
+            if org_secret
+            else None
+        )
         try:
             yield
         finally:
             workdir_gc.cancel()
             job_gc.cancel()
+            if a2a_refresh is not None:
+                a2a_refresh.cancel()
             for _gc in (workdir_gc, job_gc):
                 try:
                     await _gc
+                except asyncio.CancelledError:
+                    pass
+            if a2a_refresh is not None:
+                try:
+                    await a2a_refresh
                 except asyncio.CancelledError:
                     pass
             try:
@@ -383,6 +450,7 @@ def create_app(
     app.state.session_stream_timeout = session_stream_timeout  # B2: stream deadline
     app.state.mcp_registries = {}  # G6: session_id -> SessionMcpRegistry
     app.state.peer_registry = peer_registry  # A2A: outbound peers + inbound token validation
+    app.state.agent_card = agent_card  # P3: signed self-description served at /.well-known/agent-card
 
     # Middleware: registration order is the REVERSE of execution order.
     # auth is registered FIRST → executes LAST (innermost, closest to routes).
@@ -1127,6 +1195,11 @@ def _register_routes(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @app.get(CARD_PATH)
+    async def agent_card_route(request: Request) -> dict:
+        """P3: this instance's signed agent-card (open endpoint; trust via HMAC org-claim)."""
+        return request.app.state.agent_card
 
     @app.post("/v1/peer/invoke")
     async def peer_invoke(body: PeerInvokeRequest, request: Request) -> Response:
