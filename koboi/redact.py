@@ -25,12 +25,24 @@ REDACTED = "***REDACTED***"
 # nested untrusted JSON in the durability-critical journal write path).
 _REDACT_MAX_DEPTH = 32
 
-# Value-shape patterns (copied from koboi/server/jobs.py:47-52).
+# Value-shape patterns (copied from koboi/server/jobs.py:47-52, extended for
+# cloud-provider credentials -- issue #49).
 _SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-[A-Za-z0-9_-]{20,}"),  # OpenAI-style keys
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key IDs
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+"),  # bearer tokens
     re.compile(r"(?i)(api[_-]?key|token|password|passwd|secret)[=:]\s*\S+"),
+    re.compile(r"gh[opsur]_[A-Za-z0-9]{36,}"),  # GitHub classic tokens (PAT/OAuth/server-to-server)
+    re.compile(r"github_pat_[A-Za-z0-9_]{50,}"),  # GitHub fine-grained PATs
+    re.compile(r"sk_live_[A-Za-z0-9]{16,}"),  # Stripe live secret keys
+    re.compile(r"rk_live_[A-Za-z0-9]{16,}"),  # Stripe live restricted keys
+    re.compile(r"AIza[0-9A-Za-z_\-]{35}"),  # Google API keys
+    re.compile(r"xox[abpser]-[A-Za-z0-9-]{10,}"),  # Slack tokens (bot/user/app/session/exchange/refresh)
+    # DB/URL DSN credentials -- REQUIRES a user:pass@ segment so bare URLs
+    # (http://localhost:8080/v1) and cred-less DSNs stay unmasked.
+    re.compile(r"[a-z][a-z0-9+]*://[^/\s:@\"']+:[^/\s:@\"']+@"),
+    # PEM private-key blocks (whole block incl. body; DOTALL spans newlines).
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
 )
 
 # Exact sensitive key names (lowercased) -- extends diagnostics.py:128.
