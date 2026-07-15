@@ -46,6 +46,9 @@ Coverage-gated, cited web research (GPT-Researcher shape). `Orchestrator._run_de
 Orchestrator `__init__` deep_research params: `research` (caps/threshold dict), `websearch_conf`
 (provider config), `sandbox` (node tool dep), `session_id` (tags persisted rows). Production
 quality bar + smoke scenarios: `docs/deep-research-smoke.md`.
+- **Auto multimedia briefing (W4)**: `research.capabilities` (tokens: image/video/music/speech) + `research.media`
+  inject the matching `generate_*` media tools into the synthesis node and auto-generate a multimedia briefing
+  post-synthesis (`media_tools_for_capabilities` / `generate_research_media` in `research.py`). Requires `media.enabled`.
 
 ## Extension API -- adding a router
 There is NO registry or decorator for routers. To add one:

@@ -27,13 +27,14 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 
 - **Multi-provider LLM**: OpenAI, Anthropic, Cloudflare Workers AI
 - **YAML-driven config** with `${ENV_VAR}` interpolation
-- **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover
+- **Built-in tools**: calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media
 - **Hook lifecycle**: 15 event types for logging, guardrails, telemetry, plus declarative external-command hooks (`hooks:` YAML — no Python required)
 - **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/BM25/semantic/hybrid), cross-encoder rerank (jina/cohere/local), augmentation, query rewriting/HyDE, metadata filtering, Indonesian stopwords/stemmer, remote sources (HTTP/S3)
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Confidence-awareness + human handover**: opt-in grounding guardrail (claim-decomposition + NLI judge — abstains when ungrounded), the `transfer_to_human` tool, and structural handover detection — the bot yields to a human operator when it should (see [docs/channel-bridge.md](docs/channel-bridge.md))
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, dynamic (LLM-planned), and **deep_research** (coverage-gated, cited web research) execution
 - **Deterministic workflow export**: freeze a run into a re-runnable config bundle (`koboi export`/`import`), and optionally capture the LLM response cache for byte-identical **offline** replay (`koboi capture --with-cache`, `run --replay-mode replay` — no API key)
+- **Multimodal generation**: opt-in image/video/music/speech + transcription (STT) via a pluggable provider gateway (Surplus; mock offline) — agent tools, REST sync+async endpoints, R2/S3 storage, budget caps, and a Deep Research multimedia briefing
 - **Web research providers**: pluggable search + fetch backends for the `web_search`/`web_fetch` tools via `@register_search_provider`/`@register_fetch_provider` — built-in mock, DuckDuckGo, Brave, Firecrawl (search) + httpx/readability, Firecrawl (fetch)
 - **Context management**: truncation, smart truncation, key facts, sliding window
 - **Sandboxed execution**: pluggable passthrough/restricted backends (per-session workdir, network/rlimit isolation)
@@ -54,6 +55,7 @@ pip install koboi-agent            # bare install: --help, validate, run, sessio
 #   pip install koboi-agent[tokenizer]  # accurate OpenAI token counts (tiktoken); chars/3 heuristic is the fallback
 #   pip install koboi-agent[rerank-local]  # local BGE cross-encoder rerank (sentence-transformers); jina/cohere are API, no extra needed
 #   pip install koboi-agent[indo-nlp]      # Indonesian stemmer (Sastrawi) for lexical RAG retrieval
+#   pip install koboi-agent[media-cloud]   # R2/S3 media-artifact storage (boto3); local storage needs no extra
 #   pip install koboi-agent[dev,tui,api]  # everything (contributors)
 ```
 
@@ -100,7 +102,7 @@ asyncio.run(main())
 ## Serving (HTTP/SSE)
 
 Run koboi as a stateless HTTP service: **interactive SSE chat** (with human-in-the-loop
-approvals) and **autonomous background jobs** (durable resume). Requires the `[api]` extra.
+approvals), **autonomous background jobs** (durable resume), and **multimodal generation** (`POST /v1/media/generate` sync + `/v1/media/jobs` async). Requires the `[api]` extra.
 
 ```bash
 pip install -e ".[api]"
@@ -275,6 +277,7 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **Orchestrator** (`orchestration/`) -- multi-agent coordination; `deep_research` mode plans + runs cited web research (plan → DAG waves → coverage eval → synthesize)
 - **Websearch providers** (`websearch/`) -- pluggable search/fetch backends (Brave/Firecrawl/ddg/mock + httpx/firecrawl) behind the `web_search`/`web_fetch` tools
 - **Workflow export** (`workflows/`) -- deterministic run capture: `WorkflowDefinition` bundle + `DeterminismProfile` + response-cache sidecar (`koboi export`/`capture`; offline `replay` mode); see [docs/deterministic-workflow-export-strategy.md](docs/deterministic-workflow-export-strategy.md)
+- **Media** (`media/`) -- multimodal generation (image/video/music/speech + STT) via Surplus/mock providers; `MediaBackend` + R2/S3 store + budget + ModelProfile
 - **SubAgentManager** (`subagent.py`) -- parallel sub-agent delegation
 - **MCP clients** (`mcp/`) -- external tool servers
 

@@ -64,6 +64,8 @@ GET    /v1/workflows                  List caller's workflows
 GET    /v1/workflows/{name}           Show a workflow bundle
 DELETE /v1/workflows/{name}           Delete a workflow
 POST   /v1/jobs/{id}/capture          Capture a completed workflow_ref job into a bundle + cache sidecar
+POST   /v1/media/generate             Sync multimodal generation (image/video/music/speech/STT)
+POST   /v1/media/jobs                 Async media job (202; video/music); poll GET /v1/media/jobs/{id}
 ```
 
 ## The two execution modes

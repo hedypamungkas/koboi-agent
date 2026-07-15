@@ -20,7 +20,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (236 .py files)
+koboi/              Main package (250 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
@@ -48,7 +48,7 @@ koboi/              Main package (236 .py files)
   notifications.py  Notification system
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver), cache (ResponseCache/CachedClient -- replay/cache determinism)
-  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover)
+  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media)
   hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 21 specialized hooks (incl. handover detection)
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid + BM25), cross-encoder rerank (jina/cohere/local -- rerank.py), augmentation, query-rewrite/HyDE, metadata filters, Indonesian stopwords/stemmer, registry, live (LiveCorpus/LiveRetriever), sources (file/http/s3/firecrawl)
@@ -59,11 +59,12 @@ koboi/              Main package (236 .py files)
   server/           FastAPI HTTP/SSE serving layer: app, jobs, pool, auth, ownership, idempotency, approvals, keys_cli, schema, sse, health, middleware, protocols
   orchestration/    Multi-agent: router (keyword/LLM/hybrid), orchestrator (sequential/parallel/dag/conditional/dynamic/deep_research), factory, dynamic agent builder, dag_scheduler (wave-parallel DAG), planner (LLM plan-or-skip + plan_research), workflow_graph (programmatic builder), research (ResearchBudget/SourceStore/ResearchContext/CoverageEvaluator -- deep_research mode); per-node determinism/output_schema (workflow export)
   workflows/        Deterministic workflow export/import: WorkflowDefinition bundle + DeterminismProfile + FileWorkflowStore + capture_from_run + cache sidecar (`koboi export/import/capture/workflows`)
+  media/            Multimodal generation: MediaBackend + per-modality provider registries (image/video/music/speech/transcription; Surplus+mock), store (local/R2/S3), budget, ModelProfile, async jobs
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
-  tui/              Terminal UI (Textual): app, screens/ (10), widgets/ (12)
-tests/              298 .py files (268 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
+  tui/              Terminal UI (Textual): app, screens/ (11), widgets/ (12)
+tests/              312 .py files (282 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
 configs/            33 YAML agent configs
 examples/           37 numbered example scripts (01-37) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
@@ -132,4 +133,5 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - **Session REST surface** (`server/app.py`): `GET /v1/sessions` (list, owner-scoped + fails closed 401 when auth on but no caller identity), `POST /v1/sessions/{id}/fork` (rolls back DB+owner rows on any `get_or_create` failure), `DELETE /v1/sessions/{id}` (clears DB rows AND holds `pool.existing_session_lock` so a concurrent `/chat/stream` can't re-insert orphaned rows). `create_app` accepts externalized-state injection kwargs (`session_store`/`job_store`/`event_buffer`/`idempotency_store`/`ownership_store`/`approval_registry`, each default None → in-process impl).
 - **Confidence-awareness + handover** (PR #40, opt-in): `GroundingGuardrail` (`guardrails/grounding.py`, factory `grounding_check` in the `guardrails.output` slot) decomposes the answer into atomic claims and NLI-checks each against the retrieved context via a side-LLM; if coverage < `threshold` (default 0.8) it returns `action="abstain"` and the loop swaps the output for a refusal (fail-soft: any judge error passes-through, never breaks the run). The `transfer_to_human` tool (`tools/builtin/handover.py`) and `HandoverDetectionHook` (B1.5, `hooks/handover_detection_hook.py`; PRE_INPUT user-ask patterns + POST_OUTPUT low-coverage trigger) raise `AgentHandoverError` → `HandoverEvent` (interactive SSE) or an `awaiting_human` job status, releasing `pool.session_lock` (no Future is awaited, so the human's next `/chat/stream` can't deadlock). Config under `handover:` (`detection.enabled`/`coverage_threshold`/`ask_patterns`, `digest.enabled` for the B4 warm-handoff summary, `webhooks`). The B2 replay buffer (`GET /v1/sessions/{id}/stream`) replays history + digest to the operator. See `docs/channel-bridge.md` for the omnichannel webhook surfaces.
 - **Deterministic workflow export** (PR #42, opt-in): `koboi export <config>` freezes a run into a `WorkflowDefinition` bundle (config + `DeterminismProfile` + provenance; redacted; un-interpolated `${VAR}` templates preserved); `koboi capture --with-cache` additionally freezes the `ResponseCache` (`koboi/llm/cache.py`) as a sidecar so `koboi run --workflow <name> --replay-mode replay` re-runs **offline** (no API key; raises `CacheMissError` on cache miss). There is **no top-level `workflows:` section** — determinism lives in `orchestration.determinism` (workflow-level + per-node `DeterminismProfile.merge`, node wins) and node `output_schema`. CLI store resolves `KOBOI_WORKFLOWS_DIR` → `~/.koboi/workflows` → `cwd/.koboi/workflows`; the server store is SQLite (`workflow_store.py`, owner-scoped) surfaced via `/v1/workflows` + `POST /v1/jobs/{id}/capture`. See `koboi/workflows/CLAUDE.md`.
+- **Multimodal generation** (PR #43, opt-in via `media:`): the facade builds a `MediaBackend` (`koboi/media/`, injected as the `media_provider` tool dep) only when `media.enabled` is set + a provider configured; default backend is the **Surplus** gateway (`media.{image|video|music|speech|transcription}.surplus`), `mock` for offline. 7 tools (`media.py`): `generate_image`/`generate_video`/`generate_music`/`generate_speech`/`transcribe_audio` + async `submit_media_job`/`check_media_job`; `generate_video` is DESTRUCTIVE (timeout 1800s). REST: `POST /v1/media/generate` (sync), `POST /v1/media/jobs` (202 async), `GET /v1/media/jobs/{id}`. Storage `local`/`r2`/`s3` (r2/s3 need `[media-cloud]`); budget caps are fail-soft. Deep Research auto-multimedia-briefing via `research.capabilities` + `research.media`. TUI **F3** = Media Gallery. See `koboi/media/CLAUDE.md`.
 

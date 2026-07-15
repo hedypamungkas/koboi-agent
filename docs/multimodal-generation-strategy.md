@@ -1,6 +1,6 @@
 # Multimodal Generation Strategy — `koboi/media/`
 
-> Status: **Design / ideation** (2026-07-13). Not yet implemented.
+> Status: **SHIPPED** (PR #43, W0–W5c; 2026-07-15). See `koboi/media/` + `koboi/media/CLAUDE.md`.
 > Scope: how koboi-agent should integrate **image / video / audio generation** as a first-class
 > platform capability — routed through the **Surplus Intelligence** gateway, but behind a
 > provider-agnostic abstraction — and how the Deep Research capability (PR #37) and every other

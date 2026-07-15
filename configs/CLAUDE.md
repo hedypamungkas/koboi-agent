@@ -50,7 +50,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`
+`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `media`
 
 ### Notable sub-sections (recently added)
 - `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
@@ -66,4 +66,6 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 - `orchestration.determinism` — `{temperature, seed, top_p, model_pin, replay_mode}`: workflow-level determinism default; a per-node `determinism:` overrides via `DeterminismProfile.merge` (node wins). Drives the cache/replay tiers. No `seed` on Anthropic.
 - `orchestration.agents[].output_schema` — structured output (JSON schema) on a node; `force_response_format_with_tools` forces it even with tools (Gap A+B).
 - `replay:` — `{mode: live|cache|replay, cache_dir}` set by `koboi run --replay-mode`; `replay` is offline (raise-on-miss, no API key).
+- `media:` — opt-in multimodal generation (`MediaConfig`): `enabled`, per-modality `image`/`video`/`music`/`speech`/`transcription` (`{provider: surplus|mock, surplus: {api_key, base_url, model}}`), `budget` (`max_cost_usd`/`max_images`/`max_video_seconds`/`max_music_seconds`), `storage` (`backend: local|r2|s3`; r2/s3 need `[media-cloud]`), `profiles` (ModelProfile overrides), `custom_modules` (`@register_*` providers). Inert unless `enabled`.
+- `research.media` / `research.capabilities` — Deep Research auto-multimedia-briefing (tokens: image/video/music/speech).
 
