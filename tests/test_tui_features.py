@@ -47,12 +47,13 @@ class TestKeybindings:
         """Default config produces standard bindings."""
         config = Config.from_dict({"agent": {"name": "test"}, "llm": {"model": "gpt-4o"}})
         bindings = load_keybindings(config)
-        assert len(bindings) == 14
+        assert len(bindings) == 15
         actions = {b.action for b in bindings}
         assert "command_palette" in actions
         assert "cancel_or_quit" in actions
         assert "subagent_monitor" in actions
         assert "mcp_status" in actions
+        assert "media_gallery" in actions  # W5c
 
     def test_load_keybindings_override(self):
         """YAML overrides change the key for an action."""
@@ -77,14 +78,14 @@ class TestKeybindings:
             }
         )
         bindings = load_keybindings(config)
-        assert len(bindings) == 14
+        assert len(bindings) == 15
 
     def test_load_keybindings_invalid_config(self):
         """Non-dict config gracefully falls back to defaults."""
         config = MagicMock()
         config.get.return_value = "not-a-dict"
         bindings = load_keybindings(config)
-        assert len(bindings) == 14
+        assert len(bindings) == 15
 
     def test_get_keybinding_display(self):
         """Display tuples exclude hidden bindings."""

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from koboi.tokens import estimate_tokens
 from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, RoutingDecision
+from koboi.exceptions import AgentError
 from koboi.hooks.chain import AgentInfo, HookContext, HookEvent
 from koboi.events import (
     AgentDispatchEvent,
@@ -30,6 +31,7 @@ from koboi.events import (
     SourceEvent,
     TextDeltaEvent,
 )
+
 
 # W3: map media generation tool names to their modality for MediaGeneratedEvent emission.
 _MEDIA_MODALITY: dict[str, str] = {
@@ -174,10 +176,7 @@ class Orchestrator:
         # W4: web config so deep_research nodes get the CONFIGURED search/fetch providers
         # (Brave/Firecrawl), not the mock/inline default.
         websearch_conf: dict | None = None,
-        # W3: media config so deep_research nodes (research.capabilities) can invoke generation.
         media_conf: dict | None = None,
-        # W5a: a shared media backend for static-agent orchestration nodes (create_all_configured
-        # parity) + the programmatic API. Deep-research builds its own per-run backend.
         media_backend: object | None = None,
         # W7: session_id tags persisted research_context rows so GET /v1/sessions/{id}
         # can map a session to its deep-research run. None for non-server callers.
@@ -214,6 +213,13 @@ class Orchestrator:
         self._media_backend = media_backend
         self._resume_ctx_json: str | None = None
         self._session_id = session_id
+        # F9: reentrancy guard. The Orchestrator holds per-run mutable state (_agents_map,
+        # _dynamic_blueprints) that is rebuilt each round, so it is NOT safe to drive two
+        # concurrent runs on one instance. Today every caller (server pool = one Orchestrator
+        # per session + per-session lock; CLI = one run) creates a fresh instance per run, so
+        # this never trips in practice -- it exists to fail loudly if a future "pool the
+        # Orchestrator" optimization reintroduces the shared-state race.
+        self._run_in_progress = False
 
     def _make_agent_logger(self, agent_name: str) -> AgentLogger | None:
         if not self.logger:
@@ -265,6 +271,19 @@ class Orchestrator:
         return resolved
 
     async def run(self, query: str, mode: str = "sequential") -> OrchestratorResult:
+        # F9 guard: one run per Orchestrator instance at a time (per-run mutable state).
+        if self._run_in_progress:
+            raise AgentError(
+                "Orchestrator is already running a query; it is not concurrent-safe. Create one "
+                "Orchestrator instance per concurrent run (the server pool does this per session)."
+            )
+        self._run_in_progress = True
+        try:
+            return await self._run_impl(query, mode)
+        finally:
+            self._run_in_progress = False
+
+    async def _run_impl(self, query: str, mode: str = "sequential") -> OrchestratorResult:
         start = time.time()
 
         if self.use_revision and self.evaluator:
@@ -858,17 +877,14 @@ class Orchestrator:
         """
         from uuid import uuid4
 
-        from koboi.media import build_media
         from koboi.orchestration.factory import AgentFactory
         from koboi.orchestration.planner import plan_research
         from koboi.orchestration.research import (
+            RESEARCH_NODE_PREAMBLE,
             RESEARCH_TOOLS_CONFIG,
             CoverageEvaluator,
             ResearchBudget,
             ResearchContext,
-            generate_research_media,
-            media_tools_for_capabilities,
-            preamble_with_media,
         )
         from koboi.types import AgentDef
         from koboi.websearch import build_fetch_provider, build_search_provider
@@ -883,13 +899,7 @@ class Orchestrator:
             max_tokens=int(rc.get("max_tokens", 0)),
         )
         threshold = float(rc.get("coverage_threshold", 0.7))
-        caps = rc.get("capabilities") or []
-        tools_config = rc.get("tools") or dict(RESEARCH_TOOLS_CONFIG)
-        # W3: append media tools when media is enabled + research.capabilities request them.
-        if self._media_conf.get("enabled") and caps:
-            _extra = media_tools_for_capabilities(caps)
-            if _extra:
-                tools_config = {**tools_config, "builtin": list(tools_config.get("builtin", [])) + _extra}
+        tools_config = rc.get("tools") or RESEARCH_TOOLS_CONFIG
 
         ctx = ResearchContext(budget=budget)
         ctx.query = query  # W5.1: store for resume synthesis
@@ -921,8 +931,29 @@ class Orchestrator:
             await self._emit_research_hook(HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=report[:200])
             report, referenced = _verify_citations(report, ctx)
             combined_answer = report + self._sources_footer(ctx, referenced)
+            # W8 review fix: emit a RoutingDecisionEvent so the non-streaming run() path can
+            # build a valid RoutingDecision (it falls back to agents=[] -> ValueError when no
+            # RoutingDecisionEvent is seen). The other deep_research arms emit one; resume must too.
+            yield RoutingDecisionEvent(
+                agents=["synthesis"],
+                confidence=1.0,
+                method="dynamic",
+                reasoning="deep research resume",
+                domain_label=None,
+            )
             if combined_answer:
                 yield TextDeltaEvent(content=combined_answer)
+            # W8 review fix: persist the re-synthesized report (parity with the multi-step
+            # + direct-answer arms) so GET /v1/sessions/{id} surfaces the fresh report after
+            # resume, not the stale pre-interruption one.
+            ctx.final_report = combined_answer
+            if db_path:
+                try:
+                    from koboi.orchestration.dag_scheduler import DagScheduler
+
+                    DagScheduler.persist_research_context(db_path, run_id, ctx.to_json(), session_id=self._session_id)
+                except Exception as e:  # noqa: BLE001 - journaling is best-effort, never fatal
+                    logger.warning("research resume final-report journal failed: %s", e)
             await self._emit_research_hook(HookEvent.SESSION_END)
             yield OrchestrationCompleteEvent(
                 final_answer=combined_answer,
@@ -965,10 +996,6 @@ class Orchestrator:
         results_by_name: dict[str, AgentResult] = {}  # A5: dedup across re-plan rounds
         routing_agents: list[str] = []
         score = 0.0
-        # W3: build the media backend ONCE per run (only the multi-step path reaches here -- resume
-        # and direct-answer return above). Shared across depth iterations so media.budget caps the
-        # whole run; closed after the final event below.
-        media_backend = build_media(self._media_conf)
 
         while True:
             step_ids = [s.id for s in plan.steps]
@@ -986,7 +1013,7 @@ class Orchestrator:
                 s.id: AgentFactory.create_configured_agent(
                     AgentDef(
                         name=s.id,
-                        system_prompt=f"{preamble_with_media(caps)}\n\n{s.instruction or s.id}",
+                        system_prompt=f"{RESEARCH_NODE_PREAMBLE}\n\n{s.instruction or s.id}",
                         tools_config=dict(tools_config),
                     ),
                     self.client,
@@ -994,7 +1021,6 @@ class Orchestrator:
                     sandbox=self._sandbox,
                     search_provider=search_provider,
                     fetch_provider=fetch_provider,
-                    media_provider=media_backend,
                 )
                 for s in plan.steps
             }
@@ -1070,25 +1096,6 @@ class Orchestrator:
         if combined_answer:
             yield TextDeltaEvent(content=combined_answer)
 
-        # W4: automatic post-synthesis media briefing -- one LLM call picks supporting media
-        # (image/voiceover/...) derived from the report, generates it, appends a section. Fail-soft.
-        media_cfg = rc.get("media") or {}
-        media_artifacts: list[dict] = []
-        if media_cfg.get("enabled") and media_backend is not None:
-            media_section, media_artifacts = await generate_research_media(
-                self.client,
-                combined_answer,
-                kinds=media_cfg.get("kinds") or ["image"],
-                max_items=int(media_cfg.get("max_items", 1)),
-                media_backend=media_backend,
-                logger=logger,
-            )
-            if media_section:
-                combined_answer += media_section
-                yield TextDeltaEvent(content=media_section)
-                for _art in media_artifacts:
-                    yield MediaGeneratedEvent(modality=_art["kind"], prompt=_art.get("prompt", ""))
-
         # W7: persist the final synthesized report so GET /v1/sessions/{id} can surface it
         # (the report prose is otherwise only streamed as events, never written to DB).
         ctx.final_report = combined_answer
@@ -1125,18 +1132,14 @@ class Orchestrator:
                 # Production-smoke bar (docs/deep-research-smoke.md): decomposition,
                 # budget adherence, node health -- all readable via RunResult.metadata.
                 "plan_nodes": len(routing_agents),
-                "media_artifacts": media_artifacts,
                 "used_searches": budget.used_searches,
                 "used_fetches": budget.used_fetches,
-                "nodes_failed": sum(1 for r in results_by_name.values() if getattr(r, "failed", False)),
+                # _run_single catches node exceptions + returns AgentResult(answer="Error: ...",
+                # failed=False), so r.failed never reflects crashes. Detect via the same
+                # "Error:" answer prefix the citation path uses (line ~502).
+                "nodes_failed": sum(1 for r in results_by_name.values() if (r.answer or "").startswith("Error:")),
             },
         )
-        # W3: release the media backend's persistent HTTP transport now that the run is complete.
-        if media_backend is not None:
-            try:
-                await media_backend.close()
-            except Exception as e:  # noqa: BLE001 - best-effort teardown
-                logger.warning("media backend close failed: %s", e)
 
     async def _research_direct_answer(self, query: str, start: float, run_id: str) -> AsyncGenerator:
         """A7: simple-request fallback -- one assistant node, stamped deep_research.
@@ -1190,6 +1193,10 @@ class Orchestrator:
         )
         yield TextDeltaEvent(content=result.answer)
         await self._emit_research_hook(HookEvent.SESSION_END)
+        # W8 review fix: reflect actual node success honestly. _run_single turns a failed/empty
+        # LLM response into answer="Error: ..." (or ""), so coverage/nodes_failed must not claim
+        # success for those -- the smoke bar + job consumers rely on this signal.
+        _da_failed = (not result.answer) or result.answer.startswith("Error:")
         yield OrchestrationCompleteEvent(
             final_answer=result.answer,
             elapsed_seconds=time.time() - start,
@@ -1199,13 +1206,13 @@ class Orchestrator:
             routing_confidence=1.0,
             metadata={
                 "research_sources": [],
-                "coverage": 1.0,
+                "coverage": 0.0 if _da_failed else 1.0,
                 "depth": 0,
                 "run_id": run_id,
                 "plan_nodes": 1,
                 "used_searches": 0,
                 "used_fetches": 0,
-                "nodes_failed": 0,
+                "nodes_failed": 1 if _da_failed else 0,
             },
         )
 
@@ -1377,7 +1384,17 @@ class Orchestrator:
 
     async def run_stream(self, query: str, mode: str = "sequential") -> AsyncGenerator:
         """Streaming version of run() -- yields orchestration events."""
-        async for event in self._execute_pipeline(query, mode):
-            if isinstance(event, _AgentCompletedEvent):
-                continue
-            yield event
+        # F9 guard: one run per Orchestrator instance at a time (per-run mutable state).
+        if self._run_in_progress:
+            raise AgentError(
+                "Orchestrator is already running a query; it is not concurrent-safe. Create one "
+                "Orchestrator instance per concurrent run (the server pool does this per session)."
+            )
+        self._run_in_progress = True
+        try:
+            async for event in self._execute_pipeline(query, mode):
+                if isinstance(event, _AgentCompletedEvent):
+                    continue
+                yield event
+        finally:
+            self._run_in_progress = False
