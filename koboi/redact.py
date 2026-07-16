@@ -9,8 +9,10 @@ journal (and future callers) never durable-store leaked credentials:
   (password/token/secret/api_key/...) -- copied from ``diagnostics.py`` +
   the fnmatch globs in ``harness/env.py``.
 
-Existing callers (``server/jobs.py``/``diagnostics.py``) are untouched to avoid
-churn; this module copies the patterns. A future cleanup can re-point them here.
+Callers: ``journal.py`` (:func:`redact_tool_arguments`), ``server/jobs.py``,
+``diagnostics.py`` (:func:`redact_config_for_export` via ``_sanitize_config``),
+and the workflow-export path (``workflows/definition.py``).
+``server/jobs.py`` keeps its own inline copy of the value-shape patterns.
 """
 
 from __future__ import annotations
@@ -25,23 +27,39 @@ REDACTED = "***REDACTED***"
 # nested untrusted JSON in the durability-critical journal write path).
 _REDACT_MAX_DEPTH = 32
 
-# Value-shape patterns (copied from koboi/server/jobs.py:47-52).
+# Value-shape patterns (copied from koboi/server/jobs.py:47-52, extended for
+# cloud-provider credentials -- issue #49).
 _SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-[A-Za-z0-9_-]{20,}"),  # OpenAI-style keys
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key IDs
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+"),  # bearer tokens
     re.compile(r"(?i)(api[_-]?key|token|password|passwd|secret)[=:]\s*\S+"),
+    re.compile(r"gh[opsur]_[A-Za-z0-9]{36,}"),  # GitHub classic tokens (PAT/OAuth/server-to-server)
+    re.compile(r"github_pat_[A-Za-z0-9_]{50,}"),  # GitHub fine-grained PATs
+    re.compile(r"sk_live_[A-Za-z0-9]{16,}"),  # Stripe live secret keys
+    re.compile(r"rk_live_[A-Za-z0-9]{16,}"),  # Stripe live restricted keys
+    re.compile(r"AIza[0-9A-Za-z_\-]{35}"),  # Google API keys
+    re.compile(r"xox[abpser]-[A-Za-z0-9-]{10,}"),  # Slack tokens (bot/user/app/session/exchange/refresh)
+    # DB/URL DSN credentials -- REQUIRES a user:pass@ segment so bare URLs
+    # (http://localhost:8080/v1) and cred-less DSNs stay unmasked.
+    re.compile(r"[a-z][a-z0-9+]*://[^/\s:@\"']+:[^/\s:@\"']+@"),
+    # PEM private-key blocks (whole block incl. body; DOTALL spans newlines).
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
 )
 
-# Exact sensitive key names (lowercased) -- extends diagnostics.py:128.
+# Exact sensitive key names (lowercased). Supersedes the original short set
+# (api_key/secret_key/auth_token/password/token) that used to live inline in
+# diagnostics.py; diagnostics now delegates here (issue #55).
 SENSITIVE_KEY_NAMES: frozenset[str] = frozenset(
     {
         "api_key",
         "apikey",
+        "api_keys",
         "secret_key",
         "secret",
         "auth_token",
         "authtoken",
+        "authorization",
         "password",
         "passwd",
         "token",
@@ -129,13 +147,28 @@ _ENV_TEMPLATE_RE = re.compile(r"^\$\{[^}]+\}$")
 
 
 def _redact_export_value(value: object, _depth: int = 0) -> object:
-    """Export-time handling for a SENSITIVE-key value.
+    """Export-time handling for a value found under a SENSITIVE key.
 
-    Keep a whole ``${VAR:default}`` template (re-runnable); otherwise recurse via
-    :func:`redact_config_for_export` so a concrete secret (``sk-...``) is masked.
+    * A whole ``${VAR:default}`` template is KEPT so an exported bundle stays
+      re-runnable via environment credentials.
+    * Any other leaf string is masked wholesale. A concrete secret under a
+      known-sensitive key is always redacted, even when its value shape is not
+      recognized (e.g. an opaque ``server.api_keys`` entry). This is stricter
+      than :func:`redact_value` value-shape masking and closes the gap where a
+      non-shape-matching secret survived under a sensitive key (issue #55).
+    * A list is redacted element-wise (so ``api_keys: [k1, k2]`` redacts each).
+    * A dict is recursed via :func:`redact_config_for_export` so nested env
+      templates under nested sensitive keys are still preserved.
+
+    Depth-capped (``_REDACT_MAX_DEPTH``); past the cap the value is masked
+    wholesale (fail-safe, never recurses/raises on untrusted nesting).
     """
-    if isinstance(value, str) and _ENV_TEMPLATE_RE.match(value):
-        return value
+    if _depth > _REDACT_MAX_DEPTH:
+        return REDACTED
+    if isinstance(value, str):
+        return value if _ENV_TEMPLATE_RE.match(value) else REDACTED
+    if isinstance(value, list):
+        return [_redact_export_value(v, _depth + 1) for v in value]
     return redact_config_for_export(value, _depth + 1)
 
 

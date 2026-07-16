@@ -172,6 +172,22 @@ class WebSearchConfig(BaseModel):
     custom_modules: list[str] = Field(default_factory=list)
 
 
+class MediaConfig(BaseModel):
+    """Top-level ``media:`` section -- multimodal generation."""
+
+    model_config = {"extra": "ignore"}
+    enabled: bool = False
+    image: dict = Field(default_factory=dict)
+    video: dict = Field(default_factory=dict)
+    music: dict = Field(default_factory=dict)
+    speech: dict = Field(default_factory=dict)
+    transcription: dict = Field(default_factory=dict)
+    budget: dict = Field(default_factory=dict)
+    storage: dict = Field(default_factory=dict)
+    custom_modules: list[str] = Field(default_factory=list)
+    profiles: list[dict] = Field(default_factory=list)
+
+
 class ResearchConfig(BaseModel):
     """Top-level ``research:`` section -- ``execution.mode: deep_research`` knobs (W2).
 
@@ -189,10 +205,12 @@ class ResearchConfig(BaseModel):
     citations: str = "numbered"  # numbered | inline | none (W2 ships numbered)
     # Optional override of the research node tool bundle (default: web_search + web_fetch).
     tools: dict | None = None
+    capabilities: list[str] = Field(default_factory=list)
     search_provider: str | None = None
     fetch_provider: str | None = None
     # W3: path to write the run's gathered findings as jsonl (cross-session corpus reuse).
     persist_findings: str | None = None
+    media: dict = Field(default_factory=dict)
 
 
 class InputGuardrailConfig(BaseModel):
@@ -613,6 +631,7 @@ class KoboiConfig(BaseModel):
     jobs: JobsConfig = Field(default_factory=JobsConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     websearch: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    media: MediaConfig = Field(default_factory=MediaConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
 

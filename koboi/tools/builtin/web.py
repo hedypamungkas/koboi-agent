@@ -129,22 +129,25 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 )
 
-PRIVATE_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("0.0.0.0/8"),  # H2: "this host"/unset (AWS http://0/ SSRF gadget)
-    ipaddress.ip_network("100.64.0.0/10"),  # H2: CGNAT / shared address space
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("::ffff:0:0/96"),  # H2: IPv4-mapped IPv6 (::ffff:127.0.0.1, ::ffff:169.254.169.254)
+# Networks that ``ipaddress`` property checks do NOT cover but the SSRF guard must
+# still block. CPython flags RFC 6598 CGNAT (100.64.0.0/10) as is_private=False, so
+# it needs an explicit net here. The property checks below handle everything else
+# (loopback, RFC 1918, link-local, IPv6 unspecified ``::``, ULA fc00::/7, multicast,
+# reserved, IPv4-mapped IPv6 like ::ffff:127.0.0.1).
+_SSRF_EXTRA_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("100.64.0.0/10"),  # RFC 6598 CGNAT / shared address space
 ]
 
 
 def _resolve_and_check(hostname: str) -> list[str]:
-    """Resolve hostname and check all IPs against private networks."""
+    """Resolve hostname and reject internal/special-purpose IPs (SSRF defense).
+
+    Rejects any resolved IP whose ``ipaddress`` properties mark it as loopback,
+    private, link-local, unspecified (``::`` / ``0.0.0.0``), multicast, or reserved --
+    plus the explicit nets in ``_SSRF_EXTRA_BLOCKED_NETWORKS`` (CGNAT). This is broader
+    than an enumerated CIDR list and closes the IPv6 unspecified ``::`` bypass (#54):
+    ``::`` matches no IPv6 CIDR in the old list but is ``is_unspecified``.
+    """
     addrs = socket.getaddrinfo(hostname, None)
     if not addrs:
         raise ValueError(f"DNS resolution returned no addresses for '{hostname}'")
@@ -153,9 +156,16 @@ def _resolve_and_check(hostname: str) -> list[str]:
     for _, _, _, _, sa in addrs:
         ip_str = str(sa[0])
         ip = ipaddress.ip_address(ip_str)
-        for net in PRIVATE_NETWORKS:
-            if ip in net:
-                raise ValueError("URL points to unauthorized internal IP address")
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_unspecified
+            or ip.is_multicast
+            or ip.is_reserved
+            or any(ip in net for net in _SSRF_EXTRA_BLOCKED_NETWORKS)
+        ):
+            raise ValueError("URL points to unauthorized internal IP address")
         resolved.append(ip_str)
     return resolved
 

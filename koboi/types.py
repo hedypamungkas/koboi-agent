@@ -311,6 +311,10 @@ class SkillDefinition:
     disable_model_invocation: bool = False
     user_invocable: bool = True
     disallowed_tools: list[str] | None = None
+    # Issue #46: per-skill opt-in for ``!`cmd` `` execution on activation. Defaults
+    # False so an untrusted SKILL.md cannot run shell on the activation path; a
+    # skill must declare ``allow-shell: true`` frontmatter to opt into preprocessing.
+    allow_shell: bool = False
 
 
 @dataclass

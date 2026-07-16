@@ -118,6 +118,19 @@ class TestResolveAndCheck:
             with pytest.raises(ValueError, match="internal IP"):
                 _resolve_and_check("mixed.example.com")
 
+    def test_raises_for_ipv6_unspecified(self):
+        # Issue #54: "::" (IPv6 unspecified, the IPv6 equivalent of 0.0.0.0/8)
+        # was missing from the enumerated CIDR list and bypassed the SSRF guard.
+        results = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::", 0, 0, 0))]
+        with patch("koboi.tools.builtin.web.socket.getaddrinfo", return_value=results):
+            with pytest.raises(ValueError, match="internal IP"):
+                _resolve_and_check("ipv6-unspecified.example")
+
+    def test_check_url_ssrf_blocks_ipv6_unspecified_literal(self):
+        # Issue #54: direct guard on an http://[::] URL (IP literal, no DNS hop).
+        with pytest.raises(ValueError, match="internal IP"):
+            _check_url_ssrf("http://[::]:1/x")
+
 
 # ── TestCheckUrlSsrf ──
 
@@ -209,6 +222,14 @@ class TestWebFetchSSRFProtection:
         results = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 0, 0, 0))]
         with patch("koboi.tools.builtin.web.socket.getaddrinfo", return_value=results):
             result = await web_fetch("http://ipv6-loopback/test")
+        assert "Error" in result
+        assert "internal IP" in result
+
+    async def test_blocks_ipv6_unspecified(self):
+        # Issue #54: "::" (IPv6 unspecified) bypassed the SSRF guard.
+        results = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::", 0, 0, 0))]
+        with patch("koboi.tools.builtin.web.socket.getaddrinfo", return_value=results):
+            result = await web_fetch("http://ipv6-unspecified/x")
         assert "Error" in result
         assert "internal IP" in result
 

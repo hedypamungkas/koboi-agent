@@ -110,3 +110,42 @@ class TestNonIdempotentSkippedOnResume:
         # A synthetic tool result was recorded for the skipped tool.
         msgs = " ".join(str(m.get("content", "")) for m in agent2._core.memory.get_messages())
         assert "skipped on resume" in msgs and "tool_charge" in msgs
+
+
+class TestShippedDestructiveBuiltinsNotIdempotent:
+    """Issue #48: shipped DESTRUCTIVE builtins must be idempotent=False so the
+    resume-skip path (loop.py _repair_interrupted_turn) fires and they cannot
+    double-execute on crash-resume."""
+
+    def test_run_shell_is_not_idempotent(self):
+        from koboi.tools.registry import ToolRegistry
+        from koboi.tools.builtin import register_all
+
+        reg = ToolRegistry()
+        register_all(reg)
+        td = reg.get_definition("run_shell")
+        assert td is not None
+        assert td.risk_level == RiskLevel.DESTRUCTIVE
+        assert td.idempotent is False  # resume-skip fires (loop.py:594)
+
+    def test_write_file_is_not_idempotent(self):
+        from koboi.tools.registry import ToolRegistry
+        from koboi.tools.builtin import register_all
+
+        reg = ToolRegistry()
+        register_all(reg)
+        td = reg.get_definition("write_file")
+        assert td is not None
+        assert td.risk_level == RiskLevel.DESTRUCTIVE
+        assert td.idempotent is False
+
+    def test_delete_file_is_not_idempotent(self):
+        from koboi.tools.registry import ToolRegistry
+        from koboi.tools.builtin import register_all
+
+        reg = ToolRegistry()
+        register_all(reg)
+        td = reg.get_definition("delete_file")
+        assert td is not None
+        assert td.risk_level == RiskLevel.DESTRUCTIVE
+        assert td.idempotent is False

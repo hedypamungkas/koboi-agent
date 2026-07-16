@@ -287,7 +287,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (28)
+### Config sections (29)
 
 | Section | Controls |
 |---------|----------|
@@ -319,6 +319,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `subagent` | Parallel sub-agent delegation config |
 | `eval` | Evaluation suite cases/scorers (e.g. `eval_suite.yaml`, `benchmark_eval.yaml`) |
 | `handover` | Confidence-aware handover: `detection` (structural handover, B1.5), `digest` (warm-handoff summary, B4), `webhooks` (HMAC `handover.requested` callbacks) |
+| `media` | Multimodal generation (image/video/music/speech/transcription; Surplus gateway + mock), `budget` caps, `storage` (local/r2/s3), `profiles` (ModelProfile), async jobs |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
@@ -389,6 +390,8 @@ deep_research query + cited report via the session-tagged `research_context` tab
 `POST /v1/jobs/{id}/capture` (freeze a completed `workflow_ref` job into a bundle + cache sidecar), and
 `workflow_ref` + `replay_mode` (`live`/`cache`/`replay`) on `POST /v1/jobs`.
 
+**Multimodal generation**: `POST /v1/media/generate` (sync), `POST /v1/media/jobs` (async, 202) + `GET /v1/media/jobs/{job_id}` (poll) — opt-in via `media:`; backed by `MediaBackend` (`koboi/media/`).
+
 Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
 (`fastapi`, `uvicorn`). See `koboi/server/CLAUDE.md` for routes/conventions/gotchas and
 `docs/rest-sse-requirements.md` for the design spec.
@@ -397,7 +400,7 @@ Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
 
 ## Extension Points
 
-koboi-agent provides 11 extension points, all following a consistent pattern: define a class implementing an ABC, register it with a registry.
+koboi-agent provides 12 extension points, all following a consistent pattern: define a class implementing an ABC, register it with a registry.
 
 | Extension | ABC | Registry | How to Register |
 |-----------|-----|----------|-----------------|
@@ -411,6 +414,7 @@ koboi-agent provides 11 extension points, all following a consistent pattern: de
 | Sandbox Backends | `BaseSandbox` | `ComponentRegistry` | `@register_sandbox()` |
 | Guardrails | `BaseGuardrail` | `GuardrailRegistry` | `GuardrailRegistry.register()`, plugin `koboi.guardrails` |
 | Eval Scorers | `BaseScorer` | `ScorerRegistry` | Plugin `koboi.scorers` |
+| Media Providers | `Base{Image,Video,Music,Speech,Transcription}Provider` | per-modality registries | `@register_{image,video,music,speech,transcription}_provider()`, `media.custom_modules` |
 | Plugins | N/A | `entry_points` | Declare in `pyproject.toml` under `koboi.*` groups |
 
 ### Plugin entry points
@@ -974,11 +978,11 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
 
 ### Workflow export (`koboi/workflows/definition.py`)
 
-`WorkflowDefinition` (envelope: schema_version/name/description/provenance/config), `DeterminismProfile` (temperature/seed/top_p/model_pin/replay_mode), `WorkflowProvenance`; server models `WorkflowCreateRequest`/`WorkflowResponse`/`WorkflowListResponse`/`CaptureRequest`/`CaptureResponse` (`koboi/server/schema.py`).
+`WorkflowDefinition` (envelope: schema_version/name/description/provenance/config), `DeterminismProfile` (temperature/seed/top_p/model_pin/replay_mode), `WorkflowProvenance`; server models `WorkflowCreateRequest`/`WorkflowResponse`/`WorkflowListResponse`/`CaptureRequest`/`CaptureResponse` (`koboi/server/schema.py`). Media (`koboi/media/types.py`): `MediaRequest`/`MediaResult`/`MediaBudget`/`MediaUnit`; server models `MediaGenerateRequest`/`MediaGenerateResponse`/`MediaJobResponse` (`server/schema.py`). `MediaGeneratedEvent` (`events.py`) is emitted when a media tool fires.
 
 ### Stream events (`koboi/events.py`)
 
-`TextDeltaEvent`, `ToolCallEvent`, `ToolResultEvent`, `CompleteEvent`, `ErrorEvent`, `IterationEvent`, `PendingApprovalEvent`, `HandoverEvent`, `RoutingDecisionEvent`, `AgentDispatchEvent`, `AgentResultEvent`, `OrchestrationCompleteEvent`, `SearchEvent`, `FetchEvent`, `SourceEvent`, `CoverageEvent`
+`TextDeltaEvent`, `ToolCallEvent`, `ToolResultEvent`, `CompleteEvent`, `ErrorEvent`, `IterationEvent`, `PendingApprovalEvent`, `HandoverEvent`, `RoutingDecisionEvent`, `AgentDispatchEvent`, `AgentResultEvent`, `OrchestrationCompleteEvent`, `SearchEvent`, `FetchEvent`, `SourceEvent`, `CoverageEvent`, `MediaGeneratedEvent`
 
 ### Error hierarchy (`AgentError` in `koboi/exceptions.py`; `LLMError` in `koboi/llm/base.py`)
 

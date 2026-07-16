@@ -61,6 +61,35 @@ class TestRedactModule:
     def test_empty_input_passthrough(self):
         assert redact_tool_arguments("") == ""
 
+    def test_redacts_cloud_provider_value_shapes(self):
+        # Issue #49: secret value shapes beyond sk-/AKIA/bearer/key=val must mask.
+        args = {
+            "command": "export GH_PAT=ghp_" + "a" * 36,  # GitHub classic PAT
+            "finegrained": "github_pat_" + "0" * 11 + "_" + "F" * 59,  # GitHub fine-grained PAT
+            "authz": "Bearer sk_live_" + "b" * 24,  # Stripe live secret
+            "query": "?key=AIza" + "c" * 35,  # Google API key
+            "webhook": "https://hooks.slack.com/services/T000/B000/" + "xoxb-" + "d" * 24,  # Slack bot
+            "refresh": "xoxe-" + "e" * 24,  # Slack token-exchange/refresh
+            "dsn": "postgres://prod:p" + "w" * 12 + "@db.internal:5432/app",  # DB DSN w/ password
+            "cert": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA"
+            + "Z" * 400
+            + "\n-----END RSA PRIVATE KEY-----",  # PEM
+            "keep_me": "this is a normal string",  # negative control
+            "bare_url": "http://localhost:8080/v1",  # must stay UNMASKED
+        }
+        out = redact_tool_arguments(json.dumps(args))
+        assert "ghp_" not in out
+        assert "github_pat_" not in out
+        assert "sk_live_" not in out
+        assert "AIza" not in out
+        assert "xoxb-" not in out
+        assert "xoxe-" not in out
+        assert ":p" + "w" * 12 + "@" not in out  # DSN password gone
+        assert "BEGIN RSA PRIVATE KEY" not in out
+        assert "MIIEpAIBAAKCAQEA" not in out  # PEM body gone
+        assert "this is a normal string" in out  # non-secret survives
+        assert "http://localhost:8080/v1" in out  # bare URL survives (no creds)
+
 
 class TestJournalRedaction:
     def test_step_journal_redacts_tool_args(self, tmp_path):
@@ -87,6 +116,31 @@ class TestJournalRedaction:
         # stored JSON still round-trips
         parsed = json.loads(stored)
         assert parsed[0]["name"] == "charge_card"
+
+    def test_step_journal_redacts_cloud_credentials(self, tmp_path):
+        # Issue #49: cloud-provider credential shapes (GitHub PAT, DB DSN w/
+        # password) must not land in steps.tool_calls_json in cleartext.
+        mem = SQLiteMemory(db_path=str(tmp_path / "t.db"), session_id="S2")
+        jr = StepJournal(mem._ensure_conn(), mem.session_id, record_tool_calls=True)
+        secret_args = json.dumps(
+            {
+                "env": "GH_TOKEN=ghp_" + "a" * 36,  # GitHub PAT
+                "dsn": "postgres://prod:s3cr3t@db.internal:5432/app",  # DSN w/ password
+                "url": "http://localhost:8080/v1",  # bare URL, must survive
+            }
+        )
+        tc = ToolCall(id="c1", name="deploy", arguments=secret_args)
+        jr.record_step(turn_index=1, step_index=0, status="tool_calls", tool_calls=[tc])
+
+        stored = _stored_args(str(tmp_path / "t.db"), "S2")
+        assert stored is not None
+        assert "ghp_" + "a" * 36 not in stored  # GitHub PAT gone
+        assert "s3cr3t" not in stored  # DSN password gone
+        assert "http://localhost:8080/v1" in stored  # bare URL survives
+        assert "***REDACTED***" in stored
+        # stored JSON still round-trips
+        parsed = json.loads(stored)
+        assert parsed[0]["name"] == "deploy"
 
 
 class TestRedactionSafety:

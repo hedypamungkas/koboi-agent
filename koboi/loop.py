@@ -397,8 +397,11 @@ class AgentCore:
         skill_name, remaining = activation
         self.memory.add_assistant_message(content)
         if not self.skills.is_activated(skill_name):
-            # H3: model-activated skills never execute `!`cmd`` blocks (supply-chain
-            # RCE guard); only explicit user invocation (/skill) may run them.
+            # H3 / issue #46: ``!`cmd` `` preprocessing is fail-closed -- a skill
+            # must declare ``allow-shell: true`` frontmatter AND the caller must
+            # pass run_shell=True for blocks to execute. Model-activated skills
+            # pass run_shell=False, so an untrusted SKILL.md can never run shell
+            # on the activation path (supply-chain RCE guard).
             body = self.skills.activate(skill_name, run_shell=False)
             # R3: record activation to telemetry so evals can assert (t.activatedSkill
             # + skill_trigger_accuracy scorer). No-op when no TelemetryHook is wired.

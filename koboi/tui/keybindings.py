@@ -36,6 +36,7 @@ _DEFAULT_BINDINGS: dict[str, tuple[str, str, bool]] = {
     "kill_subagents": ("ctrl+k", "Kill Subagents", False),
     "subagent_monitor": ("ctrl+m", "Sub-Agent Monitor", False),
     "mcp_status": ("f2", "MCP Status", False),
+    "media_gallery": ("f3", "Media Gallery", False),
 }
 
 

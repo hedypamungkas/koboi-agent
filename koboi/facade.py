@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from koboi.hooks.chain import HookChain
     from koboi.journal import StepJournal
     from koboi.loop import AgentCore
+    from koboi.media.types import MediaRequest, MediaResult
     from koboi.mcp.base import BaseMCPClient
     from koboi.orchestration.orchestrator import Orchestrator
     from koboi.rag.augmentation import AugmentationStrategy
@@ -307,6 +308,14 @@ class KoboiAgent:
                     await retriever.close()
                 except Exception as e:  # nosec B110 - best-effort teardown; logged for diagnostics
                     logging.getLogger(__name__).debug("Augmentation retriever close failed: %s", e, exc_info=True)
+            # Close the media backend (gateway HTTP transport) if media is enabled.
+            _media_tools = getattr(self._core, "tools", None)
+            _media_backend = _media_tools.get_dep("media_provider") if _media_tools is not None else None
+            if _media_backend is not None and hasattr(_media_backend, "close"):
+                try:
+                    await _media_backend.close()
+                except Exception as e:  # nosec B110 - best-effort teardown
+                    logging.getLogger(__name__).debug("Media backend close failed: %s", e, exc_info=True)
             await self._core.client.close()
         # Clean up logger
         if self._logger is not None:
@@ -529,6 +538,31 @@ class KoboiAgent:
     def mcp_clients(self) -> list:
         """The connected MCP clients (read-only view; used by the TUI/server layers)."""
         return list(self._mcp_clients)
+
+    async def media_generate(self, req: MediaRequest) -> MediaResult:
+        """Programmatic media generation (W5a)."""
+        backend = self._media_backend()
+        if backend is None:
+            from koboi.media.backend import _not_configured
+
+            return _not_configured(req, (req.modality or "image"))
+        return await backend.generate(req)
+
+    async def media_transcribe(self, audio: bytes, **opts) -> str:
+        """Programmatic STT (W5a)."""
+        backend = self._media_backend()
+        if backend is None:
+            raise RuntimeError("media not configured (enable media.transcription)")
+        return await backend.transcribe(audio, **opts)
+
+    def _media_backend(self):
+        """Reach the active MediaBackend."""
+        if self._orchestrator is not None:
+            return getattr(self._orchestrator, "_media_backend", None)
+        if self._core is not None:
+            _tools = getattr(self._core, "tools", None)
+            return _tools.get_dep("media_provider") if _tools is not None else None
+        return None
 
     def mcp_status(self) -> list[dict]:
         """Per-MCP-server status for the TUI and ``/v1/.../mcp/servers`` (G6/G7).
@@ -764,6 +798,15 @@ def _build_tools(config: Config) -> ToolRegistry:
         registry.set_dep("memory_store_ref", _MemoryStore(filepath=memory_file))
         if builtin_list and isinstance(builtin_list, list):
             registry.keep_only(builtin_list)
+
+    # W0/W5b: inject the media backend whenever media is enabled -- OUTSIDE the builtin_list gate.
+    media_conf = config.get("media", default={})
+    if media_conf and media_conf.get("enabled"):
+        from koboi.media import build_media
+
+        media_backend = build_media(media_conf)
+        if media_backend is not None:
+            registry.set_dep("media_provider", media_backend)
 
     custom_list = config.get("tools", "custom", default=[])
     if custom_list:

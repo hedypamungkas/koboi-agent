@@ -27,6 +27,23 @@ def _make_mock_agent():
     agent.config._data = {
         "agent": {"name": "test"},
         "llm": {"api_key": "sk-secret123", "model": "gpt-4o"},
+        # Credential-bearing LIST-VALUED sections (issue #55): these must be
+        # redacted in the diagnostics export, not leaked verbatim.
+        "mcp": {
+            "servers": [
+                {
+                    "auth": {
+                        "client_secret": "mcp-client-secret",
+                        "refresh_token": "mcp-refresh",
+                        "access_token": "mcp-access",
+                        "token": "mcp-token",
+                    },
+                    "headers": {"Authorization": "Bearer mcp-admin-token"},
+                }
+            ]
+        },
+        "server": {"api_keys": ["server-admin-key"]},
+        "jobs": {"webhooks": [{"secret": "webhook-hmac-secret"}]},
     }
 
     agent.core.memory.get_messages.return_value = [
@@ -96,6 +113,44 @@ class TestCollectDiagnostics:
         with zipfile.ZipFile(buf) as zf:
             config = json.loads(zf.read("config.json"))
             assert config["llm"]["api_key"] == "***REDACTED***"
+
+    def test_list_valued_auth_secrets_redacted(self):
+        """Issue #55: list-valued auth sections must be redacted, not leaked.
+
+        The old ``_sanitize_config`` only descended into ``dict`` (never
+        ``list``), knew just 5 key names, and did no value-shape masking, so
+        MCP/server/jobs credential-bearing *lists* survived verbatim in the
+        exported ``config.json``.
+        """
+        agent = _make_mock_agent()
+        data = collect_diagnostics(agent)
+        buf = BytesIO(data)
+        with zipfile.ZipFile(buf) as zf:
+            config = json.loads(zf.read("config.json"))
+
+        # Every literal secret must be absent from the exported config.
+        literal_secrets = [
+            "mcp-client-secret",
+            "mcp-refresh",
+            "mcp-access",
+            "mcp-token",
+            "mcp-admin-token",
+            "server-admin-key",
+            "webhook-hmac-secret",
+        ]
+        dumped = json.dumps(config)
+        for secret in literal_secrets:
+            assert secret not in dumped, f"leaked secret in diagnostics export: {secret}"
+
+        # And each credential location must be redacted.
+        auth = config["mcp"]["servers"][0]["auth"]
+        assert auth["client_secret"] == "***REDACTED***"
+        assert auth["refresh_token"] == "***REDACTED***"
+        assert auth["access_token"] == "***REDACTED***"
+        assert auth["token"] == "***REDACTED***"
+        assert config["mcp"]["servers"][0]["headers"]["Authorization"] == "***REDACTED***"
+        assert config["server"]["api_keys"] == ["***REDACTED***"]
+        assert config["jobs"]["webhooks"][0]["secret"] == "***REDACTED***"
 
     def test_tools_included(self):
         agent = _make_mock_agent()
@@ -191,6 +246,29 @@ class TestSanitizeConfig:
         result = _sanitize_config(data)
         assert result["model"] == "gpt-4o"
         assert result["max_tokens"] == 100
+
+    def test_redacts_non_json_value_under_sensitive_key(self):
+        """A non-JSON-serializable value under a sensitive key must be redacted.
+
+        PyYAML ``safe_load`` turns timestamp scalars into ``datetime`` objects
+        and runtime code may inject ``set``/``Path``/custom objects into
+        ``config._data``. ``redact_config_for_export`` returns such values
+        unchanged, so they would be stringified-and-leaked by the downstream
+        ``json.dumps(..., default=str)`` in ``collect_diagnostics``. The export
+        must coerce-then-redact so the fail-safe ("never leak a secret") holds.
+        """
+        from datetime import datetime, timezone
+
+        data = {
+            "llm": {"api_key": datetime(2025, 12, 31, tzinfo=timezone.utc)},
+            "token": {"a", "b"},  # set -- non-JSON-native
+        }
+        result = _sanitize_config(data)
+        dumped = json.dumps(result, default=str)  # exactly what collect_diagnostics does
+        assert "2025" not in dumped, "datetime under api_key leaked via stringify"
+        assert "'a'" not in dumped and "'b'" not in dumped, "set repr under token leaked"
+        assert result["llm"]["api_key"] == "***REDACTED***"
+        assert result["token"] == "***REDACTED***"
 
 
 class TestRedactNested:

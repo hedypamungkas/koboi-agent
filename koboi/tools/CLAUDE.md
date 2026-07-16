@@ -12,7 +12,7 @@ decorator, `RiskLevel`, and dependency injection.
 registry.py   ToolRegistry + @tool() decorator + register_decorated + apply_tool_selection + truncate_text
 state.py      ToolState -- per-session mutable state (read-before-write path set)
 __init__.py   Re-exports ToolRegistry, tool, register_decorated
-builtin/      12 built-in tools (calculator/filesystem/shell/web/memory/search/git/subagent/task/ingest/handover/peer) -- see builtin/CLAUDE.md
+builtin/      13 built-in tools (calculator/filesystem/shell/web/memory/search/git/subagent/task/ingest/handover/peer/media) -- see builtin/CLAUDE.md
 ```
 
 ## Public surface (verified against registry.py / types.py)

@@ -36,6 +36,7 @@ subagent_monitor.py   Sub-agent activity display
 transcript_viewer.py  Full transcript view
 welcome_screen.py     First-run welcome
 yolo_confirm.py       YOLO-mode confirmation dialog (/mode yolo)
+media_gallery.py      Generated media artifacts gallery (W5c; opened via the F3 keybinding)
 ```
 
 ## Widgets (`widgets/`)
