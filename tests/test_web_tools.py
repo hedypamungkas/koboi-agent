@@ -41,6 +41,19 @@ def _mock_dns(*ips: str):
     return patch("koboi.tools.builtin.web.socket.getaddrinfo", return_value=results)
 
 
+def _stream_cm(response: httpx.Response):
+    """Wrap an ``httpx.Response`` as the async context manager returned by
+    ``AsyncClient.stream(...)`` (``__aenter__`` -> response, ``__aexit__`` -> False).
+
+    ``web_fetch`` reads the body via the streaming API (#56); this lets the SSRF /
+    success / redirect tests feed it a real ``httpx.Response`` (which supports
+    ``aiter_bytes()``)."""
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=response)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
 # ── TestStripHtml ──
 
 
@@ -151,7 +164,7 @@ class TestCheckUrlSsrf:
 class TestWebFetchSuccess:
     async def test_fetch_plain_text(self):
         mock_client = MagicMock()
-        mock_client.get = AsyncMock(return_value=_mock_response(200, "Hello, World!"))
+        mock_client.stream = MagicMock(return_value=_stream_cm(_mock_response(200, "Hello, World!")))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with _mock_dns("93.184.216.34"):
@@ -163,7 +176,7 @@ class TestWebFetchSuccess:
     async def test_fetch_html_stripped(self):
         html = "<html><head><title>Test</title></head><body><p>Hello</p></body></html>"
         mock_client = MagicMock()
-        mock_client.get = AsyncMock(return_value=_mock_response(200, html, content=html.encode()))
+        mock_client.stream = MagicMock(return_value=_stream_cm(_mock_response(200, html, content=html.encode())))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with _mock_dns("93.184.216.34"):
@@ -261,12 +274,12 @@ class TestWebFetchSSRFProtection:
             request=httpx.Request("GET", "http://attacker.example/redir"),
         )
 
-        async def fake_get(_self, _url, **_kw):
-            return redirect
+        def fake_stream(_self, _method, _url, **_kw):
+            return _stream_cm(redirect)
 
         with (
             patch("koboi.tools.builtin.web._check_url_ssrf", side_effect=[None, ValueError("internal IP")]),
-            patch("httpx.AsyncClient.get", new=fake_get),
+            patch("httpx.AsyncClient.stream", new=fake_stream),
         ):
             result = await web_fetch("http://attacker.example/redir")
         assert "internal IP" in result
@@ -283,14 +296,14 @@ class TestWebFetchSSRFProtection:
         )
         state = {"n": 0}
 
-        async def fake_get(_self, _url, **_kw):
+        def fake_stream(_self, _method, _url, **_kw):
             r = redirect if state["n"] == 0 else ok
             state["n"] += 1
-            return r
+            return _stream_cm(r)
 
         with (
             patch("koboi.tools.builtin.web._check_url_ssrf", return_value=None),
-            patch("httpx.AsyncClient.get", new=fake_get),
+            patch("httpx.AsyncClient.stream", new=fake_stream),
         ):
             result = await web_fetch("http://safe.example/r")
         assert "final content" in result

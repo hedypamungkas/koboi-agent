@@ -364,13 +364,13 @@ def _load_documents(
                         continue
             return
         if source == "http" or "url" in entry:
-            yield from fetch_http_entry(entry, doc_cache)
+            yield from fetch_http_entry(entry, doc_cache, max_bytes=max_bytes)
             return
         if source == "firecrawl":
             yield from fetch_firecrawl_entry(entry, doc_cache)
             return
         if source == "s3":
-            yield from fetch_s3_entry(entry, doc_cache)
+            yield from fetch_s3_entry(entry, doc_cache, max_bytes=max_bytes)
             return
         _logger.warning("Unknown document source %r; skipping", source)
 
