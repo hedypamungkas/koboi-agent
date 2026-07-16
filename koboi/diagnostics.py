@@ -15,6 +15,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from koboi.redact import redact_config_for_export
+
 if TYPE_CHECKING:
     from koboi.facade import KoboiAgent
 
@@ -123,11 +125,35 @@ def collect_diagnostics(agent: KoboiAgent) -> bytes:
 
 
 def _sanitize_config(data: dict) -> dict:
-    """Remove sensitive values from config before export."""
-    sanitized = json.loads(json.dumps(data, default=str))
-    sensitive_keys = {"api_key", "secret_key", "auth_token", "password", "token"}
-    _redact_nested(sanitized, sensitive_keys)
-    return sanitized
+    """Remove sensitive values from config before export.
+
+    Delegates to the shared :func:`koboi.redact.redact_config_for_export`
+    redactor, which recurses into lists, matches sensitive key names
+    case-insensitively (plus fnmatch globs), masks secret value shapes, and
+    preserves ``${VAR:default}`` env templates. This closes the issue #55 leak
+    where list-valued auth sections (``mcp.servers[].auth``,
+    ``mcp.servers[].headers["Authorization"]``, ``server.api_keys``,
+    ``jobs.webhooks[].secret``) survived verbatim because the old local redactor
+    only descended into ``dict`` (never ``list``), knew a handful of key names,
+    and did no value-shape masking.
+
+    Fail-safe: on any error returns a fully-redacted placeholder so a diagnostics
+    export never crashes and never leaks a secret (mirrors the ``_safe_redact``
+    wrapper in ``journal.py``).
+    """
+    try:
+        # Coerce non-JSON-native values (PyYAML-parsed datetimes, sets, Paths,
+        # custom objects) to strings FIRST so a value under a sensitive key
+        # becomes a redactable string rather than passing through
+        # redact_config_for_export unchanged (its ``return obj`` fall-through)
+        # and leaking via the downstream ``json.dumps(..., default=str)``.
+        coerced = json.loads(json.dumps(data, default=str))
+        redacted = redact_config_for_export(coerced)
+        if isinstance(redacted, dict):
+            return redacted
+        return {"_redacted": "config was not a dict after redaction"}
+    except Exception:  # nosec B110 - fail-safe: never crash export, never leak
+        return {"_redacted": "config redacted (fail-safe on error)"}
 
 
 def _redact_nested(d: dict, keys: set[str]) -> None:
