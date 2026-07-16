@@ -1,0 +1,29 @@
+# A2A docker smoke -- instance Y (agent C), container `koboi-a2a-y`.
+# Receives peer calls from instance X (container `koboi-a2a-x`).
+
+agent:
+  name: C
+  mode: chat
+  system_prompt: "You are agent C. Answer concisely."
+llm:
+  provider: openai
+  model: "${OPENAI_MODEL:gpt-5.4-mini}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+memory:
+  backend: sqlite
+  db_path: /data/y.db
+sandbox:
+  backend: passthrough
+  workdir: /data/y
+peers:
+  enabled: true
+  org: acme
+  org_secret: "shared-a2a-secret"   # matches instance X -> card org-claim verifies
+  public_base_url: "http://koboi-a2a-y:8080"
+  inbound_tokens:
+    - "tok-y"   # token instance X presents; accepted here (same org)
+server:
+  host: 0.0.0.0
+  port: 8080
+  auth_required: true

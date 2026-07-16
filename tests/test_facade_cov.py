@@ -753,7 +753,9 @@ class TestFromConfigBranches:
 
     def test_orchestration_enabled_routes_to_builder(self, monkeypatch):
         sentinel = MagicMock(spec=KoboiAgent)
-        monkeypatch.setattr("koboi.facade._build_orchestration", lambda cfg, verbose=False: sentinel)
+        monkeypatch.setattr(
+            "koboi.facade._build_orchestration", lambda cfg, verbose=False, peer_registry=None: sentinel
+        )
         config = _cfg({"orchestration": {"enabled": True}})
         agent = KoboiAgent._from_config(config)
         assert agent is sentinel

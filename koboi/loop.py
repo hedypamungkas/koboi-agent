@@ -70,6 +70,18 @@ Rules:
 - Always explain your reasoning before and after using a tool."""
 
 
+def _langfuse_trace_id(hooks: HookChain | None) -> str:
+    """Read the Langfuse trace_id off a hook chain ('' if no Langfuse hook/trace).
+
+    Centralizes the duck-typed lookup (find by class name; Langfuse mints the id,
+    read back via getattr) used by both the streaming + non-streaming run paths.
+    """
+    if not hooks:
+        return ""
+    lf = hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+    return (getattr(lf, "_trace_id", "") or "") if lf else ""
+
+
 class AgentCore:
     """Core agent with async loop and built-in hook chain."""
 
@@ -645,6 +657,10 @@ class AgentCore:
                 output = await self._process_output(response.content, response, i)
                 self._journal_step(i, status="complete", response=response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
+                # M5/P4 parity with run_stream: stamp the Langfuse trace_id so the
+                # non-streaming path (used by A2A peer_invoke) exposes its trace id.
+                _meta = self._run_metadata(resumed=resumed, last_step=i)
+                _meta["trace_id"] = _langfuse_trace_id(self.hooks)
                 return RunResult(
                     content=output,
                     iterations_used=i + 1,
@@ -653,7 +669,7 @@ class AgentCore:
                     token_usage=total_usage,
                     success=True,
                     elapsed_seconds=_time.monotonic() - _start,
-                    metadata=self._run_metadata(resumed=resumed, last_step=i),
+                    metadata=_meta,
                 )
 
             if response.tool_calls:
@@ -774,11 +790,7 @@ class AgentCore:
                 seen: set[str] = set()
                 unique_tools = [t for t in _stream_tools_used if t not in seen and not seen.add(t)]  # type: ignore[func-returns-value]
                 # M5: enrich CompleteEvent with Langfuse trace_id if available.
-                trace_id = ""
-                if self.hooks:
-                    lf_hook = self.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
-                    if lf_hook:
-                        trace_id = getattr(lf_hook, "_trace_id", "") or ""
+                trace_id = _langfuse_trace_id(self.hooks)
                 yield CompleteEvent(
                     response=final_response,
                     content=output,

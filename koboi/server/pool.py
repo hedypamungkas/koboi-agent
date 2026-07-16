@@ -142,6 +142,10 @@ class AgentPool:
         self._extra_tools = tuple(extra_tools)
         self._extra_hooks = tuple(extra_hooks)
         self._approval_handler = approval_handler
+        # P3/P4: the server's verified PeerRegistry (set by create_app after it builds +
+        # verifies app.state.peer_registry); threaded into each pooled agent so its
+        # call_peer_agent tool / RemoteAgentProxy nodes share the SAME verified registry.
+        self._peer_registry: Any | None = None
         self._closed = False
 
     def __len__(self) -> int:
@@ -189,7 +193,7 @@ class AgentPool:
         # to query (default off -- preserves behavior for existing deployments).
         if self._config.get("sandbox", "git_init", default=False):
             _git_init_workdir(workdir)
-        agent = KoboiAgent.from_dict(data)
+        agent = KoboiAgent.from_dict(data, peer_registry=self._peer_registry)
         if self._client_factory is not None and agent._core is not None:
             # Test seam: replace the facade-built RetryClient with a MockClient.
             # NOTE: the original RetryClient is orphaned (its httpx pool is not

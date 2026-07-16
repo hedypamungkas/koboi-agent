@@ -1,0 +1,41 @@
+# A2A multi-instance smoke: two koboi containers (X{A} + Y{C}) that talk to each other.
+# Real docker network + real LLM + real HTTP between containers. Manual/CI-nightly.
+#
+#   OPENAI_API_KEY=... OPENAI_BASE_URL=... docker compose -f docker-compose.a2a.yml up -d --wait
+#   python scripts/a2a_docker_smoke.py
+#   docker compose -f docker-compose.a2a.yml down
+#
+# See docs/a2a-smoke.md.
+
+services:
+  koboi-a2a-x:
+    build: .
+    environment:
+      - KOBOI_CONFIG=/app/configs/a2a_docker_x.yaml
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
+      - KOBOI_API_KEYS=koboi_smoke_x
+      - KOBOI_DATA_DIR=/data
+    ports:
+      - "8080:8080"
+    volumes:
+      - a2a_x_data:/data
+
+  koboi-a2a-y:
+    build: .
+    environment:
+      - KOBOI_CONFIG=/app/configs/a2a_docker_y.yaml
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5.4-mini}
+      - KOBOI_API_KEYS=koboi_smoke_y
+      - KOBOI_DATA_DIR=/data
+    ports:
+      - "8081:8080"
+    volumes:
+      - a2a_y_data:/data
+
+volumes:
+  a2a_x_data:
+  a2a_y_data:

@@ -1,0 +1,32 @@
+# Cross-instance Agent-to-Agent (A2A) -- Instance Y (agent C)
+#
+# Run:  koboi serve configs/a2a_instance_y.yaml
+# C receives peer calls at POST /v1/peer/invoke (auth: Bearer tok-y).
+
+agent:
+  name: C
+  mode: chat
+  system_prompt: |
+    You are agent C on instance Y. You answer questions for peer agents that call
+    you. Be concise and factual.
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: "${OPENAI_API_KEY:}"
+memory:
+  backend: sqlite
+  db_path: ./workspace/a2a_y.db
+sandbox:
+  backend: passthrough
+  workdir: ./workspace/a2a_y
+peers:
+  enabled: true
+  org: acme
+  org_secret: "shared-acme-secret"   # P3: shared across same-org instances (matches instance X)
+  public_base_url: "http://localhost:8002"   # advertised in this instance's agent-card
+  inbound_tokens:
+    - "tok-y"           # token instance X presents; accepted here (same org)
+server:
+  host: 127.0.0.1
+  port: 8002
+  auth_required: true

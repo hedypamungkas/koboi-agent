@@ -398,6 +398,51 @@ class MCPConfig(BaseModel):
     allowlist_commands: list[str] = Field(default_factory=list)  # extra stdio runners (basename)
 
 
+class PeerDef(BaseModel):
+    """A peer koboi instance for cross-instance agent-to-agent (A2A) calls (config shape).
+
+    Each registered peer URL is trusted as same-org/owner (static Bearer per peer).
+    The ``token`` is the OUTBOUND credential presented to the peer; inbound peer
+    tokens are listed separately under ``PeersConfig.inbound_tokens``. Named ``PeerDef``
+    (not ``PeerConfig``) to avoid collision with the runtime ``koboi.server.peers.PeerConfig``
+    dataclass.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    name: str  # unique peer key (used by the call_peer_agent tool)
+    url: str  # remote instance base URL (e.g. http://peer-y:8000)
+    token: str = ""  # outbound bearer presented to the peer (plaintext; same-org trust)
+    agent_name: str = ""  # optional routing hint (which named agent to target on the peer)
+    org: str = ""  # documentation/audit only (same-org grouping)
+    timeout: float = Field(default=30.0, gt=0)  # outbound invoke timeout (seconds)
+
+
+class PeersConfig(BaseModel):
+    """Cross-instance A2A configuration (opt-in; inert by default)."""
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    peers: list[PeerDef] = Field(default_factory=list)  # outbound peers
+    inbound_tokens: list[str] = Field(default_factory=list)  # plaintext tokens accepted from peers (hashed at load)
+    # Same-org peers often live on private networks / localhost (dev, internal clusters).
+    # Default False = strict SSRF (reject private/loopback URLs at load). Set True when the
+    # operator vouches for these URLs; strict SSRF is reserved for untrusted discovery (P3).
+    allow_private_network: bool = False
+    # P3 (self-observing org-claim): the instance's org label + a shared HMAC secret.
+    # When org_secret is set, each declared peer's agent-card is fetched at startup
+    # and its HMAC org-claim verified; only verified peers are callable (verified-only).
+    org: str = ""  # human-readable org label advertised in this instance's agent-card
+    org_secret: str = ""  # shared HMAC-SHA256 secret proving same-org membership
+    public_base_url: str = ""  # advertised base URL for this instance's agent-card peer_invoke_url
+    rate_limit_per_minute: int = 60  # max inbound /v1/peer/invoke calls per peer token per minute (0 = unlimited)
+    max_concurrent_inbound: int = 10  # max simultaneous /v1/peer/invoke calls per peer token (0 = unlimited)
+    card_freshness_seconds: float = (
+        21600  # agent-card freshness window for verify_card (default 6h; widen for clock-skew tolerance)
+    )
+
+
 class RlimitsConfig(BaseModel):
     """POSIX resource limits applied to restricted sandbox subprocesses.
 
@@ -588,6 +633,7 @@ class KoboiConfig(BaseModel):
     websearch: WebSearchConfig = Field(default_factory=WebSearchConfig)
     media: MediaConfig = Field(default_factory=MediaConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
+    peers: PeersConfig = Field(default_factory=PeersConfig)
 
     @model_validator(mode="before")
     @classmethod

@@ -42,6 +42,22 @@ class ChatStreamRequest(BaseModel):
         raise ValueError("missing non-empty 'message' or user-role 'messages' entry")
 
 
+class PeerInvokeRequest(BaseModel):
+    """POST /v1/peer/invoke body -- sync cross-instance agent-to-agent call (not SSE).
+
+    A peer koboi instance calls this to run the configured agent on a message and
+    get its final answer as JSON. Mirrors ``ChatStreamRequest`` but sync (the
+    inbound receiver uses ``KoboiAgent.run()`` -> ``RunResult.content``).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    message: str = Field(max_length=65536)  # H6: bound body size
+    agent_name: str | None = None  # routing hint (informational; the instance serves one top-level agent)
+    mode: str | None = Field(default=None)
+    max_iterations: int | None = Field(default=None, ge=1)
+
+
 class CreateSessionResponse(BaseModel):
     session_id: str
 

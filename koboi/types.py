@@ -175,6 +175,13 @@ class AgentDef:
     # the workflow-level profile by facade._apply_determinism before the node's
     # LLM client is built. Stored as a raw dict so it round-trips through YAML.
     determinism: dict | None = None
+    # P2 (A2A): when set, this node is a REMOTE agent served by a peer koboi
+    # instance. The value is a peer NAME (resolved via the peers: registry). The
+    # factory returns a RemoteAgentProxy instead of a local AgentCore, so the node
+    # participates in sequential/parallel/dag/conditional orchestration while
+    # actually running on the peer. (dynamic/deep_research rebuild local agents
+    # per-query, so endpoint is ignored there.)
+    endpoint: str | None = None
 
     def to_dict(self) -> dict:
         """Serialize to the ``orchestration.agents[*]`` YAML shape.
@@ -208,6 +215,8 @@ class AgentDef:
             out["force_response_format_with_tools"] = self.force_response_format_with_tools
         if self.determinism:
             out["determinism"] = self.determinism
+        if self.endpoint:
+            out["endpoint"] = self.endpoint
         return out
 
     @classmethod
@@ -232,6 +241,7 @@ class AgentDef:
             output_schema=ac.get("output_schema"),
             force_response_format_with_tools=bool(ac.get("force_response_format_with_tools", False)),
             determinism=ac.get("determinism") or None,
+            endpoint=ac.get("endpoint"),
         )
 
 

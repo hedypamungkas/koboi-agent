@@ -1,0 +1,53 @@
+# Cross-instance A2A -- P2: a REMOTE node in a DAG.
+#
+# Instance X runs a 2-node DAG: `research` (local) -> `review` (REMOTE, served by
+# peer instance Y via endpoint: peerY). The orchestrator dispatches `review` like
+# any node, but it runs on Y and returns its answer over HTTP. Run alongside
+# configs/a2a_instance_y.yaml (agent C, inbound token tok-y) on port 8002.
+#
+#   koboi serve configs/a2a_instance_y.yaml &    # peer (port 8002)
+#   koboi serve configs/a2a_dag_remote.yaml       # this orchestrator (port 8000)
+
+agent:
+  name: orchestrator-x
+  mode: act
+  system_prompt: |
+    You orchestrate a small workflow. The `review` step is handled by a peer agent.
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: "${OPENAI_API_KEY:}"
+memory:
+  backend: sqlite
+  db_path: ./workspace/a2a_dag.db
+sandbox:
+  backend: passthrough
+  workdir: ./workspace/a2a_dag
+orchestration:
+  enabled: true
+  execution:
+    mode: dag
+  agents:
+    - name: research
+      keywords: [research, find, investigate]
+      system_prompt: "You research the user's request and produce findings."
+    # REMOTE node: `endpoint` is a peer name from `peers:` below. The factory
+    # builds a RemoteAgentProxy (no local tools/rag/llm -- the peer runs those).
+    # Only routing (keywords) + graph (depends_on) metadata matter here.
+    - name: review
+      endpoint: peerY
+      keywords: [review, check, validate]
+      depends_on: [research]
+peers:
+  enabled: true
+  allow_private_network: true
+  peers:
+    - name: peerY
+      url: "http://localhost:8002"
+      token: "tok-y"          # presented to instance Y (its inbound_token)
+      agent_name: C           # routing hint (instance Y serves agent C)
+      org: acme
+server:
+  host: 127.0.0.1
+  port: 8000
+  auth_required: true

@@ -19,6 +19,7 @@ import logging
 import sqlite3
 from typing import TYPE_CHECKING
 
+from koboi import tracing_context
 from koboi.redact import redact_tool_arguments
 
 if TYPE_CHECKING:
@@ -130,8 +131,8 @@ class StepJournal:
             cur = self._conn.execute(
                 "INSERT INTO steps "
                 "(session_id, turn_index, step_index, status, llm_prompt_tokens, "
-                " llm_completion_tokens, tool_call_count, tool_calls_json, is_terminal, error) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " llm_completion_tokens, tool_call_count, tool_calls_json, is_terminal, error, trace_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     self._session_id,
                     turn_index,
@@ -143,6 +144,7 @@ class StepJournal:
                     tool_calls_json,
                     1 if is_terminal else 0,
                     error,
+                    tracing_context.current_trace_id(),  # P4: W3C trace-id (cross-instance correlation)
                 ),
             )
             row_id = int(cur.lastrowid)
