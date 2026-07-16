@@ -636,6 +636,10 @@ class SelfHealingConfig(BaseModel):
     enabled: bool = False
     max_turns: int = 3  # shared reflection retry budget (tool-error + low-grounding)
     fail_soft: bool = True  # pass-through on any critic error (never break the run)
+    # Self-healing P3: on max_iterations exhaustion, return a side-LLM summary of
+    # partial progress instead of raising AgentMaxIterationsError. Independent of
+    # `enabled` (you can opt into graceful degrade without the full ladder).
+    graceful_max_iter: bool = False
     critic_llm: str | None = None  # named `providers:` ref or inline dict; None = reuse agent client
     triggers: dict = Field(default_factory=dict)
     # triggers.tool_error.repeat_threshold (default 2); triggers.low_grounding.threshold (default 0.6)

@@ -253,6 +253,8 @@ Effort is rough (S=≤1 day, M=2-4 days, L=1 wk+) relative to this codebase's pa
 - Rule-based (+ optional side-LLM) error classifier stamping `HookContext` tags.
 - Graceful degrade on `max_iterations`: summarize partial progress instead of `AgentMaxIterationsError` hard-stop (`loop.py:619,676-678`).
 - **Deliverable value:** no more silent/abrupt dead-ends; improves the ladder's routing quality.
+- **STATUS (2026-07-16): graceful degrade SHIPPED** — `AgentCore.graceful_max_iter` (opt-in, default off; independent of `self_healing.enabled`) + `_graceful_max_iter_summary()` side-LLM summary (fail-soft → last assistant msg → generic notice). The `_run_loop` tail returns a degraded `RunResult(success=True, metadata max_iter_degraded)` and `run_stream` yields `TextDelta`+`CompleteEvent` instead of `ErrorEvent`. The summary is routed through `_process_output` (output guardrails run on it + it's persisted, parity with every terminal answer; a block/handover falls back to the generic notice). 5 tests; 4620 pass. The **error-taxonomy** half of P3 was already delivered by P2a's `FailureClassifierHook` (tags `failure_class`); no separate side-LLM classifier was needed.
+  - **Follow-up (P0-C gap found in review):** `empty_response_reask_limit` is not facade-plumbed (hardcoded default 1) — expose it via `self_healing` config like `graceful_max_iter`.
 
 ### P4 — Optional, higher-cost verifiers (opt-in, gated to `act`+)  *(effort: L)*
 - **CRITIC-generalization:** run `calculator`/`web_search`/code tools to verify code/math/fact claims (generalizes grounding beyond RAG).

@@ -1514,6 +1514,7 @@ class AgentAssembler:
             memory=self.memory,
             tools=self.tools,
             max_iterations=self.config.max_iterations,
+            graceful_max_iter=self.config.get("self_healing", "graceful_max_iter", default=False),
             verbose=self.verbose,
             logger=self.logger,
             system_prompt=None,

@@ -92,6 +92,7 @@ class AgentCore:
         tools: ToolRegistry | None = None,
         max_iterations: int = 10,
         empty_response_reask_limit: int = 1,
+        graceful_max_iter: bool = False,
         verbose: bool = False,
         logger: AgentLogger | None = None,
         system_prompt: str | None = None,
@@ -124,6 +125,9 @@ class AgentCore:
         # (default 1 = default-ON; 0 disables). An empty answer is never useful.
         self.empty_response_reask_limit = empty_response_reask_limit
         self._empty_response_reasked = 0
+        # Self-healing P3: on max_iterations exhaustion, return a side-LLM summary of
+        # partial progress instead of raising AgentMaxIterationsError (opt-in).
+        self.graceful_max_iter = graceful_max_iter
         self.verbose = verbose
         self.context_manager = context_manager
         self.max_context_tokens = max_context_tokens
@@ -357,6 +361,50 @@ class AgentCore:
             "Your previous response was empty. Provide a direct response or call an appropriate tool.",
             label="empty_response_nudge",
         )
+
+    async def _graceful_max_iter_summary(self) -> str:
+        """Self-healing P3: summarize partial progress at max_iterations (fail-soft).
+
+        A side-LLM summarizes what was accomplished + what remains over the run's
+        conversation. On any failure (or no usable response), fall back to the last
+        non-empty assistant message, then a generic notice -- never raises. Uses the
+        agent's own client (same trust boundary as every other iteration).
+        """
+        prompt = (
+            "The assistant hit its step limit before finishing the task above. In a concise "
+            "reply to the user, summarize what was accomplished so far and what remains "
+            "unfinished. Do not mention the step limit."
+        )
+        try:
+            messages = self.memory.get_messages() + [{"role": "user", "content": prompt}]
+            resp = await self.client.complete(messages=messages, tools=None)
+            text = getattr(resp, "content", None)
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+        except Exception as exc:
+            self._log(f"Graceful max_iter summary failed, using fallback: {exc}")
+        try:
+            for m in reversed(self.memory.get_messages()):
+                if m.get("role") == "assistant" and (m.get("content") or "").strip():
+                    return f"[partial] {(m.get('content') or '').strip()}"
+        except Exception:
+            pass  # never let the fallback itself break the graceful degrade
+        return "I was unable to complete the task within the allowed steps."
+
+    async def _process_graceful_output(self, output: str) -> str:
+        """Run output guardrails on the graceful-degrade summary + persist it (fail-soft).
+
+        Routes the summary through ``_process_output`` (the single guardrail + persist
+        gate) so it gets the same treatment as any terminal answer. A guardrail block
+        / handover / abort on the degrade falls back to the generic notice (preserve
+        the graceful "never raise" contract). Self-healing P3.
+        """
+        try:
+            return await self._process_output(output, AgentResponse(content=output), self.max_iterations - 1)
+        except (AgentGuardrailError, AgentHandoverError, AgentAbortedError):
+            output = "I was unable to complete the task within the allowed steps."
+            self.memory.add_assistant_message(output)
+            return output
 
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
         """Run output guardrails, emit POST_OUTPUT, save to memory.
@@ -770,6 +818,23 @@ class AgentCore:
 
         self._journal_max_iter()
         await self._emit(HookEvent.SESSION_END, iteration=self.max_iterations)
+        # Self-healing P3: graceful degrade -- summarize partial progress instead of a
+        # hard AgentMaxIterationsError (opt-in via graceful_max_iter).
+        if self.graceful_max_iter:
+            output = await self._graceful_max_iter_summary()
+            output = await self._process_graceful_output(output)
+            meta = self._run_metadata(resumed=resumed, last_step=self.max_iterations - 1)
+            meta["max_iter_degraded"] = True
+            return RunResult(
+                content=output,
+                iterations_used=self.max_iterations,
+                tool_calls_made=tool_calls_made,
+                pipeline_outcomes=pipeline_outcomes,
+                token_usage=total_usage,
+                success=True,
+                elapsed_seconds=_time.monotonic() - _start,
+                metadata=meta,
+            )
         raise AgentMaxIterationsError(self.max_iterations)
 
     async def run(self, user_message: str | list) -> RunResult:
@@ -927,6 +992,30 @@ class AgentCore:
 
         self._journal_max_iter()
         await self._emit(HookEvent.SESSION_END, iteration=self.max_iterations)
+        # Self-healing P3: graceful degrade in streaming -- summarize partial progress
+        # instead of yielding an AgentMaxIterationsError ErrorEvent (opt-in).
+        if self.graceful_max_iter:
+            output = await self._graceful_max_iter_summary()
+            output = await self._process_graceful_output(output)
+            unique_tools = list(dict.fromkeys(_stream_tools_used))
+            trace_id = ""
+            if self.hooks:
+                lf_hook = self.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+                if lf_hook:
+                    trace_id = getattr(lf_hook, "_trace_id", "") or ""
+            meta = self._run_metadata(resumed=False, last_step=self.max_iterations - 1)
+            meta["max_iter_degraded"] = True
+            yield TextDeltaEvent(content=output)
+            yield CompleteEvent(
+                response=AgentResponse(content=output),
+                content=output,
+                elapsed_seconds=_time.monotonic() - _start,
+                iterations_used=self.max_iterations,
+                tools_used=unique_tools,
+                trace_id=trace_id,
+                metadata=meta,
+            )
+            return
         yield ErrorEvent(error=AgentMaxIterationsError(self.max_iterations))
 
     async def chat(self, user_message: str | list) -> RunResult:
