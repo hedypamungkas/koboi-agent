@@ -87,7 +87,7 @@ def parse_frontmatter(content: str) -> dict:
         result["disallowed-tools"] = result["disallowed-tools"].split()
 
     # Boolean fields: parse string "true"/"false" to bool
-    for bool_key in ("disable-model-invocation", "user-invocable"):
+    for bool_key in ("disable-model-invocation", "user-invocable", "allow-shell"):
         if bool_key in result:
             val = result[bool_key]
             if isinstance(val, str):
@@ -166,23 +166,27 @@ def _try_register_skill(
             disable_model_invocation=frontmatter.get("disable-model-invocation", False),
             user_invocable=frontmatter.get("user-invocable", True),
             disallowed_tools=frontmatter.get("disallowed-tools"),
+            allow_shell=frontmatter.get("allow-shell", False),
         )
     )
 
 
-def activate_skill(skill: SkillDefinition, run_shell: bool = True) -> str:
+def activate_skill(skill: SkillDefinition, run_shell: bool = False) -> str:
     """Load SKILL.md body (strip frontmatter). Sets skill.body and returns it.
 
     Args:
         skill: The skill definition to activate.
-        run_shell: If True, preprocess `` !`command` `` blocks by executing
-            them and injecting stdout. Commands time out after 10 seconds.
+        run_shell: If True AND ``skill.allow_shell`` is set, preprocess
+            `` !`command` `` blocks by executing them and injecting stdout
+            (commands time out after 10 seconds). Both must be true -- this is
+            the issue #46 fail-closed gate so an untrusted SKILL.md (which
+            defaults to ``allow_shell=False``) cannot run shell on activation.
     """
     skill_path = Path(skill.skill_dir) / "SKILL.md"
     content = skill_path.read_text(encoding="utf-8")
     body = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL).strip()
 
-    if run_shell:
+    if run_shell and skill.allow_shell:
         body = _preprocess_shell_commands(body)
 
     skill.body = body
@@ -355,12 +359,15 @@ class SkillRegistry:
     def list_skills(self) -> list[SkillDefinition]:
         return list(self._skills.values())
 
-    def activate(self, name: str, run_shell: bool = True) -> str | None:
+    def activate(self, name: str, run_shell: bool = False) -> str | None:
         """Activate a skill by name. Loads body if not yet loaded.
 
-        ``run_shell``: when False, `` !`command` `` blocks are left as-is (not
-        executed) -- used for model-activated skills (H3) so an untrusted
-        SKILL.md can't run shell on activation. User-invoked skills keep True.
+        ``run_shell``: when True AND the skill carries ``allow_shell=True`` (set
+        via ``allow-shell: true`` frontmatter), `` !`command` `` blocks are
+        preprocessed (executed, stdout injected); otherwise they are left as-is
+        (not executed) -- the issue #46 fail-closed gate so an untrusted SKILL.md
+        cannot run shell on activation. Both flags default False; production
+        (``loop.py``) already passes ``run_shell=False``.
         """
         skill = self._skills.get(name)
         if not skill:

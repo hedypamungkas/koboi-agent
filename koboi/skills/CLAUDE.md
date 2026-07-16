@@ -17,9 +17,9 @@ __init__.py    Re-exports SkillRegistry, discover_skills, activate_skill, load_r
 ## SkillDefinition (`koboi/types.py`)
 `name`, `description`, `skill_dir`, `body` (None until activated), `license`,
 `compatibility`, `metadata`, `allowed_tools`, `disable_model_invocation` (False),
-`user_invocable` (True), `disallowed_tools`. Frontmatter keys are kebab-case
-(`allowed-tools`, `disable-model-invocation`, `user-invocable`) and mapped to the
-snake_case dataclass fields by `parse_frontmatter`.
+`user_invocable` (True), `disallowed_tools`, `allow_shell` (False). Frontmatter keys
+are kebab-case (`allowed-tools`, `disable-model-invocation`, `user-invocable`,
+`allow-shell`) and mapped to the snake_case dataclass fields by `parse_frontmatter`.
 
 ## Discovery and activation
 - `SkillRegistry(logger=None, budget_chars=8000)` scans standard locations:
@@ -28,9 +28,11 @@ snake_case dataclass fields by `parse_frontmatter`.
   - `PLUGIN_SKILLS` = `["~/.claude/plugins/cache"]` (recursive -- nested plugin cache)
   - `discover_all()` runs all three in that order; **first occurrence wins** (dedup by name).
 - A `SKILL.md` without both `name` and `description` is silently skipped.
-- `activate(name, run_shell=True)` strips frontmatter and stores the body; `body`
-  is loaded only once (lazy). `route(query, top_k=3)` does TF-IDF keyword matching
-  (name match weighted 3x description; includes Indonesian stopwords).
+- `activate(name, run_shell=False)` strips frontmatter and stores the body; `body`
+  is loaded only once (lazy). ``!`cmd` `` preprocessing requires BOTH `run_shell=True`
+  AND `skill.allow_shell=True` (issue #46 fail-closed gate; default False everywhere).
+  `route(query, top_k=3)` does TF-IDF keyword matching (name match weighted 3x
+  description; includes Indonesian stopwords).
 - `get_discovery_prompt()` / `get_routed_discovery_prompt(query)` build the
   `<available-skills>` block (truncated to `budget_chars`, dropping least-relevant).
 
@@ -42,11 +44,12 @@ snake_case dataclass fields by `parse_frontmatter`.
 - `build_discovery_prompt()` accepts `budget_chars`; `SkillRegistry` defaults to 8000.
 
 ## Gotchas
-- **Shell injection on activation**: `activate_skill()` preprocesses `` !`command` ``
-  blocks by executing them (10s timeout). Deny-listed commands and sensitive paths are
-  refused (reuses `_check_command_blocked` + `build_safe_env`) -- H3 supply-chain guard.
-  Model-activated skills are activated with `run_shell=False`, so an untrusted SKILL.md
-  cannot run shell on activation; set `run_shell=False` explicitly to disable everywhere.
+- **Shell injection on activation (issue #46, fail-closed)**: ``!`command` `` blocks
+  are NOT executed unless BOTH the caller passes `run_shell=True` AND the skill carries
+  `allow_shell=True` (set via `allow-shell: true` frontmatter). Both default False, so an
+  untrusted SKILL.md cannot run shell on the activation path. When execution IS enabled,
+  deny-listed commands and sensitive paths are still refused (reuses
+  `_check_command_blocked` + `build_safe_env`) as defense-in-depth.
 - **`parse_frontmatter` is a custom mini-parser** (no PyYAML): it handles block scalars
   (`>`, `|`, `|-`...) and kebab-case fields, but exotic YAML may not parse -- keep
   frontmatter simple.

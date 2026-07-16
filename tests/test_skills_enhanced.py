@@ -8,6 +8,7 @@ from koboi.skills.registry import (
     SkillRegistry,
     build_discovery_prompt,
     activate_skill,
+    discover_skills,
     parse_frontmatter,
     _preprocess_shell_commands,
 )
@@ -195,6 +196,17 @@ class TestParseFrontmatterInvocation:
         assert "disable-model-invocation" not in result
         assert "user-invocable" not in result
 
+    def test_parse_allow_shell_true(self):
+        # Issue #46: ``allow-shell`` is parsed to a bool like the other kebab keys.
+        content = "---\nname: test\ndescription: Test\nallow-shell: true\n---\nBody"
+        result = parse_frontmatter(content)
+        assert result["allow-shell"] is True
+
+    def test_parse_allow_shell_defaults_absent(self):
+        content = "---\nname: test\ndescription: Test\n---\nBody"
+        result = parse_frontmatter(content)
+        assert "allow-shell" not in result
+
 
 class TestRouteInvocationControl:
     def test_route_skips_disabled_model_skills(self, invocation_skills):
@@ -335,11 +347,11 @@ class TestDynamicContextInjection:
 
 class TestActivateSkillDynamic:
     def test_activate_with_shell(self, tmp_path):
-        """activate_skill should preprocess shell commands by default."""
+        """activate_skill should preprocess shell commands for an allow-shell skill."""
         skill_dir = tmp_path / "test"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("---\nname: test\ndescription: Test\n---\nStatus: !`echo active`")
-        skill = SkillDefinition(name="test", description="Test", skill_dir=str(skill_dir))
+        skill = SkillDefinition(name="test", description="Test", skill_dir=str(skill_dir), allow_shell=True)
         body = activate_skill(skill, run_shell=True)
         assert "active" in body
 
@@ -351,6 +363,37 @@ class TestActivateSkillDynamic:
         skill = SkillDefinition(name="test", description="Test", skill_dir=str(skill_dir))
         body = activate_skill(skill, run_shell=False)
         assert "!`echo active`" in body
+
+    def test_discover_allow_shell_frontmatter_executes(self, tmp_path):
+        # Issue #46: a SKILL.md declaring ``allow-shell: true`` flows through
+        # discovery into SkillDefinition.allow_shell, and with run_shell=True the
+        # ``!`cmd` `` block IS executed (the legitimate opt-in path).
+        skill_dir = tmp_path / "trusted"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: trusted\ndescription: Trusted skill\nallow-shell: true\n---\nStatus: !`echo active`"
+        )
+        skills = discover_skills([str(tmp_path)])
+        assert len(skills) == 1
+        assert skills[0].allow_shell is True
+        body = activate_skill(skills[0], run_shell=True)
+        assert "active" in body
+        assert "!`echo active`" not in body
+
+    def test_disallow_shell_default_leaves_block_literal_even_with_run_shell(self, tmp_path):
+        # Issue #46: a SKILL.md WITHOUT ``allow-shell: true`` (the default) leaves
+        # the ``!`cmd` `` block literal even when the caller passes run_shell=True.
+        skill_dir = tmp_path / "untrusted"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: untrusted\ndescription: Untrusted skill\n---\nStatus: !`echo active`"
+        )
+        skills = discover_skills([str(tmp_path)])
+        assert len(skills) == 1
+        assert skills[0].allow_shell is False
+        body = activate_skill(skills[0], run_shell=True)
+        assert "!`echo active`" in body
+        assert "active" not in body.replace("!`echo active`", "")
 
 
 # ---------------------------------------------------------------------------
