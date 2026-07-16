@@ -407,9 +407,11 @@ async def _cmd_model(ctx: CommandContext) -> CommandResult:
             ctx.agent.core.client = new_client
         else:
             ctx.agent._orchestrator.client = new_client
-            # Also update all specialist agents' clients
+            # Also update all specialist agents' clients (skip A2A remote nodes -- they have
+            # no local client to swap; the OrchestrationNode Protocol only guarantees .run()).
             for agent in ctx.agent._orchestrator._agents_map.values():
-                agent.client = new_client
+                if hasattr(agent, "client"):
+                    agent.client = new_client
         ctx.agent.config.raw.setdefault("llm", {})["model"] = new_model
         ctx.agent.config.raw.setdefault("llm", {})["provider"] = new_provider
         if ctx.app is not None:

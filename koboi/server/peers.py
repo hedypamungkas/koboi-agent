@@ -397,3 +397,6 @@ async def invoke_peer(peer: PeerConfig, message: str) -> PeerInvokeResult:
                 await asyncio.sleep(2**attempt)  # backoff: 1s, 2s
                 continue
             raise
+    # Unreachable: the loop always returns or raises on its last iteration
+    # (attempt == _MAX_RETRIES makes every `continue` guard above false).
+    raise AssertionError("invoke_peer: retry loop exited without return/raise")
