@@ -503,14 +503,12 @@ class Orchestrator:
         if tools_registry is not None:
             for tc in tool_calls_made:
                 td = tools_registry.get_definition(getattr(tc, "name", ""))
-                # Side-effecting = flagged non-idempotent OR elevated risk. The flag is
-                # the precise signal, but most side-effecting builtins (run_shell,
-                # write_file, ingest, ...) are still flagged idempotent=True, so
-                # risk_level is the belt-and-suspenders that actually catches them.
-                # Conservative: a failed read-only MODERATE node is carried forward
-                # rather than retried -- safe, just less aggressive. TODO(systemic): set
-                # idempotent=False on side-effecting builtins so resume + SAFE-risk
-                # side-effects (delegate_tasks, memory_store) are protected too.
+                # Side-effecting = flagged non-idempotent OR elevated risk. The builtins
+                # (run_shell, write_file, delete_file, ingest_url, delegate_tasks,
+                # memory_store) are flagged idempotent=False; risk_level stays as
+                # belt-and-suspenders for CUSTOM tools registered with elevated risk but
+                # not the flag. Conservative: a failed read-only MODERATE node is carried
+                # forward rather than retried -- safe, just less aggressive.
                 if td is not None and (
                     not td.idempotent or td.risk_level in (RiskLevel.MODERATE, RiskLevel.DESTRUCTIVE)
                 ):
@@ -1256,7 +1254,9 @@ class Orchestrator:
                 # r.failed reflects crashes for the standard path. Kept as a string
                 # match on "Error:" too (belt-and-suspenders for custom agent classes
                 # that return a real answer with success=False). TODO(P1): prefer r.failed.
-                "nodes_failed": sum(1 for r in results_by_name.values() if (r.answer or "").startswith("Error:")),
+                "nodes_failed": sum(
+                    1 for r in results_by_name.values() if r.failed or (r.answer or "").startswith("Error:")
+                ),
             },
         )
 

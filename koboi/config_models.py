@@ -640,6 +640,7 @@ class SelfHealingConfig(BaseModel):
     # partial progress instead of raising AgentMaxIterationsError. Independent of
     # `enabled` (you can opt into graceful degrade without the full ladder).
     graceful_max_iter: bool = False
+    empty_response_reask_limit: int = 1  # P0-C: bounded re-ask budget for empty responses (config-plumbed; default 1)
     critic_llm: str | None = None  # named `providers:` ref or inline dict; None = reuse agent client
     triggers: dict = Field(default_factory=dict)
     # triggers.tool_error.repeat_threshold (default 2); triggers.low_grounding.threshold (default 0.6)

@@ -122,7 +122,10 @@ class ReflectionHook(Hook):
 
     async def _on_post_tool_use(self, ctx: HookContext) -> None:
         result = ctx.tool_result or ""
-        if not result.startswith("Error:"):
+        # P2a surfaces the structured error_kind onto ctx.metadata; prefer it over the
+        # fragile "Error:" prefix string-match (keep the prefix as a fallback).
+        is_error = ctx.metadata.get("tool_error_kind") is not None or result.startswith("Error:")
+        if not is_error:
             # Success resets the consecutive-failure counter for this (tool, args).
             self._tool_error_counts.pop(self._tool_key(ctx), None)
             return

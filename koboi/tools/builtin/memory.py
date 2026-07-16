@@ -124,6 +124,7 @@ _store = _MemoryStore()
     name="memory_store",
     group="memory",
     description="Store key-value pair to persistent memory. Data persists across sessions.",
+    idempotent=False,  # self-healing: mutates the KV store -- carry forward on replan / skip on resume
     parameters={
         "type": "object",
         "properties": {

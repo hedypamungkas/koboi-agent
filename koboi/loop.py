@@ -812,6 +812,8 @@ class AgentCore:
                             "tool_name": tc.name,
                             "skipped": pr.skipped,
                             "skip_reason": pr.skip_reason,
+                            "errored": pr.errored,
+                            "error_kind": pr.error_kind,
                         }
                     )
                 self._journal_step(i, status="tool_calls", response=response, tool_calls=response.tool_calls)
