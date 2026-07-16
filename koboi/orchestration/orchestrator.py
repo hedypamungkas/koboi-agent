@@ -13,12 +13,27 @@ import re
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from koboi.tokens import estimate_tokens
 from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, RoutingDecision
 from koboi.exceptions import AgentError
 from koboi.hooks.chain import AgentInfo, HookContext, HookEvent
+
+if TYPE_CHECKING:
+    from koboi.types import RunResult
+
+
+class OrchestrationNode(Protocol):
+    """Minimal contract for an orchestration graph node.
+
+    Satisfied by both a local ``AgentCore`` and a ``RemoteAgentProxy``. ``memory`` is
+    optional (only AgentCore has it; the orchestrator reads it under try/except for
+    token accounting). Encoding this lets mypy catch a future break of the
+    ``await node.run(query) -> RunResult`` contract.
+    """
+
+    async def run(self, query: str) -> RunResult: ...
 from koboi.events import (
     AgentDispatchEvent,
     AgentResultEvent,
@@ -183,7 +198,7 @@ class Orchestrator:
         self._chunk_overlap = chunk_overlap
         self._dynamic_builder = dynamic_builder
         self._dynamic_blueprints: dict[str, AgentBlueprint] = {}
-        self._agents_map: dict = agents_map or {}
+        self._agents_map: dict[str, OrchestrationNode] = agents_map or {}
         self._dag_scheduler = dag_scheduler
         self.default_mode = default_mode
         # #5: hook chain for dynamic-mode agents (so they get logging/policy/guardrails/
@@ -459,7 +474,10 @@ class Orchestrator:
 
         elapsed = time.time() - start
         try:
-            tokens = estimate_tokens(agent.memory.get_messages())
+            # ``memory`` is optional on an OrchestrationNode (RemoteAgentProxy lacks it);
+            # duck-type it so a proxy node is fine (token accounting falls back to 0).
+            mem = getattr(agent, "memory", None)
+            tokens = estimate_tokens(mem.get_messages()) if mem is not None else 0
         except Exception:
             tokens = 0
 

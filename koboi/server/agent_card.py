@@ -57,20 +57,30 @@ def verify_card(card: dict, org_secret: str) -> bool:
 
     No secret / missing or malformed signature / tampered body / stale ``issued_at``
     all return False. Constant-time signature compare via :func:`hmac.compare_digest`.
+    Each failure emits a DEBUG reason so the verifying operator (who holds the
+    ``org_secret`` and reads their own logs) can diagnose why a peer was rejected --
+    the rejection itself stays opaque to a remote attacker.
     """
     if not org_secret:
+        _logger.debug("agent-card verify: no org_secret configured")
         return False
     sig = card.get("signature")
     if not isinstance(sig, str) or not sig.startswith(_SIGNATURE_PREFIX):
+        _logger.debug("agent-card verify: missing or malformed signature")
         return False
     expected = sign_card(card, org_secret)
     if not hmac.compare_digest(expected, sig):
+        _logger.debug("agent-card verify: signature mismatch (tampered body or wrong org_secret)")
         return False
     try:
         issued_at = float(card.get("issued_at", 0))
     except (TypeError, ValueError):
+        _logger.debug("agent-card verify: issued_at not parseable")
         return False
-    return issued_at > 0 and abs(time.time() - issued_at) <= FRESHNESS_SECONDS
+    if issued_at <= 0 or abs(time.time() - issued_at) > FRESHNESS_SECONDS:
+        _logger.debug("agent-card verify: stale or non-positive issued_at")
+        return False
+    return True
 
 
 def build_agent_card(config: Config, org_secret: str, public_base_url: str) -> dict:

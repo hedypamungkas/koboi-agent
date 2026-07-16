@@ -25,9 +25,9 @@ _logger = logging.getLogger(__name__)
 _PEER_ID = "peer"
 
 
-@dataclass
+@dataclass(frozen=True)
 class PeerConfig:
-    """Outbound peer definition (runtime shape; mirrors config_models.PeerConfig)."""
+    """Immutable outbound peer definition (runtime shape; mirrors config_models.PeerDef)."""
 
     name: str
     url: str
@@ -35,21 +35,21 @@ class PeerConfig:
     agent_name: str = ""
     org: str = ""
     timeout: float = 30.0
-    verified: bool = False  # P3: True once the peer's agent-card org-claim is verified
 
 
-@dataclass
+@dataclass(frozen=True)
 class PeerInvokeResult:
-    """Result of an A2A invoke: the peer's answer + its Langfuse trace-id (if configured).
+    """Result of an A2A invoke: the peer's answer + the receiver's Langfuse trace-id.
 
-    ``trace_id`` is the receiver's LANGFUSE trace-id (for direct lookup in its Langfuse
-    project; empty if Langfuse isn't configured) -- NOT the W3C correlation key. The
-    shared W3C trace-id (which both instances stamp in their step journals) is identical
-    on both sides; a caller already holds it via ``tracing_context.current_trace_id()``.
+    ``receiver_trace_id`` is the receiver's LANGFUSE trace-id (for direct lookup in its
+    Langfuse project; empty if Langfuse isn't configured) -- NOT the W3C correlation key.
+    The shared W3C trace-id (which both instances stamp in their step journals) is
+    identical on both sides; a caller already holds it via
+    ``tracing_context.current_trace_id()``.
     """
 
     content: str
-    trace_id: str = ""
+    receiver_trace_id: str = ""
 
 
 class PeerRegistry:
@@ -66,6 +66,10 @@ class PeerRegistry:
         # P3: when an org_secret is set, declared peers must be org-verified at startup.
         self._org_secret: str = ""
         self._require_verification: bool = False
+        # Names of peers whose agent-card org-claim has been verified. Registry-owned
+        # state (NOT a mutable flag on PeerConfig) -- verification is a time-varying
+        # property of the registry's relationship to the peer.
+        self._verified: set[str] = set()
 
     def load_from_config(self, peers_cfg: Any) -> int:
         """Load outbound peers + inbound tokens from a ``peers:`` config block.
@@ -92,7 +96,6 @@ class PeerRegistry:
                     agent_name=str(raw.get("agent_name", "")),
                     org=str(raw.get("org", "")),
                     timeout=float(raw.get("timeout", 30.0) or 30.0),
-                    verified=not self._require_verification,
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 _logger.warning("Skipping malformed peer entry %r: %s", raw, exc)
@@ -115,41 +118,44 @@ class PeerRegistry:
         """Resolve a CALLABLE outbound peer by name.
 
         Returns None if unknown or -- when org-claim verification is enabled
-        (``org_secret`` set) -- if the peer's agent-card has not yet been verified.
+        (``org_secret`` set) -- if the peer's agent-card has not been verified.
         """
         peer = self._peers.get(name)
         if peer is None:
             return None
-        if self._require_verification and not peer.verified:
+        if self._require_verification and name not in self._verified:
+            _logger.debug(
+                "A2A peer '%s' is known but not org-verified (uncallable); see startup/refresh logs",
+                name,
+            )
             return None
         return peer
 
     async def verify_all(self) -> int:
-        """P3: fetch + HMAC-verify each declared peer's agent-card (call at startup).
+        """P3: fetch + HMAC-verify each declared peer's agent-card (startup + refresh).
 
-        Only does work when an ``org_secret`` is configured. Concurrent
-        (``asyncio.gather``), per-peer timeout, non-fatal -- a peer that fails
-        verification stays ``verified=False`` (uncallable via :meth:`get`) but never
-        crashes boot. Returns the number of peers verified.
+        Concurrent (``asyncio.gather``), per-peer timeout, non-fatal. REBUILDS the
+        verified set from the results -- a previously-verified peer whose card has
+        expired/rotated is downgraded (dropped), so "verified-only" holds over time,
+        not just at first success.
         """
         if not self._require_verification or not self._peers:
             return 0
         import asyncio
 
-        results = await asyncio.gather(
-            *(self._verify_one(p) for p in list(self._peers.values())),
-            return_exceptions=True,
-        )
-        verified = sum(1 for r in results if r is True)
-        if verified != len(self._peers):
+        peers = list(self._peers.values())
+        results = await asyncio.gather(*(self._verify_one(p) for p in peers), return_exceptions=True)
+        self._verified = {p.name for p, ok in zip(peers, results, strict=True) if ok is True}
+        if len(self._verified) != len(peers):
             _logger.warning(
                 "A2A org-claim verification: %d/%d peers verified; unverified peers are uncallable",
-                verified,
-                len(self._peers),
+                len(self._verified),
+                len(peers),
             )
-        return verified
+        return len(self._verified)
 
     async def _verify_one(self, peer: PeerConfig) -> bool:
+        import dataclasses
         import httpx
 
         from koboi.server.agent_card import CARD_PATH, verify_card
@@ -166,10 +172,11 @@ class PeerRegistry:
         if not isinstance(card, dict) or not verify_card(card, self._org_secret):
             _logger.warning("A2A peer '%s' failed org-claim verification (rejected)", peer.name)
             return False
-        peer.verified = True
-        # Fill agent_name from the card if the operator left it blank.
+        # Fill agent_name from the card if the operator left it blank (PeerConfig is frozen).
         if not peer.agent_name:
-            peer.agent_name = str(card.get("agent_name", "")) or peer.agent_name
+            card_agent = str(card.get("agent_name", "") or "")
+            if card_agent:
+                self._peers[peer.name] = dataclasses.replace(peer, agent_name=card_agent)
         return True
 
     def validate_inbound_token(self, token: str) -> str | None:
@@ -192,6 +199,15 @@ class PeerRegistry:
     def requires_verification(self) -> bool:
         """True when an org_secret is set (declared peers must be org-verified)."""
         return self._require_verification
+
+    def disable_verification(self) -> None:
+        """Disable verified-only gating (all loaded peers become callable).
+
+        Used for the CLI/local build path, which has no lifespan to run
+        :meth:`verify_all` -- gating there would make every peer uncallable.
+        The ``koboi serve`` path keeps verification on (peers verified at startup).
+        """
+        self._require_verification = False
 
     @staticmethod
     def _as_dict(peers_cfg: Any) -> dict:
@@ -234,6 +250,30 @@ class PeerRegistry:
             return False
 
 
+def build_peer_registry(peers_cfg: Any, *, verified_registry: PeerRegistry | None = None) -> PeerRegistry | None:
+    """Resolve the PeerRegistry for an agent build (single source for the facade paths).
+
+    If a ``verified_registry`` is provided (the server's ``app.state.peer_registry``,
+    verified at lifespan), return it as-is so agents share the SAME verified registry
+    (without this, each agent would build its own unverified registry and -- with an
+    ``org_secret`` set -- every peer would be gated out). Otherwise build a fresh one
+    from config with verification DISABLED (the CLI/local path has no lifespan to run
+    ``verify_all``; verified-only is a ``koboi serve`` feature). Returns None when A2A
+    is not enabled.
+    """
+    if verified_registry is not None:
+        return verified_registry
+    if not peers_cfg:
+        return None
+    cfg = PeerRegistry._as_dict(peers_cfg)
+    if not cfg.get("enabled"):
+        return None
+    reg = PeerRegistry()
+    reg.load_from_config(cfg)
+    reg.disable_verification()
+    return reg
+
+
 async def invoke_peer(peer: PeerConfig, message: str) -> PeerInvokeResult:
     """POST a peer instance's ``/v1/peer/invoke`` receiver and return its answer + trace-id.
 
@@ -262,4 +302,4 @@ async def invoke_peer(peer: PeerConfig, message: str) -> PeerInvokeResult:
     content = data.get("content")
     if not isinstance(content, str):
         raise ValueError(f"peer returned no string content: {data!r}")
-    return PeerInvokeResult(content=content, trace_id=str(data.get("trace_id") or ""))
+    return PeerInvokeResult(content=content, receiver_trace_id=str(data.get("trace_id") or ""))

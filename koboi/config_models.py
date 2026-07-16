@@ -380,12 +380,14 @@ class MCPConfig(BaseModel):
     allowlist_commands: list[str] = Field(default_factory=list)  # extra stdio runners (basename)
 
 
-class PeerConfig(BaseModel):
-    """A peer koboi instance for cross-instance agent-to-agent (A2A) calls.
+class PeerDef(BaseModel):
+    """A peer koboi instance for cross-instance agent-to-agent (A2A) calls (config shape).
 
     Each registered peer URL is trusted as same-org/owner (static Bearer per peer).
     The ``token`` is the OUTBOUND credential presented to the peer; inbound peer
-    tokens are listed separately under ``PeersConfig.inbound_tokens``.
+    tokens are listed separately under ``PeersConfig.inbound_tokens``. Named ``PeerDef``
+    (not ``PeerConfig``) to avoid collision with the runtime ``koboi.server.peers.PeerConfig``
+    dataclass.
     """
 
     model_config = {"extra": "ignore"}
@@ -404,7 +406,7 @@ class PeersConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     enabled: bool = False
-    peers: list[PeerConfig] = Field(default_factory=list)  # outbound peers
+    peers: list[PeerDef] = Field(default_factory=list)  # outbound peers
     inbound_tokens: list[str] = Field(default_factory=list)  # plaintext tokens accepted from peers (hashed at load)
     # Same-org peers often live on private networks / localhost (dev, internal clusters).
     # Default False = strict SSRF (reject private/loopback URLs at load). Set True when the

@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from koboi.orchestration.orchestrator import Orchestrator
     from koboi.rag.augmentation import AugmentationStrategy
     from koboi.sandbox.base import BaseSandbox
+    from koboi.server.peers import PeerRegistry
     from koboi.skills.registry import SkillRegistry
     from koboi.trust import TrustDatabase
 
@@ -108,7 +109,12 @@ class KoboiAgent:
 
     @classmethod
     def from_dict(
-        cls, data: dict, verbose: bool = False, replay_mode: str | None = None, cache_dir: str | None = None
+        cls,
+        data: dict,
+        verbose: bool = False,
+        replay_mode: str | None = None,
+        cache_dir: str | None = None,
+        peer_registry: PeerRegistry | None = None,
     ) -> KoboiAgent:
         """Factory method: create a KoboiAgent from a Python dict.
 
@@ -119,7 +125,9 @@ class KoboiAgent:
             })
         """
         config = Config.from_dict(data)
-        return cls._from_config(config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir)
+        return cls._from_config(
+            config, verbose=verbose, replay_mode=replay_mode, cache_dir=cache_dir, peer_registry=peer_registry
+        )
 
     @classmethod
     def from_config_string(
@@ -147,6 +155,7 @@ class KoboiAgent:
         resume_session: str | None = None,
         replay_mode: str | None = None,
         cache_dir: str | None = None,
+        peer_registry: PeerRegistry | None = None,
     ) -> KoboiAgent:
         """Shared builder: assemble all subsystems from a Config object."""
         if resume_session:
@@ -159,10 +168,10 @@ class KoboiAgent:
             config = config.with_replay(replay_mode=replay_mode, cache_dir=cache_dir)
         # Orchestration mode: transparent to caller
         if config.orchestration.get("enabled"):
-            return _build_orchestration(config, verbose=verbose)
+            return _build_orchestration(config, verbose=verbose, peer_registry=peer_registry)
 
         assembler = AgentAssembler(config, verbose=verbose)
-        return assembler.build()
+        return assembler.build(peer_registry=peer_registry)
 
     async def run(self, message: str | list) -> RunResult:
         if self._orchestrator is not None:
@@ -1303,7 +1312,7 @@ class AgentAssembler:
         )
         return self.proactive_memory
 
-    def build(self) -> KoboiAgent:
+    def build(self, peer_registry: PeerRegistry | None = None) -> KoboiAgent:
         """Run all build steps in dependency order and return assembled agent."""
         self.build_logger()
         self.build_client()
@@ -1330,7 +1339,7 @@ class AgentAssembler:
 
         _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
-        _setup_peer_registry(self.tools, self.config)
+        _setup_peer_registry(self.tools, self.config, peer_registry=peer_registry)
 
         # Add skill persistence hook if skills are present
         if self.skills and self.hook_chain:
@@ -1790,7 +1799,7 @@ def _build_router(config: Config, client: Client, agent_defs: list):
         return KeywordRouter(agent_defs=agent_defs)
 
 
-def _build_orchestration(config: Config, verbose: bool = False):
+def _build_orchestration(config: Config, verbose: bool = False, peer_registry: PeerRegistry | None = None):
     """Build a KoboiAgent backed by the orchestration engine.
 
     Reuses AgentAssembler for common subsystems (logger, client, guardrails,
@@ -1855,14 +1864,11 @@ def _build_orchestration(config: Config, verbose: bool = False):
     shared_mcp_clients = [client for client, _ in mcp_pairs]
     mcp_registrar = _mcp_registrar_for_pairs(mcp_pairs, config)
 
-    # A2A: shared peer registry for orchestrated sub-agents (opt-in via peers:).
-    peer_registry = None
-    peers_cfg = config.get("peers", default={})
-    if peers_cfg and peers_cfg.get("enabled"):
-        from koboi.server.peers import PeerRegistry
+    # A2A: shared peer registry for orchestrated sub-agents. Use the provided
+    # (server-verified) registry; else a fresh verification-disabled one (CLI path).
+    from koboi.server.peers import build_peer_registry
 
-        peer_registry = PeerRegistry()
-        peer_registry.load_from_config(peers_cfg)
+    peer_registry = build_peer_registry(config.get("peers", default={}), verified_registry=peer_registry)
 
     if agent_defs:
         agents_map = AgentFactory.create_all_configured(
@@ -1967,23 +1973,24 @@ def _setup_subagent(
         tools.set_dep("subagent_manager", manager)
 
 
-def _setup_peer_registry(tools: ToolRegistry, config: Config) -> None:
-    """Inject the A2A peer registry if ``call_peer_agent`` is registered.
+def _setup_peer_registry(tools: ToolRegistry, config: Config, peer_registry: PeerRegistry | None = None) -> None:
+    """Inject the A2A peer registry (and ensure the ``call_peer_agent`` tool exists).
 
-    Opt-in via ``peers:`` config. When disabled, the tool stays registered but
-    returns a clear error when invoked (mirrors the subagent/task gating pattern).
-    Covers both the CLI path and the server's pooled-agent path (both assemble
-    via the facade, which calls this).
+    Uses ``peer_registry`` (the server's verified registry) when provided; else builds
+    a fresh verification-disabled one (CLI path). When A2A is enabled the
+    ``call_peer_agent`` tool is auto-registered (it's the front door to peers -- it
+    shouldn't require a separate ``tools.builtin`` opt-in); no-op if already present.
     """
-    if "call_peer_agent" not in tools:
-        return
-    peers_cfg = config.get("peers", default={})
-    if not (peers_cfg and peers_cfg.get("enabled")):
-        return
-    from koboi.server.peers import PeerRegistry
+    from koboi.server.peers import build_peer_registry
 
-    registry = PeerRegistry()
-    registry.load_from_config(peers_cfg)
+    registry = build_peer_registry(config.get("peers", default={}), verified_registry=peer_registry)
+    if registry is None:
+        return  # A2A not enabled
+    if "call_peer_agent" not in tools:
+        from koboi.tools.builtin import peer as _peer_tool
+        from koboi.tools.registry import register_decorated
+
+        register_decorated(tools, _peer_tool)
     tools.set_dep("peer_registry", registry)
 
 

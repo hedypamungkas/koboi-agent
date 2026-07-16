@@ -89,6 +89,10 @@ ExtraRouteRegistrar = Callable[[FastAPI, AgentPool], None]
 #: Default approval timeout (seconds). Overridable via config in a future rev.
 APPROVAL_TIMEOUT = 120.0
 
+#: Modes that let a peer caller reach destructive tools -> autonomous execution (C3
+#: requires restricted sandbox). chat/plan mode-block destructive tools, so they're exempt.
+_PEER_AUTONOMOUS_MODES = frozenset({AgentMode.ACT, AgentMode.AUTO, AgentMode.YOLO})
+
 
 def _cleanup_workdirs(workspace_root: str, ttl_seconds: float) -> int:
     """Remove session workdirs older than TTL. Returns count removed."""
@@ -149,13 +153,13 @@ async def _a2a_refresh_once(
     """
     try:
         app.state.agent_card = build_agent_card(config, org_secret, public_base_url)
-    except Exception:  # noqa: BLE001 -- best-effort refresh
-        _logger.debug("A2A agent-card refresh failed", exc_info=True)
+    except Exception:  # noqa: BLE001 -- best-effort refresh; WARNING because a stale trust root makes every peer reject this instance
+        _logger.warning("A2A agent-card refresh failed; served card will age out", exc_info=True)
     if peer_registry is not None and peer_registry.requires_verification:
         try:
             await peer_registry.verify_all()
         except Exception:  # noqa: BLE001 -- best-effort re-verify
-            _logger.debug("A2A peer re-verify failed", exc_info=True)
+            _logger.warning("A2A peer re-verify failed", exc_info=True)
 
 
 async def _a2a_refresh_loop(
@@ -338,6 +342,10 @@ def create_app(
         peers_cfg = config.get("peers", default={})
         if peers_cfg and peers_cfg.get("enabled"):
             peer_registry.load_from_config(peers_cfg)
+    # Thread the (verified-at-lifespan) registry into pooled agents so their
+    # call_peer_agent tool / RemoteAgentProxy nodes share it (C1 fix: without this,
+    # each agent built its own unverified registry and org_secret gated every peer out).
+    pool._peer_registry = peer_registry
 
     # P3: build this instance's signed agent-card once (served at GET /.well-known/agent-card).
     org_secret = str(config.get("peers", "org_secret", default="") or "")
@@ -1276,7 +1284,7 @@ def _register_routes(
                 try:
                     await pool.evict(session_id)
                 except Exception:  # noqa: BLE001 -- best-effort cleanup; never fail the response
-                    _logger.debug("ephemeral peer session evict failed: %s", session_id)
+                    _logger.warning("ephemeral peer session evict failed (leak risk): %s", session_id)
 
     @app.post("/v1/sessions/{session_id}/approve", response_model=ApproveResponse)
     async def approve(session_id: str, body: ApproveRequest, request: Request) -> Response:
@@ -1702,6 +1710,17 @@ async def _run_peer_agent(agent: Any, message: str, mode: AgentMode | None, max_
     """
     if agent._core is None:
         return await agent.run(message)
+
+    # C3: a peer call that can run destructive tools (act/auto/yolo) is autonomous
+    # execution -- require a restricted sandbox, mirroring the jobs autonomous path.
+    # (chat/plan mode-block destructive tools, so passthrough is fine there.)
+    if mode in _PEER_AUTONOMOUS_MODES:
+        sb = agent._core.tools.get_dep("sandbox")
+        if getattr(sb, "name", "passthrough") == "passthrough":
+            raise PermissionError(
+                "A2A peer invoke with an autonomous mode (act/auto/yolo) requires "
+                "sandbox.backend='restricted'; 'passthrough' is refused."
+            )
 
     prior_handler = agent._core.approval_handler
     had_pipeline = hasattr(agent._core, "_tool_pipeline")

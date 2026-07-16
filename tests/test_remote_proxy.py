@@ -15,7 +15,7 @@ from koboi.orchestration.factory import AgentFactory
 from koboi.orchestration.orchestrator import Orchestrator
 from koboi.orchestration.remote_proxy import RemoteAgentProxy
 from koboi.orchestration.router import KeywordRouter
-from koboi.server.peers import PeerConfig, PeerRegistry
+from koboi.server.peers import PeerConfig, PeerInvokeResult, PeerRegistry
 from koboi.types import AgentDef, RunResult
 from tests.conftest import MockClient, make_mock_response
 
@@ -61,7 +61,7 @@ class TestFactoryBranch:
 class TestRemoteAgentProxyRun:
     async def test_success(self, monkeypatch):
         async def fake(peer, msg):
-            return "REMOTE-ANSWER"
+            return PeerInvokeResult(content="REMOTE-ANSWER", receiver_trace_id="peer-T")
 
         monkeypatch.setattr(peers_mod, "invoke_peer", fake)
         proxy = RemoteAgentProxy("review", "peerY", _registry())
@@ -69,6 +69,7 @@ class TestRemoteAgentProxyRun:
         assert isinstance(res, RunResult)
         assert res.content == "REMOTE-ANSWER"
         assert res.success is True
+        assert res.metadata.get("peer_trace_id") == "peer-T"
 
     async def test_unknown_peer_returns_error_runresult(self):
         proxy = RemoteAgentProxy("review", "NOPE", _registry())
@@ -93,7 +94,7 @@ class TestRemoteNodeInOrchestration:
         """A RemoteAgentProxy is a usable orchestration node: routing + run() + answer flow."""
 
         async def fake(peer, msg):
-            return "REMOTE-ANSWER-42"
+            return PeerInvokeResult(content="REMOTE-ANSWER-42")
 
         monkeypatch.setattr(peers_mod, "invoke_peer", fake)
         proxy = RemoteAgentProxy("review", "peerY", _registry())

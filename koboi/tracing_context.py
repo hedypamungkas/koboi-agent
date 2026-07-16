@@ -31,6 +31,13 @@ class TraceContext:
     parent_id: str  # 16 hex
     flags: str  # 2 hex
 
+    def __post_init__(self) -> None:
+        # Self-protecting: the factories (parse/mint/child) always produce valid values,
+        # but the type shouldn't rely on convention -- reject invalid construction.
+        tp = f"00-{self.trace_id}-{self.parent_id}-{self.flags}"
+        if not _TRACEPARENT_RE.match(tp) or self.trace_id == "0" * 32 or self.parent_id == "0" * 16:
+            raise ValueError(f"invalid TraceContext: {tp!r}")
+
     def as_traceparent(self) -> str:
         return f"00-{self.trace_id}-{self.parent_id}-{self.flags}"
 

@@ -155,7 +155,7 @@ class TestVerifyAll:
         monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(good_card))
         n = await reg.verify_all()
         assert n == 1
-        assert reg.get("C") is not None and reg.get("C").verified
+        assert reg.get("C") is not None  # callable == in the verified set
 
     async def test_bad_signature_peer_stays_gated(self, monkeypatch):
         reg = _registry_with_secret(
@@ -192,6 +192,22 @@ class TestVerifyAll:
         assert reg._require_verification is False
         assert (await reg.verify_all()) == 0
         assert reg.get("C") is not None  # usable without verification (P0-P2 behavior)
+
+    async def test_refresh_downgrades_peer_on_card_rotation(self, monkeypatch):
+        # C2 regression: a previously-verified peer whose card rotates (now tampered)
+        # is re-gated by the next verify_all -- "verified-only" holds over time.
+        reg = _registry_with_secret([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+        good_card = _card()
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(good_card))
+        await reg.verify_all()
+        assert reg.get("C") is not None  # verified
+
+        evil_card = copy.deepcopy(good_card)
+        evil_card["org"] = "evil"  # tampered -> signature invalid
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(evil_card))
+        n = await reg.verify_all()
+        assert n == 0
+        assert reg.get("C") is None  # downgraded (re-gated)
 
 
 class TestA2ARefresh:

@@ -7,11 +7,15 @@ import sqlite3
 
 import httpx
 import pytest
+from httpx import ASGITransport
 
 from koboi import tracing_context as tc
+from koboi.config import Config
 from koboi.journal import StepJournal
 from koboi.memory_sqlite import ensure_steps_table
+from koboi.server.app import create_app
 from koboi.server.peers import PeerConfig, PeerInvokeResult, invoke_peer
+from tests.conftest import MockClient, make_mock_response, make_mock_tool_call
 
 _GOOD = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
 
@@ -111,7 +115,7 @@ class TestInvokePeerTrace:
         res = await invoke_peer(PeerConfig(name="C", url="http://localhost:8002", token="t"), "hi")
 
         assert isinstance(res, PeerInvokeResult)
-        assert res.content == "ANS" and res.trace_id == "peerT"
+        assert res.content == "ANS" and res.receiver_trace_id == "peerT"
         sent = tc.parse_traceparent(client.posted["headers"]["traceparent"])
         assert sent is not None
         assert sent.trace_id == tc.current_trace_id()  # same trace
@@ -175,3 +179,72 @@ class TestTracePropagationIntoRemoteNode:
         root = tc.current_trace_id()
         await orch.run("please review", mode="sequential")
         assert seen.get("trace") == root  # trace propagated into the remote-node peer call
+
+
+def _trace_ids(db_path: str) -> set[str]:
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT DISTINCT trace_id FROM steps WHERE trace_id IS NOT NULL").fetchall()
+    conn.close()
+    return {r[0] for r in rows}
+
+
+class TestCrossInstanceTrace:
+    async def test_same_trace_id_in_both_journals(self, tmp_path, monkeypatch):
+        """Capstone: one W3C trace-id lands in BOTH instances' step journals across a hop."""
+        db_y = tmp_path / "y.db"
+        db_x = tmp_path / "x.db"
+
+        # Instance Y: agent C (sqlite journal), accepts peer token tok-y.
+        cfg_y = Config.from_dict(
+            {
+                "agent": {"name": "C", "mode": "chat", "system_prompt": "C", "max_iterations": 3},
+                "llm": {"provider": "openai", "model": "x", "api_key": "x"},
+                "memory": {"backend": "sqlite", "db_path": str(db_y)},
+                "peers": {"enabled": True, "inbound_tokens": ["tok-y"]},
+            }
+        )
+        app_y = create_app(cfg_y, client_factory=lambda: MockClient([make_mock_response(content="C-answer")]))
+
+        # Route X's call_peer_agent httpx at Y in-process (the hop carries the traceparent).
+        real = httpx.AsyncClient
+
+        class _Routed(real):
+            def __init__(self, *a, **k):
+                k.setdefault("transport", ASGITransport(app=app_y))
+                super().__init__(*a, **k)
+
+        monkeypatch.setattr(httpx, "AsyncClient", _Routed)
+
+        # Instance X: agent A (act; sqlite journal), peer C -> Y.
+        cfg_x = Config.from_dict(
+            {
+                "agent": {"name": "A", "mode": "act", "system_prompt": "A", "max_iterations": 5},
+                "llm": {"provider": "openai", "model": "x", "api_key": "x"},
+                "memory": {"backend": "sqlite", "db_path": str(db_x)},
+                "peers": {
+                    "enabled": True,
+                    "allow_private_network": True,
+                    "peers": [{"name": "C", "url": "http://peer-y:8000", "token": "tok-y"}],
+                },
+            }
+        )
+        app_x = create_app(
+            cfg_x,
+            client_factory=lambda: MockClient(
+                [
+                    make_mock_response(
+                        tool_calls=[make_mock_tool_call("call_peer_agent", {"calls": [{"peer": "C", "message": "hi"}]})]
+                    ),
+                    make_mock_response(content="A got C-answer"),
+                ]
+            ),
+        )
+
+        tc.begin_request(_GOOD)
+        root = tc.current_trace_id()
+        agent = await app_x.state.pool.get_or_create("x-sess")
+        await agent.run("ask C")
+
+        # The same W3C trace-id is stamped in BOTH instances' step journals.
+        assert root in _trace_ids(str(db_x))  # caller journaled the trace
+        assert root in _trace_ids(str(db_y))  # peer continued the SAME trace-id via the header

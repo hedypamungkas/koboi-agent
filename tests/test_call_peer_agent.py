@@ -25,14 +25,6 @@ def _registry_with_peers(peers: list[dict]) -> ToolRegistry:
     return r
 
 
-def _exec(r: ToolRegistry, calls: list[dict]) -> str:
-    return asyncio.get_event_loop().run_until_complete(_aexec(r, calls))
-
-
-async def _aexec(r: ToolRegistry, calls: list[dict]) -> str:
-    return await r.execute("call_peer_agent", json.dumps({"calls": calls}))
-
-
 class TestCallPeerAgent:
     async def test_no_registry_returns_clear_error(self):
         r = ToolRegistry()
