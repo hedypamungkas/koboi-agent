@@ -29,9 +29,15 @@ class DoomLoopHook(Hook):
         self._on_doom_loop = on_doom_loop
 
     def handles(self) -> list[HookEvent]:
-        return [HookEvent.POST_TOOL_USE]
+        return [HookEvent.SESSION_START, HookEvent.POST_TOOL_USE]
 
     async def execute(self, ctx: HookContext) -> HookContext:
+        # P2a: reset per-run so detector state never contaminates the next run (the
+        # detector is per-session; without this its history accumulates across run()
+        # calls within a session). Fixes a latent multi-run contamination bug.
+        if ctx.event == HookEvent.SESSION_START:
+            self.detector.reset()
+            return ctx
         if not ctx.tool_name:
             return ctx
 

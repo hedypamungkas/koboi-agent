@@ -350,6 +350,9 @@ class ToolExecutionPipeline:
                 tool_arguments=tc.arguments,
                 tool_result=tool_result,
             )
+            # Self-healing P2a: surface P0-D's structured error signal onto the ctx so
+            # FailureClassifierHook can tag failure_class without string-matching.
+            post_ctx.metadata["tool_error_kind"] = error_kind
             post_ctx = await self.hooks.emit(post_ctx)
             for msg in post_ctx.inject_messages:
                 self.memory.add_context_message(msg, label="hook_inject")

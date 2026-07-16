@@ -1449,6 +1449,17 @@ class AgentAssembler:
                     "self_healing.enabled without a grounding_check output guardrail "
                     "-- low-grounding reflection will be inert; only tool-error critique fires"
                 )
+            # P2a: shared per-run recovery budget (owned by the router, consumed by
+            # ReflectionHook on an actual reflect). The 'handover' rung needs
+            # HandoverDetectionHook (handover.detection.enabled) to actually escalate.
+            from koboi.harness.recovery_budget import RecoveryBudget
+
+            budget = RecoveryBudget(max_turns=self.config.get("self_healing", "max_turns", default=3))
+            if not self.config.get("handover", "detection", "enabled", default=False):
+                logging.getLogger(__name__).warning(
+                    "self_healing enabled without handover.detection -- the ladder's "
+                    "'handover' rung will be inert (escalate-to-human unavailable)"
+                )
             critic_client = self.client
             critic_spec = self.config.get("self_healing", "critic_llm", default=None)
             if critic_spec:
@@ -1479,6 +1490,20 @@ class AgentAssembler:
                     grounding_threshold=self.config.get(
                         "self_healing", "triggers", "low_grounding", "threshold", default=0.6
                     ),
+                    budget=budget,
+                )
+            )
+            # P2a: escalation ladder -- classifier + router. The shared per-run budget
+            # built above is consumed by ReflectionHook on an actual reflect; the router
+            # arbitrates reflect<->handover on POST_OUTPUT and resets it on SESSION_START.
+            from koboi.hooks.failure_classifier_hook import FailureClassifierHook
+            from koboi.hooks.ladder_router_hook import LadderRouterHook
+
+            self.hook_chain.add(FailureClassifierHook(grounding=grounding))
+            self.hook_chain.add(
+                LadderRouterHook(
+                    budget=budget,
+                    ladder=self.config.get("self_healing", "ladder", default=None) or None,
                 )
             )
 

@@ -43,6 +43,7 @@ from koboi.redact import redact_tool_arguments, redact_value
 
 if TYPE_CHECKING:
     from koboi.guardrails.grounding import GroundingGuardrail
+    from koboi.harness.recovery_budget import RecoveryBudget
     from koboi.llm.base import LLMClient
 
 _logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class ReflectionHook(Hook):
         fail_soft: bool = True,
         tool_error_threshold: int = 2,
         grounding_threshold: float = 0.6,
+        budget: RecoveryBudget | None = None,
     ) -> None:
         self._client = client
         self._grounding = grounding
@@ -90,6 +92,9 @@ class ReflectionHook(Hook):
         self._fail_soft = bool(fail_soft)
         self._tool_error_threshold = int(tool_error_threshold)
         self._grounding_threshold = float(grounding_threshold)
+        # Shared per-run budget (router-owned); consumed here only when the router chose
+        # "reflect" and the critique actually fires. None in standalone mode (P1 path).
+        self._budget = budget
         # Per-run state (reset on SESSION_START).
         self._turns_used = 0
         self._tool_error_counts: dict[str, int] = {}
@@ -156,10 +161,16 @@ class ReflectionHook(Hook):
     # -- POST_OUTPUT: low-grounding reground-and-retry --------------------------
 
     async def _on_post_output(self, ctx: HookContext) -> None:
+        # P2a: when the ladder router is active it stamps recovery_plan and owns the
+        # shared RecoveryBudget; only fire when chosen ("reflect"). When no router is
+        # active (standalone), use the hook's own _turns_used budget (P1 behavior).
+        plan = ctx.metadata.get("recovery_plan")
+        if plan is not None and plan.get("rung") != "reflect":
+            return  # ladder routed to a different rung this turn (e.g. handover)
         if self._grounding is None:
             return
-        if self._turns_used >= self._max_turns:
-            return  # budget exhausted -> fall through to abstain/handover
+        if plan is None and self._turns_used >= self._max_turns:
+            return  # standalone budget exhausted -> fall through to abstain/handover
         coverage: Any = getattr(self._grounding, "last_coverage", None)
         if coverage is None or coverage >= self._grounding_threshold:
             return  # grounded enough, or no signal -> nothing to do
@@ -169,7 +180,10 @@ class ReflectionHook(Hook):
         critique = await self._critique_grounding(coverage, self._answer_text(ctx))
         if critique is None:
             return  # no client / critic error -> fail-soft skip (fall through to abstain/handover)
-        self._turns_used += 1
+        if plan is None:
+            self._turns_used += 1  # standalone: count against own budget
+        elif self._budget is not None:
+            self._budget.consume()  # router-mode: spend the shared budget on an actual reflect
         # Set the retry flag (loop._process_output stashes it; _run_loop honors it by
         # re-iterating and adds the critique to memory AFTER the answer). Do NOT use
         # inject_messages here -- _emit runs before add_assistant_message, so it would

@@ -639,6 +639,9 @@ class SelfHealingConfig(BaseModel):
     critic_llm: str | None = None  # named `providers:` ref or inline dict; None = reuse agent client
     triggers: dict = Field(default_factory=dict)
     # triggers.tool_error.repeat_threshold (default 2); triggers.low_grounding.threshold (default 0.6)
+    ladder: dict = Field(default_factory=dict)
+    # failure-class -> ordered recovery rungs, e.g. {grounding: [reflect, handover]}.
+    # empty = built-in DEFAULT_LADDER (see koboi/hooks/ladder_router_hook.py). P2a.
 
 
 class KoboiConfig(BaseModel):
