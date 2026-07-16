@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from koboi.tokens import estimate_tokens
-from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, RoutingDecision
+from koboi.types import AgentBlueprint, AgentResult, OrchestratorResult, RiskLevel, RoutingDecision
 from koboi.exceptions import AgentError
 from koboi.hooks.chain import AgentInfo, HookContext, HookEvent
 
@@ -494,6 +494,29 @@ class Orchestrator:
             answer = f"Error: {e}"
             failed = True
 
+        # Self-healing P2b: detect whether the node fired any side-effecting tool, so
+        # the replan loop can carry it forward instead of re-running it (avoids
+        # double-firing side effects). Crashed nodes have no tool_calls_made, so they
+        # default to False (re-run) -- same limitation as _repair_interrupted_turn.
+        had_non_idempotent_tool = False
+        tools_registry = getattr(agent, "tools", None)
+        if tools_registry is not None:
+            for tc in tool_calls_made:
+                td = tools_registry.get_definition(getattr(tc, "name", ""))
+                # Side-effecting = flagged non-idempotent OR elevated risk. The flag is
+                # the precise signal, but most side-effecting builtins (run_shell,
+                # write_file, ingest, ...) are still flagged idempotent=True, so
+                # risk_level is the belt-and-suspenders that actually catches them.
+                # Conservative: a failed read-only MODERATE node is carried forward
+                # rather than retried -- safe, just less aggressive. TODO(systemic): set
+                # idempotent=False on side-effecting builtins so resume + SAFE-risk
+                # side-effects (delegate_tasks, memory_store) are protected too.
+                if td is not None and (
+                    not td.idempotent or td.risk_level in (RiskLevel.MODERATE, RiskLevel.DESTRUCTIVE)
+                ):
+                    had_non_idempotent_tool = True
+                    break
+
         elapsed = time.time() - start
         try:
             # ``memory`` is optional on an OrchestrationNode (RemoteAgentProxy lacks it);
@@ -515,6 +538,7 @@ class Orchestrator:
             domain_label=domain_label,
             tool_calls=tool_calls_made,
             failed=failed,
+            had_non_idempotent_tool=had_non_idempotent_tool,
         )
 
     async def _run_dag_waves_with_flow(
@@ -523,6 +547,7 @@ class Orchestrator:
         query: str,
         deps: dict[str, list[str]],
         ctx: ResearchContext | None = None,
+        cached_results: dict[str, AgentResult] | None = None,
     ) -> AsyncGenerator:
         """Run ``agent_names`` as a dependency graph in topological waves WITH EDGE DATA FLOW.
 
@@ -538,7 +563,11 @@ class Orchestrator:
 
         total = len(agent_names)
         waves = DagScheduler(deps=deps).waves(agent_names)
-        outputs: dict[str, str] = {}
+        # Self-healing P2b: carry forward cached (already-succeeded) node results so a
+        # replan re-runs only the failed subtree -- seeded outputs let downstream
+        # _input_for consume the carried-forward upstream answer.
+        cached = cached_results or {}
+        outputs: dict[str, str] = {name: r.answer for name, r in cached.items()}
 
         def _input_for(name: str) -> str:
             node_deps = deps.get(name, [])
@@ -555,7 +584,24 @@ class Orchestrator:
             for name in wave:
                 yield AgentDispatchEvent(agent_name=name, agent_index=flat, total_agents=total, mode="dag")
                 flat += 1
-            wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in wave])
+            # P2b: emit cached nodes' result/completed events (stream+synthesis parity)
+            # WITHOUT re-running them (no _run_single, no re-record, no duplicate findings).
+            for name in [n for n in wave if n in cached]:
+                cr = cached[name]
+                yield AgentResultEvent(
+                    agent_name=cr.agent_name,
+                    answer=cr.answer[:200],
+                    elapsed_seconds=cr.elapsed_seconds,
+                    tokens_used=cr.tokens_used,
+                    is_dynamic=cr.is_dynamic,
+                    domain_label=cr.domain_label,
+                    failed=cr.failed,
+                )
+                yield _AgentCompletedEvent(agent_result=cr)
+            runnable = [n for n in wave if n not in cached]
+            if not runnable:
+                continue
+            wave_results = await asyncio.gather(*[self._run_single(n, _input_for(n)) for n in runnable])
             for result in wave_results:
                 outputs[result.agent_name] = result.answer
                 # W2/W4 A3: collect the node's findings into the research context -- but skip
@@ -599,6 +645,25 @@ class Orchestrator:
                     yield TextDeltaEvent(
                         content=f"[NODE_INTERRUPT] {result.agent_name} completed — awaiting human review"
                     )
+
+    @staticmethod
+    def _downstream_closure(roots: set[str], deps: dict[str, list[str]]) -> set[str]:
+        """Transitive downstream of ``roots`` in a dep graph (node -> its deps).
+
+        Returns ``roots`` plus every node that (transitively) depends on a root -- the
+        subtree whose input may be stale because an upstream root failed. Used by the
+        self-healing P2b replan loop to re-run not just failed nodes but the downstream
+        that consumed their degraded output.
+        """
+        subtree = set(roots)
+        changed = True
+        while changed:
+            changed = False
+            for node, node_deps in deps.items():
+                if node not in subtree and any(d in subtree for d in node_deps):
+                    subtree.add(node)
+                    changed = True
+        return subtree
 
     @staticmethod
     def _eval_conditional(when: dict, output: str) -> bool:
@@ -824,22 +889,36 @@ class Orchestrator:
                 yield event
             routing_agents = step_ids
             # #3: re-plan on node failure (bounded by max_replans). Opt-in (default
-            # 0 = off). CAVEAT (self-healing P0-A unblocked this loop): on a node
-            # crash this re-runs the WHOLE freshly-planned graph under a new
-            # graph_run_id (no cursor-skip of already-succeeded nodes), so
-            # side-effecting non-idempotent tools in succeeded nodes can double-fire.
-            # Keep dynamic nodes read-only, or leave max_replans=0 until P2 adds
-            # per-node/subtree retry. TODO(P2): cache succeeded-node results.
+            # 0 = off). Self-healing P2b: carry forward succeeded nodes (+ nodes that
+            # fired a non-idempotent side-effecting tool, even if failed) and re-run
+            # ONLY the failed subtree -- so side-effecting tools never double-fire.
+            # cached_results is filtered to nodes present in the new plan (planner
+            # renames drop old nodes; new nodes miss the cache and run normally).
             replans_left = self._max_replans
             while replans_left > 0 and any(r.failed for r in results):
                 replans_left -= 1
-                failed_names = [r.agent_name for r in results if r.failed]
-                retry_query = f"{query}\n\nNote: steps {failed_names} failed previously. Adjust the plan."
+                results_by_name = {r.agent_name: r for r in results}
+                directly_failed = {n for n, r in results_by_name.items() if r.failed and not r.had_non_idempotent_tool}
+                if not directly_failed:
+                    break  # nothing retryable (remaining failures were non-idempotent side-effects)
+                retry_query = (
+                    f"{query}\n\nNote: steps {sorted(directly_failed)} failed previously. Adjust "
+                    "the plan but keep the names of any steps whose output you can reuse."
+                )
                 plan = await plan_or_skip(self.client, retry_query)
                 if not plan.needs_workflow or not plan.steps:
                     break
-                results = []
                 step_ids = [s.id for s in plan.steps]
+                # Re-run the failed SUBTREE: directly-failed nodes + their transitive
+                # downstream (whose input was degraded by an upstream failure, so their
+                # "success" is stale and must be recomputed). Side-effecting nodes
+                # (had_non_idempotent_tool) are NEVER re-run -- carried forward even if
+                # stale (a double-fired side effect is worse than a stale answer).
+                failed_subtree = self._downstream_closure(directly_failed, plan.deps)
+                side_effecting = {n for n, r in results_by_name.items() if r.had_non_idempotent_tool}
+                rerun_set = failed_subtree - side_effecting
+                cached_results = {n: r for n, r in results_by_name.items() if n in set(step_ids) and n not in rerun_set}
+                # Build agents only for nodes that will actually run (skip cached).
                 self._agents_map = {
                     s.id: AgentFactory.create_configured_agent(
                         AgentDef(name=s.id, system_prompt=s.instruction or s.id),
@@ -847,9 +926,15 @@ class Orchestrator:
                         hook_chain=self._hook_chain,
                     )
                     for s in plan.steps
+                    if s.id not in cached_results
                 }
-                async for event in self._run_dag_waves_with_flow(step_ids, query, plan.deps):
+                # Seed results with carried-forward nodes; accumulate new ones (dedupe).
+                results = list(cached_results.values())
+                async for event in self._run_dag_waves_with_flow(
+                    step_ids, query, plan.deps, cached_results=cached_results
+                ):
                     if isinstance(event, _AgentCompletedEvent):
+                        results = [r for r in results if r.agent_name != event.agent_result.agent_name]
                         results.append(event.agent_result)
                     yield event
                 routing_agents = step_ids

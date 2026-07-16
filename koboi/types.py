@@ -120,6 +120,10 @@ class AgentResult:
     is_dynamic: bool = False
     domain_label: str | None = None
     failed: bool = False
+    # Self-healing P2b: True if the node fired any non-idempotent (side-effecting)
+    # tool. Such nodes must NOT be re-run on replan (their side effect already
+    # happened) -- the replan loop carries them forward instead. Default False.
+    had_non_idempotent_tool: bool = False
     tool_calls: list = field(default_factory=list)
 
 
