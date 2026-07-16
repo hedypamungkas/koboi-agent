@@ -9,7 +9,7 @@
 
 agent:
   name: A
-  mode: act  # call_peer_agent is MODERATE -> needs act+ (or allowlist via mode.read_only_tools)
+  mode: act  # call_peer_agent is SAFE (no approval needed); act kept for other tools
   system_prompt: |
     You are agent A on instance X. You collaborate with a peer agent C on instance Y.
     When a task benefits from C's input, use the `call_peer_agent` tool to ask C

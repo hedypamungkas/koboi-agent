@@ -19,7 +19,7 @@ subagent.py     delegate_tasks                           MODERATE    parallel su
 task.py         task_create / task_list / task_get / task_update / task_add_dependency   SAFE   structured task management
 ingest.py       ingest_url                               MODERATE    fetch a URL + chunk into the live corpus (W3; needs rag.live + a fetch provider)
 handover.py     transfer_to_human                        SAFE        yield the conversation to a human operator (B1; raises AgentHandoverError)
-peer.py         call_peer_agent                          MODERATE    cross-instance A2A fan-out (POSTs each peer's /v1/peer/invoke; needs `peers:` config + the `peer_registry` dep; idempotent=False)
+peer.py         call_peer_agent                          SAFE        cross-instance A2A fan-out (POSTs each peer's /v1/peer/invoke; needs `peers:` config + the `peer_registry` dep; idempotent=False; SAFE like web_fetch so it works in the interactive path without HITL approval)
 ```
 
 ## Conventions

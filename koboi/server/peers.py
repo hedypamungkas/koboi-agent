@@ -200,6 +200,11 @@ class PeerRegistry:
         """True when an org_secret is set (declared peers must be org-verified)."""
         return self._require_verification
 
+    @property
+    def peer_count(self) -> int:
+        """Number of declared outbound peers."""
+        return len(self._peers)
+
     def disable_verification(self) -> None:
         """Disable verified-only gating (all loaded peers become callable).
 

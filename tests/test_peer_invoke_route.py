@@ -93,6 +93,48 @@ class TestPeerInvokeRoute:
             )
         assert r.status_code == 400
 
+    async def test_act_mode_refused_with_passthrough_sandbox(self, app_y):
+        # C3: autonomous peer execution (act) requires a restricted sandbox; the default
+        # passthrough sandbox is refused. (chat/plan are exempt -- they mode-block destructive.)
+        async with await _client(app_y) as c:
+            r = await c.post(
+                "/v1/peer/invoke",
+                json={"message": "hi", "mode": "act"},
+                headers={"Authorization": "Bearer tok-y"},
+            )
+        assert r.status_code == 500
+        assert r.json()["error"]["code"] == "peer_invoke_failed"
+        assert "restricted" in r.json()["error"]["message"]
+
+    async def test_message_at_max_length_ok(self, app_y):
+        async with await _client(app_y) as c:
+            r = await c.post(
+                "/v1/peer/invoke",
+                json={"message": "x" * 65536},
+                headers={"Authorization": "Bearer tok-y"},
+            )
+        assert r.status_code == 200
+
+    async def test_message_over_max_length_rejected(self, app_y):
+        async with await _client(app_y) as c:
+            r = await c.post(
+                "/v1/peer/invoke",
+                json={"message": "x" * 65537},
+                headers={"Authorization": "Bearer tok-y"},
+            )
+        assert r.status_code == 422  # Pydantic max_length=65536
+
+    async def test_malformed_traceparent_ignored(self, app_y):
+        # A malformed inbound traceparent is dropped + a fresh root minted (no crash).
+        async with await _client(app_y) as c:
+            r = await c.post(
+                "/v1/peer/invoke",
+                json={"message": "hi"},
+                headers={"Authorization": "Bearer tok-y", "traceparent": "junk"},
+            )
+        assert r.status_code == 200
+        assert r.json()["content"] == "C-answer-42"
+
 
 # Fixture defined at module level (pytest discovers it).
 

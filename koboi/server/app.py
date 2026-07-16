@@ -394,12 +394,23 @@ def create_app(
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
         # P3: verify each declared peer's agent-card org-claim before serving (verified-only).
-        # Bounded by per-peer timeouts (concurrent gather); never fatal to startup.
+        # RETRY a few times: in a concurrent deploy (e.g. `docker compose up`) peers may not be
+        # ready to serve their card when this instance starts; re-fetch until they verify or the
+        # attempts are exhausted. Bounded by per-peer timeouts; never fatal to startup.
         if peer_registry is not None and peer_registry.requires_verification:
-            try:
-                await peer_registry.verify_all()
-            except Exception:  # noqa: BLE001 -- verification must not block/crash startup
-                _logger.warning("A2A peer org-claim verification failed at startup", exc_info=True)
+            for _attempt in range(3):
+                try:
+                    n = await peer_registry.verify_all()
+                except Exception:  # noqa: BLE001 -- verification must not crash startup
+                    n = 0
+                if peer_registry.peer_count == 0 or n >= peer_registry.peer_count:
+                    break  # all verified (or no peers to verify)
+                _logger.info(
+                    "A2A verify_all: %d/%d peers verified; peer(s) may still be starting -- retrying",
+                    n,
+                    peer_registry.peer_count,
+                )
+                await asyncio.sleep(5)
         # 16.24: workdir TTL GC + G5c-a: job TTL GC background sweeps.
         workdir_gc = asyncio.create_task(_workdir_gc_loop(workspace_root, workdir_ttl))
         job_gc = asyncio.create_task(_job_ttl_gc_loop(job_store, job_registry, job_ttl))

@@ -103,3 +103,15 @@ class TestRemoteNodeInOrchestration:
         orch = Orchestrator(client=client, router=router, agents_map={"review": proxy})
         result = await orch.run("please review this", mode="sequential")
         assert any("REMOTE-ANSWER-42" in r.answer for r in result.agent_results)
+
+    async def test_remote_node_participates_in_parallel(self, monkeypatch):
+        async def fake(peer, msg):
+            return PeerInvokeResult(content="REMOTE-PARALLEL")
+
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake)
+        proxy = RemoteAgentProxy("review", "peerY", _registry())
+        router = KeywordRouter(agent_defs=[AgentDef(name="review", keywords=["review"])])
+        client = MockClient([make_mock_response(content="synthesized")])
+        orch = Orchestrator(client=client, router=router, agents_map={"review": proxy})
+        result = await orch.run("please review this", mode="parallel")
+        assert any("REMOTE-PARALLEL" in r.answer for r in result.agent_results)

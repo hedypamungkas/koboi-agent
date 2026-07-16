@@ -52,7 +52,7 @@ _logger = logging.getLogger(__name__)
         },
         "required": ["calls"],
     },
-    risk_level=RiskLevel.MODERATE,  # live side-effecting network call -> act+ or mode.read_only_tools
+    risk_level=RiskLevel.SAFE,  # like web_fetch: HTTP to a trusted same-org peer, returns an answer (the peer's own sandbox guards its side); SAFE so it works in the interactive /v1/chat/stream path without HITL approval
     deps=["peer_registry"],
     idempotent=False,  # must NOT silently double-fire into a peer on crash-resume
 )

@@ -65,6 +65,24 @@ class TestAgentCardSigning:
         del card["signature"]
         assert verify_card(card, "s3cr3t") is False
 
+    def test_orchestrated_card_lists_agent_names(self):
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "orch", "description": "orchestrator"},
+                "llm": {"provider": "openai", "model": "x", "api_key": "x"},
+                "orchestration": {
+                    "enabled": True,
+                    "agents": [
+                        {"name": "research", "description": "researches"},
+                        {"name": "review", "description": "reviews"},
+                    ],
+                },
+                "peers": {"org": "acme", "org_secret": "s3cr3t", "public_base_url": "http://o:8000"},
+            }
+        )
+        card = build_agent_card(cfg, "s3cr3t", "http://o:8000")
+        assert [a["name"] for a in card["agents"]] == ["research", "review"]
+
 
 def _app(*, org_secret: str, api_keys=None):
     cfg = Config.from_dict(
@@ -208,6 +226,20 @@ class TestVerifyAll:
         n = await reg.verify_all()
         assert n == 0
         assert reg.get("C") is None  # downgraded (re-gated)
+
+    async def test_refresh_reaccepts_peer_when_card_good_again(self, monkeypatch):
+        # After a rotation downgrade, a subsequent good card re-verifies the peer.
+        reg = _registry_with_secret([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+        good_card = _card()
+        evil_card = copy.deepcopy(good_card)
+        evil_card["org"] = "evil"
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(evil_card))
+        await reg.verify_all()
+        assert reg.get("C") is None  # gated
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(good_card))
+        n = await reg.verify_all()
+        assert n == 1
+        assert reg.get("C") is not None  # re-accepted
 
 
 class TestA2ARefresh:

@@ -1,0 +1,40 @@
+# A2A docker smoke -- instance X (agent A), container `koboi-a2a-x`.
+# Peer C lives on container `koboi-a2a-y` (resolved by service name on the compose network).
+# Used by docker-compose.a2a.yml + scripts/a2a_docker_smoke.py.
+
+agent:
+  name: A
+  mode: act  # call_peer_agent is SAFE (works in any mode without approval); act kept for other tools
+  system_prompt: |
+    You are agent A. For ANY factual question from the user you MUST use the call_peer_agent
+    tool to ask peer C first: pass calls=[{"peer": "C", "message": "<the user's question>"}].
+    Then report C's exact answer to the user verbatim.
+llm:
+  provider: openai
+  model: "${OPENAI_MODEL:gpt-5.4-mini}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+memory:
+  backend: sqlite
+  db_path: /data/x.db
+sandbox:
+  backend: passthrough
+  workdir: /data/x
+peers:
+  enabled: true
+  allow_private_network: true   # docker service IPs are private
+  org: acme
+  org_secret: "shared-a2a-secret"   # same as instance Y -> verified-only across containers
+  public_base_url: "http://koboi-a2a-x:8080"
+  inbound_tokens:
+    - "tok-x"
+  peers:
+    - name: C
+      url: "http://koboi-a2a-y:8080"
+      token: "tok-y"
+      agent_name: C
+      org: acme
+server:
+  host: 0.0.0.0
+  port: 8080
+  auth_required: true
