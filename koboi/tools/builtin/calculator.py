@@ -10,12 +10,35 @@ from typing import Any
 
 from koboi.tools.registry import tool
 
+# Cap the bit-length of any ``**``/``pow()`` integer result so a pathological
+# exponent (e.g. ``9 ** 9 ** 8``) cannot hang/OOM the process. 32768 bits is
+# ~9864 decimal digits -- generous for real math, far below the DoS threshold.
+_MAX_POW_RESULT_BITS = 1 << 15
+
+
+def _safe_pow(base, exp, mod=None):
+    """``operator.pow`` with a bound on integer-result size (issue #47).
+
+    ``**`` is right-associative, so ``9 ** 9 ** 8`` expands the exponent first;
+    we therefore reject up-front when ``base.bit_length() * exp`` would exceed
+    the cap. ``abs(base) <= 1`` (result is -1/0/1), 3-arg ``pow(b, e, mod)``
+    (modular exponentiation, bounded by ``mod``), floats, and negative
+    exponents are always cheap and left to ``pow``/``operator.pow``.
+    """
+    if mod is not None:
+        return pow(base, exp, mod)
+    if isinstance(base, int) and isinstance(exp, int) and exp >= 0 and abs(base) > 1:
+        if base.bit_length() * exp > _MAX_POW_RESULT_BITS:
+            raise ValueError("exponentiation result too large")
+    return operator.pow(base, exp)
+
+
 _BINOPS: dict[type, Callable[[Any, Any], Any]] = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
-    ast.Pow: operator.pow,
+    ast.Pow: _safe_pow,
     ast.Mod: operator.mod,
     ast.FloorDiv: operator.floordiv,
 }
@@ -84,7 +107,7 @@ def calculate(expression: str) -> str:
         "log10": math.log10,
         "pi": math.pi,
         "e": math.e,
-        "pow": pow,
+        "pow": _safe_pow,
         "ceil": math.ceil,
         "floor": math.floor,
     }
@@ -92,4 +115,9 @@ def calculate(expression: str) -> str:
         result = _safe_eval(expression, safe_names)
         return f"{expression} = {result}"
     except Exception as e:
+        # MemoryError must not be masked as a normal "Error" string; the
+        # _safe_pow bound is the primary protection, but re-raise defensively
+        # so a future unbounded path can never silently swallow an OOM.
+        if isinstance(e, MemoryError):
+            raise
         return f"Error calculating '{expression}': {e}"
