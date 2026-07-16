@@ -19,10 +19,19 @@ class TestIdempotentForwarding:
         assert r.get_definition("call_peer_agent").idempotent is False
 
     def test_default_tools_stay_idempotent(self):
-        """Existing builtins keep re-running on resume (idempotent=True by default)."""
+        """Read-only/safe builtins keep re-running on resume (idempotent=True by default)."""
         r = ToolRegistry()
         register_all(r)
-        for name in ("delegate_tasks", "calculate", "read_file", "run_shell"):
+        for name in ("delegate_tasks", "calculate", "read_file"):
             td = r.get_definition(name)
             assert td is not None, f"{name} missing"
             assert td.idempotent is True, f"{name} should remain idempotent=True"
+
+    def test_destructive_shipped_builtins_are_not_idempotent(self):
+        """PR #48 (main): DESTRUCTIVE/side-effecting builtins must not double-execute on resume."""
+        r = ToolRegistry()
+        register_all(r)
+        for name in ("run_shell", "write_file", "delete_file"):
+            td = r.get_definition(name)
+            assert td is not None, f"{name} missing"
+            assert td.idempotent is False, f"{name} should be idempotent=False"

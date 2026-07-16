@@ -34,6 +34,8 @@ class OrchestrationNode(Protocol):
     """
 
     async def run(self, query: str) -> RunResult: ...
+
+
 from koboi.events import (
     AgentDispatchEvent,
     AgentResultEvent,
