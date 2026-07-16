@@ -287,7 +287,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (29)
+### Config sections (30)
 
 | Section | Controls |
 |---------|----------|
@@ -320,6 +320,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `eval` | Evaluation suite cases/scorers (e.g. `eval_suite.yaml`, `benchmark_eval.yaml`) |
 | `handover` | Confidence-aware handover: `detection` (structural handover, B1.5), `digest` (warm-handoff summary, B4), `webhooks` (HMAC `handover.requested` callbacks) |
 | `media` | Multimodal generation (image/video/music/speech/transcription; Surplus gateway + mock), `budget` caps, `storage` (local/r2/s3), `profiles` (ModelProfile), async jobs |
+| `peers` | Cross-instance A2A (opt-in, inert by default): outbound peer defs (name/URL/token), inbound token hashes, `org_secret` (agent-card HMAC claim), rate limits |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
@@ -391,6 +392,8 @@ deep_research query + cited report via the session-tagged `research_context` tab
 `workflow_ref` + `replay_mode` (`live`/`cache`/`replay`) on `POST /v1/jobs`.
 
 **Multimodal generation**: `POST /v1/media/generate` (sync), `POST /v1/media/jobs` (async, 202) + `GET /v1/media/jobs/{job_id}` (poll) — opt-in via `media:`; backed by `MediaBackend` (`koboi/media/`).
+
+**Cross-instance A2A**: `POST /v1/peer/invoke` (inbound receiver; peer-token auth via `peers.inbound_tokens`, `AutonomousApprovalHandler`, ephemeral session) + `GET /.well-known/agent-card` (this instance's signed agent-card, open/no-Bearer, served regardless of `peers.enabled`) — opt-in via `peers:`; backed by `PeerRegistry` (`koboi/server/peers.py`). See `koboi/server/CLAUDE.md` and `docs/a2a-smoke.md`.
 
 Driven by the `server:` + `jobs:` config sections; requires the `[api]` extra
 (`fastapi`, `uvicorn`). See `koboi/server/CLAUDE.md` for routes/conventions/gotchas and
@@ -707,6 +710,13 @@ Orchestrator.run(mode=...)
 OrchestratorResult (final_answer, agent_results, metadata{research_sources, coverage, depth, plan_nodes, used_searches, ...})
 ```
 
+**Cross-instance A2A**: in `sequential`/`parallel`/`dag`/`conditional` mode, an `AgentDef` with
+`endpoint: <peer_name>` becomes a `RemoteAgentProxy` (`orchestration/remote_proxy.py`) instead of a
+local `AgentCore` — it duck-types as a node (`await node.run(query) -> RunResult`) but POSTs to the
+peer's `POST /v1/peer/invoke` under the hood. Ignored in `dynamic`/`deep_research` (they rebuild local
+agents per-query). A peer failure degrades to `RunResult(content="Error: ...")` rather than crashing
+the run. Opt-in via `peers:` config; see `koboi/orchestration/CLAUDE.md` and `docs/a2a-smoke.md`.
+
 ### Deep research (`execution.mode: deep_research`)
 
 Coverage-gated, cited web research (GPT-Researcher shape). `Orchestrator._run_deep_research`
@@ -978,7 +988,7 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
 
 ### Workflow export (`koboi/workflows/definition.py`)
 
-`WorkflowDefinition` (envelope: schema_version/name/description/provenance/config), `DeterminismProfile` (temperature/seed/top_p/model_pin/replay_mode), `WorkflowProvenance`; server models `WorkflowCreateRequest`/`WorkflowResponse`/`WorkflowListResponse`/`CaptureRequest`/`CaptureResponse` (`koboi/server/schema.py`). Media (`koboi/media/types.py`): `MediaRequest`/`MediaResult`/`MediaBudget`/`MediaUnit`; server models `MediaGenerateRequest`/`MediaGenerateResponse`/`MediaJobResponse` (`server/schema.py`). `MediaGeneratedEvent` (`events.py`) is emitted when a media tool fires.
+`WorkflowDefinition` (envelope: schema_version/name/description/provenance/config), `DeterminismProfile` (temperature/seed/top_p/model_pin/replay_mode), `WorkflowProvenance`; server models `WorkflowCreateRequest`/`WorkflowResponse`/`WorkflowListResponse`/`CaptureRequest`/`CaptureResponse` (`koboi/server/schema.py`). Media (`koboi/media/types.py`): `MediaRequest`/`MediaResult`/`MediaBudget`/`MediaUnit`; server models `MediaGenerateRequest`/`MediaGenerateResponse`/`MediaJobResponse` (`server/schema.py`). `MediaGeneratedEvent` (`events.py`) is emitted when a media tool fires. Cross-instance A2A (`koboi/server/peers.py`): `PeerConfig`, `PeerInvokeResult` (both frozen dataclasses); `PeerRegistry` + `PeerRateLimiter`; the signed agent-card dict shape (`koboi/server/agent_card.py`: `build_agent_card`/`sign_card`/`verify_card`).
 
 ### Stream events (`koboi/events.py`)
 
@@ -1019,5 +1029,6 @@ LLMError
 | See config examples | `configs/CLAUDE.md` |
 | Work on the TUI | `koboi/tui/CLAUDE.md` |
 | Serve over HTTP/SSE | `koboi/server/CLAUDE.md` |
+| Set up cross-instance A2A | `koboi/server/CLAUDE.md`, `koboi/orchestration/CLAUDE.md`, `docs/a2a-smoke.md` |
 | Extend the eval framework | `koboi/eval/CLAUDE.md` |
 | Write tests | `tests/conftest.py` and `.claude/rules/tests.md` |

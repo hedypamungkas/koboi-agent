@@ -106,6 +106,7 @@ koboi chat examples/01_simple_chat.yaml
 | [Dynamic Workflow Live](dynamic_workflow_live.py) | Live-LLM dynamic + DAG workflow e2e | `python examples/dynamic_workflow_live.py` |
 | [Phase 3 Live E2E](phase3_live_e2e.py) | Live-LLM validation of Phase 3 capabilities | `python examples/phase3_live_e2e.py` |
 | [Command Hook Forwarder](_command_hook_forwarder.py) | Standalone script invoked by example 33's `hooks:` entry | `uv run examples/_command_hook_forwarder.py OUTFILE` |
+| [A2A Fan-out](a2a_fanout.py) | Cross-instance agent-to-agent: remote orchestration nodes via `call_peer_agent` / `/v1/peer/invoke` | `python examples/a2a_fanout.py` |
 
 ## Feature Coverage
 
@@ -127,6 +128,7 @@ koboi chat examples/01_simple_chat.yaml
 | Workflow graph (programmatic DAG builder) | workflow_graph_demo |
 | Dynamic workflow (live LLM planning) | dynamic_workflow_live, phase3_live_e2e |
 | DAG / conditional orchestration (configs) | dag_demo, conditional_demo, dynamic_demo |
+| Cross-instance A2A (remote orchestration nodes) | a2a_fanout |
 | Multi-provider LLM | 17 |
 | Harness (telemetry, doom loop, carryover) | 18, 19, 20 |
 | Evaluation suite | 21 |

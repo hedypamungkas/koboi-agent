@@ -33,6 +33,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Confidence-awareness + human handover**: opt-in grounding guardrail (claim-decomposition + NLI judge — abstains when ungrounded), the `transfer_to_human` tool, and structural handover detection — the bot yields to a human operator when it should (see [docs/channel-bridge.md](docs/channel-bridge.md))
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, dynamic (LLM-planned), and **deep_research** (coverage-gated, cited web research) execution
+- **Cross-instance agent-to-agent (A2A)**: a remote peer's orchestration node runs as a first-class agent (`AgentDef.endpoint:` → `RemoteAgentProxy`) via `POST /v1/peer/invoke`; the `call_peer_agent` tool, signed agent-card discovery (`GET /.well-known/agent-card`), and W3C trace-context propagation across the fan-out — opt-in via `peers:` config, inert by default
 - **Deterministic workflow export**: freeze a run into a re-runnable config bundle (`koboi export`/`import`), and optionally capture the LLM response cache for byte-identical **offline** replay (`koboi capture --with-cache`, `run --replay-mode replay` — no API key)
 - **Multimodal generation**: opt-in image/video/music/speech + transcription (STT) via a pluggable provider gateway (Surplus; mock offline) — agent tools, REST sync+async endpoints, R2/S3 storage, budget caps, and a Deep Research multimedia briefing
 - **Web research providers**: pluggable search + fetch backends for the `web_search`/`web_fetch` tools via `@register_search_provider`/`@register_fetch_provider` — built-in mock, DuckDuckGo, Brave, Firecrawl (search) + httpx/readability, Firecrawl (fetch)
@@ -102,7 +103,7 @@ asyncio.run(main())
 ## Serving (HTTP/SSE)
 
 Run koboi as a stateless HTTP service: **interactive SSE chat** (with human-in-the-loop
-approvals), **autonomous background jobs** (durable resume), and **multimodal generation** (`POST /v1/media/generate` sync + `/v1/media/jobs` async). Requires the `[api]` extra.
+approvals), **autonomous background jobs** (durable resume), **multimodal generation** (`POST /v1/media/generate` sync + `/v1/media/jobs` async), and **cross-instance A2A** (`POST /v1/peer/invoke` inbound receiver + `GET /.well-known/agent-card` discovery). Requires the `[api]` extra.
 
 ```bash
 pip install -e ".[api]"
@@ -237,6 +238,7 @@ pytest --cov=koboi            # with coverage
 | 35 | Confidence-aware CS with human handover (`configs/cs_confidence_handover.yaml`; the confidence ladder) |
 | 36 | Deterministic workflow export/import (`koboi export`/`import`; bundle = config + determinism profile) |
 | 37 | Workflow cache + capture + offline replay (`koboi capture --with-cache`; `run --replay-mode replay`, no API key) |
+| a2a_fanout | Cross-instance A2A: remote orchestration nodes via `call_peer_agent` / `/v1/peer/invoke` |
 | configs/deep_research_demo.yaml | Deep research (coverage-gated cited web research; `koboi run` + `koboi serve`) |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
 | hitl_client / workflow_graph_demo / dynamic_workflow_live / phase3_live_e2e | HITL client + DAG/workflow-graph demos |
@@ -274,7 +276,7 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **ProactiveMemory** (`proactive_memory.py`) -- opt-in long-term memory: auto-extract durable facts (D), semantic recall + per-turn injection (C), always-in-context core block (B)
 - **Redaction** (`redact.py`) -- shared secret masking (value-shape + key-name) for the journal/jobs/diagnostics
 - **Server** (`server/`) -- FastAPI HTTP/SSE serving (interactive chat + autonomous jobs)
-- **Orchestrator** (`orchestration/`) -- multi-agent coordination; `deep_research` mode plans + runs cited web research (plan → DAG waves → coverage eval → synthesize)
+- **Orchestrator** (`orchestration/`) -- multi-agent coordination; `deep_research` mode plans + runs cited web research (plan → DAG waves → coverage eval → synthesize); `RemoteAgentProxy` lets a node be a remote peer instance (cross-instance A2A)
 - **Websearch providers** (`websearch/`) -- pluggable search/fetch backends (Brave/Firecrawl/ddg/mock + httpx/firecrawl) behind the `web_search`/`web_fetch` tools
 - **Workflow export** (`workflows/`) -- deterministic run capture: `WorkflowDefinition` bundle + `DeterminismProfile` + response-cache sidecar (`koboi export`/`capture`; offline `replay` mode); see [docs/deterministic-workflow-export-strategy.md](docs/deterministic-workflow-export-strategy.md)
 - **Media** (`media/`) -- multimodal generation (image/video/music/speech + STT) via Surplus/mock providers; `MediaBackend` + R2/S3 store + budget + ModelProfile
