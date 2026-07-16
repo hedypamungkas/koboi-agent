@@ -128,6 +128,58 @@ class TestInvokePeerTrace:
         await invoke_peer(PeerConfig(name="C", url="http://localhost:8002", token="t"), "hi")
         assert "traceparent" not in client.posted["headers"]
 
+    async def test_retry_succeeds_after_transient_errors(self, monkeypatch):
+        # Gap 1.1: invoke_peer retries on transient failures (ConnectError) then succeeds.
+        async def _no_sleep(*a):
+            pass
+
+        monkeypatch.setattr(asyncio, "sleep", _no_sleep)  # eliminate backoff delays
+
+        calls = {"n": 0}
+
+        class _RetryClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, json=None, headers=None):
+                calls["n"] += 1
+                if calls["n"] < 3:
+                    raise httpx.ConnectError("transient")
+                return _Resp()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _RetryClient())
+        res = await invoke_peer(PeerConfig(name="C", url="http://localhost:8002", token="t"), "hi")
+        assert res.content == "ANS"
+        assert calls["n"] == 3  # 2 retries + 1 success
+
+    async def test_response_too_large_rejected(self, monkeypatch):
+        # Gap 1.4: content > _MAX_PEER_CONTENT → ValueError (no retry — not transient).
+        class _BigResp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"content": "x" * 65537}
+
+        class _BigClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, json=None, headers=None):
+                return _BigResp()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _BigClient())
+        with pytest.raises(ValueError, match="too large"):
+            await invoke_peer(PeerConfig(name="C", url="http://localhost:8002", token="t"), "hi")
+
 
 class TestJournalTraceId:
     def test_record_step_stamps_trace_id(self, tmp_path):

@@ -172,6 +172,19 @@ class PeerRegistry:
         if not isinstance(card, dict) or not verify_card(card, self._org_secret):
             _logger.warning("A2A peer '%s' failed org-claim verification (rejected)", peer.name)
             return False
+        # Audience binding: the card must advertise the URL we fetched it from (anti-replay).
+        from urllib.parse import urlparse
+
+        fetched_host = urlparse(peer.url).hostname
+        card_host = urlparse(str(card.get("peer_invoke_url", ""))).hostname
+        if not card_host or card_host != fetched_host:
+            _logger.warning(
+                "A2A peer '%s' card URL mismatch (fetched %s, card advertises %s) -- rejected",
+                peer.name,
+                fetched_host,
+                card_host,
+            )
+            return False
         # Fill agent_name from the card if the operator left it blank (PeerConfig is frozen).
         if not peer.agent_name:
             card_agent = str(card.get("agent_name", "") or "")
@@ -255,6 +268,32 @@ class PeerRegistry:
             return False
 
 
+class PeerRateLimiter:
+    """Per-peer-token sliding-window rate limiter (in-memory, instance-scoped).
+
+    Bounds how many ``/v1/peer/invoke`` calls a single peer token can make per minute,
+    preventing a malicious/compromised peer from draining the receiver's LLM budget.
+    """
+
+    def __init__(self, max_per_minute: int = 60) -> None:
+        self._max = max_per_minute
+        self._hits: dict[str, list[float]] = {}
+
+    def allow(self, peer_id: str) -> bool:
+        """True if the call is within the rate limit; False if throttled."""
+        if self._max <= 0:
+            return True  # unlimited
+        import time
+
+        now = time.time()
+        hits = self._hits.setdefault(peer_id, [])
+        hits[:] = [t for t in hits if now - t < 60.0]  # prune old
+        if len(hits) >= self._max:
+            return False
+        hits.append(now)
+        return True
+
+
 def build_peer_registry(peers_cfg: Any, *, verified_registry: PeerRegistry | None = None) -> PeerRegistry | None:
     """Resolve the PeerRegistry for an agent build (single source for the facade paths).
 
@@ -279,14 +318,22 @@ def build_peer_registry(peers_cfg: Any, *, verified_registry: PeerRegistry | Non
     return reg
 
 
+#: Max chars in a peer's response content (matches PeerInvokeRequest.message max_length).
+_MAX_PEER_CONTENT = 65536
+#: Retry attempts on transient failures (3 total tries: initial + 2 retries).
+_MAX_RETRIES = 2
+
+
 async def invoke_peer(peer: PeerConfig, message: str) -> PeerInvokeResult:
     """POST a peer instance's ``/v1/peer/invoke`` receiver and return its answer + trace-id.
 
     The single A2A HTTP path, shared by the ``call_peer_agent`` tool and
-    :class:`koboi.orchestration.remote_proxy.RemoteAgentProxy`. Propagates the current
-    W3C trace as a child ``traceparent`` header (P4). Raises ``httpx.HTTPStatusError``
-    on a non-2xx response and ``ValueError`` on a malformed body; callers surface failures.
+    :class:`koboi.orchestration.remote_proxy.RemoteAgentProxy`. Retries on transient
+    failures (5xx, connection errors) with exponential backoff; raises on 4xx, malformed
+    responses, or responses exceeding ``_MAX_PEER_CONTENT``. Callers surface failures.
     """
+    import asyncio
+
     import httpx  # lazy: peers.py stays importable without httpx at module load
 
     from koboi import tracing_context
@@ -294,17 +341,31 @@ async def invoke_peer(peer: PeerConfig, message: str) -> PeerInvokeResult:
     url = peer.url.rstrip("/") + "/v1/peer/invoke"
     headers = {"Authorization": f"Bearer {peer.token}"}
     # P4: carry the W3C trace as a child traceparent (same trace-id, fresh parent-id).
-    tc = tracing_context.current()
-    if tc is not None:
-        headers["traceparent"] = tracing_context.child(tc).as_traceparent()
+    trace_ctx = tracing_context.current()
+    if trace_ctx is not None:
+        headers["traceparent"] = tracing_context.child(trace_ctx).as_traceparent()
     body: dict = {"message": message}
     if peer.agent_name:
         body["agent_name"] = peer.agent_name  # routing hint (informational)
-    async with httpx.AsyncClient(timeout=peer.timeout) as client:
-        resp = await client.post(url, json=body, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-    content = data.get("content")
-    if not isinstance(content, str):
-        raise ValueError(f"peer returned no string content: {data!r}")
-    return PeerInvokeResult(content=content, receiver_trace_id=str(data.get("trace_id") or ""))
+
+    _retriable = (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError)
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=peer.timeout) as client:
+                resp = await client.post(url, json=body, headers=headers)
+                if resp.status_code >= 500 and attempt < _MAX_RETRIES:
+                    await asyncio.sleep(2**attempt)  # backoff: 1s, 2s
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+            content = data.get("content")
+            if not isinstance(content, str):
+                raise ValueError(f"peer returned no string content: {data!r}")
+            if len(content) > _MAX_PEER_CONTENT:
+                raise ValueError(f"peer response too large: {len(content)} chars (max {_MAX_PEER_CONTENT})")
+            return PeerInvokeResult(content=content, receiver_trace_id=str(data.get("trace_id") or ""))
+        except _retriable:
+            if attempt < _MAX_RETRIES:
+                await asyncio.sleep(2**attempt)  # backoff: 1s, 2s
+                continue
+            raise

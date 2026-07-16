@@ -418,6 +418,7 @@ class PeersConfig(BaseModel):
     org: str = ""  # human-readable org label advertised in this instance's agent-card
     org_secret: str = ""  # shared HMAC-SHA256 secret proving same-org membership
     public_base_url: str = ""  # advertised base URL for this instance's agent-card peer_invoke_url
+    rate_limit_per_minute: int = 60  # max inbound /v1/peer/invoke calls per peer token per minute (0 = unlimited)
 
 
 class RlimitsConfig(BaseModel):

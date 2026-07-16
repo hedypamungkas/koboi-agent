@@ -49,7 +49,7 @@ from koboi.server.workflow_store import WorkflowStore
 from koboi.server.pool import AgentPool, PoolFull, is_safe_session_id
 from koboi.server.session_events import SessionEventRegistry
 from koboi.server.handoff_digest import HandoffDigest
-from koboi.server.peers import PeerRegistry
+from koboi.server.peers import PeerRateLimiter, PeerRegistry
 from koboi.server.agent_card import CARD_PATH, build_agent_card
 from koboi.server.schema import (
     ApproveRequest,
@@ -347,6 +347,9 @@ def create_app(
     # each agent built its own unverified registry and org_secret gated every peer out).
     pool._peer_registry = peer_registry
 
+    # W1: per-peer-token rate limiter for /v1/peer/invoke (prevents LLM-budget drain).
+    peer_rate_limiter = PeerRateLimiter(max_per_minute=int(config.get("peers", "rate_limit_per_minute", default=60)))
+
     # P3: build this instance's signed agent-card once (served at GET /.well-known/agent-card).
     org_secret = str(config.get("peers", "org_secret", default="") or "")
     public_base_url = str(config.get("peers", "public_base_url", default="") or "") or (
@@ -470,6 +473,7 @@ def create_app(
     app.state.session_stream_timeout = session_stream_timeout  # B2: stream deadline
     app.state.mcp_registries = {}  # G6: session_id -> SessionMcpRegistry
     app.state.peer_registry = peer_registry  # A2A: outbound peers + inbound token validation
+    app.state.peer_rate_limiter = peer_rate_limiter  # W1: per-token rate limit on /v1/peer/invoke
     app.state.agent_card = agent_card  # P3: signed self-description served at /.well-known/agent-card
 
     # Middleware: registration order is the REVERSE of execution order.
@@ -535,6 +539,7 @@ def create_app(
         handoff_digest,
         handover_webhooks,
         peer_registry,
+        peer_rate_limiter,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -603,6 +608,7 @@ def _register_routes(
     handoff_digest: Any | None = None,
     handover_webhooks: list[dict] | None = None,
     peer_registry: Any | None = None,
+    peer_rate_limiter: Any | None = None,
 ) -> None:
     @app.get("/healthz")
     async def healthz() -> dict:
@@ -1244,6 +1250,10 @@ def _register_routes(
         if peer_id is None:
             return _error_response(401, "unauthorized", "valid peer token required", request)
 
+        # Rate limit: bound how many calls a single peer token can make per minute.
+        if peer_rate_limiter is not None and not peer_rate_limiter.allow(peer_id):
+            return _error_response(429, "rate_limited", "A2A peer rate limit exceeded", request)
+
         # Fresh ephemeral session per call (isolation, no history bleed); optional
         # X-Session-Id for cross-call continuity.
         header_sid = request.headers.get("X-Session-Id")
@@ -1252,10 +1262,8 @@ def _register_routes(
         session_id = header_sid or f"peer-{pool.new_session_id()}"
         ephemeral = header_sid is None
 
-        try:
-            effective_mode = _resolve_mode(body.mode, allowed_modes, allow_yolo=False)
-        except ValueError as exc:
-            return _error_response(400, "invalid_mode", str(exc), request)
+        # The receiver ignores the caller's body.mode (security: a peer caller must not
+        # control the receiver's execution mode). max_iterations is a ceiling (safe to honor).
         effective_max_iter = min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
 
         try:
@@ -1275,7 +1283,7 @@ def _register_routes(
 
         try:
             async with pool.session_lock(session_id):
-                result = await _run_peer_agent(agent, body.message, effective_mode, effective_max_iter)
+                result = await _run_peer_agent(agent, body.message, None, effective_max_iter)
             return JSONResponse(
                 {
                     "content": result.content,
@@ -1724,13 +1732,14 @@ async def _run_peer_agent(agent: Any, message: str, mode: AgentMode | None, max_
 
     # C3: a peer call that can run destructive tools (act/auto/yolo) is autonomous
     # execution -- require a restricted sandbox, mirroring the jobs autonomous path.
-    # (chat/plan mode-block destructive tools, so passthrough is fine there.)
-    if mode in _PEER_AUTONOMOUS_MODES:
+    # Uses the agent's CONFIGURED mode (the caller can no longer override it via body.mode).
+    configured_mode = agent._core.mode_manager.current_mode
+    if configured_mode in _PEER_AUTONOMOUS_MODES:
         sb = agent._core.tools.get_dep("sandbox")
         if getattr(sb, "name", "passthrough") == "passthrough":
             raise PermissionError(
-                "A2A peer invoke with an autonomous mode (act/auto/yolo) requires "
-                "sandbox.backend='restricted'; 'passthrough' is refused."
+                "A2A peer invoke on an agent configured for an autonomous mode (act/auto/yolo) "
+                "requires sandbox.backend='restricted'; 'passthrough' is refused."
             )
 
     prior_handler = agent._core.approval_handler

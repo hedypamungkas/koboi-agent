@@ -11,10 +11,10 @@ from koboi.server.app import create_app
 from tests.conftest import MockClient, make_mock_response
 
 
-def _app(peers_cfg, *, api_keys=None, content="C-answer-42"):
+def _app(peers_cfg, *, api_keys=None, content="C-answer-42", mode="chat"):
     cfg = Config.from_dict(
         {
-            "agent": {"name": "C", "mode": "chat", "system_prompt": "You are C."},
+            "agent": {"name": "C", "mode": mode, "system_prompt": "You are C."},
             "llm": {"provider": "openai", "model": "gpt-4o-mini", "api_key": "x"},
             "memory": {"backend": "memory"},
             "peers": peers_cfg,
@@ -74,15 +74,15 @@ class TestPeerInvokeRoute:
         assert r2.json()["session_id"] == "peer-fixed-1"
         assert app_y.state.pool.get("peer-fixed-1") is not None  # continuity sessions stay
 
-    async def test_invalid_mode_400(self, app_y):
+    async def test_caller_mode_ignored(self, app_y):
+        # body.mode is ignored (security: the receiver uses its own configured mode).
         async with await _client(app_y) as c:
             r = await c.post(
                 "/v1/peer/invoke",
                 json={"message": "hi", "mode": "yolo"},
                 headers={"Authorization": "Bearer tok-y"},
             )
-        assert r.status_code == 400
-        assert r.json()["error"]["code"] == "invalid_mode"
+        assert r.status_code == 200  # mode:yolo ignored, not 400
 
     async def test_bad_session_id_400(self, app_y):
         async with await _client(app_y) as c:
@@ -93,13 +93,14 @@ class TestPeerInvokeRoute:
             )
         assert r.status_code == 400
 
-    async def test_act_mode_refused_with_passthrough_sandbox(self, app_y):
-        # C3: autonomous peer execution (act) requires a restricted sandbox; the default
-        # passthrough sandbox is refused. (chat/plan are exempt -- they mode-block destructive.)
-        async with await _client(app_y) as c:
+    async def test_configured_act_mode_refused_with_passthrough_sandbox(self):
+        # C3: an agent CONFIGURED for act mode + passthrough sandbox is refused for peer calls.
+        # (body.mode is now ignored -- the check uses the receiver's configured mode.)
+        app = _app({"enabled": True, "inbound_tokens": ["tok-y"]}, mode="act")
+        async with await _client(app) as c:
             r = await c.post(
                 "/v1/peer/invoke",
-                json={"message": "hi", "mode": "act"},
+                json={"message": "hi"},
                 headers={"Authorization": "Bearer tok-y"},
             )
         assert r.status_code == 500
@@ -134,6 +135,60 @@ class TestPeerInvokeRoute:
             )
         assert r.status_code == 200
         assert r.json()["content"] == "C-answer-42"
+
+    async def test_500_on_agent_error(self):
+        # Gap 2.1: the receiver's agent.run raises → 500 peer_invoke_failed.
+        class _ExplodingClient(MockClient):
+            async def complete(self, messages, tools=None, response_format=None):
+                raise RuntimeError("LLM exploded")
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "C", "mode": "chat", "system_prompt": "C"},
+                "llm": {"provider": "openai", "model": "gpt-4o-mini", "api_key": "x"},
+                "memory": {"backend": "memory"},
+                "peers": {"enabled": True, "inbound_tokens": ["tok-y"]},
+            }
+        )
+        app = create_app(cfg, client_factory=lambda: _ExplodingClient([]))
+        async with await _client(app) as c:
+            r = await c.post("/v1/peer/invoke", json={"message": "hi"}, headers={"Authorization": "Bearer tok-y"})
+        assert r.status_code == 500
+        assert r.json()["error"]["code"] == "peer_invoke_failed"
+
+    async def test_429_pool_full(self, app_y, monkeypatch):
+        # Gap 2.2: PoolFull on get_or_create → 429 pool_full.
+        from koboi.server.pool import PoolFull
+
+        async def _full(sid):
+            raise PoolFull("pool full")
+
+        monkeypatch.setattr(app_y.state.pool, "get_or_create", _full)
+        async with await _client(app_y) as c:
+            r = await c.post("/v1/peer/invoke", json={"message": "hi"}, headers={"Authorization": "Bearer tok-y"})
+        assert r.status_code == 429
+        assert r.json()["error"]["code"] == "pool_full"
+
+    async def test_429_rate_limited(self):
+        # Gap 7.2: exceeding rate_limit_per_minute → 429 rate_limited.
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "C", "mode": "chat", "system_prompt": "C"},
+                "llm": {"provider": "openai", "model": "gpt-4o-mini", "api_key": "x"},
+                "memory": {"backend": "memory"},
+                "peers": {"enabled": True, "inbound_tokens": ["tok-y"], "rate_limit_per_minute": 2},
+            }
+        )
+        app = create_app(cfg, client_factory=lambda: MockClient([make_mock_response(content="ok")]))
+        headers = {"Authorization": "Bearer tok-y"}
+        async with await _client(app) as c:
+            r1 = await c.post("/v1/peer/invoke", json={"message": "1"}, headers=headers)
+            r2 = await c.post("/v1/peer/invoke", json={"message": "2"}, headers=headers)
+            r3 = await c.post("/v1/peer/invoke", json={"message": "3"}, headers=headers)
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+        assert r3.status_code == 429
+        assert r3.json()["error"]["code"] == "rate_limited"
 
 
 # Fixture defined at module level (pytest discovers it).

@@ -166,7 +166,7 @@ def _registry_with_secret(peers):
 
 class TestVerifyAll:
     async def test_verified_peer_becomes_callable(self, monkeypatch):
-        reg = _registry_with_secret([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+        reg = _registry_with_secret([{"name": "C", "url": "http://c.local:8002", "token": "t"}])
         assert reg.get("C") is None  # unverified -> uncallable
         # Serve a valid card from the peer.
         good_card = _card()
@@ -178,8 +178,8 @@ class TestVerifyAll:
     async def test_bad_signature_peer_stays_gated(self, monkeypatch):
         reg = _registry_with_secret(
             [
-                {"name": "good", "url": "http://localhost:8002", "token": "t"},
-                {"name": "bad", "url": "http://localhost:8003", "token": "t"},
+                {"name": "good", "url": "http://c.local:8002", "token": "t"},
+                {"name": "bad", "url": "http://c.local:8003", "token": "t"},
             ]
         )
         good_card = _card()
@@ -205,7 +205,7 @@ class TestVerifyAll:
     async def test_no_secret_skips_verification(self):
         reg = PeerRegistry()
         reg.load_from_config(
-            {"enabled": True, "allow_private_network": True, "peers": [{"name": "C", "url": "http://localhost:8002"}]}
+            {"enabled": True, "allow_private_network": True, "peers": [{"name": "C", "url": "http://c.local:8002"}]}
         )
         assert reg._require_verification is False
         assert (await reg.verify_all()) == 0
@@ -214,7 +214,7 @@ class TestVerifyAll:
     async def test_refresh_downgrades_peer_on_card_rotation(self, monkeypatch):
         # C2 regression: a previously-verified peer whose card rotates (now tampered)
         # is re-gated by the next verify_all -- "verified-only" holds over time.
-        reg = _registry_with_secret([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+        reg = _registry_with_secret([{"name": "C", "url": "http://c.local:8002", "token": "t"}])
         good_card = _card()
         monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(good_card))
         await reg.verify_all()
@@ -229,7 +229,7 @@ class TestVerifyAll:
 
     async def test_refresh_reaccepts_peer_when_card_good_again(self, monkeypatch):
         # After a rotation downgrade, a subsequent good card re-verifies the peer.
-        reg = _registry_with_secret([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+        reg = _registry_with_secret([{"name": "C", "url": "http://c.local:8002", "token": "t"}])
         good_card = _card()
         evil_card = copy.deepcopy(good_card)
         evil_card["org"] = "evil"
@@ -240,6 +240,17 @@ class TestVerifyAll:
         n = await reg.verify_all()
         assert n == 1
         assert reg.get("C") is not None  # re-accepted
+
+    async def test_audience_binding_rejects_mismatched_url(self, monkeypatch):
+        # Gap 5.2: a card that advertises a DIFFERENT host than the one fetched from → rejected.
+        reg = _registry_with_secret([{"name": "C", "url": "http://c.local:8002", "token": "t"}])
+        mismatched = copy.deepcopy(_card())
+        mismatched["peer_invoke_url"] = "http://evil-host:9999/v1/peer/invoke"
+        mismatched["signature"] = sign_card(mismatched, "s3cr3t")  # re-sign (valid HMAC, wrong host)
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _FakeClient(mismatched))
+        n = await reg.verify_all()
+        assert n == 0  # audience mismatch → rejected
+        assert reg.get("C") is None
 
 
 class TestA2ARefresh:
@@ -254,7 +265,7 @@ class TestA2ARefresh:
                     "enabled": True,
                     "org_secret": "s3cr3t",
                     "allow_private_network": True,
-                    "peers": [{"name": "Y", "url": "http://localhost:8002", "token": "t"}],
+                    "peers": [{"name": "Y", "url": "http://c.local:8002", "token": "t"}],
                 },
             }
         )
