@@ -624,6 +624,23 @@ class HooksConfig(BaseModel):
     on_event: list[CommandHookConfig] = Field(default_factory=list)
 
 
+class SelfHealingConfig(BaseModel):
+    """Self-healing reflection loop (self-healing P1). Opt-in (default off).
+
+    Drives ``ReflectionHook`` -- a verifier-grounded reflection loop. See
+    ``docs/self-healing-feasibility.md`` §P1 and ``koboi/hooks/reflection_hook.py``.
+    """
+
+    model_config = {"extra": "allow"}
+
+    enabled: bool = False
+    max_turns: int = 3  # shared reflection retry budget (tool-error + low-grounding)
+    fail_soft: bool = True  # pass-through on any critic error (never break the run)
+    critic_llm: str | None = None  # named `providers:` ref or inline dict; None = reuse agent client
+    triggers: dict = Field(default_factory=dict)
+    # triggers.tool_error.repeat_threshold (default 2); triggers.low_grounding.threshold (default 0.6)
+
+
 class KoboiConfig(BaseModel):
     """Top-level config schema for koboi-agent."""
 
@@ -653,6 +670,7 @@ class KoboiConfig(BaseModel):
     media: MediaConfig = Field(default_factory=MediaConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
+    self_healing: SelfHealingConfig = Field(default_factory=SelfHealingConfig)
 
     @model_validator(mode="before")
     @classmethod

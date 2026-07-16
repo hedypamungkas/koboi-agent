@@ -1433,6 +1433,55 @@ class AgentAssembler:
                 )
             )
 
+        # Self-healing P1: tool-grounded reflection loop (opt-in). Verifier-fed
+        # (GroundingGuardrail ref for low-grounding; P0-D errored signal for tools).
+        if self.hook_chain and self.config.get("self_healing", "enabled", default=False):
+            from koboi.guardrails.grounding import GroundingGuardrail
+            from koboi.hooks.reflection_hook import ReflectionHook
+            from koboi.llm.resolve import resolve_llm_spec
+
+            grounding = next(
+                (g for g in (self.output_guardrails or []) if isinstance(g, GroundingGuardrail)),
+                None,
+            )
+            if grounding is None:
+                logging.getLogger(__name__).warning(
+                    "self_healing.enabled without a grounding_check output guardrail "
+                    "-- low-grounding reflection will be inert; only tool-error critique fires"
+                )
+            critic_client = self.client
+            critic_spec = self.config.get("self_healing", "critic_llm", default=None)
+            if critic_spec:
+                try:  # fail-soft: fall back to the main client on any resolve/build error
+                    resolved = resolve_llm_spec(critic_spec, self.config) or {}
+                    from koboi.llm.factory import create_client
+
+                    critic_client = create_client(
+                        provider=resolved.get("provider") or "openai",
+                        model=resolved.get("model") or "",
+                        api_key=resolved.get("api_key") or "",
+                        base_url=resolved.get("base_url") or "",
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "self_healing.critic_llm resolve/build failed (%s); reusing main client", exc
+                    )
+                    critic_client = self.client
+            self.hook_chain.add(
+                ReflectionHook(
+                    client=critic_client,
+                    grounding=grounding,
+                    max_turns=self.config.get("self_healing", "max_turns", default=3),
+                    fail_soft=self.config.get("self_healing", "fail_soft", default=True),
+                    tool_error_threshold=self.config.get(
+                        "self_healing", "triggers", "tool_error", "repeat_threshold", default=2
+                    ),
+                    grounding_threshold=self.config.get(
+                        "self_healing", "triggers", "low_grounding", "threshold", default=0.6
+                    ),
+                )
+            )
+
         from koboi.loop import AgentCore
 
         core = AgentCore(

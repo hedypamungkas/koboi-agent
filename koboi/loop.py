@@ -136,6 +136,10 @@ class AgentCore:
         if output_guardrail is not None and output_guardrail not in self.output_guardrails:
             self.output_guardrails.insert(0, output_guardrail)
         self._last_output_guardrail: dict | None = None  # R2: warn outcome -> RunResult.metadata
+        # Self-healing P1: reflection-retry state. Stashed by _process_output from a
+        # ReflectionHook's POST_OUTPUT flag; honored by _run_loop. None when no hook.
+        self._reflection_retry_requested: dict | None = None
+        self._reflection_retries = 0
         self.rate_limiter = rate_limiter
         self.audit_trail = audit_trail
         self.approval_handler = approval_handler
@@ -401,6 +405,14 @@ class AgentCore:
                 break
 
         ctx = await self._emit(HookEvent.POST_OUTPUT, iteration=iteration, llm_response=response)
+        # Self-healing P1: a ReflectionHook may request a verifier-grounded retry
+        # (low-grounding reground). Stash it for _run_loop to honor (mirrors the
+        # _last_output_guardrail stash). Note: by here ``output`` is the abstain
+        # refusal (the original answer was swapped), so memory will hold the refusal;
+        # the loop's reflection note is self-contained (it names the ungrounded
+        # claims), so the model re-attempts informed rather than revising a verbatim
+        # prior answer.
+        self._reflection_retry_requested = ctx.metadata.get("reflection_retry")
         if ctx.abort:
             raise AgentAbortedError(ctx.inject_message or "Output rejected by hook")
         _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
@@ -537,6 +549,8 @@ class AgentCore:
             # Self-healing P0-C: observability -- how many empty-response re-asks
             # happened this run (0 = none / disabled).
             "empty_response_reasked": getattr(self, "_empty_response_reasked", 0),
+            # Self-healing P1: reflection retry count (0 = none / disabled / streaming).
+            "reflection_retries": getattr(self, "_reflection_retries", 0),
         }
         # R4: stamp retrieved chunks so evals can assert on retrieval (t.retrievedChunk)
         # without a live LLM. last_results is overwritten each retrieval (not accumulated).
@@ -655,6 +669,9 @@ class AgentCore:
         self._last_output_guardrail = None  # R2: reset per run
         empty_reasks = 0  # self-healing P0-C: bounded re-ask counter for empty responses
         self._empty_response_reasked = 0
+        # Self-healing P1: reflection-retry state (reset per run).
+        self._reflection_retry_requested = None
+        self._reflection_retries = 0
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
@@ -699,6 +716,21 @@ class AgentCore:
                     self._journal_step(i, status="empty_reask", response=response)
                     continue
                 output = await self._process_output(response.content, response, i)
+                # Self-healing P1: POST_OUTPUT reflection retry (low-grounding reground).
+                # The hook owns the soft max_turns budget; (i+1) < max is the hard
+                # backstop (P0-C lesson: never turn a success into MaxIterationsError).
+                if self._reflection_retry_requested and (i + 1) < self.max_iterations:
+                    self._reflection_retries += 1
+                    critique = (self._reflection_retry_requested or {}).get("critique")
+                    if critique:
+                        self.memory.add_context_message(
+                            f"[REFLECTION] {critique} (Re-attempt grounded strictly in the "
+                            "context; do not repeat previous side-effecting tool calls.)",
+                            label="reflection_critique",
+                        )
+                    self._log(f"Low-grounding reflection retry ({self._reflection_retries})")
+                    self._journal_step(i, status="reflection_retry", response=response)
+                    continue
                 self._journal_step(i, status="complete", response=response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 # M5/P4 parity with run_stream: stamp the Langfuse trace_id so the
@@ -776,6 +808,9 @@ class AgentCore:
         self._last_output_guardrail = None  # R2: reset per run (parity with _run_loop)
         empty_reasks = 0  # self-healing P0-C: bounded re-ask counter for empty responses
         self._empty_response_reasked = 0
+        # Self-healing P1: reflection-retry state (reset per run; streaming skips retry).
+        self._reflection_retry_requested = None
+        self._reflection_retries = 0
         _stream_tools_used: list[str] = []
         # G8b: when output guardrails are configured, buffer TextDeltas and flush
         # them only after _process_output passes -- otherwise the tokens stream
@@ -845,6 +880,10 @@ class AgentCore:
                 # May raise AgentGuardrailError (block) -- the buffer is then
                 # discarded, so the blocked tokens never reach the stream.
                 output = await self._process_output(final_response.content or "", final_response, i)
+                if self._reflection_retry_requested:
+                    # P1: streaming reflection is deferred (doc §risks); complete without
+                    # retrying. The critique already ran; the run completes normally.
+                    self._log("Reflection retry requested but streaming -- completing (P1 defers stream reflection)")
                 for d in delta_buffer:
                     yield d
                 self._journal_step(i, status="complete", response=final_response, is_terminal=True)

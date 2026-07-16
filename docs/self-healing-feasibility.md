@@ -236,6 +236,7 @@ Effort is rough (S=≤1 day, M=2-4 days, L=1 wk+) relative to this codebase's pa
 - **Tests:** `test_reflection_hook` (low-grounding→reground, repeated-tool-error→critique, budget-exhaustion→fall-through, fail-soft-on-judge-error, non-idempotent-skip).
 - **Demo:** `configs/self_healing_demo.yaml`.
 - **Deliverable value:** closes the headline gap.
+- **STATUS (2026-07-16): SHIPPED on `worktree-self-healing-initiative`.** `ReflectionHook` (priority 60, POST_TOOL_USE repeated-error critique + POST_OUTPUT low-grounding reground + SESSION_START reset); loop retry-seam (`_process_output` stashes `reflection_retry` → `_run_loop` honors via bounded `continue`; `run_stream` skips); `SelfHealingConfig` (opt-in); facade wiring (critic via `resolve_llm_spec`/`create_client`, fail-soft fallback). Verifier-grounded (GroundingGuardrail + P0-D), fail-soft, redacted. 14 tests + demo config; 4594 pass. Reground = self-correct against EXISTING context (critique names ungrounded claims). **Deferred:** (a) streaming parity (run_stream logs+skips); (b) query-reformulation/re-retrieval reground (P1b/P3); (c) skip the critic on the final iteration to avoid a wasted call (P2 -- needs hook↔agent `max_iterations` coupling); (d) shared `TurnBudget` with doom-loop (P2); (e) thread P0-D `errored`/`error_kind` onto POST_TOOL_USE `HookContext` so the hook needn't string-match `"Error:"` (P1b).
 
 ### P2 — Declarative escalation ladder + replan-on-failure  *(effort: M, opt-in)*
 - `self_healing.ladder:` declarative policy mapping failure-class → ordered rungs.

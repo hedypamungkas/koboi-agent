@@ -1,0 +1,51 @@
+# configs/self_healing_demo.yaml -- self-healing P1 (ReflectionHook) demo.
+#
+# Opt-in verifier-grounded reflection (see docs/self-healing-feasibility.md §P1):
+#   - Low-grounding answers (coverage < 0.6) are critiqued by a side-LLM and
+#     re-attempted (bounded by max_turns) BEFORE the grounding guardrail's abstain
+#     refusal stands.
+#   - Repeated identical tool failures (>= repeat_threshold) are critiqued with an
+#     actionable "try a different approach" note.
+#
+# Requires a `grounding_check` output guardrail (the verifier). The critic reuses
+# the agent's main client unless `critic_llm` names a top-level `providers:` entry.
+#
+#   koboi run configs/self_healing_demo.yaml -m "What is Acme's return policy?"
+
+agent:
+  name: self-healing-demo
+  max_iterations: 8
+  system_prompt: |
+    You are a careful assistant. Only make claims you can ground in the provided
+    context; hedge when you cannot. Use tools when needed.
+
+llm:
+  model: ${KOBOI_MODEL:gpt-4o-mini}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+
+rag:
+  enabled: true
+  documents:
+    - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/product_catalog.md"
+
+guardrails:
+  output:
+    - name: grounding_check
+      provider: openai
+      model: ${KOBOI_MODEL:gpt-4o-mini}
+      api_key: ${OPENAI_API_KEY:}
+      threshold: 0.8
+
+# Self-healing P1 (opt-in). Default OFF across the framework; enabled here.
+self_healing:
+  enabled: true
+  max_turns: 3
+  fail_soft: true
+  # critic_llm: primary   # uncomment to use a named `providers:` entry as the critic
+  triggers:
+    tool_error:
+      repeat_threshold: 2
+    low_grounding:
+      threshold: 0.6
