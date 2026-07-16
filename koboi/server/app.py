@@ -212,6 +212,30 @@ def _sidecar_db_path(memory_backend: str, explicit_db_path: str | None) -> str:
     return explicit_db_path or ":memory:"
 
 
+def _session_has_history(memory_db_path: str | None, session_id: str) -> bool:
+    """True if the session has persisted messages (pre-existing, not brand-new).
+
+    Used by the ownership gate to distinguish a genuinely-new header session
+    (no rows → claimable) from a pre-existing/CLI-created session (rows present
+    but no owner → must NOT be silently claimed by an unrelated caller → IDOR).
+    Opens a short-lived read connection to the shared conversation DB. Fail-safe
+    to False on any error so a schema mismatch never blocks a legit new session.
+    """
+    if not memory_db_path:
+        return False
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(memory_db_path, check_same_thread=False)
+        try:
+            row = conn.execute("SELECT 1 FROM messages WHERE session_id = ? LIMIT 1", (session_id,)).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 -- fail-safe: treat as no history
+        return False
+
+
 def create_app(
     config: Config,
     *,
@@ -553,20 +577,6 @@ def create_app(
     return app
 
 
-def _check_owner(ownership: OwnershipStore, session_id: str, request: Request) -> JSONResponse | None:
-    """Returns an error response if the caller is not the session owner.
-
-    Sessions with NO owner set (header-provided, never POSTed) are allowed
-    (back-compat — the session_id is the secret). Only explicitly-owned sessions
-    (created via POST /v1/sessions) are restricted to their owner.
-    """
-    owner = getattr(request.state, "api_key_id", "dev")
-    actual = ownership.get_owner(session_id)
-    if actual is not None and actual != owner:
-        return _error_response(403, "forbidden", "not the session owner", request)
-    return None
-
-
 def _enrich_trace(agent: Any, **metadata: str) -> None:
     """Tag the Langfuse trace with serving context (16.21). No-op if no hook."""
     if agent._core and agent._core.hooks:
@@ -680,6 +690,33 @@ def _register_routes(
     peer_registry: Any | None = None,
     peer_rate_limiter: Any | None = None,
 ) -> None:
+    # Issue #52: ownership gate (fail-closed for unowned-with-history).
+    # Closes the IDOR where a pre-existing/CLI-created session (full history, no
+    # owner row) was reachable by ANY authenticated caller via X-Session-Id and
+    # then silently auto-claimed. ``memory_db_path`` is the shared conversation DB
+    # (sqlite only); under auth, an unowned session WITH history is denied, while a
+    # genuinely-new header session (no rows) is still claimable. Dev mode (auth off)
+    # is unchanged. History-aware (not a blanket deny) so the existing H1 claim flow
+    # for fresh sessions stays intact.
+    memory_db_path = shared_db if memory_backend == "sqlite" else None
+
+    def _check_owner(ownership: OwnershipStore, session_id: str, request: Request) -> JSONResponse | None:
+        """Returns an error response if the caller may not use the session.
+
+        Allowed: the recorded owner matches; or (under dev mode) any caller; or
+        (under auth) an unowned session with NO history (genuinely new → claim).
+        Denied: a different recorded owner; or (under auth) an unowned session
+        that already has persisted history (pre-existing → not claimable by an
+        unrelated tenant → IDOR).
+        """
+        owner = getattr(request.state, "api_key_id", "dev")
+        actual = ownership.get_owner(session_id)
+        if actual is not None and actual != owner:
+            return _error_response(403, "forbidden", "not the session owner", request)
+        if auth_enabled and actual is None and _session_has_history(memory_db_path, session_id):
+            return _error_response(403, "forbidden", "session is not owned by any caller", request)
+        return None
+
     @app.get("/healthz")
     async def healthz() -> dict:
         return {"status": "ok"}
