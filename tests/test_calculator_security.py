@@ -81,6 +81,11 @@ class TestMathFunctions:
     def test_pow_function(self):
         assert "8" in calculate("pow(2, 3)")
 
+    def test_pow_three_arg_modular(self):
+        # 3-arg pow(base, exp, mod) is bounded by mod (never a DoS vector) and
+        # must keep working after the _safe_pow DoS bound (issue #47).
+        assert "3" in calculate("pow(2, 3, 5)")
+
     def test_ceil(self):
         assert "4" in calculate("ceil(3.2)")
 
@@ -174,3 +179,54 @@ class TestSafeEvalInternal:
 
         with pytest.raises(ValueError, match="Disallowed"):
             _safe_eval("1 < 2", {})
+
+
+class TestPowDosBound:
+    """Issue #47: unbounded exponentiation must not allow a DoS.
+
+    ``**`` is right-associative, so ``9 ** 9 ** 8`` materializes a ~41M-digit
+    integer and hangs/OOMs the process; ``pow(9, 10 ** 9)`` is equally unbounded.
+    The repo has no pytest-timeout and the GIL stays pinned while the big int is
+    built, so the DoS cases run in a subprocess with a hard timeout (precedent:
+    tests/test_skills_enhanced.py).
+    """
+
+    def test_pathological_exponentiation_is_bounded(self):
+        import subprocess
+        import sys
+
+        code = "from koboi.tools.builtin.calculator import calculate; print(calculate('9 ** 9 ** 8'))"
+        try:
+            r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=3)
+        except subprocess.TimeoutExpired:
+            import pytest
+
+            pytest.fail("calculate('9**9**8') hung past 3s -- unbounded exponentiation DoS (issue #47)")
+        assert "Error" in r.stdout, r.stdout
+
+    def test_pow_call_path_is_bounded(self):
+        import subprocess
+        import sys
+
+        code = "from koboi.tools.builtin.calculator import calculate; print(calculate('pow(9, 10 ** 9)'))"
+        try:
+            r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=3)
+        except subprocess.TimeoutExpired:
+            import pytest
+
+            pytest.fail("calculate('pow(9, 10 ** 9)') hung past 3s -- unbounded pow() DoS (issue #47)")
+        assert "Error" in r.stdout, r.stdout
+
+    def test_normal_powers_still_work(self):
+        assert "8" in calculate("2 ** 3")
+        assert "1024" in calculate("2 ** 10")
+        # 1000-bit result is well under the 32768-bit cap and must still work.
+        assert "Error" not in calculate("2 ** 1000")
+
+    def test_tiny_base_large_exponent_not_broken(self):
+        # abs(base) <= 1 yields a -1/0/1 result regardless of exponent size, so
+        # the DoS bound must not reject these (issue #47).
+        assert "= 1" in calculate("1 ** 100000")
+        assert "= 1" in calculate("(-1) ** 100000")
+        assert "= -1" in calculate("(-1) ** 100001")
+        assert "= 0" in calculate("0 ** 100000")
