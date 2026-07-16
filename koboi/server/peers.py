@@ -97,13 +97,15 @@ class PeerRegistry:
                     token=str(raw.get("token", "")),
                     agent_name=str(raw.get("agent_name", "")),
                     org=str(raw.get("org", "")),
-                    timeout=float(raw.get("timeout", 30.0) or 30.0),
+                    timeout=max(1.0, float(raw.get("timeout", 30.0) or 30.0)),
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 _logger.warning("Skipping malformed peer entry %r: %s", raw, exc)
                 continue
             if not self._url_ok(peer.url, peer.name, allow_private):
                 continue
+            if peer.name in self._peers:
+                _logger.warning("Duplicate A2A peer name '%s' — overwriting previous entry", peer.name)
             self._peers[peer.name] = peer
             loaded += 1
             _logger.info("Loaded A2A peer '%s' -> %s", peer.name, peer.url)

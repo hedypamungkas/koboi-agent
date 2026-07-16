@@ -57,6 +57,8 @@ _logger = logging.getLogger(__name__)
     idempotent=False,  # must NOT silently double-fire into a peer on crash-resume
 )
 async def call_peer_agent(calls: list[dict], _deps: dict | None = None) -> str:
+    if not calls:
+        return "Error: call_peer_agent requires at least one call."
     registry = _deps.get("peer_registry") if _deps else None
     if registry is None:
         return "Error: A2A peers not configured. Cannot call peer agents."
@@ -80,4 +82,4 @@ async def call_peer_agent(calls: list[dict], _deps: dict | None = None) -> str:
             return f"[{peer.name}] (FAILED: {exc})\nAnswer: <error>"
 
     parts = await asyncio.gather(*[_slot(c) for c in calls])
-    return "\n\n---\n\n".join(parts)
+    return "\n\n═══════\n\n".join(parts)

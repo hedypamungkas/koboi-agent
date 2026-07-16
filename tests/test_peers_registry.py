@@ -68,7 +68,9 @@ class TestPeerRegistry:
 
     def test_bad_scheme_rejected_even_with_allow_private(self):
         r = PeerRegistry()
-        n = r.load_from_config({"enabled": True, "allow_private_network": True, "peers": [{"name": "F", "url": "ftp://x"}]})
+        n = r.load_from_config(
+            {"enabled": True, "allow_private_network": True, "peers": [{"name": "F", "url": "ftp://x"}]}
+        )
         assert n == 0
         assert r.get("F") is None
 
@@ -100,7 +102,11 @@ class TestPeerRegistry:
     def test_timeout_parsed(self):
         r = PeerRegistry()
         r.load_from_config(
-            {"enabled": True, "allow_private_network": True, "peers": [{"name": "C", "url": "http://localhost:1", "timeout": 5}]}
+            {
+                "enabled": True,
+                "allow_private_network": True,
+                "peers": [{"name": "C", "url": "http://localhost:1", "timeout": 5}],
+            }
         )
         assert r.get("C").timeout == 5.0
 
@@ -110,3 +116,35 @@ class TestPeerRegistry:
             {"enabled": True, "allow_private_network": True, "peers": [{"name": "C", "url": "http://localhost:1"}]}
         )
         assert r.get("C").timeout == 30.0
+
+    def test_duplicate_peer_name_overwrites(self):
+        r = PeerRegistry()
+        r.load_from_config(
+            {
+                "enabled": True,
+                "allow_private_network": True,
+                "peers": [
+                    {"name": "C", "url": "http://first.example.com"},
+                    {"name": "C", "url": "http://second.example.com"},
+                ],
+            }
+        )
+        assert r.get("C").url == "http://second.example.com"  # second overwrites first
+
+    def test_negative_timeout_clamped(self):
+        r = PeerRegistry()
+        r.load_from_config(
+            {
+                "enabled": True,
+                "allow_private_network": True,
+                "peers": [{"name": "C", "url": "http://localhost:1", "timeout": -5}],
+            }
+        )
+        assert r.get("C").timeout == 1.0  # clamped to minimum
+
+    def test_long_token_handled(self):
+        r = PeerRegistry()
+        long_token = "a" * 1000
+        r.load_from_config({"enabled": True, "inbound_tokens": [long_token]})
+        assert r.validate_inbound_token(long_token) == "peer"
+        assert r.validate_inbound_token("wrong") is None

@@ -115,3 +115,32 @@ class TestCallPeerAgent:
         )
         assert "C-ok" in out  # C completed
         assert "FAILED" in out  # B timed out
+
+    async def test_empty_calls_returns_error(self):
+        r = _registry_with_peers([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+        out = await r.execute("call_peer_agent", json.dumps({"calls": []}))
+        assert "at least one call" in out.lower()
+
+    async def test_same_peer_twice_both_succeed(self, monkeypatch):
+        r = _registry_with_peers([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+        count = {"n": 0}
+
+        async def fake(peer, msg):
+            count["n"] += 1
+            return peers_mod.PeerInvokeResult(content=f"answer-{count['n']}")
+
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake)
+        out = await r.execute(
+            "call_peer_agent", json.dumps({"calls": [{"peer": "C", "message": "1"}, {"peer": "C", "message": "2"}]})
+        )
+        assert "answer-1" in out and "answer-2" in out
+
+    async def test_separator_in_peer_answer(self, monkeypatch):
+        r = _registry_with_peers([{"name": "C", "url": "http://localhost:8002", "token": "t"}])
+
+        async def fake(peer, msg):
+            return peers_mod.PeerInvokeResult(content="line1\n═══════\nline2")
+
+        monkeypatch.setattr(peers_mod, "invoke_peer", fake)
+        out = await r.execute("call_peer_agent", json.dumps({"calls": [{"peer": "C", "message": "m"}]}))
+        assert "line1" in out and "line2" in out
