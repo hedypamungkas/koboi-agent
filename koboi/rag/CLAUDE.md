@@ -102,6 +102,10 @@ kwargs and validates `config_aliases` targets exist (raises `ValueError` otherwi
   via `endpoint_url`). Loaded bytes are parsed by format (text/html/pdf/docx) via
   `parser_registry` (`[rag]` extra for PDF/DOCX; HTML is stdlib). `document_cache_path`
   caches remote fetches across the per-session rebuilds in `koboi/server/pool.py`.
+  `rag.max_document_size_mb` (default 10) bounds a single remote document; `http`/`s3`
+  fetches (`koboi/rag/sources.py`) are streamed with an early Content-Length reject +
+  bounded read (not fully buffered before the check) so an oversized/malicious
+  response can't exhaust memory (CWE-400, issue #56).
 - **Semantic/Hybrid retrievers degrade to keyword** when no `client` is injected or the embedding
   endpoint returns None (logged as a warning). Hybrid's RRF still fuses both legs.
 - **Process-level embedding cache** (`_EMBEDDING_CACHE`) embeds a corpus once per process, keyed by
