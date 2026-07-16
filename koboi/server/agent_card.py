@@ -52,7 +52,7 @@ def sign_card(card: dict, org_secret: str) -> str:
     return _SIGNATURE_PREFIX + digest
 
 
-def verify_card(card: dict, org_secret: str) -> bool:
+def verify_card(card: dict, org_secret: str, *, freshness_seconds: float | None = None) -> bool:
     """True iff ``card``'s HMAC org-claim matches ``org_secret`` AND it is fresh.
 
     No secret / missing or malformed signature / tampered body / stale ``issued_at``
@@ -77,7 +77,8 @@ def verify_card(card: dict, org_secret: str) -> bool:
     except (TypeError, ValueError):
         _logger.debug("agent-card verify: issued_at not parseable")
         return False
-    if issued_at <= 0 or abs(time.time() - issued_at) > FRESHNESS_SECONDS:
+    window = freshness_seconds if freshness_seconds is not None else FRESHNESS_SECONDS
+    if issued_at <= 0 or abs(time.time() - issued_at) > window:
         _logger.debug("agent-card verify: stale or non-positive issued_at")
         return False
     return True

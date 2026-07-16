@@ -348,7 +348,10 @@ def create_app(
     pool._peer_registry = peer_registry
 
     # W1: per-peer-token rate limiter for /v1/peer/invoke (prevents LLM-budget drain).
-    peer_rate_limiter = PeerRateLimiter(max_per_minute=int(config.get("peers", "rate_limit_per_minute", default=60)))
+    peer_rate_limiter = PeerRateLimiter(
+        max_per_minute=int(config.get("peers", "rate_limit_per_minute", default=60)),
+        max_concurrent=int(config.get("peers", "max_concurrent_inbound", default=10)),
+    )
 
     # P3: build this instance's signed agent-card once (served at GET /.well-known/agent-card).
     org_secret = str(config.get("peers", "org_secret", default="") or "")
@@ -1253,6 +1256,8 @@ def _register_routes(
         # Rate limit: bound how many calls a single peer token can make per minute.
         if peer_rate_limiter is not None and not peer_rate_limiter.allow(peer_id):
             return _error_response(429, "rate_limited", "A2A peer rate limit exceeded", request)
+        if peer_rate_limiter is not None and not peer_rate_limiter.try_acquire(peer_id):
+            return _error_response(429, "too_many_concurrent", "too many concurrent A2A calls", request)
 
         # Fresh ephemeral session per call (isolation, no history bleed); optional
         # X-Session-Id for cross-call continuity.
@@ -1296,6 +1301,9 @@ def _register_routes(
             _logger.exception("A2A peer invoke failed (session=%s)", session_id)
             return _error_response(500, "peer_invoke_failed", str(exc), request)
         finally:
+            # Release the concurrency slot (always, even on error/exception).
+            if peer_rate_limiter is not None:
+                peer_rate_limiter.release(peer_id)
             # Evict ephemeral sessions so peer fan-out (N parallel inbound calls into
             # this instance) cannot bloat the pool toward cap. Continuity sessions
             # (explicit X-Session-Id) are left for LRU.

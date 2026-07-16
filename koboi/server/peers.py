@@ -66,6 +66,7 @@ class PeerRegistry:
         # P3: when an org_secret is set, declared peers must be org-verified at startup.
         self._org_secret: str = ""
         self._require_verification: bool = False
+        self._freshness_seconds: float | None = None  # W2: configurable card freshness
         # Names of peers whose agent-card org-claim has been verified. Registry-owned
         # state (NOT a mutable flag on PeerConfig) -- verification is a time-varying
         # property of the registry's relationship to the peer.
@@ -84,6 +85,7 @@ class PeerRegistry:
         # must pass agent-card org-claim verification (verify_all) before they're callable.
         self._org_secret = str(cfg.get("org_secret", "") or "")
         self._require_verification = bool(self._org_secret)
+        self._freshness_seconds = float(cfg.get("card_freshness_seconds", 0) or 0) or None
 
         # Outbound peers
         loaded = 0
@@ -169,7 +171,9 @@ class PeerRegistry:
         except Exception as exc:  # noqa: BLE001 -- unreachable/bad peer -> not verified
             _logger.warning("A2A peer '%s' card fetch failed: %s", peer.name, exc)
             return False
-        if not isinstance(card, dict) or not verify_card(card, self._org_secret):
+        if not isinstance(card, dict) or not verify_card(
+            card, self._org_secret, freshness_seconds=self._freshness_seconds
+        ):
             _logger.warning("A2A peer '%s' failed org-claim verification (rejected)", peer.name)
             return False
         # Audience binding: the card must advertise the URL we fetched it from (anti-replay).
@@ -269,18 +273,21 @@ class PeerRegistry:
 
 
 class PeerRateLimiter:
-    """Per-peer-token sliding-window rate limiter (in-memory, instance-scoped).
+    """Per-peer-token rate limiter + concurrency cap (in-memory, instance-scoped).
 
-    Bounds how many ``/v1/peer/invoke`` calls a single peer token can make per minute,
-    preventing a malicious/compromised peer from draining the receiver's LLM budget.
+    Bounds how many ``/v1/peer/invoke`` calls a single peer token can make per minute
+    (rate) + how many can run simultaneously (concurrency), preventing a malicious or
+    compromised peer from draining the receiver's LLM budget or monopolizing its pool.
     """
 
-    def __init__(self, max_per_minute: int = 60) -> None:
+    def __init__(self, max_per_minute: int = 60, max_concurrent: int = 10) -> None:
         self._max = max_per_minute
         self._hits: dict[str, list[float]] = {}
+        self._max_concurrent = max_concurrent
+        self._active: dict[str, int] = {}
 
     def allow(self, peer_id: str) -> bool:
-        """True if the call is within the rate limit; False if throttled."""
+        """True if the call is within the per-minute rate limit; False if throttled."""
         if self._max <= 0:
             return True  # unlimited
         import time
@@ -292,6 +299,20 @@ class PeerRateLimiter:
             return False
         hits.append(now)
         return True
+
+    def try_acquire(self, peer_id: str) -> bool:
+        """Acquire a concurrency slot. True if allowed, False if at the cap."""
+        if self._max_concurrent <= 0:
+            return True  # unlimited
+        count = self._active.get(peer_id, 0)
+        if count >= self._max_concurrent:
+            return False
+        self._active[peer_id] = count + 1
+        return True
+
+    def release(self, peer_id: str) -> None:
+        """Release a concurrency slot."""
+        self._active[peer_id] = max(0, self._active.get(peer_id, 0) - 1)
 
 
 def build_peer_registry(peers_cfg: Any, *, verified_registry: PeerRegistry | None = None) -> PeerRegistry | None:
@@ -357,7 +378,12 @@ async def invoke_peer(peer: PeerConfig, message: str) -> PeerInvokeResult:
                     await asyncio.sleep(2**attempt)  # backoff: 1s, 2s
                     continue
                 resp.raise_for_status()
-                data = resp.json()
+                try:
+                    data = resp.json()
+                except Exception as exc:
+                    raise ValueError(
+                        f"peer returned non-JSON (status {resp.status_code}): {resp.text[:200]!r}"
+                    ) from exc
             content = data.get("content")
             if not isinstance(content, str):
                 raise ValueError(f"peer returned no string content: {data!r}")

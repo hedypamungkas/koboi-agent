@@ -180,6 +180,57 @@ class TestInvokePeerTrace:
         with pytest.raises(ValueError, match="too large"):
             await invoke_peer(PeerConfig(name="C", url="http://localhost:8002", token="t"), "hi")
 
+    async def test_non_json_response_handled(self, monkeypatch):
+        # Gap 1.2: B returns HTML (proxy error) → clear ValueError, not bare JSONDecodeError.
+        class _HtmlResp:
+            status_code = 200
+            text = "<html>502 Bad Gateway</html>"
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                raise ValueError("Expecting value")
+
+        class _HtmlClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, json=None, headers=None):
+                return _HtmlResp()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _HtmlClient())
+        with pytest.raises(ValueError, match="non-JSON"):
+            await invoke_peer(PeerConfig(name="C", url="http://localhost:8002", token="t"), "hi")
+
+    async def test_wrong_shape_json_handled(self, monkeypatch):
+        # Gap 1.3: {"content": null} → ValueError ("no string content").
+        class _NullResp:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"content": None}
+
+        class _NullClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, json=None, headers=None):
+                return _NullResp()
+
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: _NullClient())
+        with pytest.raises(ValueError, match="no string content"):
+            await invoke_peer(PeerConfig(name="C", url="http://localhost:8002", token="t"), "hi")
+
 
 class TestJournalTraceId:
     def test_record_step_stamps_trace_id(self, tmp_path):

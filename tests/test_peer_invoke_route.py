@@ -190,6 +190,33 @@ class TestPeerInvokeRoute:
         assert r3.status_code == 429
         assert r3.json()["error"]["code"] == "rate_limited"
 
+    async def test_429_too_many_concurrent(self):
+        # Gap 8.4: max_concurrent_inbound caps simultaneous peer calls per token.
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "C", "mode": "chat", "system_prompt": "C"},
+                "llm": {"provider": "openai", "model": "gpt-4o-mini", "api_key": "x"},
+                "memory": {"backend": "memory"},
+                "peers": {"enabled": True, "inbound_tokens": ["tok-y"], "max_concurrent_inbound": 1},
+            }
+        )
+        app = create_app(cfg, client_factory=lambda: MockClient([make_mock_response(content="ok")]))
+        app.state.peer_rate_limiter.try_acquire("peer")  # fill the single slot
+        async with await _client(app) as c:
+            r = await c.post("/v1/peer/invoke", json={"message": "hi"}, headers={"Authorization": "Bearer tok-y"})
+        assert r.status_code == 429
+        assert r.json()["error"]["code"] == "too_many_concurrent"
+
+    async def test_evict_failure_doesnt_break_response(self, app_y, monkeypatch):
+        # Gap 2.4: pool.evict raises → response still 200 (graceful degradation).
+        async def _boom(sid):
+            raise RuntimeError("evict exploded")
+
+        monkeypatch.setattr(app_y.state.pool, "evict", _boom)
+        async with await _client(app_y) as c:
+            r = await c.post("/v1/peer/invoke", json={"message": "hi"}, headers={"Authorization": "Bearer tok-y"})
+        assert r.status_code == 200
+
 
 # Fixture defined at module level (pytest discovers it).
 

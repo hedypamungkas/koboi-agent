@@ -419,6 +419,10 @@ class PeersConfig(BaseModel):
     org_secret: str = ""  # shared HMAC-SHA256 secret proving same-org membership
     public_base_url: str = ""  # advertised base URL for this instance's agent-card peer_invoke_url
     rate_limit_per_minute: int = 60  # max inbound /v1/peer/invoke calls per peer token per minute (0 = unlimited)
+    max_concurrent_inbound: int = 10  # max simultaneous /v1/peer/invoke calls per peer token (0 = unlimited)
+    card_freshness_seconds: float = (
+        21600  # agent-card freshness window for verify_card (default 6h; widen for clock-skew tolerance)
+    )
 
 
 class RlimitsConfig(BaseModel):
