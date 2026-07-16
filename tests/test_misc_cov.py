@@ -598,28 +598,61 @@ class TestMemoryStoreInternals:
 
 
 class _FakeResponse:
+    """httpx.Response double -- supports BOTH the eager ``.content`` path and the
+    streaming ``.aiter_bytes()`` path, and counts total bytes the consumer pulled
+    (``bytes_consumed``) so a test can assert a bound (CWE-400 #56)."""
+
     def __init__(self, status_code=200, content=b"ok", headers=None, reason="OK", text=None):
         self.status_code = status_code
-        self.content = content
+        self._content = content
         self.headers = headers or {}
         self.reason_phrase = reason
         self._text = text
+        self.bytes_consumed = 0
+
+    @property
+    def content(self):
+        # Eager path: the full body is materialized at once.
+        self.bytes_consumed += len(self._content)
+        return self._content
 
     @property
     def text(self):
         if self._text is not None:
             return self._text
-        return self.content.decode("utf-8", errors="replace")
+        return self._content.decode("utf-8", errors="replace")
+
+    async def aiter_bytes(self, chunk_size=1024):
+        # Lazy streaming path: yields chunks; the consumer is expected to stop early
+        # once it has enough (bounded read). Only the chunks actually pulled count.
+        for i in range(0, len(self._content), chunk_size):
+            chunk = self._content[i : i + chunk_size]
+            self.bytes_consumed += len(chunk)
+            yield chunk
+
+
+class _FakeStreamCtx:
+    """Async context manager backing ``AsyncClient.stream("GET", url)``."""
+
+    def __init__(self, response):
+        self._response = response
+
+    async def __aenter__(self):
+        return self._response
+
+    async def __aexit__(self, *a):
+        return False
 
 
 class _FakeAsyncClient:
-    """Minimal httpx.AsyncClient double: async context manager + get()."""
+    """Minimal httpx.AsyncClient double: async context manager + get()/stream()."""
 
     def __init__(self, response=None, sequence=None, exc=None):
         self._response = response
         self._sequence = sequence
         self._exc = exc
         self._idx = 0
+        self.last_response = None  # most recent response handed to a consumer
 
     async def __aenter__(self):
         return self
@@ -627,7 +660,7 @@ class _FakeAsyncClient:
     async def __aexit__(self, *a):
         return False
 
-    async def get(self, url):
+    def _next(self):
         if self._exc is not None:
             raise self._exc
         if self._sequence is not None:
@@ -635,8 +668,18 @@ class _FakeAsyncClient:
             self._idx += 1
             if isinstance(item, Exception):
                 raise item
+            self.last_response = item
             return item
+        self.last_response = self._response
         return self._response
+
+    async def get(self, url):
+        # Eager path (kept for back-compat). Pre-fix web_fetch used this + .content.
+        return self._next()
+
+    def stream(self, method, url):
+        # Streaming path (post-fix web_fetch). Returns an async context manager.
+        return _FakeStreamCtx(self._next())
 
 
 def _patch_httpx(monkeypatch, fake):
@@ -795,3 +838,32 @@ class TestWebFetchTruncation:
         _patch_httpx(monkeypatch, _FakeAsyncClient(response=_FakeResponse(content=medium)))
         out = await web_fetch("https://example.com")
         assert "truncated, total" in out
+
+
+class TestWebFetchStreamingBound:
+    """CWE-400 / GHSA-qf8c-xp5r-p869 (#56): web_fetch must not buffer an oversized
+    response body before applying the size limit. The counting fake records how many
+    bytes the consumer actually pulled; a bounded stream stops near MAX_RESPONSE_SIZE
+    instead of materializing the whole body."""
+
+    async def test_oversized_body_not_fully_buffered(self, monkeypatch):
+        _no_ssrf(monkeypatch)
+        oversized = b"x" * 5_000_000  # 5 MB >> MAX_RESPONSE_SIZE (50_000)
+        fake = _FakeAsyncClient(response=_FakeResponse(content=oversized))
+        _patch_httpx(monkeypatch, fake)
+        out = await web_fetch("https://example.com")
+        consumed = fake.last_response.bytes_consumed
+        # A bounded reader must stop near the cap, NOT pull all 5 MB.
+        assert consumed <= 60_000, f"expected bounded read, consumed {consumed} bytes"
+        # Still truncates (partial content), not a hard failure for the no-Content-Length path.
+        assert "response truncated" in out
+
+    async def test_content_length_precheck_rejects_without_consuming_body(self, monkeypatch):
+        _no_ssrf(monkeypatch)
+        oversized = b"x" * 5_000_000
+        fake = _FakeAsyncClient(response=_FakeResponse(content=oversized, headers={"Content-Length": "5000000"}))
+        _patch_httpx(monkeypatch, fake)
+        out = await web_fetch("https://example.com")
+        # Content-Length > MAX -> rejected BEFORE any body byte is pulled.
+        assert fake.last_response.bytes_consumed == 0
+        assert out.startswith("Error:")

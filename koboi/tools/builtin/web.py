@@ -12,11 +12,12 @@ back-compat (tests and the ``WEB_SEARCH_PROVIDER`` env path still import them fr
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import ipaddress
 import logging
 import os
 import re
 import socket
-import ipaddress
 from typing import cast
 from urllib.parse import urlparse
 
@@ -213,6 +214,18 @@ def _extract_html_content(text: str) -> str:
     return body
 
 
+async def _aclose_stream(stream_ctx: object) -> None:
+    """Best-effort close an ``AsyncClient.stream(...)`` context manager.
+
+    Used by ``web_fetch`` to release the streaming response as soon as the bounded
+    read is done or an error/redirect short-circuits the hop (CWE-400 / #56).
+    """
+    if stream_ctx is None:
+        return
+    with contextlib.suppress(Exception):
+        await stream_ctx.__aexit__(None, None, None)  # type: ignore[attr-defined]
+
+
 @tool(
     name="web_fetch",
     group="web",
@@ -258,6 +271,11 @@ async def web_fetch(url: str, timeout: int = 15, _deps: dict | None = None, _too
     # DNS/private-range check runs on EVERY hop (initial URL + each Location).
     # Blocks redirect-to-metadata (302 -> 169.254.169.254) and re-resolves DNS
     # per hop (defeats DNS rebinding). Redirects capped at MAX_REDIRECTS.
+    #
+    # CWE-400 / GHSA-qf8c-xp5r-p869 (#56): the body is read via a STREAMING
+    # request with a hard byte bound, so an oversized response cannot be fully
+    # buffered before the size limit is applied. The stream is opened per hop and
+    # closed the moment we redirect/retry/finish (try/finally below).
     MAX_REDIRECTS = 5
     async with httpx.AsyncClient(
         timeout=timeout,
@@ -265,69 +283,107 @@ async def web_fetch(url: str, timeout: int = 15, _deps: dict | None = None, _too
         headers={"User-Agent": USER_AGENT},
     ) as client:
         current_url = url
-        for _redir in range(MAX_REDIRECTS + 1):
-            try:
-                await asyncio.to_thread(_check_url_ssrf, str(current_url))
-            except socket.gaierror:
-                return f"Error: failed to resolve hostname '{urlparse(str(current_url)).hostname}'"
-            except ValueError as e:
-                return f"Error: {e}"
-
-            last_error = ""
-            for attempt in range(MAX_RETRIES + 1):
-                try:
-                    response = await client.get(current_url)
-                except httpx.ConnectError as e:
-                    return f"Error: connection failed -- {e}"
-                except httpx.TimeoutException:
-                    return f"Error: request timed out after {timeout}s"
-
-                if response.status_code < 400:
-                    break
-
-                if response.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
-                    last_error = f"HTTP {response.status_code}: {response.reason_phrase}"
-                    wait = 2**attempt
-                    _logger.warning(
-                        "Retrying %s (status %d, attempt %d/%d)",
-                        current_url,
-                        response.status_code,
-                        attempt + 1,
-                        MAX_RETRIES,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-
-                return f"Error: HTTP {response.status_code} -- {response.reason_phrase}"
-            else:
-                return f"Error: Max retries exceeded: {last_error}"
-
-            # Follow the redirect manually so the next hop is SSRF-checked.
-            if response.status_code in (301, 302, 303, 307, 308):
-                loc = response.headers.get("location")
-                if not loc:
-                    break
-                current_url = str(httpx.URL(current_url).join(loc))
-                continue
-            break
-        else:
-            return "Error: too many redirects"
-
-        raw = response.content[: MAX_RESPONSE_SIZE + 1]
-        truncated = len(response.content) > MAX_RESPONSE_SIZE
-
+        response = None
+        stream_ctx = None
+        buf = bytearray()
+        oversized = False
         try:
-            text = raw.decode("utf-8", errors="replace")
-        except Exception:
-            text = raw.decode("latin-1", errors="replace")
+            for _redir in range(MAX_REDIRECTS + 1):
+                try:
+                    await asyncio.to_thread(_check_url_ssrf, str(current_url))
+                except socket.gaierror:
+                    return f"Error: failed to resolve hostname '{urlparse(str(current_url)).hostname}'"
+                except ValueError as e:
+                    return f"Error: {e}"
 
-        if "html" in text[:500].lower():
-            text = _extract_html_content(text)
+                last_error = ""
+                for attempt in range(MAX_RETRIES + 1):
+                    try:
+                        cm = client.stream("GET", current_url)
+                        response = await cm.__aenter__()
+                        stream_ctx = cm  # track only after a successful enter
+                    except httpx.ConnectError as e:
+                        return f"Error: connection failed -- {e}"
+                    except httpx.TimeoutException:
+                        return f"Error: request timed out after {timeout}s"
 
-        if truncated:
-            text = text[:MAX_OUTPUT]
-            text += f"\n... (response truncated at {MAX_OUTPUT} chars, body exceeds {MAX_RESPONSE_SIZE} bytes)"
-        elif len(text) > MAX_OUTPUT:
-            text = text[:MAX_OUTPUT] + f"\n... (response truncated, total {len(text)} chars)"
+                    if response.status_code < 400:
+                        break  # success/redirect -- leave the stream OPEN for now
 
-        return text
+                    if response.status_code in RETRYABLE_STATUS and attempt < MAX_RETRIES:
+                        last_error = f"HTTP {response.status_code}: {response.reason_phrase}"
+                        wait = 2**attempt
+                        _logger.warning(
+                            "Retrying %s (status %d, attempt %d/%d)",
+                            current_url,
+                            response.status_code,
+                            attempt + 1,
+                            MAX_RETRIES,
+                        )
+                        await _aclose_stream(stream_ctx)
+                        stream_ctx = None
+                        response = None
+                        await asyncio.sleep(wait)
+                        continue
+
+                    err = f"Error: HTTP {response.status_code} -- {response.reason_phrase}"
+                    await _aclose_stream(stream_ctx)
+                    stream_ctx = None
+                    response = None
+                    return err
+                else:
+                    return f"Error: Max retries exceeded: {last_error}"
+
+                # Follow the redirect manually so the next hop is SSRF-checked.
+                if response.status_code in (301, 302, 303, 307, 308):
+                    loc = response.headers.get("location")
+                    if not loc:
+                        break  # no Location -> stop hopping; keep stream OPEN, read body below
+                    await _aclose_stream(stream_ctx)
+                    stream_ctx = None
+                    response = None
+                    current_url = str(httpx.URL(current_url).join(loc))
+                    continue
+                break  # 2xx success -> exit the redirect loop, stream stays OPEN
+            else:
+                return "Error: too many redirects"
+
+            # Content-Length pre-check: reject without consuming the body when the
+            # header itself declares an oversized payload.
+            cl = response.headers.get("Content-Length")
+            if cl is not None:
+                try:
+                    cl_int = int(cl)
+                except (TypeError, ValueError):
+                    cl_int = None
+                if cl_int is not None and cl_int > MAX_RESPONSE_SIZE:
+                    return f"Error: response too large ({cl_int} bytes exceeds {MAX_RESPONSE_SIZE} byte limit)"
+
+            # Bounded streaming read: STOP once the cap is crossed so the rest of
+            # the body is never pulled into memory.
+            async for chunk in response.aiter_bytes():
+                buf.extend(chunk)
+                if len(buf) > MAX_RESPONSE_SIZE:
+                    oversized = True
+                    break
+        finally:
+            await _aclose_stream(stream_ctx)
+
+    raw = bytes(buf[: MAX_RESPONSE_SIZE + 1])
+    truncated = oversized or len(buf) > MAX_RESPONSE_SIZE
+
+    try:
+        text = raw.decode("utf-8", errors="replace")
+    except Exception:
+        text = raw.decode("latin-1", errors="replace")
+
+    if "html" in text[:500].lower():
+        text = _extract_html_content(text)
+
+    if truncated:
+        text = text[:MAX_OUTPUT]
+        text += f"\n... (response truncated at {MAX_OUTPUT} chars, body exceeds {MAX_RESPONSE_SIZE} bytes)"
+    elif len(text) > MAX_OUTPUT:
+        text = text[:MAX_OUTPUT] + f"\n... (response truncated, total {len(text)} chars)"
+
+    return text

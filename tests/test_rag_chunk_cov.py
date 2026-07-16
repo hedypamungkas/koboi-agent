@@ -506,14 +506,42 @@ class TestSourceKeyAndName:
 
 
 class _FakeResponse:
+    """httpx.Response double -- supports eager ``.content`` AND streaming
+    ``iter_bytes()``, counting bytes the consumer pulled (``bytes_consumed``)."""
+
     def __init__(self, status_code, content=b"", headers=None):
         self.status_code = status_code
-        self.content = content
+        self._content = content
         self.headers = headers or {}
+        self.bytes_consumed = 0
+
+    @property
+    def content(self):
+        self.bytes_consumed += len(self._content)
+        return self._content
 
     def raise_for_status(self):
         if self.status_code >= 400:
             raise RuntimeError(f"HTTP {self.status_code}")
+
+    def iter_bytes(self, chunk_size=1024):
+        for i in range(0, len(self._content), chunk_size):
+            chunk = self._content[i : i + chunk_size]
+            self.bytes_consumed += len(chunk)
+            yield chunk
+
+
+class _FakeStreamCtx:
+    """Sync context manager backing ``Client.stream("GET", url)``."""
+
+    def __init__(self, response):
+        self._response = response
+
+    def __enter__(self):
+        return self._response
+
+    def __exit__(self, *a):
+        return False
 
 
 class _FakeClient:
@@ -524,6 +552,7 @@ class _FakeClient:
         self._by_url = responses_by_url or {}
         self._exc = exc
         self.get_calls = []
+        self.last_response = None
 
     def __enter__(self):
         return self
@@ -536,8 +565,14 @@ class _FakeClient:
         if self._exc is not None:
             raise self._exc
         if str(url) in self._by_url:
-            return self._by_url[str(url)]
-        return self._responses.pop(0) if self._responses else _FakeResponse(200, b"")
+            self.last_response = self._by_url[str(url)]
+            return self.last_response
+        self.last_response = self._responses.pop(0) if self._responses else _FakeResponse(200, b"")
+        return self.last_response
+
+    def stream(self, method, url, headers=None):
+        # Streaming path reuses the queueing/url-map logic of get().
+        return _FakeStreamCtx(self.get(url, headers=headers))
 
 
 class _FakeURL:
@@ -729,14 +764,29 @@ def _make_fake_s3_client(pages, objects, failing_keys=None):
     paginator = MagicMock()
     paginator.paginate = MagicMock(return_value=pages)
     client.get_paginator = MagicMock(return_value=paginator)
+    client.last_body = None
 
     def _get_object(Bucket, Key):
         if Key in failing_keys:
             raise RuntimeError("object fetch failed")
-        return {"Body": BytesIO(objects.get(Key, b""))}
+        body = _CountingS3Body(objects.get(Key, b""))
+        client.last_body = body
+        return {"Body": body}
 
     client.get_object = MagicMock(side_effect=_get_object)
     return client
+
+
+class _CountingS3Body:
+    """Wraps a BytesIO so a test can assert ``read(amt)`` was called with a bounded amt."""
+
+    def __init__(self, data):
+        self._buf = BytesIO(data)
+        self.read_calls: list[int | None] = []
+
+    def read(self, amt=None):
+        self.read_calls.append(amt)
+        return self._buf.read(amt)
 
 
 def _install_fake_boto3(monkeypatch, client_factory):
@@ -744,6 +794,77 @@ def _install_fake_boto3(monkeypatch, client_factory):
     fake_boto3.client = MagicMock(side_effect=client_factory)
     monkeypatch.setitem(sys.modules, "boto3", fake_boto3)
     return fake_boto3
+
+
+# --------------------------------------------------------------------------- #
+# CWE-400 / #56 -- stream-bound remote RAG sources (buffer-before-limit DoS)
+# --------------------------------------------------------------------------- #
+
+
+class TestFetchHttpSizeBound:
+    def test_bounded_read_raises_when_oversized_no_content_length(self, monkeypatch):
+        oversized = b"x" * 2_000_000
+        client = _FakeClient([_FakeResponse(200, oversized)])
+        _install_fake_httpx(monkeypatch, lambda **kw: client)
+        with pytest.raises(ValueError, match="too large"):
+            fetch_http("https://example.com/big", max_bytes=50_000)
+        # body read was bounded near the cap, NOT the full 2 MB
+        assert client.last_response.bytes_consumed <= 60_000
+
+    def test_content_length_precheck_rejects_without_consuming_body(self, monkeypatch):
+        client = _FakeClient([_FakeResponse(200, b"x" * 2_000_000, headers={"Content-Length": "2000000"})])
+        _install_fake_httpx(monkeypatch, lambda **kw: client)
+        with pytest.raises(ValueError, match="too large"):
+            fetch_http("https://example.com/big", max_bytes=50_000)
+        assert client.last_response.bytes_consumed == 0
+
+    def test_under_limit_returns_full_body(self, monkeypatch):
+        client = _FakeClient([_FakeResponse(200, b"small document")])
+        _install_fake_httpx(monkeypatch, lambda **kw: client)
+        data = fetch_http("https://example.com/doc", max_bytes=50_000)
+        assert data == b"small document"
+
+
+class TestFetchHttpEntrySizeBound:
+    def test_oversized_not_cached_not_yielded_and_bounded(self, monkeypatch, tmp_path):
+        oversized = b"x" * 2_000_000
+        client = _FakeClient([_FakeResponse(200, oversized)])
+        _install_fake_httpx(monkeypatch, lambda **kw: client)
+        cache = DocumentCache(str(tmp_path / "c"))
+        out = list(fetch_http_entry({"url": "https://example.com/big"}, cache, max_bytes=50_000))
+        assert out == []  # rejected -> not yielded
+        key = source_key({"source": "http", "url": "https://example.com/big"})
+        assert cache.get(key) is None  # never written to the on-disk cache
+        assert client.last_response.bytes_consumed <= 60_000  # bounded read
+
+
+class TestFetchS3EntrySizeBound:
+    def test_size_precheck_skips_get_object_for_oversized(self, monkeypatch, tmp_path):
+        cache = DocumentCache(str(tmp_path / "c"))
+        fake_client = _make_fake_s3_client(
+            pages=[{"Contents": [{"Key": "p/big", "Size": 5_000_000}]}],
+            objects={},
+        )
+        _install_fake_boto3(monkeypatch, client_factory=lambda *a, **kw: fake_client)
+        out = list(fetch_s3_entry({"bucket": "b", "key": "p/"}, cache, max_bytes=50_000))
+        assert out == []
+        fake_client.get_object.assert_not_called()  # Size metadata -> rejected before download
+        ckey = source_key({"source": "s3", "bucket": "b", "key": "p/big", "endpoint_url": "", "region": "auto"})
+        assert cache.get(ckey) is None  # not cached
+
+    def test_bounded_body_read_when_size_missing(self, monkeypatch, tmp_path):
+        cache = DocumentCache(str(tmp_path / "c"))
+        fake_client = _make_fake_s3_client(
+            pages=[{"Contents": [{"Key": "p/big"}]}],  # no Size metadata
+            objects={"p/big": b"x" * 60_000},  # > max_bytes but only 60 KB allocated
+        )
+        _install_fake_boto3(monkeypatch, client_factory=lambda *a, **kw: fake_client)
+        out = list(fetch_s3_entry({"bucket": "b", "key": "p/"}, cache, max_bytes=50_000))
+        assert out == []  # 60 KB > 50 KB cap -> rejected
+        # body.read() must be called with a bounded amt, not unbounded
+        assert fake_client.last_body is not None
+        assert fake_client.last_body.read_calls, "body.read was never called"
+        assert all(amt is not None and amt <= 50_001 for amt in fake_client.last_body.read_calls)
 
 
 class TestDocumentCache:

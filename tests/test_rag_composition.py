@@ -43,7 +43,7 @@ def _chunks():
 def test_ingestion_pipeline_http_parse_cache_sizecap(tmp_path, monkeypatch):
     calls = {"n": 0}
 
-    def fake_fetch(url, *, headers=None, timeout=None):
+    def fake_fetch(url, *, headers=None, timeout=None, max_bytes=None):
         calls["n"] += 1
         return b"<p>Refund window is 30 days</p>"  # HTML -> stripped to text
 

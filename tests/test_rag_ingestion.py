@@ -93,7 +93,7 @@ def test_local_file_glob_and_dir_still_load(tmp_path):
 def test_http_source_loads_parses_and_caches(tmp_path, monkeypatch):
     calls = {"n": 0}
 
-    def fake_fetch(url, *, headers=None, timeout=None):
+    def fake_fetch(url, *, headers=None, timeout=None, max_bytes=None):
         calls["n"] += 1
         return b"# Handbook\nRefund window is 30 days."
 
@@ -123,7 +123,7 @@ def test_http_source_loads_parses_and_caches(tmp_path, monkeypatch):
 
 
 def test_http_fetch_failure_skips_entry_no_crash(tmp_path, monkeypatch):
-    def boom(url, *, headers=None, timeout=None):
+    def boom(url, *, headers=None, timeout=None, max_bytes=None):
         raise RuntimeError("network down")
 
     monkeypatch.setattr(sources, "fetch_http", boom)
