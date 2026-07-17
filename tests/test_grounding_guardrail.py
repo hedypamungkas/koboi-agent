@@ -1,8 +1,8 @@
 """Tests for koboi.guardrails.grounding.GroundingGuardrail (Wave 2 A3).
 
 The guardrail is driven by a scripted side-LLM judge (no real API calls): the
-decompose call returns a JSON claim array, each NLI call returns SUPPORTED /
-UNSUPPORTED. Coverage math + the abstain decision + fail-soft are asserted.
+decompose call returns a JSON claim array, the batch-NLI call returns a JSON
+array of verdicts. Coverage math + the abstain decision + fail-soft are asserted.
 """
 
 from __future__ import annotations
@@ -42,9 +42,7 @@ class _BoomJudge:
 
 
 def _guard(judge=None, threshold: float = 0.8) -> GroundingGuardrail:
-    g = GroundingGuardrail(
-        provider="openai", model="gpt-4o-mini", api_key="x", threshold=threshold
-    )
+    g = GroundingGuardrail(provider="openai", model="gpt-4o-mini", api_key="x", threshold=threshold)
     if judge is not None:
         g._client = judge  # bypass lazy create_client
     return g
@@ -67,7 +65,7 @@ class TestGroundingGuardrail:
 
     async def test_high_coverage_passes(self):
         # 2 claims, both SUPPORTED -> coverage 1.0 >= 0.8 -> pass.
-        judge = _ScriptedJudge(['["a is x", "b is y"]', "SUPPORTED", "SUPPORTED"])
+        judge = _ScriptedJudge(['["a is x", "b is y"]', '["SUPPORTED", "SUPPORTED"]'])
         g = _guard(judge)
         result = await g.check("a is x. b is y.", context=["a is x", "b is y"])
         assert result.passed is True
@@ -75,7 +73,7 @@ class TestGroundingGuardrail:
 
     async def test_low_coverage_abstains(self):
         # 2 claims, 1 SUPPORTED -> coverage 0.5 < 0.8 -> abstain (refusal swap).
-        judge = _ScriptedJudge(['["a is x", "b is z"]', "SUPPORTED", "UNSUPPORTED"])
+        judge = _ScriptedJudge(['["a is x", "b is z"]', '["SUPPORTED", "UNSUPPORTED"]'])
         g = _guard(judge)
         result = await g.check("a is x. b is z.", context=["a is x"])
         assert result.passed is False
@@ -86,7 +84,7 @@ class TestGroundingGuardrail:
 
     async def test_threshold_is_configurable(self):
         # Same 0.5 coverage passes when threshold is lowered to 0.5.
-        judge = _ScriptedJudge(['["a", "b"]', "SUPPORTED", "UNSUPPORTED"])
+        judge = _ScriptedJudge(['["a", "b"]', '["SUPPORTED", "UNSUPPORTED"]'])
         g = _guard(judge, threshold=0.5)
         result = await g.check("a. b.", context=["a"])
         assert result.passed is True
@@ -100,10 +98,19 @@ class TestGroundingGuardrail:
 
     async def test_fail_soft_on_bad_json_decompose(self):
         # Non-JSON decompose output -> fallback line-split; the check still completes.
-        judge = _ScriptedJudge(["not json at all", "SUPPORTED"])
+        judge = _ScriptedJudge(["not json at all", '["SUPPORTED"]'])
         g = _guard(judge)
         result = await g.check("answer", context=["ctx"])
         assert result.passed is True  # 1 claim (the line), SUPPORTED -> 1.0
+
+    async def test_batch_nli_fallback_on_bad_json(self):
+        # Batch NLI returns non-JSON -> falls back to per-claim NLI (2nd + 3rd calls).
+        judge = _ScriptedJudge(['["a", "b"]', "not json", "SUPPORTED", "UNSUPPORTED"])
+        g = _guard(judge)
+        result = await g.check("a. b.", context=["a"])
+        assert result.passed is False  # 1 SUPPORTED of 2 -> 0.5 < 0.8
+        assert g.last_coverage == 0.5
+        assert judge.calls == 4  # decompose + batch (failed) + 2 per-claim fallback
 
     async def test_client_build_failure_passes(self):
         # Unknown provider -> create_client raises -> _get_client returns None -> pass.
@@ -131,15 +138,13 @@ class TestGroundingGuardrailIntegration:
         from tests.conftest import MockClient, make_mock_response
 
         # The agent LLM returns a hallucination; the judge marks 1/2 claims unsupported.
-        judge = _ScriptedJudge(['["acme ceo is john", "acme revenue is 9bn"]', "SUPPORTED", "UNSUPPORTED"])
+        judge = _ScriptedJudge(['["acme ceo is john", "acme revenue is 9bn"]', '["SUPPORTED", "UNSUPPORTED"]'])
         guard = _guard(judge, threshold=0.8)
 
         class _FakeAug:
             # Non-empty last_results so the loop threads a non-empty context to the
             # guardrail (otherwise the cost-gate passes and no judge call happens).
-            last_results = [
-                RetrievalResult(Chunk(id="c1", doc_id="d", content="Acme CEO is John."), 0.9, "keyword")
-            ]
+            last_results = [RetrievalResult(Chunk(id="c1", doc_id="d", content="Acme CEO is John."), 0.9, "keyword")]
             last_rewrite = None
 
             async def augment_for_memory(self, user_message: str) -> str:
