@@ -1,20 +1,16 @@
-# configs/self_healing_demo.yaml -- self-healing P1 (ReflectionHook) demo.
+# configs/self_healing_demo.yaml -- self-healing P0-P4 complete demo.
 #
-# Opt-in verifier-grounded reflection (see docs/self-healing-feasibility.md §P1):
-#   - Low-grounding answers (coverage < 0.6) are critiqued by a side-LLM and
-#     re-attempted (bounded by max_turns) BEFORE the grounding guardrail's abstain
-#     refusal stands.
-#   - Repeated identical tool failures (>= repeat_threshold) are critiqued with an
-#     actionable "try a different approach" note.
+# Demonstrates the full self-healing stack: verifier-grounded reflection (P1),
+# escalation ladder (P2a), graceful degrade (P3), and CRITIC tool-verification (P4).
+# Requires `grounding_check` (the verifier) + `handover.detection` (the terminal rung).
 #
-# Requires a `grounding_check` output guardrail (the verifier). The critic reuses
-# the agent's main client unless `critic_llm` names a top-level `providers:` entry.
-#
-#   koboi run configs/self_healing_demo.yaml -m "What is Acme's return policy?"
+#   python examples/36_self_healing_demo.py --mock    # offline scripted demo
+#   OPENAI_API_KEY=... python examples/36_self_healing_demo.py  # real LLM
 
 agent:
   name: self-healing-demo
   max_iterations: 8
+  mode: act                    # act+ required for the ladder's escalation gate
   system_prompt: |
     You are a careful assistant. Only make claims you can ground in the provided
     context; hedge when you cannot. Use tools when needed.
@@ -26,8 +22,15 @@ llm:
 
 rag:
   enabled: true
+  chunker: sentence
+  chunk_size: 400
+  retriever: bm25
+  top_k: 10
+  stopwords: true
+  augmentation: on_the_fly
   documents:
     - path: "./data/sample/company_policy.md"
+    - path: "./data/sample/employee_handbook.md"
     - path: "./data/sample/product_catalog.md"
 
 guardrails:
@@ -36,16 +39,30 @@ guardrails:
       provider: openai
       model: ${KOBOI_MODEL:gpt-4o-mini}
       api_key: ${OPENAI_API_KEY:}
+      base_url: ${OPENAI_BASE_URL:}
       threshold: 0.8
 
-# Self-healing P1 (opt-in). Default OFF across the framework; enabled here.
+# Enables the ladder's terminal rung (escalate-to-human on budget exhaustion).
+handover:
+  detection:
+    enabled: true
+    coverage_threshold: 0.5
+  digest:
+    enabled: true              # B4 warm-handoff summary
+
+# Self-healing P0-P4 (opt-in). All features enabled here for the demo.
 self_healing:
   enabled: true
-  max_turns: 3
+  max_turns: 3                 # shared reflection retry budget
   fail_soft: true
-  # critic_llm: primary   # uncomment to use a named `providers:` entry as the critic
+  graceful_max_iter: true      # P3: graceful degrade on max_iterations
   triggers:
     tool_error:
       repeat_threshold: 2
     low_grounding:
       threshold: 0.6
+  tool_verification:            # P4 CRITIC (top-level self_healing field, NOT under triggers)
+    enabled: true
+    tools: [calculate, web_search]
+    max_claims: 5
+  ladder: {}                   # default: grounding -> reflect -> handover
