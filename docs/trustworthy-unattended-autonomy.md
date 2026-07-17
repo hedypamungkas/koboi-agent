@@ -4,8 +4,8 @@
 > No peer agent framework combines all four at the library level.
 
 koboi-agent is a YAML-driven, async-Python, multi-provider AI agent framework. Its
-defensible position is **not** feature breadth (RAG is in-process, MCP is
-static-Bearer today) — it is the integration of capabilities that make an agent
+defensible position is **not** feature breadth (RAG is in-process, MCP auth is
+static-Bearer or OAuth2 client-credentials only) — it is the integration of capabilities that make an agent
 safe to leave running unattended, shipped together at the framework core.
 
 ## The five moats
@@ -79,8 +79,10 @@ skills at the framework core, with Python 3.10+ multi-provider breadth.
   a scale claim, not part of the unattended-autonomy wedge.
 - **RAG is in-process** (no vector DB; fs-only document source). Adequate for the
   autonomy wedge; a production-RAG tier is a separate track.
-- **MCP is static-Bearer only** (no OAuth flow; remote MCP catalogs need manual
-  token minting). OAuth 2.1 is the next MCP increment.
+- **MCP auth is static-Bearer or OAuth2 client-credentials** (token refresh + 401
+  recovery in `koboi/mcp/auth.py`); authorization-code / user-delegated flows
+  aren't supported yet, so remote MCP servers requiring interactive user consent
+  still need a manually minted token.
 
 *Star counts and competitor version numbers are point-in-time snapshots; GitHub
 restricted the stargazers API on 2026-06-30, so growth-rate comparisons are
