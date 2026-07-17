@@ -61,7 +61,6 @@ memory:
 sandbox:
   backend: restricted
   workdir: /data/workspace
-  workdir_strategy: per_session
   network: deny
   network_isolation: seccomp            # HARD egress deny via seccomp (needs python3-seccomp system package + Linux)
   timeout: 30
@@ -160,7 +159,6 @@ jobs:
   enabled: true
   max_concurrent: 32
   queue_depth: 16
-  default_dedicated_session: true
   resume_on_startup: true
   timeout_seconds: 1800
   ttl_seconds: 86400

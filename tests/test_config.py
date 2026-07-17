@@ -311,6 +311,45 @@ class TestConfigValidation:
         )
         assert not any("not recognized" in r.message for r in caplog.records)
 
+    def test_llm_pool_key_no_warning(self, caplog):
+        # ``llm: {pool: name}`` is the documented Tier-2 entry point (resolve.py);
+        # it must NOT trigger the "Unknown llm: key 'pool' is not recognized" warning.
+        caplog.set_level(logging.WARNING)
+        Config.from_dict(
+            {"agent": {"name": "x"}, "llm": {"pool": "main"}, "pools": {"main": {"members": []}}}
+        )
+        msgs = [r.message for r in caplog.records]
+        assert not any("pool" in m and "not recognized" in m for m in msgs)
+
+    def test_passthrough_sections_no_unknown_warning_and_preserved_in_to_dict(self, caplog):
+        # ``providers``/``pools``/``replay``/``eval``/``subagent``/``keybindings`` are
+        # read at runtime via config.<key> accessors; they must NOT trip the top-level
+        # "Unknown config key" warning, AND must survive in to_dict() (#3 + #11).
+        caplog.set_level(logging.WARNING)
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "x"},
+                "llm": {"provider": "openai", "model": "m"},
+                "providers": {"p1": {"provider": "openai", "model": "gpt", "api_key": "k"}},
+                "pools": {"main": {"members": ["p1"]}},
+                "replay": {"mode": "cache", "cache_dir": "/tmp/c"},
+                "eval": {"suite": "t"},
+                "subagent": {"max_concurrency": 4},
+                "keybindings": {"exit": "ctrl+q"},
+            }
+        )
+        unknown = [r for r in caplog.records if "Unknown config key" in r.message]
+        assert not any(
+            k in r.message for r in unknown for k in ("providers", "pools", "replay", "eval", "subagent", "keybindings")
+        )
+        d = cfg.to_dict()
+        assert "providers" in d and d["providers"]["p1"]["model"] == "gpt"
+        assert "pools" in d and d["pools"]["main"]["members"] == ["p1"]
+        assert "replay" in d and d["replay"]["mode"] == "cache"
+        assert "eval" in d and d["eval"]["suite"] == "t"
+        assert "subagent" in d and d["subagent"]["max_concurrency"] == 4
+        assert "keybindings" in d and d["keybindings"]["exit"] == "ctrl+q"
+
     def test_unknown_orchestration_agent_llm_key_warns(self, caplog):
         # A typo in an orchestration agent's llm_config must warn too -- the exact
         # path the per-agent llm_config feature resurrected. max_context_tokens is

@@ -206,8 +206,6 @@ class ResearchConfig(BaseModel):
     # Optional override of the research node tool bundle (default: web_search + web_fetch).
     tools: dict | None = None
     capabilities: list[str] = Field(default_factory=list)
-    search_provider: str | None = None
-    fetch_provider: str | None = None
     # W3: path to write the run's gathered findings as jsonl (cross-session corpus reuse).
     persist_findings: str | None = None
     media: dict = Field(default_factory=dict)
@@ -482,20 +480,58 @@ class SandboxConfig(BaseModel):
 
     ``passthrough`` (default) preserves pre-P0b behavior; ``restricted`` adds
     cwd/env/PATH/network/rlimit containment. Docker (P0c) is deferred.
+    ``network_isolation`` opts into HARD syscall-layer egress deny (Linux +
+    ``python3-seccomp``); fail-closed on any value outside the allowlist.
     """
 
     model_config = {"extra": "ignore"}
 
     backend: str = "passthrough"
     workdir: str = "."
-    workdir_strategy: str = "shared"  # "shared" (legacy global) | "per_session" (M1 serving)
     network: str = "deny"
+    # HARD egress-deny knob consumed at koboi/facade.py:1797 + sandbox/restricted.py.
+    # None = soft token-scan (default); ``seccomp``/``seccomp_strict`` = syscall-layer.
+    network_isolation: str | None = None
+    # Per-session workdir is seeded as a git repo when true (read at pool.py:194).
+    git_init: bool = False
     network_binaries: list[str] = Field(default_factory=list)
     safe_path: list[str] = Field(default_factory=list)
     env_passthrough: bool = False
     rlimits: RlimitsConfig | None = None
     timeout: float = Field(default=30.0, gt=0)
     max_output: int = Field(default=10000, ge=1)
+
+    @field_validator("network_isolation")
+    @classmethod
+    def _validate_network_isolation(cls, v: str | None) -> str | None:
+        # Fail-closed: an unrecognized value (e.g. a typo ``seccop``) MUST raise
+        # rather than silently fall back to soft isolation -- operators selecting
+        # seccomp are asserting a HARD-egress security invariant.
+        if v is None:
+            return None
+        allowed = {"seccomp", "seccomp_strict"}
+        if v not in allowed:
+            raise ValueError(f"sandbox.network_isolation must be one of {sorted(allowed)} (or unset); got {v!r}")
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_unknown_sandbox_keys(cls, data: dict) -> dict:
+        # Surface key-name typos (e.g. ``network_isolaton``) that ``extra='ignore'``
+        # would otherwise silently drop. Fail-closed on typos to match the value-typo
+        # behavior (e.g. ``network_isolation: seccop`` raises ValueError).
+        if isinstance(data, dict):
+            known = set(cls.model_fields.keys())
+            unknown = set(data.keys()) - known
+            if unknown:
+                # Suggest the closest known field if plausible
+                suggestions = sorted(known)
+                err_msg = f"Unknown sandbox config key(s) {sorted(unknown)} (typo?). Known keys: {suggestions}."
+                # Common typo: network_isolaton -> network_isolation
+                if "network_isolaton" in unknown:
+                    err_msg += " Did you mean 'network_isolation'?"
+                raise ValueError(err_msg)
+        return data
 
 
 class JournalConfig(BaseModel):
@@ -513,11 +549,16 @@ class JournalConfig(BaseModel):
 
 
 class ServerConfig(BaseModel):
-    """Top-level ``server:`` section -- REST/SSE serving (M0 skeleton; M1+ wiring).
+    """Top-level ``server:`` section -- REST/SSE serving (fully wired).
 
-    M0 ships the schema only; no runtime code reads it yet. Nested groups
-    (``pool``/``timeouts``/``limits``/``cors``/``idempotency``) are dicts now and
-    are promoted to typed sub-models as each is consumed in M1+.
+    Runtime reads via dotted-path ``config.get("server", ...)`` throughout
+    ``koboi/server/app.py``: ``host``/``port`` (bind), ``auth_required`` + ``api_keys`` +
+    ``api_keys_file`` (KeyStore), ``docs_enabled`` (OpenAPI exposure), ``workdir_ttl_seconds``
+    (per-session workdir GC), ``allowed_modes`` + ``limits.max_iterations_cap`` (per-request
+    G2 knobs), ``timeouts.drain_seconds`` (graceful drain), ``idempotency.chat_ttl_seconds``
+    + ``max_entries`` (IdempotencyRegistry), ``limits.session_event_buffer`` /
+    ``session_streams_per_owner`` / ``chat_queue_maxsize`` / ``job_streams_per_owner``
+    (admission), ``cors`` (middleware). Nested groups stay dicts (promoted lazily).
     """
 
     model_config = {"extra": "ignore"}
@@ -559,10 +600,15 @@ class JobWebhookConfig(BaseModel):
 
 
 class JobsConfig(BaseModel):
-    """Top-level ``jobs:`` section -- background/autonomous job runner (M0 skeleton; M4 wiring).
+    """Top-level ``jobs:`` section -- background/autonomous job runner (fully wired).
 
-    Drives long-running agent runs outside the request lifecycle with
-    resume-on-startup durability. M0 ships the schema only.
+    Runtime reads via dotted-path ``config.get("jobs", ...)`` in ``koboi/server/app.py``
+    (registration + admission) and ``koboi/server/jobs.py`` (execution): ``max_concurrent``
+    + ``per_tenant_max`` + ``queue_depth`` (admission caps, race-free via
+    ``JobRegistry.reserve_admit``), ``timeout_seconds`` (per-job wall clock), ``ttl_seconds``
+    (retention), ``event_buffer.max_events`` (in-memory event cap), ``webhooks`` (HMAC-signed
+    terminal-status callbacks), ``resume_on_startup`` (crash recovery). Dedicated sessions
+    are unconditional at ``app.py`` submit (``body.session_id or pool.new_session_id()``).
     """
 
     model_config = {"extra": "ignore"}
@@ -571,7 +617,6 @@ class JobsConfig(BaseModel):
     max_concurrent: int = Field(default=64, ge=1)
     per_tenant_max: int = Field(default=5, ge=1)
     queue_depth: int = Field(default=32, ge=1)
-    default_dedicated_session: bool = True
     event_buffer: dict = Field(default_factory=dict)
     resume_on_startup: bool = True
     timeout_seconds: float = Field(default=1800.0, gt=0)
@@ -687,6 +732,16 @@ class KoboiConfig(BaseModel):
     peers: PeersConfig = Field(default_factory=PeersConfig)
     self_healing: SelfHealingConfig = Field(default_factory=SelfHealingConfig)
     handover: dict = Field(default_factory=dict)  # handover.detection / handover.digest / handover.webhooks
+    # Pass-through sections read at runtime via ``config.get(<key>, ...)`` but not
+    # (yet) promoted to typed sub-models. Declaring them keeps ``_warn_unknown_keys``
+    # from falsely flagging them as typos AND makes ``to_dict()``/``model_dump()``
+    # preserve them (issue #11). Each is consumed in ``koboi/config.py`` accessors.
+    providers: dict = Field(default_factory=dict)  # named provider specs (Tier 1/2); config.providers
+    pools: dict = Field(default_factory=dict)  # named provider pools (Tier 2/W2); config.pools
+    eval: dict = Field(default_factory=dict)  # eval-suite config; config.eval
+    subagent: dict = Field(default_factory=dict)  # sub-agent delegation knobs; config.subagent
+    keybindings: dict = Field(default_factory=dict)  # TUI keybindings; config.keybindings
+    replay: dict = Field(default_factory=dict)  # {mode, cache_dir}; config.replay / with_replay()
 
     @model_validator(mode="before")
     @classmethod

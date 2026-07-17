@@ -1,4 +1,4 @@
-"""Tests for server/jobs config skeleton + sandbox.workdir_strategy (M0 16.6)."""
+"""Tests for server/jobs config schema + sandbox.network_isolation (M0 16.6)."""
 
 from __future__ import annotations
 
@@ -64,19 +64,38 @@ class TestServerJobsConfig:
             Config.builder()
             .agent(name="t")
             .llm(model="m")
-            .jobs(max_concurrent=16, default_dedicated_session=False)
+            .jobs(max_concurrent=16, ttl_seconds=3600)
             .build()
         )
         assert cfg.jobs["max_concurrent"] == 16
-        assert cfg.jobs["default_dedicated_session"] is False
+        assert cfg.jobs["ttl_seconds"] == 3600
+        # default_dedicated_session was removed (dead -- dedicated is unconditional at app.py submit)
+        assert "default_dedicated_session" not in cfg.jobs
 
-    def test_sandbox_workdir_strategy_default(self):
+    def test_sandbox_network_isolation_default(self):
         cfg = Config.from_dict(_base(), validate=True)
-        assert cfg.schema.sandbox.workdir_strategy == "shared"
+        assert cfg.schema.sandbox.network_isolation is None
 
-    def test_sandbox_workdir_strategy_parses(self):
-        cfg = Config.from_dict({**_base(), "sandbox": {"workdir_strategy": "per_session"}}, validate=True)
-        assert cfg.schema.sandbox.workdir_strategy == "per_session"
+    def test_sandbox_network_isolation_parses(self):
+        cfg = Config.from_dict({**_base(), "sandbox": {"network_isolation": "seccomp"}}, validate=True)
+        assert cfg.schema.sandbox.network_isolation == "seccomp"
+        cfg2 = Config.from_dict({**_base(), "sandbox": {"network_isolation": "seccomp_strict"}}, validate=True)
+        assert cfg2.schema.sandbox.network_isolation == "seccomp_strict"
+
+    def test_sandbox_network_isolation_invalid_value_rejected(self):
+        # Fail-closed: a typo value (e.g. ``seccop``) MUST raise, not silently fall back.
+        import pytest
+
+        with pytest.raises(ValueError):
+            Config.from_dict({**_base(), "sandbox": {"network_isolation": "seccop"}}, validate=True)
+
+    def test_sandbox_unknown_key_raises(self):
+        # A key-name typo (e.g. ``network_isolaton``) MUST raise (fail-closed to
+        # match value-typo behavior; extra='ignore' would otherwise silently drop it).
+        import pytest
+
+        with pytest.raises(ValueError, match=r"(network_isolat|Unknown sandbox)"):
+            Config.from_dict({**_base(), "sandbox": {"network_isolaton": "seccomp"}}, validate=True)
 
     def test_no_unknown_key_warning_for_server_jobs(self, caplog):
         # server/jobs are now declared top-level keys -> no "Unknown config key" warning.
