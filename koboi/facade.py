@@ -1709,8 +1709,9 @@ def _build_command_hooks(config: Config, sandbox: BaseSandbox, hook_chain) -> No
 
     # R4: seccomp hard-blocks all egress -> messaging/forwarding hooks (uvx /
     # WhatsApp / Telegram) would fail. Warn (don't hard-fail) so non-network hooks
-    # remain usable.
-    if config.get("sandbox", "network_isolation", default=None) == "seccomp":
+    # remain usable. Both ``seccomp`` and ``seccomp_strict`` apply the same egress
+    # filter, so the warning must fire for either value.
+    if config.get("sandbox", "network_isolation", default=None) in ("seccomp", "seccomp_strict"):
         log.warning(
             "hooks: command hooks are configured with sandbox.network_isolation='seccomp', "
             "which hard-blocks all network egress -- messaging/forwarding hooks will fail. "

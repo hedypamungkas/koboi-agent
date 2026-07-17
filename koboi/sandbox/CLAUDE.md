@@ -32,12 +32,18 @@ __init__.py    Re-exports register_sandbox, build_sandbox, BaseSandbox; calls re
   - *Soft* (default): token-scan deny of obvious egress binaries (`curl`/`wget`/etc. via
     `network_binaries`). SOFT -- does NOT block interpreters (`python3 -c 'import urllib'`)
     or shell builtins (`bash /dev/tcp`).
-  - *Hard* (`network_isolation: seccomp`): syscall-layer deny of `connect`/`connectat`/
-    `sendto`/`sendmsg` via a seccomp filter applied in the child (preexec_fn) that
-    persists across execve. Blocks interpreters + builtins too. Linux-only + requires the
-    `python3-seccomp` system package (`apt install python3-seccomp` (Debian/Ubuntu)); gated by
-    `_HAS_SECCOMP` and degrades to soft with a one-time warning if unavailable.
-    `server_deploy.yaml` / `e2e_full.yaml` enable this by default.
+  - *Hard* (`network_isolation: seccomp` | `seccomp_strict`): syscall-layer deny of
+    `connect`/`sendto`/`sendmsg`/`sendmmsg` via a seccomp filter applied in the
+    child (preexec_fn) that persists across execve. Blocks interpreters + builtins too.
+    Linux-only + requires the `python3-seccomp` system package (`apt install python3-seccomp`
+    (Debian/Ubuntu)); gated by `_HAS_SECCOMP`. The installer is FAIL-CLOSED (issue #51): a
+    per-syscall `add_rule` failure or unresolvable deny action raises rather than loading a
+    default-ALLOW filter. Two modes:
+    - `seccomp` (legacy, back-compat): if unavailable, degrades to soft with a one-time
+      warning. `server_deploy.yaml` / `e2e_full.yaml` enable this by default.
+    - `seccomp_strict` (opt-in): if unavailable, RAISES at construction (fail-closed at boot)
+      -- use when the operator has arranged Linux + bindings (or the Dockerfile build stage)
+      and wants the sandbox to refuse boot rather than silently degrade.
 - **rlimits**: optional cpu/as_mb/fsize_mb/nofile caps (applied in the child via preexec_fn;
   the seccomp filter shares the same preexec_fn, which is now built whenever rlimits OR
   seccomp is active -- not rlimits-only).

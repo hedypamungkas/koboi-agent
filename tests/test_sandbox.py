@@ -16,6 +16,7 @@ from koboi.sandbox.restricted import (
     NETWORK_ENV_BLOCKLIST,
     RestrictedProcessBackend,
     _HAS_SECCOMP,
+    _SECCOMP_EGRESS_SYSCALLS,
 )
 from koboi.sandbox.registry import build_sandbox, register_sandbox, sandbox_registry
 
@@ -481,3 +482,150 @@ class TestSeccompEgress:
         r = sb.run("echo ok", shell=True)
         assert r.returncode == 0
         assert "ok" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# Issue #51: seccomp installer must FAIL CLOSED (mock-based, macOS-safe)
+# ---------------------------------------------------------------------------
+
+
+def _build_fake_seccomp(*, errno_raises=False, has_kill=True, kill_value=None, fail_add_for=None):
+    """Build a fake ``seccomp`` module to inject via ``sys.modules``.
+
+    Mirrors how the real python3-seccomp binding is consumed inside the child
+    ``_install`` closure (module-level ALLOW/ERRNO/KILL + ``SyscallFilter``).
+    Records every created filter instance on ``mod._instances`` so tests can
+    assert which rules landed and whether ``load()`` fired.
+
+    - errno_raises: ``seccomp.ERRNO(...)`` raises TypeError (simulates old bindings).
+    - has_kill: when False the module has NO ``KILL`` attr (``getattr`` -> None).
+    - kill_value: explicit KILL value (defaults to a sentinel); ignored if has_kill False.
+    - fail_add_for: iterable of syscall names whose ``add_rule`` raises RuntimeError.
+    """
+    import types
+
+    mod = types.ModuleType("seccomp")
+    mod.ALLOW = ("Action", "ALLOW")
+
+    if errno_raises:
+
+        def _errno(*args, **kwargs):
+            raise TypeError("an integer is required")
+
+    else:
+
+        def _errno(*args, **kwargs):
+            return ("Action", "ERRNO", args[0] if args else None)
+
+    mod.ERRNO = _errno
+
+    if has_kill:
+        mod.KILL = kill_value if kill_value is not None else ("Action", "KILL")
+
+    fail = set(fail_add_for) if fail_add_for else set()
+    instances: list = []
+    mod._instances = instances
+
+    class _Filter:
+        def __init__(self, *args, **kwargs):
+            self.rules: list[tuple] = []
+            self.loaded = False
+            instances.append(self)
+
+        def add_rule(self, action, sc, *args, **kwargs):
+            if sc in fail:
+                raise RuntimeError(f"fake: unrecognized syscall '{sc}' on this kernel/arch")
+            self.rules.append((action, sc))
+
+        def load(self):
+            self.loaded = True
+
+    mod.SyscallFilter = _Filter
+    return mod
+
+
+class TestSeccompInstallerFailClosed:
+    """Issue #51: the seccomp installer must FAIL CLOSED, not silently permit egress.
+
+    The old ``_install`` closure swallowed per-syscall ``add_rule`` failures
+    (``except ...: pass``) and called ``f.load()`` unconditionally -- so if the
+    critical ``connect`` rule failed to add, a default-ALLOW filter loaded and
+    egress was PERMITTED while the backend reported success. Also covers the new
+    ``seccomp_strict`` opt-in (fail-closed at boot when seccomp is unavailable)
+    and the broadened egress syscall set (``sendmmsg``).
+    """
+
+    def test_add_rule_failure_raises_not_swallows(self, tmp_path, monkeypatch):
+        # Fake seccomp whose add_rule raises for "connect" only.
+        fake = _build_fake_seccomp(fail_add_for={"connect"})
+        monkeypatch.setitem(sys.modules, "seccomp", fake)
+        monkeypatch.setattr("koboi.sandbox.restricted._HAS_SECCOMP", True)
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        assert sb._seccomp_preexec is not None
+        # MUST raise rather than swallow + load a default-ALLOW filter.
+        with pytest.raises(RuntimeError, match="connect"):
+            sb._seccomp_preexec()
+
+    def test_seccomp_strict_raises_when_unavailable(self, tmp_path, monkeypatch):
+        # seccomp_strict must fail-closed at BOOT when seccomp is unavailable.
+        monkeypatch.setattr("koboi.sandbox.restricted._HAS_SECCOMP", False)
+        with pytest.raises(RuntimeError, match="seccomp_strict"):
+            RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp_strict")
+
+    def test_legacy_seccomp_still_soft_degrades(self, tmp_path, monkeypatch):
+        # Back-compat guard: legacy "seccomp" + unavailable KEEPS soft-degrade
+        # (shipped configs must not break). This is GREEN today and must stay green.
+        monkeypatch.setattr("koboi.sandbox.restricted._HAS_SECCOMP", False)
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        assert sb._seccomp_preexec is None
+
+    def test_sendmmsg_in_egress_deny_set(self):
+        # The egress tuple was missing sendmmsg (Issue #51).
+        assert "sendmmsg" in _SECCOMP_EGRESS_SYSCALLS
+
+    def test_connectat_absent_from_egress_set(self):
+        # connectat is NOT a Linux syscall (FreeBSD/Solaris-only; absent from
+        # libseccomp's table). The old installer swallowed its add_rule failure
+        # (silent no-op); the new fail-closed installer makes add_rule failures
+        # FATAL, so keeping connectat would break ALL seccomp execution on Linux.
+        # Regression guard: connectat must never be re-added to the tuple.
+        assert "connectat" not in _SECCOMP_EGRESS_SYSCALLS
+
+    def test_sendmmsg_actually_denied(self, tmp_path, monkeypatch):
+        # Wire a non-failing fake filter; every primary egress syscall must be denied.
+        fake = _build_fake_seccomp()
+        monkeypatch.setitem(sys.modules, "seccomp", fake)
+        monkeypatch.setattr("koboi.sandbox.restricted._HAS_SECCOMP", True)
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        sb._seccomp_preexec()
+        assert fake._instances, "SyscallFilter was never constructed"
+        f = fake._instances[-1]
+        denied = {sc for (_act, sc) in f.rules}
+        assert {"connect", "sendto", "sendmsg", "sendmmsg"} <= denied
+        assert f.loaded is True
+
+    def test_none_deny_action_does_not_load_filter(self, tmp_path, monkeypatch):
+        # ERRNO raises TypeError AND KILL resolves to None -> deny is None.
+        # Old code skipped the rule loop but STILL called f.load() (default-ALLOW
+        # filter -> silent egress). Fix must raise AND not load the filter.
+        fake = _build_fake_seccomp(errno_raises=True, has_kill=False)
+        monkeypatch.setitem(sys.modules, "seccomp", fake)
+        monkeypatch.setattr("koboi.sandbox.restricted._HAS_SECCOMP", True)
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        with pytest.raises(RuntimeError):
+            sb._seccomp_preexec()
+        if fake._instances:
+            assert fake._instances[-1].loaded is False
+
+    def test_install_failure_surfaces_as_nonzero_sandbox_result(self, tmp_path, monkeypatch):
+        # End-to-end: a preexec_fn RuntimeError (seccomp installer refusing to load
+        # a default-ALLOW filter) must surface via run() as a non-zero SandboxResult
+        # (fail-closed), NOT an uncaught exception that crashes the agent loop.
+        # The fake seccomp is inherited across fork; _install runs in the child.
+        fake = _build_fake_seccomp(fail_add_for={"connect"})
+        monkeypatch.setitem(sys.modules, "seccomp", fake)
+        monkeypatch.setattr("koboi.sandbox.restricted._HAS_SECCOMP", True)
+        sb = RestrictedProcessBackend(workdir=str(tmp_path), network="deny", network_isolation="seccomp")
+        r = sb.run("echo ok", shell=True)
+        assert r.returncode == 126
+        assert "fail-closed" in r.stderr

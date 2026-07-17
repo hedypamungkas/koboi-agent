@@ -1,19 +1,43 @@
-FROM python:3.12-slim AS base
-
-# System deps for sandbox (restricted backend uses subprocess + rlimits).
-#
-# NOTE on HARD network isolation (sandbox.network_isolation: seccomp): the
-# libseccomp Python bindings are NOT on PyPI and apt's `python3-seccomp` targets
-# debian's python3 (3.11), not this image's `/usr/local/bin/python3.12`, so
-# `import seccomp` is not wired up here by default -- the sandbox gracefully
-# falls back to SOFT network deny (one-time warning) in this image. To enable
-# HARD isolation, either build the bindings from libseccomp source for this
-# Python, or derive FROM a debian/ubuntu base where the runtime python3 matches
-# `apt install python3-seccomp`. Tracked as a follow-up.
+# ---- seccomp-builder: compile libseccomp Python bindings for /usr/local/bin/python3.12 ----
+# The libseccomp bindings are NOT on PyPI, and apt's `python3-seccomp` targets
+# debian's system python3 (3.11), NOT this image's `/usr/local/bin/python3.12`.
+# So `import seccomp` would otherwise fail in the runtime image and the sandbox
+# would silently fall back to SOFT network deny (token-scan only). To make HARD
+# syscall-layer egress deny actually available we build the bindings from the
+# upstream libseccomp source against the image's own Python (issue #51).
+FROM python:3.12-slim AS seccomp-builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         git \
+        libseccomp-dev \
+        cython3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir cython \
+    && pip install --no-cache-dir git+https://github.com/seccomp/libseccomp@v2.5.5#subdirectory=src/python
+
+# ---- base: runtime image ----
+FROM python:3.12-slim AS base
+
+# System deps for sandbox (restricted backend uses subprocess + rlimits).
+# libseccomp2 is the runtime shared lib the bindings link against.
+#
+# NOTE on HARD network isolation (sandbox.network_isolation: seccomp): HARD
+# syscall-layer egress deny now WORKS in this image -- the seccomp-builder stage
+# above compiles the libseccomp Python bindings for /usr/local/bin/python3.12 and
+# we COPY them in below, guarded by a build-time smoke check. (Issue #51: the
+# installer is also fail-closed, so `network_isolation: seccomp_strict` will
+# refuse to boot if the bindings are ever missing rather than silently soft-
+# degrading.) HARD isolation still requires a Linux kernel (containers run Linux);
+# on a non-Linux host set `seccomp_strict` to fail-closed or `seccomp` to soft-
+# degrade. For full OS-level isolation (filesystem too), use the Docker backend.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        git \
+        libseccomp2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Land the freshly-built seccomp bindings into the runtime Python's site-packages.
+COPY --from=seccomp-builder /usr/local/lib/python3.12/site-packages/seccomp* /usr/local/lib/python3.12/site-packages/
 
 WORKDIR /app
 
@@ -26,6 +50,10 @@ COPY examples/ examples/
 COPY skills/ skills/
 
 RUN pip install --no-cache-dir -e ".[api,tracing]"
+
+# Build-time smoke check: FAIL the docker build if the seccomp bindings did not
+# land (guards against a silent COPY glob miss or a builder-stage failure).
+RUN python -c "import seccomp; print('seccomp OK')"
 
 # Default runtime config — override via volume mount or KOBOI_CONFIG env.
 ENV KOBOI_CONFIG=/app/configs/server_simple.yaml
