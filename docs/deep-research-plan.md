@@ -400,7 +400,7 @@ accumulate** (deep-research enhancer).
   resume rehydrates context (no re-fetch), tool bundle attached to planned nodes.
 - `tests/rag/test_sources_firecrawl.py` — `source: firecrawl` crawl loop + `DocumentCache`.
 - Keep `mock` provider as the default in `conftest.py` → suite stays offline / CI-safe.
-- **Empirical harness** `experiment_web_research_gaps.py` (pola `experiment_mcp_gaps.py`)
+- **Empirical harness** `experiment_web_research_gaps.py` (pola `scripts/experiments/experiment_mcp_gaps.py`)
   asserting: default provider resolvable, Brave/Firecrawl register, custom decorator fires,
   SSRF enforced on Firecrawl path, planned nodes get tools in `deep_research`, coverage<threshold
   triggers replan, `max_depth` bounds it, `--resume` skips re-fetch.
