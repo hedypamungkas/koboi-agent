@@ -292,7 +292,8 @@ class ReflectionHook(Hook):
             return None
         try:
             outcome = await self._tools.execute_outcome("calculate", json.dumps({"expression": hint}))
-        except Exception:
+        except Exception as exc:
+            _logger.warning("CRITIC verify_math failed: %s", exc)
             return None
         content = outcome.content or ""
         # calculate RETURNS (not raises) "Error calculating '...': ..." on a bad expression,
@@ -312,7 +313,8 @@ class ReflectionHook(Hook):
             return None
         try:
             outcome = await self._tools.execute_outcome("web_search", json.dumps({"query": claim}))
-        except Exception:
+        except Exception as exc:
+            _logger.warning("CRITIC verify_fact failed: %s", exc)
             return None
         if outcome.errored:
             return None

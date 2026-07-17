@@ -496,19 +496,32 @@ class Orchestrator:
 
         # Self-healing P2b: detect whether the node fired any side-effecting tool, so
         # the replan loop can carry it forward instead of re-running it (avoids
-        # double-firing side effects). Crashed nodes have no tool_calls_made, so they
-        # default to False (re-run) -- same limitation as _repair_interrupted_turn.
+        # double-firing side effects). On crash, tool_calls_made is empty (it's a local
+        # in _run_loop, never persisted). Fall back to scanning the agent's memory for
+        # assistant messages with tool_calls (stored before execution by the loop).
         had_non_idempotent_tool = False
         tools_registry = getattr(agent, "tools", None)
         if tools_registry is not None:
-            for tc in tool_calls_made:
-                td = tools_registry.get_definition(getattr(tc, "name", ""))
-                # Side-effecting = flagged non-idempotent OR elevated risk. The builtins
-                # (run_shell, write_file, delete_file, ingest_url, delegate_tasks,
-                # memory_store) are flagged idempotent=False; risk_level stays as
-                # belt-and-suspenders for CUSTOM tools registered with elevated risk but
-                # not the flag. Conservative: a failed read-only MODERATE node is carried
-                # forward rather than retried -- safe, just less aggressive.
+            # Check tool_calls_made first (the normal success/RunResult path).
+            check_calls = tool_calls_made
+            if not check_calls:
+                # Crash path: tool_calls_made is empty. Recover from memory.
+                agent_memory = getattr(agent, "memory", None)
+                if agent_memory is not None:
+                    try:
+                        for msg in reversed(agent_memory.get_messages()):
+                            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                                check_calls = msg["tool_calls"]
+                                break
+                    except Exception as exc:
+                        logger.debug("crash-path tool recovery failed for %s: %s", agent_name, exc)
+            for tc in check_calls:
+                if isinstance(tc, dict):
+                    fn = tc.get("function", {})
+                    tc_name = fn.get("name", "") if isinstance(fn, dict) else ""
+                else:
+                    tc_name = getattr(tc, "name", "")
+                td = tools_registry.get_definition(tc_name)
                 if td is not None and (
                     not td.idempotent or td.risk_level in (RiskLevel.MODERATE, RiskLevel.DESTRUCTIVE)
                 ):

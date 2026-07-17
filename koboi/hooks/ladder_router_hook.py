@@ -51,7 +51,7 @@ class LadderRouterHook(Hook):
 
     def __init__(self, budget: RecoveryBudget, ladder: dict[str, list[str]] | None = None) -> None:
         self._budget = budget
-        self._ladder = ladder or DEFAULT_LADDER
+        self._ladder = {**DEFAULT_LADDER, **(ladder or {})}
 
     def handles(self) -> list[HookEvent]:
         return [HookEvent.SESSION_START, HookEvent.POST_OUTPUT]
@@ -72,7 +72,7 @@ class LadderRouterHook(Hook):
                 # A custom ladder listed rungs for this class but none were actionable
                 # (e.g. typo'd rung name, or reflect budget exhausted with no handover
                 # rung). Log so misconfiguration isn't silent.
-                _logger.debug("LadderRouterHook: no actionable rung for class=%s rungs=%s", fclass, rungs)
+                _logger.warning("LadderRouterHook: no actionable rung for class=%s rungs=%s", fclass, rungs)
             ctx.metadata["recovery_plan"] = {"class": fclass, "rung": chosen}
         except Exception as exc:  # fail-soft: routing metadata must never break the run
             _logger.warning("LadderRouterHook fail-soft: %s", exc)

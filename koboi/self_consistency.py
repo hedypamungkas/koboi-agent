@@ -30,7 +30,7 @@ def aggregate_structured(samples: list[AgentResponse]) -> tuple[AgentResponse, f
         try:
             obj = json.loads(s.content) if s.content else None
         except Exception:
-            return samples[0], 1.0  # a sample wasn't valid JSON -> no aggregation
+            return samples[0], 0.0  # a sample wasn't valid JSON -> no aggregation (0.0 = not aggregated)
         norms.append(json.dumps(obj, sort_keys=True) if obj is not None else (s.content or ""))
 
     counts: dict[str, int] = {}
