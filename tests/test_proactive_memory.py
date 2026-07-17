@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from koboi.memory_sqlite import SQLiteMemory
 from koboi.proactive_memory import ProactiveMemory
@@ -287,7 +286,6 @@ class TestConfigGatingAndHook:
         assert h.priority == 65
 
 
-@pytest.mark.asyncio
 class TestCriticalRegressions:
     async def test_recall_sees_newly_extracted_fact(self, tmp_path):
         # TG1: extract -> cache invalidation -> recall finds the new fact (no

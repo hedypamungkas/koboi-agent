@@ -1,4 +1,4 @@
-"""Example 36 -- Cache + Capture + offline Replay (v2 + v3) -- the wedge.
+"""Example 37 -- Cache + Capture + offline Replay (v2 + v3) -- the wedge.
 
 The wedge: run an agent once in cache mode (memoize its responses), CAPTURE the
 run into a portable bundle (+ cache sidecar), then RE-PLAY it fully OFFLINE --
@@ -10,11 +10,11 @@ Uses a MockClient stand-in (no API key). Real-world: swap MockClient for your
 provider (koboi.llm.create_client) and the flow is identical.
 
 CLI equivalent:
-    koboi run configs/geo.yaml --replay-mode cache -m "What is the capital of France?"
-    koboi capture configs/geo.yaml --with-cache --save --name geo-cap
+    koboi run configs/workflow_export_demo.yaml --replay-mode cache -m "What is the capital of France?"
+    koboi capture configs/workflow_export_demo.yaml --with-cache --save --name geo-cap
     koboi run --workflow geo-cap -m "What is the capital of France?"   # offline replay
 
-Run: python examples/36_workflow_cache_capture_replay.py
+Run: python examples/37_workflow_cache_capture_replay.py
 """
 
 import asyncio

@@ -47,12 +47,10 @@ class TestSearchMock:
 
 
 class TestWebSearch:
-    @pytest.mark.asyncio
     async def test_mock_provider(self):
         result = await web_search("react")
         assert "React" in result
 
-    @pytest.mark.asyncio
     async def test_mock_provider_no_results(self):
         result = await web_search("xyznonexistent")
         assert "No results" in result
@@ -120,13 +118,11 @@ class TestCheckUrlSsrf:
 
 
 class TestWebFetch:
-    @pytest.mark.asyncio
     async def test_invalid_scheme(self):
         result = await web_fetch("ftp://example.com")
         assert "Error" in result
         assert "http" in result
 
-    @pytest.mark.asyncio
     async def test_unreachable_host(self):
         result = await web_fetch("http://this-domain-does-not-exist-12345.invalid")
         # Either DNS failure or connection error

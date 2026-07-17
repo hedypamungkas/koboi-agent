@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.context.manager import (
     ensure_tool_integrity,
@@ -106,7 +105,6 @@ class TestEnsureToolIntegrity:
 
 
 class TestNoopContextManager:
-    @pytest.mark.asyncio
     async def test_passthrough(self):
         mgr = NoopContextManager()
         msgs = [{"role": "user", "content": "hi"}]
@@ -115,14 +113,12 @@ class TestNoopContextManager:
 
 
 class TestTruncationManager:
-    @pytest.mark.asyncio
     async def test_no_truncation_needed(self):
         mgr = TruncationManager(keep_last=10)
         msgs = [{"role": "user", "content": "hi"}]
         result = await mgr.manage(msgs, max_tokens=100000)
         assert result == msgs
 
-    @pytest.mark.asyncio
     async def test_truncates_old_messages(self):
         mgr = TruncationManager(keep_last=2)
         msgs = [
@@ -137,7 +133,6 @@ class TestTruncationManager:
         # System should be preserved
         assert any(m.get("role") == "system" for m in result)
 
-    @pytest.mark.asyncio
     async def test_with_logger(self):
         logger = MagicMock()
         mgr = TruncationManager(logger=logger, keep_last=2)
@@ -153,7 +148,6 @@ class TestTruncationManager:
 
 
 class TestSmartTruncationManager:
-    @pytest.mark.asyncio
     async def test_keeps_all_user_messages(self):
         mgr = SmartTruncationManager(keep_last=1)
         msgs = [
@@ -172,7 +166,6 @@ class TestSmartTruncationManager:
         assert "second user" in joined
         assert "resp1" not in joined  # old assistant dropped (keep_last=1 -> only resp2)
 
-    @pytest.mark.asyncio
     async def test_no_truncation_needed(self):
         mgr = SmartTruncationManager(keep_last=10)
         msgs = [{"role": "user", "content": "hi"}]
@@ -181,14 +174,12 @@ class TestSmartTruncationManager:
 
 
 class TestKeyFactsManager:
-    @pytest.mark.asyncio
     async def test_no_truncation_needed(self):
         mgr = KeyFactsManager(keep_last=10)
         msgs = [{"role": "user", "content": "hi"}]
         result = await mgr.manage(msgs, max_tokens=100000)
         assert result == msgs
 
-    @pytest.mark.asyncio
     async def test_extracts_facts(self):
         mgr = KeyFactsManager(keep_last=1)
         msgs = [

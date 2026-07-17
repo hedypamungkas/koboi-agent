@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 
 from koboi.tui.screens.command_palette import CommandPaletteScreen
 from textual.widgets import Input, OptionList
 
 
 class TestCommandPaletteScreen:
-    @pytest.mark.asyncio
     async def test_shows_commands(self):
         screen = CommandPaletteScreen(["/reset", "/info", "/help"])
         app = _make_test_app(screen)
@@ -17,7 +15,6 @@ class TestCommandPaletteScreen:
             option_list = screen.query_one("#palette-list", OptionList)
             assert len(option_list._options) == 3
 
-    @pytest.mark.asyncio
     async def test_escape_dismisses_with_none(self):
         dismissed = []
         screen = CommandPaletteScreen(["/reset", "/info"])
@@ -27,7 +24,6 @@ class TestCommandPaletteScreen:
             await pilot.pause()
             assert dismissed == [None]
 
-    @pytest.mark.asyncio
     async def test_filter_on_input(self):
         screen = CommandPaletteScreen(["/reset", "/info", "/help", "/tools"])
         app = _make_test_app(screen)

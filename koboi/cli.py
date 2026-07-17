@@ -101,10 +101,13 @@ def _run_chat(args) -> int:
 def _build_parser():
     import argparse
 
+    from koboi import __version__
+
     parser = argparse.ArgumentParser(
         prog="koboi",
         description="Koboi Agent — universal configurable AI agent framework.",
     )
+    parser.add_argument("--version", action="version", version=f"koboi {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     # serve (needs [api])

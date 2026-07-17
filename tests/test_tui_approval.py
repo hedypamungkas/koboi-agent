@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.tui.approval import (
     TUIApprovalHandler,
@@ -104,7 +103,6 @@ class TestTUIApprovalHandler:
         # Should not raise
         handler._audit("tool", "{}", RiskLevel.SAFE, True, "test", source="TUI approval")
 
-    @pytest.mark.asyncio
     async def test_should_approve_with_trust_auto_approve(self):
         app = MagicMock()
         trust_db = MagicMock()
@@ -116,7 +114,6 @@ class TestTUIApprovalHandler:
         result = await handler.should_approve("read", "{}", RiskLevel.SAFE)
         assert result is True
 
-    @pytest.mark.asyncio
     async def test_should_approve_posts_message(self):
         app = MagicMock()
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 import yaml
 from unittest.mock import MagicMock, AsyncMock
 
@@ -257,7 +256,6 @@ class TestBuildPolicy:
 
 
 class TestKoboiAgent:
-    @pytest.mark.asyncio
     async def test_run_delegates(self, tmp_path):
         config = Config.from_yaml(_write_config(tmp_path, _base_config()))
         logger = AgentLogger(log_dir=str(tmp_path / "logs"))
@@ -272,7 +270,6 @@ class TestKoboiAgent:
         assert result.content == "ok"
         core.run.assert_called_once_with("test")
 
-    @pytest.mark.asyncio
     async def test_run_stream_delegates(self, tmp_path):
         config = Config.from_yaml(_write_config(tmp_path, _base_config()))
         logger = AgentLogger(log_dir=str(tmp_path / "logs"))

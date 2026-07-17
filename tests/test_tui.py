@@ -96,7 +96,6 @@ def mock_console():
 class TestStreamResponse:
     """Tests for _stream_response function."""
 
-    @pytest.mark.asyncio
     async def test_stream_text_deltas(self, mock_console):
         """Test streaming TextDeltaEvent updates the Live display."""
         mock_agent = MagicMock()
@@ -126,7 +125,6 @@ class TestStreamResponse:
 
             assert isinstance(last_call[0][0], Panel)
 
-    @pytest.mark.asyncio
     async def test_stream_tool_call_event(self, mock_console):
         """Test ToolCallEvent shows tool name in subtitle."""
         mock_agent = MagicMock()
@@ -147,7 +145,6 @@ class TestStreamResponse:
             # Check that Live.update was called
             assert mock_live.update.called
 
-    @pytest.mark.asyncio
     async def test_stream_error_event(self, mock_console):
         """Test ErrorEvent displays error in red border."""
         mock_agent = MagicMock()
@@ -167,7 +164,6 @@ class TestStreamResponse:
             # Verify update was called for error display
             assert mock_live.update.called
 
-    @pytest.mark.asyncio
     async def test_stream_iteration_event(self, mock_console):
         """Test IterationEvent is handled without error."""
         mock_agent = MagicMock()
@@ -188,7 +184,6 @@ class TestStreamResponse:
             # Should complete without error
             assert True
 
-    @pytest.mark.asyncio
     async def test_stream_complete_event_updates_final_content(self, mock_console):
         """Test CompleteEvent with content updates final display."""
         mock_agent = MagicMock()
@@ -402,7 +397,6 @@ class TestBuildSlashCommands:
 class TestInteractiveLoop:
     """Tests for interactive_loop function."""
 
-    @pytest.mark.asyncio
     async def test_exit_on_quit(self):
         """Test 'quit' exits the loop."""
         mock_agent = _make_mock_agent()
@@ -414,7 +408,6 @@ class TestInteractiveLoop:
         # Should have called summary once
         assert mock_console.print.called
 
-    @pytest.mark.asyncio
     async def test_exit_on_exit(self):
         """Test 'exit' exits the loop."""
         mock_agent = _make_mock_agent()
@@ -425,7 +418,6 @@ class TestInteractiveLoop:
 
         assert mock_console.print.called
 
-    @pytest.mark.asyncio
     async def test_exit_on_q(self):
         """Test 'q' exits the loop."""
         mock_agent = _make_mock_agent()
@@ -436,7 +428,6 @@ class TestInteractiveLoop:
 
         assert mock_console.print.called
 
-    @pytest.mark.asyncio
     async def test_empty_input_continues(self):
         """Test empty input continues loop."""
         mock_agent = _make_mock_agent()
@@ -449,7 +440,6 @@ class TestInteractiveLoop:
         # Should not have called agent.run for empty input
         mock_agent.run.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_slash_command_dispatch(self):
         """Test slash commands are dispatched."""
         mock_agent = _make_mock_agent()
@@ -462,7 +452,6 @@ class TestInteractiveLoop:
         # Help should have been displayed
         assert mock_console.print.called
 
-    @pytest.mark.asyncio
     async def test_keyboard_interrupt_triggers_summary(self):
         """Test KeyboardInterrupt triggers summary."""
         mock_agent = _make_mock_agent()
@@ -474,7 +463,6 @@ class TestInteractiveLoop:
         # Should print summary on interrupt
         assert mock_console.print.called
 
-    @pytest.mark.asyncio
     async def test_eof_error_triggers_summary(self):
         """Test EOFError triggers summary."""
         mock_agent = _make_mock_agent()
@@ -486,7 +474,6 @@ class TestInteractiveLoop:
         # Should print summary on EOF
         assert mock_console.print.called
 
-    @pytest.mark.asyncio
     async def test_error_preserves_session(self):
         """Test errors during run preserve session."""
         mock_agent = _make_mock_agent()
@@ -500,7 +487,6 @@ class TestInteractiveLoop:
         error_calls = [c for c in mock_console.print.call_args_list]
         assert any("error" in str(c).lower() for c in error_calls)
 
-    @pytest.mark.asyncio
     async def test_stream_mode_uses_stream_response(self):
         """Test stream=True uses _stream_response."""
         mock_agent = _make_mock_agent()
@@ -517,7 +503,6 @@ class TestInteractiveLoop:
             await interactive_loop(mock_agent, mock_console, stream=True)
             mock_stream_resp.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_non_stream_mode_uses_run(self):
         """Test stream=False uses agent.run."""
         mock_agent = _make_mock_agent()

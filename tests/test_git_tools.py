@@ -338,8 +338,7 @@ class TestEdgeCases:
 class TestGitNotInstalled:
     def test_git_not_found_error(self, tmp_path, monkeypatch):
         """Test error message when git is not found."""
-        # Mock PATH to exclude git
-        original_path = os.environ.get("PATH", "")
+        # Mock PATH to exclude git (monkeypatch auto-restores env at teardown)
         monkeypatch.setenv("PATH", "")
 
         # Create a directory that's not a git repo
@@ -348,9 +347,6 @@ class TestGitNotInstalled:
 
         # This should fail with "git not found" or similar
         result = _run_git(["status"], str(non_repo))
-
-        # Restore PATH
-        monkeypatch.setenv("PATH", original_path)
 
         # The result should indicate an error
         # (Either git not found or not a git repo)

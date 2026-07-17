@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.tui.textual_app import KoboiApp
 from koboi.tui.widgets.chat_log import ChatLog
@@ -30,7 +29,6 @@ def _make_mock_agent():
 
 
 class TestSlashCommands:
-    @pytest.mark.asyncio
     async def test_help_command(self):
         from koboi.tui.screens.help_overlay import HelpOverlayScreen
 
@@ -42,7 +40,6 @@ class TestSlashCommands:
             assert len(app.screen_stack) > 1
             assert isinstance(app.screen_stack[-1], HelpOverlayScreen)
 
-    @pytest.mark.asyncio
     async def test_info_command(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -54,7 +51,6 @@ class TestSlashCommands:
             assert len(bubbles) == 1
             assert "test-agent" in bubbles[0]._content
 
-    @pytest.mark.asyncio
     async def test_history_command_empty(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -66,7 +62,6 @@ class TestSlashCommands:
             assert len(bubbles) == 1
             assert "No messages" in bubbles[0]._content
 
-    @pytest.mark.asyncio
     async def test_tools_command_empty(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -78,7 +73,6 @@ class TestSlashCommands:
             assert len(bubbles) == 1
             assert "No tools" in bubbles[0]._content
 
-    @pytest.mark.asyncio
     async def test_reset_command(self):
         agent = _make_mock_agent()
         agent.reset = MagicMock()
@@ -91,7 +85,6 @@ class TestSlashCommands:
             await pilot.pause()
             agent.reset.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_unknown_command(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -103,7 +96,6 @@ class TestSlashCommands:
             assert len(bubbles) == 1
             assert "Unknown command" in bubbles[0]._content
 
-    @pytest.mark.asyncio
     async def test_non_command_sends_to_agent(self):
         agent = _make_mock_agent()
 
@@ -122,7 +114,6 @@ class TestSlashCommands:
             status = app.query_one("#status-bar")
             assert status.turn_count == 1
 
-    @pytest.mark.asyncio
     async def test_get_all_commands(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)

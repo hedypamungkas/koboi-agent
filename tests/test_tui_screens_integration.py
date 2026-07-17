@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.tui.screens.command_palette import CommandPaletteScreen
 from koboi.tui.screens.history_search import HistorySearchScreen
@@ -60,7 +59,6 @@ def _make_mock_agent():
 
 
 class TestCommandPaletteScreenIntegration:
-    @pytest.mark.asyncio
     async def test_select_option_dismisses_value(self):
         screen = CommandPaletteScreen(["/reset", "/info", "/help"])
         dismissed: list = []
@@ -73,7 +71,6 @@ class TestCommandPaletteScreenIntegration:
             await pilot.pause()
             assert dismissed == ["/reset"]
 
-    @pytest.mark.asyncio
     async def test_filter_then_select(self):
         screen = CommandPaletteScreen(["/reset", "/info", "/help", "/tools"])
         dismissed: list = []
@@ -93,7 +90,6 @@ class TestCommandPaletteScreenIntegration:
             await pilot.pause()
             assert dismissed == ["/reset"]
 
-    @pytest.mark.asyncio
     async def test_filter_no_match_shows_empty(self):
         screen = CommandPaletteScreen(["/reset", "/info"])
         app = _make_test_app(screen)
@@ -111,7 +107,6 @@ class TestCommandPaletteScreenIntegration:
 
 
 class TestHistorySearchScreenInteraction:
-    @pytest.mark.asyncio
     async def test_shows_reversed_entries(self):
         screen = HistorySearchScreen(["first", "second", "third"])
         app = _make_test_app(screen)
@@ -122,7 +117,6 @@ class TestHistorySearchScreenInteraction:
             assert option_list._options[0].prompt == "third"
             assert option_list._options[2].prompt == "first"
 
-    @pytest.mark.asyncio
     async def test_filter_by_typing(self):
         screen = HistorySearchScreen(["alpha", "beta", "gamma", "alphabet"])
         app = _make_test_app(screen)
@@ -135,7 +129,6 @@ class TestHistorySearchScreenInteraction:
             # Filter "alp" matches: alphabet, alpha -> 2 entries
             assert len(option_list._options) == 2
 
-    @pytest.mark.asyncio
     async def test_select_entry_dismisses_value(self):
         screen = HistorySearchScreen(["first", "second", "third"])
         dismissed: list = []
@@ -149,7 +142,6 @@ class TestHistorySearchScreenInteraction:
             # Reversed list: "third" is first, so Enter selects it
             assert dismissed == ["third"]
 
-    @pytest.mark.asyncio
     async def test_escape_dismisses_none(self):
         screen = HistorySearchScreen(["entry1"])
         dismissed: list = []
@@ -159,7 +151,6 @@ class TestHistorySearchScreenInteraction:
             await pilot.pause()
             assert dismissed == [None]
 
-    @pytest.mark.asyncio
     async def test_filter_then_clear_shows_all(self):
         screen = HistorySearchScreen(["a", "b", "c"])
         app = _make_test_app(screen)
@@ -181,7 +172,6 @@ class TestHistorySearchScreenInteraction:
 
 
 class TestPermissionDialogInteraction:
-    @pytest.mark.asyncio
     async def test_press_y_approves_once(self):
         screen = PermissionDialog("shell", '{"cmd":"ls"}', "safe")
         results: list = []
@@ -193,7 +183,6 @@ class TestPermissionDialogInteraction:
             assert results[0].approved is True
             assert results[0].always_allow is False
 
-    @pytest.mark.asyncio
     async def test_press_a_always_approves(self):
         screen = PermissionDialog("shell", '{"cmd":"ls"}', "moderate")
         results: list = []
@@ -205,7 +194,6 @@ class TestPermissionDialogInteraction:
             assert results[0].approved is True
             assert results[0].always_allow is True
 
-    @pytest.mark.asyncio
     async def test_press_n_denies(self):
         screen = PermissionDialog("shell", '{"cmd":"rm -rf"}', "destructive")
         results: list = []
@@ -217,7 +205,6 @@ class TestPermissionDialogInteraction:
             assert results[0].approved is False
             assert results[0].always_allow is False
 
-    @pytest.mark.asyncio
     async def test_escape_denies(self):
         screen = PermissionDialog("shell", "{}", "safe")
         results: list = []
@@ -228,7 +215,6 @@ class TestPermissionDialogInteraction:
             assert len(results) == 1
             assert results[0].approved is False
 
-    @pytest.mark.asyncio
     async def test_d_key_does_not_dismiss(self):
         screen = PermissionDialog("shell", '{"long":"args"}', "safe")
         results: list = []
@@ -247,7 +233,6 @@ class TestPermissionDialogInteraction:
 
 
 class TestThemeCycling:
-    @pytest.mark.asyncio
     async def test_ctrl_t_cycles_dark_to_light(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -256,7 +241,6 @@ class TestThemeCycling:
             await pilot.pause()
             assert app.theme == "koboi-light"
 
-    @pytest.mark.asyncio
     async def test_ctrl_t_cycles_back_to_dark(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -267,7 +251,6 @@ class TestThemeCycling:
             await pilot.pause()
             assert app.theme == "koboi-dark"
 
-    @pytest.mark.asyncio
     async def test_action_cycle_theme_direct(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:

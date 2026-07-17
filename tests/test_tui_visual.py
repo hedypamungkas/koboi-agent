@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.tui.textual_app import KoboiApp
 from koboi.tui.widgets.chat_log import ChatLog
@@ -60,7 +59,6 @@ diff --git a/foo.py b/foo.py
 
 
 class TestScreenshotCapture:
-    @pytest.mark.asyncio
     async def test_screenshot_user_message(self, tmp_path: Path):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -71,7 +69,6 @@ class TestScreenshotCapture:
             assert Path(svg_path).exists()
             assert Path(svg_path).stat().st_size > 100
 
-    @pytest.mark.asyncio
     async def test_screenshot_assistant_message(self, tmp_path: Path):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -82,7 +79,6 @@ class TestScreenshotCapture:
             assert Path(svg_path).exists()
             assert Path(svg_path).stat().st_size > 100
 
-    @pytest.mark.asyncio
     async def test_screenshot_system_message(self, tmp_path: Path):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -93,7 +89,6 @@ class TestScreenshotCapture:
             assert Path(svg_path).exists()
             assert Path(svg_path).stat().st_size > 100
 
-    @pytest.mark.asyncio
     async def test_screenshot_tool_call_running(self, tmp_path: Path):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -104,7 +99,6 @@ class TestScreenshotCapture:
             assert Path(svg_path).exists()
             assert Path(svg_path).stat().st_size > 100
 
-    @pytest.mark.asyncio
     async def test_screenshot_tool_call_completed(self, tmp_path: Path):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -117,7 +111,6 @@ class TestScreenshotCapture:
             assert Path(svg_path).exists()
             assert Path(svg_path).stat().st_size > 100
 
-    @pytest.mark.asyncio
     async def test_screenshot_diff_view(self, tmp_path: Path):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -137,7 +130,6 @@ class TestScreenshotCapture:
 
 
 class TestResizeBehavior:
-    @pytest.mark.asyncio
     async def test_survive_small_terminal(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test(size=(120, 40)) as pilot:
@@ -148,7 +140,6 @@ class TestResizeBehavior:
             assert app.query_one("#header-bar").display
             assert app.query_one("#status-bar").display
 
-    @pytest.mark.asyncio
     async def test_survive_large_terminal(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test(size=(80, 24)) as pilot:
@@ -159,7 +150,6 @@ class TestResizeBehavior:
             assert app.query_one("#header-bar").display
             assert app.query_one("#status-bar").display
 
-    @pytest.mark.asyncio
     async def test_messages_survive_resize(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test(size=(120, 40)) as pilot:
@@ -172,7 +162,6 @@ class TestResizeBehavior:
             await pilot.pause()
             assert len(chat.query(MessageBubble)) == 2
 
-    @pytest.mark.asyncio
     async def test_tool_calls_survive_resize(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test(size=(120, 40)) as pilot:
@@ -191,7 +180,6 @@ class TestResizeBehavior:
 
 
 class TestSlashAutocompleteIntegration:
-    @pytest.mark.asyncio
     async def test_suggester_wired_to_input(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test():
@@ -199,7 +187,6 @@ class TestSlashAutocompleteIntegration:
             assert input_box.suggester is not None
             assert isinstance(input_box.suggester, CompositeSuggester)
 
-    @pytest.mark.asyncio
     async def test_slash_suggestion_partial(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test():
@@ -207,7 +194,6 @@ class TestSlashAutocompleteIntegration:
             suggestion = await input_box.suggester.get_suggestion("/h")
             assert suggestion == "/help"
 
-    @pytest.mark.asyncio
     async def test_slash_no_suggestion_plain_text(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test():
@@ -215,7 +201,6 @@ class TestSlashAutocompleteIntegration:
             suggestion = await input_box.suggester.get_suggestion("hello world")
             assert suggestion is None
 
-    @pytest.mark.asyncio
     async def test_slash_suggestion_reset(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test():
@@ -223,7 +208,6 @@ class TestSlashAutocompleteIntegration:
             suggestion = await input_box.suggester.get_suggestion("/re")
             assert suggestion == "/reset"
 
-    @pytest.mark.asyncio
     async def test_slash_exact_match_none(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test():

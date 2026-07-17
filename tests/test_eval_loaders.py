@@ -43,7 +43,6 @@ def yaml_dir(tmp_path):
 
 
 class TestYAMLLoader:
-    @pytest.mark.asyncio
     async def test_load_file(self, yaml_file):
         loader = YAMLLoader()
         cases = await loader.load(yaml_file)
@@ -52,13 +51,11 @@ class TestYAMLLoader:
         assert cases[0].expected_tools == ["read"]
         assert cases[1].name == "case2"
 
-    @pytest.mark.asyncio
     async def test_load_directory(self, yaml_dir):
         loader = YAMLLoader()
         cases = await loader.load(yaml_dir)
         assert len(cases) == 2
 
-    @pytest.mark.asyncio
     async def test_load_single_dict(self, tmp_path):
         data = {"name": "single", "user_message": "msg"}
         path = tmp_path / "single.yaml"
@@ -67,7 +64,6 @@ class TestYAMLLoader:
         cases = await loader.load(str(path))
         assert len(cases) == 1
 
-    @pytest.mark.asyncio
     async def test_load_list_format(self, tmp_path):
         data = [{"name": "a", "user_message": "m1"}, {"name": "b", "user_message": "m2"}]
         path = tmp_path / "list.yaml"
@@ -76,7 +72,6 @@ class TestYAMLLoader:
         cases = await loader.load(str(path))
         assert len(cases) == 2
 
-    @pytest.mark.asyncio
     async def test_load_invalid_yaml(self, tmp_path):
         path = tmp_path / "bad.yaml"
         path.write_text("- just a string")
@@ -103,7 +98,6 @@ class TestLoaderRegistry:
         available = LoaderRegistry.list_available()
         assert "yaml" in available
 
-    @pytest.mark.asyncio
     async def test_load_via_registry(self, yaml_file):
         register_default_loaders()
         cases = await LoaderRegistry.load("yaml", yaml_file)
@@ -150,14 +144,12 @@ class TestRAGASDataGenerator:
         chunks = gen._chunk_text("")
         assert len(chunks) == 1
 
-    @pytest.mark.asyncio
     async def test_generate_from_docs_nonexistent(self, tmp_path):
         client = MagicMock()
         gen = RAGASDataGenerator(client)
         cases = await gen.generate_from_docs([str(tmp_path / "nonexistent.md")])
         assert len(cases) == 0
 
-    @pytest.mark.asyncio
     async def test_generate_from_docs_success(self, tmp_path):
         doc = tmp_path / "test.md"
         doc.write_text("This is test content about AI agents.")
@@ -173,7 +165,6 @@ class TestRAGASDataGenerator:
         assert cases[0].user_message == "What is this about?"
         assert "ragas" in cases[0].tags
 
-    @pytest.mark.asyncio
     async def test_generate_llm_failure(self, tmp_path):
         doc = tmp_path / "test.md"
         doc.write_text("Content here.")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.tui.textual_app import KoboiApp
 from koboi.tui.widgets.input_box import ChatSubmit, InputBox
@@ -28,7 +27,6 @@ def _make_mock_agent():
 
 
 class TestCommandHistory:
-    @pytest.mark.asyncio
     async def test_history_adds_entries(self):
         agent = _make_mock_agent()
         agent.run_stream = AsyncMock()
@@ -40,7 +38,6 @@ class TestCommandHistory:
             await pilot.pause()
             assert app._history == ["first", "second", "third"]
 
-    @pytest.mark.asyncio
     async def test_history_deduplicates_consecutive(self):
         agent = _make_mock_agent()
         agent.run_stream = AsyncMock()
@@ -51,7 +48,6 @@ class TestCommandHistory:
             await pilot.pause()
             assert app._history == ["same"]
 
-    @pytest.mark.asyncio
     async def test_history_caps_at_max(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -62,7 +58,6 @@ class TestCommandHistory:
         assert app._history[0] == "msg-5"
         assert app._history[-1] == "msg-9"
 
-    @pytest.mark.asyncio
     async def test_history_navigation(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)

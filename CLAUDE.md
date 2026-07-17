@@ -106,7 +106,7 @@ docs/               Architecture overview, REST/SSE requirements, performance be
 - `SkillPersistenceHook` (priority 45) re-injects activated skills after POST_COMPACT
 - Skill scorers: only `skill_trigger_accuracy` in eval/ (`skill_routing_accuracy` + `skill_token_overhead` were removed)
 - The `facade.py` `_build_*` functions are module-level, not class methods
-- TUI entry point: `koboi.tui.app:main` (setuptools script)
+- TUI entry point: launched via `koboi chat` (interactive), which lazy-imports `koboi.tui.app:run_chat_interactive` and prints an install hint if the `[tui]` extra is absent (no standalone setuptools script; `koboi/tui/app.py` has no `main`)
 - Tool functions can be sync or async -- sync runs in thread via `asyncio.to_thread`
 - Tool return type must be `str` -- the registry calls `str(result)`
 - `HookChain` hooks sorted by priority: 0-19 infra, 20-39 security, 40-59 business, 60-79 post, 80-100 cleanup

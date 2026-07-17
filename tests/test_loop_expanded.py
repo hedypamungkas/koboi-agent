@@ -75,7 +75,6 @@ def tools():
 
 
 class TestAgentCoreStreaming:
-    @pytest.mark.asyncio
     async def test_run_stream_basic(self, memory, tools):
         client = MockStreamClient([_make_response(content="Hello world")])
         core = AgentCore(client=client, memory=memory, tools=tools, max_iterations=5)
@@ -86,7 +85,6 @@ class TestAgentCoreStreaming:
 
         assert any(isinstance(e, (TextDeltaEvent, CompleteEvent)) for e in collected)
 
-    @pytest.mark.asyncio
     async def test_run_stream_with_tool_calls(self, memory, tools):
         client = MagicMock()
         call_count = 0
@@ -114,7 +112,6 @@ class TestAgentCoreStreaming:
 
         assert any(isinstance(e, CompleteEvent) for e in collected)
 
-    @pytest.mark.asyncio
     async def test_run_stream_max_iterations(self, memory):
         client = MagicMock()
 
@@ -131,7 +128,6 @@ class TestAgentCoreStreaming:
 
         assert any(isinstance(e, ErrorEvent) for e in collected)
 
-    @pytest.mark.asyncio
     async def test_run_stream_input_guardrail_blocks(self, memory):
         guardrail = AsyncMock()
         guardrail.check.return_value = MagicMock(passed=False, reason="Injection detected", sanitized_content=None)
@@ -146,7 +142,6 @@ class TestAgentCoreStreaming:
         assert len(collected) == 1
         assert isinstance(collected[0], ErrorEvent)
 
-    @pytest.mark.asyncio
     async def test_run_stream_hook_abort(self, memory):
         hook_chain = MagicMock()
         hook_chain.emit = AsyncMock(
@@ -163,7 +158,6 @@ class TestAgentCoreStreaming:
         assert len(collected) == 1
         assert isinstance(collected[0], ErrorEvent)
 
-    @pytest.mark.asyncio
     async def test_run_stream_null_response(self, memory):
         client = MagicMock()
 
@@ -208,7 +202,6 @@ class TestAgentCoreSkills:
         result = core._check_skill_activation("[ACTIVATE_SKILL: coding]")
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_run_skill_activation(self, tools):
         skills = MagicMock()
         skills.get.return_value = MagicMock(skill_dir="/skills/coding")
@@ -236,7 +229,6 @@ class TestAgentCoreSkills:
 
 
 class TestAgentCoreGuardrails:
-    @pytest.mark.asyncio
     async def test_run_input_guardrail_sanitizes(self, tools):
         guardrail = AsyncMock()
         guardrail.check.return_value = MagicMock(passed=True, reason="", sanitized_content="clean input")
@@ -252,7 +244,6 @@ class TestAgentCoreGuardrails:
         result = await core.run("dirty input")
         assert result.success is True
 
-    @pytest.mark.asyncio
     async def test_run_input_guardrail_blocks(self, tools):
         guardrail = AsyncMock()
         guardrail.check.return_value = MagicMock(passed=False, reason="Injection detected", sanitized_content=None)
@@ -264,7 +255,6 @@ class TestAgentCoreGuardrails:
         with pytest.raises(AgentGuardrailError):
             await core.run("malicious")
 
-    @pytest.mark.asyncio
     async def test_run_output_guardrail_warning(self, tools):
         output_guard = AsyncMock()
         output_guard.check.return_value = MagicMock(passed=False, reason="Contains API key")
@@ -282,7 +272,6 @@ class TestAgentCoreGuardrails:
 
 
 class TestAgentCoreRateLimiter:
-    @pytest.mark.asyncio
     async def test_run_rate_limited_tool(self, tools):
         rl = MagicMock()
         rl.check.return_value = MagicMock(passed=False, reason="Too many calls")
@@ -307,7 +296,6 @@ class TestAgentCoreRateLimiter:
 
 
 class TestAgentCoreApproval:
-    @pytest.mark.asyncio
     async def test_run_tool_denied(self, tools):
         approval = MagicMock()
         approval.should_approve.return_value = False
@@ -353,7 +341,6 @@ class TestAgentCoreReset:
 
 
 class TestAgentCoreEmit:
-    @pytest.mark.asyncio
     async def test_emit_sets_context(self, tools):
         chain = HookChain()
         mem = ConversationMemory()
@@ -363,7 +350,6 @@ class TestAgentCoreEmit:
         ctx = await core._emit(HookEvent.SESSION_START)
         assert ctx.event == HookEvent.SESSION_START
 
-    @pytest.mark.asyncio
     async def test_emit_with_inject_message(self, tools):
         hook = MagicMock()
         hook.handles.return_value = [HookEvent.PRE_INPUT]
@@ -388,7 +374,6 @@ class TestAgentCoreEmit:
 
 
 class TestAgentCoreChat:
-    @pytest.mark.asyncio
     async def test_chat_delegates_to_run(self, tools):
         mem = ConversationMemory()
         client = MagicMock()
@@ -403,7 +388,6 @@ class TestAgentCoreChat:
 
 
 class TestAgentCoreContextManagement:
-    @pytest.mark.asyncio
     async def test_managed_messages_with_context_manager(self, tools):
         mem = ConversationMemory()
         ctx_mgr = AsyncMock()
@@ -416,7 +400,6 @@ class TestAgentCoreContextManagement:
         assert len(msgs) == 1
         ctx_mgr.manage.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_managed_messages_no_context_manager(self, tools):
         mem = ConversationMemory()
         mem.add_user_message("seed")
@@ -426,7 +409,6 @@ class TestAgentCoreContextManagement:
         msgs = await core._get_managed_messages()
         assert len(msgs) >= 1
 
-    @pytest.mark.asyncio
     async def test_augment_memory_no_augmentation(self, tools):
         mem = ConversationMemory()
         client = MagicMock()
@@ -434,7 +416,6 @@ class TestAgentCoreContextManagement:
         result = await core._augment_memory("test")
         assert result == "test"
 
-    @pytest.mark.asyncio
     async def test_augment_memory_with_augmentation(self, tools):
         mem = ConversationMemory()
         aug = AsyncMock()
@@ -446,7 +427,6 @@ class TestAgentCoreContextManagement:
         result = await core._augment_memory("test")
         assert result == "augmented test"
 
-    @pytest.mark.asyncio
     async def test_augment_llm_no_augmentation(self, tools):
         mem = ConversationMemory()
         client = MagicMock()
@@ -532,7 +512,6 @@ class TestAgentCoreAudit:
 
 
 class TestAgentCoreSkillsDiscovery:
-    @pytest.mark.asyncio
     async def test_skills_discovery_appended(self, tools):
         mem = ConversationMemory()
         mem.add_user_message("hello")
@@ -545,7 +524,6 @@ class TestAgentCoreSkillsDiscovery:
         await core._get_managed_messages()
         skills.get_routed_discovery_prompt.assert_called_once_with("hello")
 
-    @pytest.mark.asyncio
     async def test_skills_discovery_no_user_message(self, tools):
         mem = ConversationMemory()
         client = MagicMock()
@@ -557,7 +535,6 @@ class TestAgentCoreSkillsDiscovery:
         await core._get_managed_messages()
         skills.get_discovery_prompt.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_skills_discovery_already_appended(self, tools):
         mem = ConversationMemory()
         mem.add_user_message("hello")
@@ -569,7 +546,6 @@ class TestAgentCoreSkillsDiscovery:
         await core._get_managed_messages()
         skills.get_routed_discovery_prompt.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_skills_discovery_no_system_message(self, tools):
         mem = ConversationMemory()
         mem.add_user_message("hello")
@@ -585,7 +561,6 @@ class TestAgentCoreSkillsDiscovery:
 
 
 class TestAgentCoreApprovalAsync:
-    @pytest.mark.asyncio
     async def test_approval_async_should_approve(self, tools):
         approval = MagicMock()
         approval.should_approve = AsyncMock(return_value=True)
@@ -611,7 +586,6 @@ class TestAgentCoreApprovalAsync:
 
 
 class TestAgentCoreRunStreamModeBlocked:
-    @pytest.mark.asyncio
     async def test_stream_mode_blocked_tool(self, tools):
         hook = MagicMock()
         hook.handles.return_value = [HookEvent.PRE_TOOL_USE]
