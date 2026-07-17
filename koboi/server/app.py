@@ -498,6 +498,13 @@ def create_app(
     app.state.job_streams_per_owner = job_streams_per_owner  # M3
     app.state.job_streams = {}
     app.state.media_jobs = _MediaJobTracker()  # M3: owner -> active job-stream count
+    # Issue #74: media-local admission counters (global + per-owner in-flight).
+    # Same numeric policy as /v1/jobs (jobs.max_concurrent + jobs.per_tenant_max)
+    # but tracked SEPARATELY so this fix is independent of PR #73's JobRegistry
+    # rework in koboi/server/jobs.py. Int is rebound on each admit/release; the
+    # per-owner dict is mutated in place. Both updated synchronously (race-free).
+    app.state.media_inflight_global = 0
+    app.state.media_inflight_per_owner = {}  # dict[str, int]; mypy rejects annotating app.state.* attrs
     app.state.session_events = session_events  # B2: per-session replay buffer
     app.state.session_streams_per_owner = session_streams_per_owner  # B2 slowloris guard
     app.state.session_streams = {}  # B2: owner -> active session-stream count
@@ -640,12 +647,41 @@ def _media_result_to_response(result):
     )
 
 
+# Issue #74: retention cap for _MediaJobTracker. The job_ttl reaper only covers
+# job_registry/job_store (koboi/server/jobs.py); the in-memory media tracker had
+# no eviction, so terminal entries accumulated forever (unbounded memory). The cap
+# is generous (1k terminal+pending entries) and evicts OLDEST TERMINAL first, so
+# pending/in-flight handles are never lost. Read live so tests can monkeypatch it.
+_MEDIA_TRACKER_MAX = 1000
+
+
 class _MediaJobTracker:
     def __init__(self):
-        self._jobs = {}
+        # py3.7+ dicts are insertion-ordered → oldest entry is iterated first (FIFO).
+        self._jobs: dict[str, dict] = {}
 
     def create(self, job_id, owner, session_id):
+        # Bound growth BEFORE inserting so create() never pushes len over the cap
+        # without first making room. Pending/in-flight entries are never evicted.
+        self._evict_terminal_to_fit()
         self._jobs[job_id] = {"status": "pending", "result": None, "owner": owner, "session_id": session_id}
+
+    def _evict_terminal_to_fit(self):
+        """Drop oldest TERMINAL entries FIFO until one slot is free under the cap.
+
+        If every entry is pending/in-flight, evict NOTHING (return over-cap rather
+        than lose a live job handle — the cap is a leak guard, not a hard ceiling).
+        """
+        terminal = ("succeeded", "failed")
+        while len(self._jobs) >= _MEDIA_TRACKER_MAX:
+            victim = None
+            for jid, rec in self._jobs.items():  # FIFO: oldest first
+                if rec.get("status") in terminal:
+                    victim = jid
+                    break
+            if victim is None:
+                break
+            del self._jobs[victim]
 
     def set_result(self, job_id, status, result):
         rec = self._jobs.get(job_id)
@@ -1826,20 +1862,75 @@ def _register_routes(
             err = _check_owner(ownership, session_id, request)
             if err:
                 return err
+
+        # Issue #74: admission gate for /v1/media/jobs. Before this fix the route
+        # admitted an unbounded number of billed generations (no per-tenant / global
+        # cap) — same class of bug as #50 on /v1/jobs. A tenant must not bypass the
+        # caps by routing through media, so the gate considers the COMBINED load:
+        # media-local in-flight (tracked here) PLUS the shared job_registry running
+        # counts (read-only; same public API /v1/jobs uses at submit_job). The
+        # check+increment pair is SYNCHRONOUS (no `await` between them) so concurrent
+        # submits on one event loop cannot interleave and over-admit (race-free).
+        # Media owns its own counters (released in _run_media_job's finally); we do
+        # NOT mutate job_registry here, which keeps this fix conflict-free with PR
+        # #73's JobRegistry rework in koboi/server/jobs.py (no edit to that file).
+        app_state = request.app.state
+        per_owner = app_state.media_inflight_per_owner
+        if (
+            auth_enabled
+            and job_per_tenant > 0
+            and per_owner.get(owner, 0) + job_registry.active_count_for_owner(owner) >= job_per_tenant
+        ):
+            return _error_response(
+                429, "too_many_jobs_per_tenant", f"per_tenant_max ({job_per_tenant}) reached", request
+            )
+        if job_max_concurrent > 0 and app_state.media_inflight_global + job_registry.active_count >= job_max_concurrent:
+            return _error_response(429, "queue_full", f"max_concurrent ({job_max_concurrent}) reached", request)
+        # Admit — synchronous increment immediately after the checks above (race-free).
+        per_owner[owner] = per_owner.get(owner, 0) + 1
+        app_state.media_inflight_global = app_state.media_inflight_global + 1
+        admitted = True
+
+        def _release_media_slot() -> None:
+            # Release exactly once per admit (idempotent guard). Called on every
+            # pre-flight early-return path below AND in _run_media_job's finally.
+            nonlocal admitted
+            if not admitted:
+                return
+            admitted = False
+            app_state.media_inflight_global = max(0, app_state.media_inflight_global - 1)
+            prev = per_owner.get(owner, 0)
+            if prev > 0:
+                per_owner[owner] = prev - 1
+
+        # Pre-flight: materialize the pooled agent, run idempotency, claim ownership,
+        # build the request, and create the tracker entry. Any NON-PoolFull exception
+        # here (e.g. InvalidSessionId from an untrusted body.session_id, or an
+        # _build_agent failure) MUST release the reserved slot — otherwise repeating
+        # it max_concurrent times permanently DoS-locks the media endpoint at 429
+        # (counter leaked, never decremented, no task spawned to rescue it in finally).
+        # The explicit releases on the PoolFull / idempotency returns stay (a `return`
+        # does not trigger `except`); this outer guard covers every other raise.
         try:
-            agent = await pool.get_or_create(session_id)
-        except PoolFull as exc:
-            return _error_response(429, "pool_full", str(exc), request)
-        idem_key = body.idempotency_key or request.headers.get("Idempotency-Key")
-        if idem_key:
-            if not chat_idem.check_and_record(f"{owner}:{session_id}:{idem_key}"):
-                return _error_response(409, "duplicate_request", "Idempotency-Key already used", request)
-        if ownership.get_owner(session_id) is None:
-            ownership.set_owner(session_id, owner)
-        req = _media_request_from_body(body, idem_key)
-        media_jobs = request.app.state.media_jobs
-        job_id = new_job_id()
-        media_jobs.create(job_id, owner, session_id)
+            try:
+                agent = await pool.get_or_create(session_id)
+            except PoolFull as exc:
+                _release_media_slot()
+                return _error_response(429, "pool_full", str(exc), request)
+            idem_key = body.idempotency_key or request.headers.get("Idempotency-Key")
+            if idem_key:
+                if not chat_idem.check_and_record(f"{owner}:{session_id}:{idem_key}"):
+                    _release_media_slot()
+                    return _error_response(409, "duplicate_request", "Idempotency-Key already used", request)
+            if ownership.get_owner(session_id) is None:
+                ownership.set_owner(session_id, owner)
+            req = _media_request_from_body(body, idem_key)
+            media_jobs = request.app.state.media_jobs
+            job_id = new_job_id()
+            media_jobs.create(job_id, owner, session_id)
+        except Exception:
+            _release_media_slot()
+            raise
 
         async def _run_media_job():
             try:
@@ -1847,6 +1938,9 @@ def _register_routes(
                 media_jobs.set_result(job_id, "succeeded", result)
             except Exception:
                 media_jobs.set_result(job_id, "failed", None)
+            finally:
+                # Release the slot whether the generation succeeded or failed.
+                _release_media_slot()
 
         task = asyncio.create_task(_run_media_job())
         stream_tasks.add(task)
