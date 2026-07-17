@@ -1472,6 +1472,7 @@ class AgentAssembler:
                         model=resolved.get("model") or "",
                         api_key=resolved.get("api_key") or "",
                         base_url=resolved.get("base_url") or "",
+                        timeout=self.config.get("self_healing", "critic_timeout", default=120.0),
                     )
                 except Exception as exc:
                     logging.getLogger(__name__).warning(

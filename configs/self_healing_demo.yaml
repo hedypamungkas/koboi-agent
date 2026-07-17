@@ -40,6 +40,7 @@ guardrails:
       model: ${KOBOI_MODEL:gpt-4o-mini}
       api_key: ${OPENAI_API_KEY:}
       base_url: ${OPENAI_BASE_URL:}
+      timeout: 120                 # longer timeout for slow gateways (default 60)
       threshold: 0.8
 
 # Enables the ladder's terminal rung (escalate-to-human on budget exhaustion).
@@ -55,6 +56,7 @@ self_healing:
   enabled: true
   max_turns: 3                 # shared reflection retry budget
   fail_soft: true
+  critic_timeout: 180          # longer timeout for side-LLM calls on slow gateways (default 120)
   graceful_max_iter: true      # P3: graceful degrade on max_iterations
   triggers:
     tool_error:

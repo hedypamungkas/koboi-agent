@@ -642,6 +642,7 @@ class SelfHealingConfig(BaseModel):
     graceful_max_iter: bool = False
     empty_response_reask_limit: int = 1  # P0-C: bounded re-ask budget for empty responses (config-plumbed; default 1)
     critic_llm: str | None = None  # named `providers:` ref or inline dict; None = reuse agent client
+    critic_timeout: float = 120.0  # timeout (seconds) for side-LLM calls; increase for slow gateways
     triggers: dict = Field(default_factory=dict)
     # triggers.tool_error.repeat_threshold (default 2); triggers.low_grounding.threshold (default 0.6)
     ladder: dict = Field(default_factory=dict)
@@ -685,6 +686,7 @@ class KoboiConfig(BaseModel):
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
     self_healing: SelfHealingConfig = Field(default_factory=SelfHealingConfig)
+    handover: dict = Field(default_factory=dict)  # handover.detection / handover.digest / handover.webhooks
 
     @model_validator(mode="before")
     @classmethod
