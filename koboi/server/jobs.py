@@ -334,19 +334,81 @@ class JobRegistry:
 
     @property
     def active_count(self) -> int:
-        return sum(1 for r in self._jobs.values() if r.status == "running")
+        # #50: "reserved" counts as active so the synchronous reservation holds a
+        # slot across the await window between admission and register/set_running.
+        return sum(1 for r in self._jobs.values() if r.status in ("running", "reserved"))
 
     def active_count_for_owner(self, owner: str) -> int:
-        """Running jobs for one owner (per-tenant concurrency basis; G5a)."""
-        return sum(1 for r in self._jobs.values() if r.owner == owner and r.status == "running")
+        """Running+reserved jobs for one owner (per-tenant concurrency basis; G5a, #50)."""
+        return sum(1 for r in self._jobs.values() if r.owner == owner and r.status in ("running", "reserved"))
 
     def peek_admit(self, max_concurrent: int, queue_depth: int) -> str:
-        """Non-mutating admission decision for a new job: ``run`` | ``queue`` | ``reject``."""
+        """Non-mutating admission decision for a new job: ``run`` | ``queue`` | ``reject``.
+
+        Retained for back-compat; ``reserve_admit`` is the atomic admission path (#50).
+        """
         if self.active_count < max_concurrent:
             return "run"
         if len(self._pending) < queue_depth:
             return "queue"
         return "reject"
+
+    def reserve_admit(
+        self,
+        owner: str,
+        max_concurrent: int,
+        queue_depth: int,
+        per_tenant_max: int | None,
+    ) -> tuple[str, str]:
+        """#50: synchronously reserve an admission slot, closing the TOCTOU window.
+
+        Creates a ``status="reserved"`` placeholder (minted via :func:`new_job_id`)
+        BEFORE any ``await`` so N concurrent submitters can't all read pre-increment
+        counts and overrun ``max_concurrent`` / ``per_tenant_max`` during the await
+        before ``register``/``set_running``. Returns ``(decision, reserved_id)``:
+
+        - ``("run", id)`` — capacity available now; placeholder reserved.
+        - ``("queue", id)`` — at the global cap but a queue slot is open; placeholder reserved.
+        - ``("reject", id)`` — global cap + queue full; placeholder never created (id minted for symmetry).
+        - ``("too_many_jobs_per_tenant", id)`` — owner at their per-tenant cap; placeholder never created.
+
+        ``per_tenant_max=None`` disables the per-tenant check (dev mode).
+        """
+        reserved_id = new_job_id()
+        # 1. Global admission (preserves prior precedence: global-reject wins over per-tenant).
+        if self.active_count < max_concurrent:
+            decision = "run"
+        elif len(self._pending) < queue_depth:
+            decision = "queue"
+        else:
+            return ("reject", reserved_id)  # never reserved -> caller's release_reserve is a no-op
+        # 2. Per-tenant cap (tighter bound; skipped in dev mode).
+        if per_tenant_max is not None and self.active_count_for_owner(owner) >= per_tenant_max:
+            return ("too_many_jobs_per_tenant", reserved_id)  # never reserved
+        # 3. Reserve synchronously — the placeholder counts toward active immediately.
+        self._jobs[reserved_id] = JobRecord(job_id=reserved_id, session_id="", owner=owner, status="reserved")
+        return (decision, reserved_id)
+
+    def commit_reserve(self, reserved_id: str, *, real_job_id: str, session_id: str) -> JobRecord:
+        """#50: finalize a reservation into a real ``status="pending"`` job record.
+
+        Pops the reserved placeholder, re-keys it under ``real_job_id``, and stamps the
+        real ``session_id``. If ``reserved_id == real_job_id`` the fields are updated in place.
+        """
+        record = self._jobs.get(reserved_id)
+        if record is None:
+            raise KeyError(f"reserve_admit placeholder {reserved_id!r} not found")
+        if reserved_id != real_job_id:
+            self._jobs.pop(reserved_id, None)
+            self._jobs[real_job_id] = record
+        record.job_id = real_job_id
+        record.session_id = session_id
+        record.status = "pending"
+        return record
+
+    def release_reserve(self, reserved_id: str) -> None:
+        """#50: idempotently drop a reserved placeholder (any failure path after reservation)."""
+        self._jobs.pop(reserved_id, None)
 
     def enqueue_pending(self, job_id: str) -> None:
         self._pending.append(job_id)
