@@ -133,6 +133,7 @@ _KNOWN_LLM_KEYS: frozenset[str] = FORWARDABLE_LLM_KEYS | frozenset(
         "api_version",
         "transport_retries",
         "account_id",  # cloudflare extra_env (registry.py)
+        "pool",  # Tier-2 entry point: ``llm: {pool: name}`` resolves at runtime (resolve.py)
     }
 )
 
@@ -248,19 +249,30 @@ class Config:
         return self._data
 
     def to_dict(self) -> dict:
-        """Return config as a plain dict. Uses validated schema if available."""
-        if self._schema is not None:
-            return self._schema.model_dump()
+        """Return config as a full-fidelity plain dict.
+
+        Backed by ``self._data`` (env-interpolated, provider-ref-expanded) so
+        every key the runtime reads is preserved -- including the forward-as-is
+        LLM generation params (``seed`` / ``top_p`` / ``response_format`` / ...)
+        and the pass-through sections (``providers`` / ``pools`` / ``replay`` /
+        ``keybindings`` / ``eval`` / ``subagent``). Previously this returned the
+        lossy ``schema.model_dump()`` view which silently dropped those keys
+        (issue #11); it now matches :meth:`to_yaml`'s fidelity.
+
+        ``${VAR:default}`` env placeholders are already resolved into concrete
+        values at construction time (see ``__init__``). Callers exporting a
+        shareable artifact should use :func:`koboi.workflows.build_from_config_path`
+        (which reads the un-interpolated source and redacts secrets).
+        """
         return dict(self._data)
 
     def to_yaml(self) -> str:
         """Full-fidelity YAML dump of the resolved raw config.
 
-        Dumps ``self._data`` (env-interpolated, provider-ref-expanded) with
+        Dumps ``self._data`` (the same backing dict as :meth:`to_dict`) with
         ``yaml.safe_dump(sort_keys=False, allow_unicode=True)`` so the output is
-        human-readable and diff-friendly. Unlike :meth:`to_dict` (which returns
-        the lossy validated-schema view and drops forward-as-is LLM params such
-        as ``seed`` / ``top_p`` / ``response_format``), this preserves every key.
+        human-readable and diff-friendly. Preserves every key including the
+        forward-as-is LLM params and the pass-through sections.
 
         Note: ``${VAR:default}`` env placeholders are already resolved into
         concrete values at construction time (see ``__init__``), so the dump
@@ -809,7 +821,6 @@ class ConfigBuilder:
         max_concurrent: int | None = None,
         per_tenant_max: int | None = None,
         queue_depth: int | None = None,
-        default_dedicated_session: bool | None = None,
         event_buffer: dict | None = None,
         resume_on_startup: bool | None = None,
         timeout_seconds: float | None = None,
@@ -821,7 +832,6 @@ class ConfigBuilder:
             "max_concurrent": max_concurrent,
             "per_tenant_max": per_tenant_max,
             "queue_depth": queue_depth,
-            "default_dedicated_session": default_dedicated_session,
             "event_buffer": event_buffer,
             "resume_on_startup": resume_on_startup,
             "timeout_seconds": timeout_seconds,

@@ -24,11 +24,11 @@ class TestConfigToYaml:
         assert back["llm"]["top_p"] == 0.9
         assert back["llm"]["response_format"] == {"type": "json_object"}
 
-    def test_to_dict_still_lossy_unlike_to_yaml(self):
-        # Documents the behavior we deliberately did NOT change: to_dict() is the
-        # lossy validated-schema view; to_yaml() is the full-fidelity raw view.
+    def test_to_dict_now_full_fidelity_like_to_yaml(self):
+        # to_dict() now matches to_yaml()'s fidelity (issue #11): forward-as-is LLM
+        # params (seed/top_p/response_format) and pass-through sections are preserved.
         cfg = Config.from_dict({"agent": {"name": "x"}, "llm": {"provider": "openai", "model": "m", "seed": 42}})
-        assert "seed" not in cfg.to_dict().get("llm", {})
+        assert cfg.to_dict()["llm"]["seed"] == 42
         assert cfg.raw["llm"]["seed"] == 42
         assert yaml.safe_load(cfg.to_yaml())["llm"]["seed"] == 42
 

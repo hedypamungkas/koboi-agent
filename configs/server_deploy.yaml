@@ -22,8 +22,7 @@ memory:
 
 sandbox:
   backend: restricted                   # Production: isolate subprocess/fs
-  workdir: /data/workspace              # Docker volume mount
-  workdir_strategy: per_session         # Each session gets its own subdir
+  workdir: /data/workspace              # Docker volume mount (per-session subdir is automatic in server mode)
   network: deny                         # No outbound network from tools
   network_isolation: seccomp            # HARD egress deny via seccomp (needs python3-seccomp system package + Linux; falls back to soft otherwise)
   timeout: 30
@@ -55,7 +54,6 @@ jobs:
   enabled: true
   max_concurrent: 32
   queue_depth: 16
-  default_dedicated_session: true
   resume_on_startup: true
   timeout_seconds: 1800
   ttl_seconds: 86400

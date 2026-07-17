@@ -75,7 +75,7 @@ menyediakan `facade.run_stream()` (`loop.py:484`), `event_to_dict()` (`events.py
 - Auth: **keys file + CLI** (env back-compat) + session/job ownership.
 - **Idempotency-Key** dedup on submit endpoints.
 - Cancellation/disconnect + graceful drain (jobs + interactive).
-- Config: `server:` + `jobs:` + `sandbox.workdir_strategy`.
+- Config: `server:` + `jobs:` + `sandbox:` (per-session workdir is automatic in server mode).
 - **Error contract** (envelope + `ErrorEvent` + job error taxonomy).
 - `/healthz` + `/readyz` + request-id middleware.
 - Langfuse serving-enrichment (metadata + trace_id + flush).
@@ -396,7 +396,7 @@ control plane). Serving-state protocol-ization (`SessionStore`/`LockProvider`/`E
 | 16.3 | **`AsyncCallbackApprovalHandler`** | `guardrails/approval.py`+`facade.py:615` | handler async belum ada | S |
 | 16.4 | **Event `PendingApprovalEvent`** | `events.py:97,111` | SSE perlu tahu approval | S |
 | 16.5 | **Ownership sidecar** + cek | server layer | tenant isolation | M |
-| 16.6 | **Config `server:`+`jobs:`+`sandbox.workdir_strategy`** | `config*.py` | belum ada section | S |
+| 16.6 | **Config `server:`+`jobs:`+`sandbox:`** | `config*.py` | belum ada section | S |
 | 16.7 | **Verifikasi partial-turn consistency** | `loop.py:484`+`journal.py` | tak korup | M |
 | 16.8 | **Verifikasi timing tool-result persist** + idempotensi doc | `loop.py:470-471`+`memory_sqlite.py:171` | cegah dobel destructive saat resume | M |
 | 16.9 | **RAG warm-up / pre-build** | `rag/registry.py`+facade | cold-start lambat | M |
@@ -463,7 +463,6 @@ jobs:
   max_concurrent: 64
   per_tenant_max: 5
   queue_depth: 32
-  default_dedicated_session: true
   event_buffer: { max_events: 500 }
   resume_on_startup: true
   timeout_seconds: 1800
@@ -471,7 +470,6 @@ jobs:
 
 sandbox:
   backend: restricted
-  workdir_strategy: per_session
   safe_path: true
   network: false
 
@@ -530,7 +528,7 @@ event HITL + skeleton config/extra. Dipakai bersama kedua mode. **Testable murni
 - `koboi/events.py` — `PendingApprovalEvent` + tambah ke `StreamEvent` union + `_EVENT_TYPE_MAP`
   + case di `event_to_dict` (16.4).
 - `koboi/config_models.py` / `config.py` — Pydantic model `ServerConfig`, `JobsConfig`,
-  `sandbox.workdir_strategy`, `idempotency`, `workdir_ttl` (16.6).
+  `sandbox` (per-session workdir automatic), `idempotency`, `workdir_ttl` (16.6).
 - `pyproject.toml` — extra `[api]` (`fastapi`, `uvicorn[standard]`) (16.10).
 
 **Depends on:** — (entry point).
