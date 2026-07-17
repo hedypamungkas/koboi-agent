@@ -513,8 +513,8 @@ class Orchestrator:
                             if msg.get("role") == "assistant" and msg.get("tool_calls"):
                                 check_calls = msg["tool_calls"]
                                 break
-                    except Exception:
-                        pass  # never let the crash-path check itself crash
+                    except Exception as exc:
+                        logger.debug("crash-path tool recovery failed for %s: %s", agent_name, exc)
             for tc in check_calls:
                 if isinstance(tc, dict):
                     fn = tc.get("function", {})
