@@ -22,10 +22,13 @@ tydiqa_id_loader.py   TyDi QA Indonesian (native secondary_task; registered "tyd
 
 ## Scorers (`scorers/`)
 ```
-base.py               BaseScorer ABC + 11 built-in scorers:
-                        ToolUsageScorer, KeywordPresenceScorer, OutputLengthScorer,
-                        IterationEfficiencyScorer, HealthScoreScorer, LLMJudgeScorer, CostScorer,
-                        RAGNoiseScorer, ContextEfficiencyScorer, ToolSelectionScorer, TokenEfficiencyScorer
+base.py               BaseScorer ABC + 11 base scorer classes (ToolUsageScorer, KeywordPresenceScorer,
+                        OutputLengthScorer, IterationEfficiencyScorer, HealthScoreScorer, LLMJudgeScorer,
+                        CostScorer, RAGNoiseScorer, ContextEfficiencyScorer, ToolSelectionScorer,
+                        TokenEfficiencyScorer). `register_default_scorers` (registry.py) registers these
+                        + 4 mock-safe RAG/CI/skill classes (RetrievalMetricScorer, CitationGroundingScorer,
+                        BootstrapCIScorer, SkillTriggerAccuracyScorer) = **15 unique classes / 20 registered
+                        names** (the 5 retrieval_* aliases share one class).
 bfcl_scorer.py        BFCL function-calling accuracy
 gaia_scorer.py        GAIA exact-match
 swe_bench_scorer.py   SWE-bench patch-apply
@@ -51,7 +54,16 @@ env-gated, GATE-severity bar): `evals/deep_research_prod_{multifaceted,recency,c
 The passing grade + run commands are documented in `docs/deep-research-smoke.md`.
 
 ## How to run evals
-See `examples/21_eval_suite.py` and `configs/eval_suite.yaml`.
+- **eve-style `t` authoring DSL** (canonical, CI-native, no API key with `--mock`):
+  `koboi eval-test evals/ --mock --strict` — write `evals/**/*.eval.py` files exporting
+  `async def test_*(t)` (see the `t/` block below).
+- **Programmatic loader/scorer path** (BFCL/GAIA/SWE-bench/RAGAS/DeepEval):
+  see `examples/27_benchmark_suite.py`.
+
+The legacy YAML-suite path (`EvalConfig.build_suite`, the deleted `configs/eval_suite.yaml`,
+a `--suite` CLI flag) is **deprecated** (`EvalConfig.build_suite`/`build_scorers` emit
+`DeprecationWarning`); it had zero runtime callers. `examples/21_eval_suite.py` still ships
+as a direct-`EvalRunner` demo (it does not use the deprecated suite path).
 
 ## How to add a scorer
 1. Create a class in `scorers/` that inherits from `base.BaseScorer`

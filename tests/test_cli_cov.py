@@ -368,11 +368,28 @@ class TestEvalRun:
         assert rc == 1
         assert "Eval runner error" in capsys.readouterr().err
 
-    def test_eval_cases_file_missing_falls_back(self, tmp_path, capsys):
+    def test_eval_cases_file_missing_fails_closed(self, tmp_path, capsys):
+        # #21: a missing --cases file is an operator error (likely a typo). Silently
+        # returning exit 0 was a false-green -- CI would believe the suite passed
+        # without running a single case. Now it must exit 2 + stderr.
         cfg = _write_cfg(tmp_path)
         rc = cmd_eval(cfg, str(tmp_path / "nope.yaml"))
-        assert rc == 0
-        assert "No eval cases" in capsys.readouterr().out
+        assert rc == 2
+        assert "not found" in capsys.readouterr().err
+
+    def test_eval_cases_file_bad_row_fails_closed(self, tmp_path, capsys):
+        # #21: a YAML typo / unknown key in a case row must surface loudly with the row
+        # index + offending key, not be silently filtered into a false-green run.
+        cases_file = tmp_path / "cases.yaml"
+        cases_file.write_text(
+            yaml.dump({"cases": [{"name": "c1", "user_message": "hi", "oops_typo": "x"}]})
+        )
+        cfg = _write_cfg(tmp_path)
+        rc = cmd_eval(cfg, str(cases_file))
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "row 0" in captured.err
+        assert "oops_typo" in captured.err
 
     def test_eval_factory_systemexit_propagates(self, tmp_path, capsys):
         # Real EvalRunner drives the harness_factory; a failing from_config makes

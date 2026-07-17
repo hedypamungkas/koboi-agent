@@ -216,7 +216,7 @@ assertion** (that needs the human-annotated PPI tier per the "(beyond)" row abov
 
 ## 7. Verification (2026-07-11)
 
-- `koboi eval-test evals/ --mock --strict` → **46/46 passed** (33 mock + 13 live self-skips).
+- `koboi eval-test evals/ --mock --strict` → **61/61 passed** (37 mock + 24 live self-skips via `t.require_live()`). This count is a **floor** — it grows as new `t.*` evals are added; re-run the command for the current number.
 - `pytest` → **3201 passed / 0 failed / 178 skipped**, coverage **83%**.
 - `ruff check koboi/ evals/` → clean.
 - `mypy koboi/` → clean (205 files; CI runs mypy without ragas installed — local mypy
