@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from koboi.media.types import MediaRequest, MediaResult
     from koboi.mcp.base import BaseMCPClient
     from koboi.orchestration.orchestrator import Orchestrator
+    from koboi.proactive_memory import ProactiveMemory
     from koboi.rag.augmentation import AugmentationStrategy
     from koboi.sandbox.base import BaseSandbox
     from koboi.server.peers import PeerRegistry
@@ -1159,6 +1160,10 @@ class AgentAssembler:
         self.hook_chain: HookChain | None = None
         self.sandbox: BaseSandbox | None = None
         self.journal: StepJournal | None = None
+        # Wave2 #1: proactive_memory is only populated by ``build_proactive_memory()``,
+        # but ``build_opt_in_hooks()`` (shared with the orchestration path) reads it
+        # unconditionally -- default to None so the attribute always exists.
+        self.proactive_memory: ProactiveMemory | None = None
 
     def build_logger(self) -> AgentLogger:
         self.logger = AgentLogger(session_id=self.config.agent_name)
@@ -1355,35 +1360,18 @@ class AgentAssembler:
         )
         return self.proactive_memory
 
-    def build(self, peer_registry: PeerRegistry | None = None) -> KoboiAgent:
-        """Run all build steps in dependency order and return assembled agent."""
-        self.build_logger()
-        self.build_client()
-        self.build_memory()
-        self.build_journal()
-        self.build_tools()
-        self.build_sandbox()
-        self.build_mcp()
-        self.build_context()
-        self.build_rag()
-        self.build_guardrails()
-        self.build_trust_db()
-        self.build_approval()
-        self.build_policy()
-        self.build_skills()
-        self.build_mode_manager()
-        self.build_proactive_memory()
-        self.build_hooks()
+    def build_opt_in_hooks(self) -> None:
+        """Add opt-in hooks to ``self.hook_chain`` (skill/task persistence, proactive
+        extraction, structural handover detection, self-healing reflection + escalation
+        ladder).
 
-        # YAML-driven external command hooks (hooks: section). Gated by
-        # hooks.allow_exec (default-deny); each command runs under self.sandbox.
-        if self.hook_chain:
-            _build_command_hooks(self.config, self.sandbox, self.hook_chain)
-
-        _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
-        _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
-        _setup_peer_registry(self.tools, self.config, peer_registry=peer_registry)
-
+        Shared between the single-agent path (:meth:`build`) and the orchestration
+        path (``_build_orchestration``) so these hooks are no longer silently dropped
+        under ``orchestration.enabled:true``. Idempotent guards: each block only fires
+        when its config flag is on AND its collaborators exist. ``self.tools`` may be
+        ``None`` in orchestration mode (sub-agents own their own registries); tool-led
+        hooks are skipped in that case.
+        """
         # Add skill persistence hook if skills are present
         if self.skills and self.hook_chain:
             from koboi.hooks.skill_persistence_hook import SkillPersistenceHook
@@ -1394,7 +1382,9 @@ class AgentAssembler:
         # TaskPersistenceHook re-injects the active todo list after a compact;
         # ReadBeforeWriteResetHook clears stale read-tracking on session start
         # and real compaction. Each is added only when its collaborator exists.
-        if self.hook_chain:
+        # Self.tools may be None in orchestration mode -- skip both in that case
+        # (sub-agents own their own per-agent tool registries).
+        if self.hook_chain and self.tools is not None:
             task_mgr = self.tools.get_dep("task_manager")
             if task_mgr is not None:
                 from koboi.hooks.task_persistence_hook import TaskPersistenceHook
@@ -1512,6 +1502,40 @@ class AgentAssembler:
                     ladder=self.config.get("self_healing", "ladder", default=None) or None,
                 )
             )
+
+    def build(self, peer_registry: PeerRegistry | None = None) -> KoboiAgent:
+        """Run all build steps in dependency order and return assembled agent."""
+        self.build_logger()
+        self.build_client()
+        self.build_memory()
+        self.build_journal()
+        self.build_tools()
+        self.build_sandbox()
+        self.build_mcp()
+        self.build_context()
+        self.build_rag()
+        self.build_guardrails()
+        self.build_trust_db()
+        self.build_approval()
+        self.build_policy()
+        self.build_skills()
+        self.build_mode_manager()
+        self.build_proactive_memory()
+        self.build_hooks()
+
+        # YAML-driven external command hooks (hooks: section). Gated by
+        # hooks.allow_exec (default-deny); each command runs under self.sandbox.
+        if self.hook_chain:
+            _build_command_hooks(self.config, self.sandbox, self.hook_chain)
+
+        _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
+        _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
+        _setup_peer_registry(self.tools, self.config, peer_registry=peer_registry)
+
+        # Add the opt-in hooks (skill/task persistence, proactive extraction,
+        # handover, self-healing). Shared with _build_orchestration so orchestration
+        # mode no longer silently drops them (issue wave2 #1).
+        self.build_opt_in_hooks()
 
         from koboi.loop import AgentCore
 
@@ -1944,12 +1968,19 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
     Cache/replay coverage (v2/v3): EVERY chat LLM call in orchestration flows
     through ``_maybe_wrap_cache`` -- the shared ``assembler.client`` (router,
     planner, synthesis, dynamic builder) via ``build_client``, and per-node
-    clients via ``_agent_client_builder``. Three call paths are currently
-    UNREACHABLE from here and therefore uncached: ``QualityEvaluator`` (only
-    constructed in tests), ``ProactiveExtractionHook`` (not attached in
-    orchestration mode), and ``deep_research`` (docs-only on this branch). If
-    any becomes reachable, route it through ``_maybe_wrap_cache`` or it
-    egresses live during a cache/replay run.
+    clients via ``_agent_client_builder``. The ``ProactiveExtractionHook``
+    side-LLM (when ``memory.proactive.enabled``) shares ``assembler.client``
+    and is therefore cached too. ``QualityEvaluator`` is only constructed in
+    tests. If a new call path becomes reachable, route it through
+    ``_maybe_wrap_cache`` or it egresses live during a cache/replay run.
+
+    Wave2 fix: this path now runs ``build_opt_in_hooks()`` (the same hook
+    additions the single-agent path runs) so self-healing / handover /
+    proactive-memory / skill-task-persistence hooks are no longer silently
+    dropped under ``orchestration.enabled:true``. It also forwards the
+    media backend + websearch providers into sub-agent registries and the
+    Orchestrator (closing the second seam: media was non-functional in
+    orchestration mode).
     """
     from koboi.orchestration.factory import AgentFactory
     from koboi.orchestration.orchestrator import Orchestrator
@@ -1963,8 +1994,21 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
     assembler.build_policy()
     assembler.build_skills()
     assembler.build_mode_manager()
+    # Wave2 #1: proactive long-term-memory needs ``self.memory`` to bind to.
+    # Only build the (otherwise-unused-in-orchestration) parent memory when the
+    # proactive opt-in is on, so default orchestration configs are unaffected.
+    if config.get("memory", "proactive", "enabled", default=False):
+        assembler.build_memory()
+        assembler.build_proactive_memory()
     assembler.build_hooks()
     assembler.build_sandbox()
+
+    # Wave2 #1: YAML-driven command hooks + opt-in hooks (skill/task persistence,
+    # proactive extraction, handover, self-healing). Same call sequence as the
+    # single-agent path so opt-in hooks are no longer silently dropped.
+    if assembler.hook_chain:
+        _build_command_hooks(assembler.config, assembler.sandbox, assembler.hook_chain)
+    assembler.build_opt_in_hooks()
 
     orch_conf = config.orchestration
     exec_conf = orch_conf.get("execution", {})
@@ -2005,6 +2049,27 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
 
     peer_registry = build_peer_registry(config.get("peers", default={}), verified_registry=peer_registry)
 
+    # Wave2 #5: build the shared websearch providers + media backend once and forward
+    # them to every sub-agent's ToolRegistry via ``create_all_configured``. Without this,
+    # ``web_search``/``web_fetch``/``generate_*`` tools in orchestration sub-agents fall back
+    # to the mock/inline defaults and media is non-functional in orchestration mode.
+    websearch_conf = config.get("websearch", default={})
+    if websearch_conf.get("custom_modules"):
+        from koboi.websearch import load_custom_components
+
+        load_custom_components(websearch_conf["custom_modules"])
+    from koboi.websearch import build_fetch_provider, build_search_provider
+
+    shared_search_provider = build_search_provider(websearch_conf)
+    shared_fetch_provider = build_fetch_provider(websearch_conf)
+
+    media_conf = config.get("media", default={}) or {}
+    media_backend = None
+    if media_conf.get("enabled"):
+        from koboi.media import build_media
+
+        media_backend = build_media(media_conf)
+
     if agent_defs:
         agents_map = AgentFactory.create_all_configured(
             agent_defs,
@@ -2017,6 +2082,9 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
             client_builder=_agent_client_builder,
             mcp_registrar=mcp_registrar,
             peer_registry=peer_registry,
+            search_provider=shared_search_provider,
+            fetch_provider=shared_fetch_provider,
+            media_provider=media_backend,
         )
     else:
         agents_map = {}
@@ -2064,6 +2132,12 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
         sandbox=assembler.sandbox,
         research=config.get("research", default={}),
         websearch_conf=config.get("websearch", default={}),
+        # Wave2 #5: hand the media backend + config to the Orchestrator so
+        # ``KoboiAgent._media_backend()`` resolves (it reads
+        # ``getattr(self._orchestrator, "_media_backend", None)``) and the
+        # deep-research auto-multimedia briefing can generate artifacts.
+        media_conf=media_conf,
+        media_backend=media_backend,
         session_id=config.get("memory", "session_id", default=None),
     )
 

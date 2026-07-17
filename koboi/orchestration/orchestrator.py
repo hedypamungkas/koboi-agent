@@ -1353,17 +1353,68 @@ class Orchestrator:
 
         Non-streaming (``client.complete``) so the result can be citation-verified before
         emit. Falls back to findings concatenation on any failure.
+
+        Wave2 #6: when ``research.media.enabled`` (or ``media.enabled`` + a media
+        capability token) is on AND a ``media_backend`` is wired, a post-synthesis
+        multimedia briefing is appended (one selection LLM call + per-kind generation,
+        fail-soft). Previously the W4 helpers in ``research.py`` had zero callers.
         """
         from koboi.orchestration.research import build_research_synthesis_prompt
 
         prompt = build_research_synthesis_prompt(query, ctx)
+        report: str | None = None
         try:
             resp = await self.client.complete(messages=[{"role": "user", "content": prompt}], tools=None)
             if resp.content and resp.content.strip():
-                return resp.content
+                report = resp.content
         except Exception as e:  # noqa: BLE001 - synthesis is best-effort
             logger.warning("research synthesis failed; using findings concatenation: %s", e)
-        return ctx.source_store.format_for_synthesis()
+        if report is None:
+            report = ctx.source_store.format_for_synthesis()
+        # Wave2 #6: append the auto multimedia briefing when configured.
+        report = await self._maybe_append_research_media(report)
+        return report
+
+    async def _maybe_append_research_media(self, report: str) -> str:
+        """Wave2 #6: post-synthesis multimedia briefing (fail-soft; no-op without config).
+
+        Fires when ``research.media.enabled`` OR (``media.enabled`` + a media capability
+        token in ``research.capabilities``), AND a ``media_backend`` is wired. Appends a
+        ``## Generated media`` section to ``report``. Any selection/generation failure is
+        logged and the original report is returned unchanged.
+        """
+        if not report or self._media_backend is None:
+            return report
+        research_conf = self._research or {}
+        research_media = research_conf.get("media") or {}
+        # kinds: explicit research.media.kinds wins; else derive from research.capabilities.
+        kinds = list(research_media.get("kinds") or [])
+        if not kinds:
+            capabilities = research_conf.get("capabilities") or []
+            # Capability tokens use the same names as _MEDIA_KIND_DISPATCH keys
+            # (image/video/music/speech); "web" is the non-media default and ignored.
+            kinds = [c for c in capabilities if c in ("image", "video", "music", "speech")]
+        if not kinds:
+            return report
+        media_enabled = bool(research_media.get("enabled")) or bool((self._media_conf or {}).get("enabled"))
+        if not media_enabled:
+            return report
+        from koboi.orchestration.research import generate_research_media
+
+        max_items = int(research_media.get("max_items", 2))
+        try:
+            section, _artifacts = await generate_research_media(
+                client=self.client,
+                report=report,
+                kinds=kinds,
+                max_items=max_items,
+                media_backend=self._media_backend,
+                logger=logger,
+            )
+        except Exception as e:  # noqa: BLE001 - boundary: any failure -> no media section
+            logger.warning("post-synthesis media briefing failed: %s", e)
+            return report
+        return report + section
 
     @staticmethod
     def _sources_footer(ctx: ResearchContext, referenced: list[int]) -> str:

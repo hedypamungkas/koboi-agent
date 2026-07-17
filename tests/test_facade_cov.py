@@ -1539,6 +1539,126 @@ class TestBuildOrchestrationE2E:
         assert agent.orchestrator is not None
 
 
+class TestOrchestrationOptInHooksReachable:
+    """Wave2 #1: opt-in hooks (self-healing reflection, structural handover detection,
+    proactive-memory extraction) must reach the orchestrator's hook_chain under
+    ``orchestration.enabled:true``. Before the fix, ``_build_orchestration`` called the
+    individual ``build_*()`` steps but never ``assembler.build()`` (where these hooks
+    were inlined), so they were silently dropped in orchestration mode.
+    """
+
+    @staticmethod
+    def _hook_names(agent: KoboiAgent) -> set[str]:
+        chain = agent.orchestrator._hook_chain
+        return {type(h).__name__ for h in chain._hooks} if chain is not None else set()
+
+    def test_self_healing_hook_attached_in_orchestration(self):
+        from koboi.hooks.reflection_hook import ReflectionHook
+
+        cfg = _base_config()
+        cfg["memory"] = {"backend": "memory"}
+        cfg["orchestration"] = {
+            "enabled": True,
+            "execution": {"mode": "sequential"},
+            "router": {"type": "keyword"},
+            "agents": [{"name": "w", "keywords": ["x"]}],
+        }
+        cfg["self_healing"] = {"enabled": True, "max_turns": 1}
+        agent = KoboiAgent.from_dict(cfg)
+        names = self._hook_names(agent)
+        assert "ReflectionHook" in names, f"ReflectionHook missing from orchestration chain: {names}"
+        # P2a escalation ladder ships together with ReflectionHook.
+        assert "LadderRouterHook" in names, f"LadderRouterHook missing: {names}"
+
+    def test_handover_detection_hook_attached_in_orchestration(self):
+        from koboi.hooks.handover_detection_hook import HandoverDetectionHook
+
+        cfg = _base_config()
+        cfg["memory"] = {"backend": "memory"}
+        cfg["orchestration"] = {
+            "enabled": True,
+            "execution": {"mode": "sequential"},
+            "router": {"type": "keyword"},
+            "agents": [{"name": "w", "keywords": ["x"]}],
+        }
+        cfg["handover"] = {"detection": {"enabled": True, "coverage_threshold": 0.6}}
+        agent = KoboiAgent.from_dict(cfg)
+        names = self._hook_names(agent)
+        assert "HandoverDetectionHook" in names, f"HandoverDetectionHook missing: {names}"
+
+    def test_proactive_extraction_hook_attached_in_orchestration(self):
+        from koboi.hooks.proactive_extraction_hook import ProactiveExtractionHook
+
+        cfg = _base_config()
+        cfg["memory"] = {"backend": "memory", "proactive": {"enabled": True, "extract": True}}
+        cfg["orchestration"] = {
+            "enabled": True,
+            "execution": {"mode": "sequential"},
+            "router": {"type": "keyword"},
+            "agents": [{"name": "w", "keywords": ["x"]}],
+        }
+        agent = KoboiAgent.from_dict(cfg)
+        names = self._hook_names(agent)
+        assert "ProactiveExtractionHook" in names, f"ProactiveExtractionHook missing: {names}"
+
+    def test_all_opt_in_hooks_attached_together(self):
+        """All three opt-in hooks coexist on the orchestration hook_chain when configured."""
+        cfg = _base_config()
+        cfg["memory"] = {"backend": "memory", "proactive": {"enabled": True, "extract": True}}
+        cfg["orchestration"] = {
+            "enabled": True,
+            "execution": {"mode": "sequential"},
+            "router": {"type": "keyword"},
+            "agents": [{"name": "w", "keywords": ["x"]}],
+        }
+        cfg["self_healing"] = {"enabled": True, "max_turns": 1}
+        cfg["handover"] = {"detection": {"enabled": True}}
+        agent = KoboiAgent.from_dict(cfg)
+        names = self._hook_names(agent)
+        for expected in ("ReflectionHook", "HandoverDetectionHook", "ProactiveExtractionHook"):
+            assert expected in names, f"{expected} missing from orchestration chain: {names}"
+
+
+class TestOrchestrationMediaWiring:
+    """Wave2 #5: the media backend must reach sub-agent registries AND the Orchestrator
+    when ``media.enabled:true`` under ``orchestration.enabled:true`` (previously media was
+    non-functional in orchestration mode -- no provider was forwarded).
+    """
+
+    def test_media_backend_reaches_orchestrator_and_subagents(self):
+        cfg = _base_config()
+        cfg["memory"] = {"backend": "memory"}
+        cfg["media"] = {"enabled": True, "image": {"provider": "mock"}}
+        cfg["tools"] = {"builtin": ["generate_image"]}
+        cfg["orchestration"] = {
+            "enabled": True,
+            "execution": {"mode": "sequential"},
+            "router": {"type": "keyword"},
+            "agents": [{"name": "w", "keywords": ["x"], "tools": {"builtin": ["generate_image"]}}],
+        }
+        agent = KoboiAgent.from_dict(cfg)
+        # Orchestrator-side: ``KoboiAgent._media_backend()`` reads ``_orchestrator._media_backend``.
+        assert agent.orchestrator._media_backend is not None, "Orchestrator media_backend missing"
+        # Sub-agent side: the shared backend is forwarded to each sub-agent's tool registry.
+        sub_agent = agent.orchestrator._agents_map.get("w")
+        assert sub_agent is not None, "sub-agent 'w' not built"
+        sub_tools = getattr(sub_agent, "tools", None)
+        assert sub_tools is not None, "sub-agent has no tools registry"
+        assert sub_tools.get_dep("media_provider") is not None, "media_provider dep missing on sub-agent"
+
+    def test_no_media_backend_when_disabled(self):
+        cfg = _base_config()
+        cfg["memory"] = {"backend": "memory"}
+        cfg["orchestration"] = {
+            "enabled": True,
+            "execution": {"mode": "sequential"},
+            "router": {"type": "keyword"},
+            "agents": [{"name": "w", "keywords": ["x"]}],
+        }
+        agent = KoboiAgent.from_dict(cfg)
+        assert agent.orchestrator._media_backend is None
+
+
 class TestRagCustomModules:
     def test_build_rag_loads_custom_components(self, tmp_path, monkeypatch):
         called: list = []
