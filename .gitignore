@@ -61,6 +61,8 @@ koboi_trust.db
 .koboi_embedding_cache.json
 .koboi_embedding_cache.json.tmp
 .koboi_doc_cache/
+# Generated deep-research findings dump (output of configs/deep_research_demo.yaml `persist_findings`)
+research_findings.jsonl
 
 # === Benchmarks (large files) ===
 benchmarks/results.json
