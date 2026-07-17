@@ -339,12 +339,31 @@ class SkillsConfig(BaseModel):
     budget_chars: int = Field(default=8000, ge=0)
 
 
+class ExecutionConfig(BaseModel):
+    """Typed view of ``orchestration.execution`` (self-healing P0-B).
+
+    ``extra="allow"`` so the many untyped execution keys (mode, full_graph,
+    research caps, ...) pass through unchanged; this model only validates +
+    documents the knobs we care about. The facade still reads the raw dict via
+    ``config.get("orchestration", "execution", ...)`` -- this is the validated
+    surface for those same keys.
+    """
+
+    model_config = {"extra": "allow"}
+
+    max_replans: int = 0  # dynamic-mode re-plan budget on node failure (0 = opt-in/off)
+    max_revisions: int = 2
+    use_revision: bool = False
+    full_graph: bool = False
+    mode: str | None = None
+
+
 class OrchestrationConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     enabled: bool = False
     router: dict = Field(default_factory=dict)
-    execution: dict = Field(default_factory=dict)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     agents: list[dict] = Field(default_factory=list)
     share_mcp: bool = True  # G5: wire shared MCP clients into orchestration sub-agents
 
@@ -605,6 +624,38 @@ class HooksConfig(BaseModel):
     on_event: list[CommandHookConfig] = Field(default_factory=list)
 
 
+class SelfHealingConfig(BaseModel):
+    """Self-healing reflection loop (self-healing P1). Opt-in (default off).
+
+    Drives ``ReflectionHook`` -- a verifier-grounded reflection loop. See
+    ``docs/self-healing-feasibility.md`` §P1 and ``koboi/hooks/reflection_hook.py``.
+    """
+
+    model_config = {"extra": "allow"}
+
+    enabled: bool = False
+    max_turns: int = 3  # shared reflection retry budget (tool-error + low-grounding)
+    fail_soft: bool = True  # pass-through on any critic error (never break the run)
+    # Self-healing P3: on max_iterations exhaustion, return a side-LLM summary of
+    # partial progress instead of raising AgentMaxIterationsError. Independent of
+    # `enabled` (you can opt into graceful degrade without the full ladder).
+    graceful_max_iter: bool = False
+    empty_response_reask_limit: int = 1  # P0-C: bounded re-ask budget for empty responses (config-plumbed; default 1)
+    critic_llm: str | None = None  # named `providers:` ref or inline dict; None = reuse agent client
+    critic_timeout: float = 120.0  # timeout (seconds) for side-LLM calls; increase for slow gateways
+    triggers: dict = Field(default_factory=dict)
+    # triggers.tool_error.repeat_threshold (default 2); triggers.low_grounding.threshold (default 0.6)
+    ladder: dict = Field(default_factory=dict)
+    # failure-class -> ordered recovery rungs, e.g. {grounding: [reflect, handover]}.
+    # empty = built-in DEFAULT_LADDER (see koboi/hooks/ladder_router_hook.py). P2a.
+    tool_verification: dict = Field(default_factory=dict)
+    # P4 CRITIC: tool-grounded claim verification. .enabled (default false),
+    # .tools (subset of {calculate, web_search}; default [calculate, web_search]), .max_claims (default 5).
+    self_consistency: dict = Field(default_factory=dict)
+    # P4 self-consistency: N-sample aggregation for structured-output terminal answers.
+    # .enabled, .n_samples (default 3), .max_concurrency (default 3), .modes (default [act, auto, yolo]).
+
+
 class KoboiConfig(BaseModel):
     """Top-level config schema for koboi-agent."""
 
@@ -634,6 +685,8 @@ class KoboiConfig(BaseModel):
     media: MediaConfig = Field(default_factory=MediaConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
+    self_healing: SelfHealingConfig = Field(default_factory=SelfHealingConfig)
+    handover: dict = Field(default_factory=dict)  # handover.detection / handover.digest / handover.webhooks
 
     @model_validator(mode="before")
     @classmethod

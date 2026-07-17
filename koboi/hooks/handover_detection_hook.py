@@ -66,6 +66,12 @@ class HandoverDetectionHook(Hook):
         return [HookEvent.PRE_INPUT, HookEvent.POST_OUTPUT]
 
     async def execute(self, ctx: HookContext) -> HookContext:
+        # P2a: when the ladder router is active, only fire when chosen. On PRE_INPUT
+        # recovery_plan is unset (router only acts on POST_OUTPUT) so user-ask handover
+        # always fires. No router -> current behavior (plan is None, no gate).
+        plan = ctx.metadata.get("recovery_plan")
+        if plan is not None and plan.get("rung") != "handover":
+            return ctx
         if ctx.event == HookEvent.PRE_INPUT:
             msg = ctx.user_message or ""
             if any(p.search(msg) for p in self._ask_patterns):

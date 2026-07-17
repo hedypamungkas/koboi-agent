@@ -12,8 +12,8 @@ a future method-aware gate). It is a probabilistic LLM-judge catch, NOT a
 deterministic guarantee -- fail-soft: any judge error passes-through (never breaks
 the run, mirroring ``ProactiveMemory.extract_and_store``).
 
-Opt-in via config (cost/latency: 1 + N side-LLM calls per terminal answer where N =
-claim count)::
+Opt-in via config (cost/latency: 2 side-LLM calls per terminal answer — 1
+claim-decompose + 1 batch-NLI over all claims)::
 
     guardrails:
       output:
@@ -58,6 +58,14 @@ _NLI_PROMPT = (
     "says the opposite), or UNSUPPORTED (not in the context). Reply with exactly one "
     "word: SUPPORTED, CONTRADICTED, or UNSUPPORTED.\n\n"
     "Context:\n{context}\n\nClaim:\n{claim}"
+)
+_BATCH_NLI_PROMPT = (
+    "You are a strict grounding checker. Given the retrieved context, decide for EACH "
+    "claim whether it is SUPPORTED (directly entailed by the context), CONTRADICTED "
+    "(the context says the opposite), or UNSUPPORTED (not in the context). "
+    "Respond ONLY as a JSON array of verdicts, one per claim, in order. "
+    'Example: ["SUPPORTED", "UNSUPPORTED", "CONTRADICTED"].\n\n'
+    "Context:\n{context}\n\nClaims:\n{claims}"
 )
 
 
@@ -122,10 +130,8 @@ class GroundingGuardrail(BaseGuardrail):
                 self.last_coverage = None
                 return GuardrailResult(passed=True)
             ctx_text = "\n---\n".join(context)
-            supported = 0
-            for claim in claims:
-                if await self._nli(client, ctx_text, claim) == "SUPPORTED":
-                    supported += 1
+            verdicts = await self._batch_nli(client, ctx_text, claims)
+            supported = sum(1 for v in verdicts if v == "SUPPORTED")
             coverage = supported / len(claims)
             self.last_coverage = coverage
             if coverage >= self._threshold:
@@ -164,10 +170,46 @@ class GroundingGuardrail(BaseGuardrail):
             messages=[{"role": "user", "content": _NLI_PROMPT.format(context=ctx_text, claim=claim)}],
             tools=None,
         )
-        verdict = (resp.content or "").strip().upper()
-        # Order matters: "SUPPORTED" is a substring of "UNSUPPORTED", so check
-        # UNSUPPORTED (and CONTRADICTED) first to avoid a false SUPPORTED match.
-        for v in ("UNSUPPORTED", "CONTRADICTED", "SUPPORTED"):
-            if v in verdict:
-                return v
+        return self._normalize_verdict((resp.content or "").strip())
+
+    async def _batch_nli(self, client: LLMClient, ctx_text: str, claims: list[str]) -> list[str]:
+        """Batch NLI: check ALL claims in ONE side-LLM call (vs N per-claim calls).
+
+        Falls back to per-claim ``_nli`` on any parse failure (correctness over
+        latency). This is the key latency fix for slow gateways: N+1 calls → 2.
+        """
+        claims_formatted = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(claims))
+        resp = await client.complete(
+            messages=[
+                {
+                    "role": "user",
+                    "content": _BATCH_NLI_PROMPT.format(context=ctx_text, claims=claims_formatted),
+                }
+            ],
+            tools=None,
+        )
+        text = (resp.content or "").strip()
+        start, end = text.find("["), text.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            try:
+                raw_verdicts = json.loads(text[start : end + 1])
+                if isinstance(raw_verdicts, list) and len(raw_verdicts) == len(claims):
+                    return [self._normalize_verdict(str(v)) for v in raw_verdicts]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Fallback: batch failed (unparseable / wrong count) → per-claim NLI.
+        _logger.debug("GroundingGuardrail: batch NLI parse failed, falling back to per-claim")
+        return [await self._nli(client, ctx_text, claim) for claim in claims]
+
+    @staticmethod
+    def _normalize_verdict(verdict: str) -> str:
+        """Normalize an LLM NLI verdict to SUPPORTED/CONTRADICTED/UNSUPPORTED.
+
+        Order matters: 'SUPPORTED' is a substring of 'UNSUPPORTED', so check
+        UNSUPPORTED (and CONTRADICTED) first to avoid a false SUPPORTED match.
+        """
+        v = verdict.strip().upper()
+        for candidate in ("UNSUPPORTED", "CONTRADICTED", "SUPPORTED"):
+            if candidate in v:
+                return candidate
         return "UNSUPPORTED"

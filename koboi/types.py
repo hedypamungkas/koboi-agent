@@ -52,6 +52,20 @@ class ToolResult:
 
 
 @dataclass
+class ToolExecOutcome:
+    """Structured outcome of executing a tool (self-healing P0-D).
+
+    ``content`` is always the LLM-facing string (so ``ToolRegistry.execute()``
+    keeps its ``-> str`` contract). ``errored`` / ``error_kind`` let the pipeline
+    flag a failure WITHOUT fragile string-matching of the ``"Error:"`` prefix.
+    """
+
+    content: str
+    errored: bool = False
+    error_kind: str | None = None
+
+
+@dataclass
 class TokenUsage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -106,6 +120,10 @@ class AgentResult:
     is_dynamic: bool = False
     domain_label: str | None = None
     failed: bool = False
+    # Self-healing P2b: True if the node fired any non-idempotent (side-effecting)
+    # tool. Such nodes must NOT be re-run on replan (their side effect already
+    # happened) -- the replan loop carries them forward instead. Default False.
+    had_non_idempotent_tool: bool = False
     tool_calls: list = field(default_factory=list)
 
 

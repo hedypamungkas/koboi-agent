@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging as _logging
 import time as _time
 from collections.abc import AsyncGenerator
@@ -91,6 +92,9 @@ class AgentCore:
         memory: ConversationMemory | None = None,
         tools: ToolRegistry | None = None,
         max_iterations: int = 10,
+        empty_response_reask_limit: int = 1,
+        graceful_max_iter: bool = False,
+        self_consistency_config: dict | None = None,
         verbose: bool = False,
         logger: AgentLogger | None = None,
         system_prompt: str | None = None,
@@ -119,6 +123,17 @@ class AgentCore:
         self.memory = memory if memory is not None else ConversationMemory(logger=logger, system_prompt=system_prompt)
         self.tools = tools if tools is not None else ToolRegistry()
         self.max_iterations = max_iterations
+        # Self-healing P0-C: bounded re-ask budget for complete-but-empty responses
+        # (default 1 = default-ON; 0 disables). An empty answer is never useful.
+        self.empty_response_reask_limit = empty_response_reask_limit
+        self._empty_response_reasked = 0
+        # Self-healing P3: on max_iterations exhaustion, return a side-LLM summary of
+        # partial progress instead of raising AgentMaxIterationsError (opt-in).
+        self.graceful_max_iter = graceful_max_iter
+        # Self-healing P4: self-consistency (N-sample aggregation) for structured-output
+        # terminal answers. Opt-in; structured-only; mode act+. None/empty = disabled.
+        self.self_consistency_config = self_consistency_config or {}
+        self._last_self_consistency: dict | None = None
         self.verbose = verbose
         self.context_manager = context_manager
         self.max_context_tokens = max_context_tokens
@@ -131,6 +146,10 @@ class AgentCore:
         if output_guardrail is not None and output_guardrail not in self.output_guardrails:
             self.output_guardrails.insert(0, output_guardrail)
         self._last_output_guardrail: dict | None = None  # R2: warn outcome -> RunResult.metadata
+        # Self-healing P1: reflection-retry state. Stashed by _process_output from a
+        # ReflectionHook's POST_OUTPUT flag; honored by _run_loop. None when no hook.
+        self._reflection_retry_requested: dict | None = None
+        self._reflection_retries = 0
         self.rate_limiter = rate_limiter
         self.audit_trail = audit_trail
         self.approval_handler = approval_handler
@@ -334,6 +353,104 @@ class AgentCore:
         if _hr:
             raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
 
+    def _is_empty_terminal(self, response: AgentResponse) -> bool:
+        """A complete response with no usable content (self-healing P0-C).
+
+        ``is_complete`` only checks ``not tool_calls``; content is ignored, so an
+        empty/whitespace response is silently treated as a successful completion.
+        """
+        return response.is_complete and not (response.content and response.content.strip())
+
+    def _nudge_empty_response(self) -> None:
+        """Inject a context nudge so the next iteration doesn't repeat the empty turn."""
+        self.memory.add_context_message(
+            "Your previous response was empty. Provide a direct response or call an appropriate tool.",
+            label="empty_response_nudge",
+        )
+
+    async def _graceful_max_iter_summary(self) -> str:
+        """Self-healing P3: summarize partial progress at max_iterations (fail-soft).
+
+        A side-LLM summarizes what was accomplished + what remains over the run's
+        conversation. On any failure (or no usable response), fall back to the last
+        non-empty assistant message, then a generic notice -- never raises. Uses the
+        agent's own client (same trust boundary as every other iteration).
+        """
+        prompt = (
+            "The assistant hit its step limit before finishing the task above. In a concise "
+            "reply to the user, summarize what was accomplished so far and what remains "
+            "unfinished. Do not mention the step limit."
+        )
+        try:
+            messages = self.memory.get_messages() + [{"role": "user", "content": prompt}]
+            resp = await self.client.complete(messages=messages, tools=None)
+            text = getattr(resp, "content", None)
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+        except Exception as exc:
+            self._log(f"Graceful max_iter summary failed, using fallback: {exc}")
+        try:
+            for m in reversed(self.memory.get_messages()):
+                if m.get("role") == "assistant" and (m.get("content") or "").strip():
+                    return f"[partial] {(m.get('content') or '').strip()}"
+        except Exception:  # nosec B110 - intentionally swallowed; the fallback must never break the graceful degrade
+            pass
+        return "I was unable to complete the task within the allowed steps."
+
+    async def _process_graceful_output(self, output: str) -> str:
+        """Run output guardrails on the graceful-degrade summary + persist it (fail-soft).
+
+        Routes the summary through ``_process_output`` (the single guardrail + persist
+        gate) so it gets the same treatment as any terminal answer. A guardrail block
+        / handover / abort on the degrade falls back to the generic notice (preserve
+        the graceful "never raise" contract). Self-healing P3.
+        """
+        try:
+            return await self._process_output(output, AgentResponse(content=output), self.max_iterations - 1)
+        except (AgentGuardrailError, AgentHandoverError, AgentAbortedError):
+            output = "I was unable to complete the task within the allowed steps."
+            self.memory.add_assistant_message(output)
+            return output
+
+    # -- P4: self-consistency (structured terminal answers) ---------------------
+
+    def _self_consistency_applies(self, rf: dict | None) -> bool:
+        cfg = self.self_consistency_config
+        if not cfg.get("enabled") or int(cfg.get("n_samples", 3)) < 2:
+            return False
+        if rf is None:  # structured-output only (exact-match majority on normalized JSON)
+            return False
+        # Mode gate: act+ only (self-consistency multiplies spend on terminal answers);
+        # configurable via self_consistency.modes (default [act, auto, yolo]).
+        if self.mode_manager is not None:
+            from koboi.modes import AgentMode
+
+            allowed = {
+                AgentMode[m.upper()] if isinstance(m, str) else m for m in cfg.get("modes", ["act", "auto", "yolo"])
+            }
+            if self.mode_manager.current_mode not in allowed:
+                return False
+        return True
+
+    async def _self_consistent_sample(
+        self, messages: list[dict], tool_defs: list[dict] | None, rf: dict, first: AgentResponse
+    ) -> tuple[AgentResponse, float]:
+        from koboi.self_consistency import aggregate_structured
+
+        n = int(self.self_consistency_config.get("n_samples", 3))
+        max_concurrency = int(self.self_consistency_config.get("max_concurrency", 3))
+        sem = asyncio.Semaphore(max(1, max_concurrency))
+
+        async def _one() -> AgentResponse:
+            async with sem:
+                return await self.client.complete(messages=messages, tools=tool_defs, response_format=rf)
+
+        others = await asyncio.gather(*[_one() for _ in range(n - 1)], return_exceptions=True)
+        samples = [first] + [r for r in others if isinstance(r, AgentResponse)]
+        if len(samples) < 2:
+            return first, 1.0
+        return aggregate_structured(samples)
+
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
         """Run output guardrails, emit POST_OUTPUT, save to memory.
 
@@ -381,6 +498,14 @@ class AgentCore:
                 break
 
         ctx = await self._emit(HookEvent.POST_OUTPUT, iteration=iteration, llm_response=response)
+        # Self-healing P1: a ReflectionHook may request a verifier-grounded retry
+        # (low-grounding reground). Stash it for _run_loop to honor (mirrors the
+        # _last_output_guardrail stash). Note: by here ``output`` is the abstain
+        # refusal (the original answer was swapped), so memory will hold the refusal;
+        # the loop's reflection note is self-contained (it names the ungrounded
+        # claims), so the model re-attempts informed rather than revising a verbatim
+        # prior answer.
+        self._reflection_retry_requested = ctx.metadata.get("reflection_retry")
         if ctx.abort:
             raise AgentAbortedError(ctx.inject_message or "Output rejected by hook")
         _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
@@ -514,6 +639,13 @@ class AgentCore:
             "resumed": resumed,
             "turn_index": self._turn_index,
             "last_step": last_step,
+            # Self-healing P0-C: observability -- how many empty-response re-asks
+            # happened this run (0 = none / disabled).
+            "empty_response_reasked": getattr(self, "_empty_response_reasked", 0),
+            # Self-healing P1: reflection retry count (0 = none / disabled / streaming).
+            "reflection_retries": getattr(self, "_reflection_retries", 0),
+            # Self-healing P4: self-consistency outcome (None = not fired / streaming / off).
+            "self_consistency": getattr(self, "_last_self_consistency", None),
         }
         # R4: stamp retrieved chunks so evals can assert on retrieval (t.retrievedChunk)
         # without a live LLM. last_results is overwritten each retrieval (not accumulated).
@@ -630,6 +762,12 @@ class AgentCore:
         pipeline_outcomes: list[dict] = []
         total_usage: TokenUsage | None = None
         self._last_output_guardrail = None  # R2: reset per run
+        empty_reasks = 0  # self-healing P0-C: bounded re-ask counter for empty responses
+        self._empty_response_reasked = 0
+        # Self-healing P1: reflection-retry state (reset per run).
+        self._reflection_retry_requested = None
+        self._reflection_retries = 0
+        self._last_self_consistency = None
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
@@ -647,14 +785,61 @@ class AgentCore:
             response = await self.client.complete(messages=messages, tools=tool_defs, response_format=_rf)
             await self._emit(HookEvent.POST_LLM_CALL, iteration=i, llm_response=response)
 
-            total_usage = self._update_usage(response, total_usage)
+            # P4: defer usage accounting when self-consistency will fire (counted once
+            # after the N-sample swap, since the canonical carries the summed usage).
+            _sc_applies = self._self_consistency_applies(_rf)
+            if not _sc_applies:
+                total_usage = self._update_usage(response, total_usage)
 
             if response.content and self.skills and self._activate_skill(response.content):
                 self._journal_step(i, status="skill", response=response)
                 continue
 
             if response.is_complete:
+                # Self-healing P0-C: a complete-but-empty response is degenerate --
+                # an empty answer is never useful. Re-ask within budget AND only
+                # while a next iteration remains; otherwise fall through to normal
+                # handling (back-compat: still success=True). The (i+1) < max guard
+                # ensures an empty response on the final iteration never turns a
+                # previously-successful run into an AgentMaxIterationsError.
+                if (
+                    self._is_empty_terminal(response)
+                    and empty_reasks < self.empty_response_reask_limit
+                    and (i + 1) < self.max_iterations
+                ):
+                    empty_reasks += 1
+                    self._empty_response_reasked = empty_reasks
+                    self._log(
+                        f"Empty response; nudging and re-asking ({empty_reasks}/{self.empty_response_reask_limit})"
+                    )
+                    self._nudge_empty_response()
+                    self._journal_step(i, status="empty_reask", response=response)
+                    continue
+                # Self-healing P4: self-consistency -- for structured terminal answers,
+                # fan out N samples + pick the majority (before guardrails/reflection).
+                if _sc_applies:
+                    response, sc_agreement = await self._self_consistent_sample(messages, tool_defs, _rf, response)
+                    total_usage = self._update_usage(response, total_usage)  # count the summed canonical once
+                    self._last_self_consistency = {
+                        "n": int(self.self_consistency_config.get("n_samples", 3)),
+                        "agreement": round(sc_agreement, 4),
+                    }
                 output = await self._process_output(response.content, response, i)
+                # Self-healing P1: POST_OUTPUT reflection retry (low-grounding reground).
+                # The hook owns the soft max_turns budget; (i+1) < max is the hard
+                # backstop (P0-C lesson: never turn a success into MaxIterationsError).
+                if self._reflection_retry_requested and (i + 1) < self.max_iterations:
+                    self._reflection_retries += 1
+                    critique = (self._reflection_retry_requested or {}).get("critique")
+                    if critique:
+                        self.memory.add_context_message(
+                            f"[REFLECTION] {critique} (Re-attempt grounded strictly in the "
+                            "context; do not repeat previous side-effecting tool calls.)",
+                            label="reflection_critique",
+                        )
+                    self._log(f"Low-grounding reflection retry ({self._reflection_retries})")
+                    self._journal_step(i, status="reflection_retry", response=response)
+                    continue
                 self._journal_step(i, status="complete", response=response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 # M5/P4 parity with run_stream: stamp the Langfuse trace_id so the
@@ -688,12 +873,31 @@ class AgentCore:
                             "tool_name": tc.name,
                             "skipped": pr.skipped,
                             "skip_reason": pr.skip_reason,
+                            "errored": pr.errored,
+                            "error_kind": pr.error_kind,
                         }
                     )
                 self._journal_step(i, status="tool_calls", response=response, tool_calls=response.tool_calls)
 
         self._journal_max_iter()
         await self._emit(HookEvent.SESSION_END, iteration=self.max_iterations)
+        # Self-healing P3: graceful degrade -- summarize partial progress instead of a
+        # hard AgentMaxIterationsError (opt-in via graceful_max_iter).
+        if self.graceful_max_iter:
+            output = await self._graceful_max_iter_summary()
+            output = await self._process_graceful_output(output)
+            meta = self._run_metadata(resumed=resumed, last_step=self.max_iterations - 1)
+            meta["max_iter_degraded"] = True
+            return RunResult(
+                content=output,
+                iterations_used=self.max_iterations,
+                tool_calls_made=tool_calls_made,
+                pipeline_outcomes=pipeline_outcomes,
+                token_usage=total_usage,
+                success=True,
+                elapsed_seconds=_time.monotonic() - _start,
+                metadata=meta,
+            )
         raise AgentMaxIterationsError(self.max_iterations)
 
     async def run(self, user_message: str | list) -> RunResult:
@@ -730,6 +934,12 @@ class AgentCore:
             return
 
         self._last_output_guardrail = None  # R2: reset per run (parity with _run_loop)
+        empty_reasks = 0  # self-healing P0-C: bounded re-ask counter for empty responses
+        self._empty_response_reasked = 0
+        # Self-healing P1: reflection-retry state (reset per run; streaming skips retry).
+        self._reflection_retry_requested = None
+        self._reflection_retries = 0
+        self._last_self_consistency = None
         _stream_tools_used: list[str] = []
         # G8b: when output guardrails are configured, buffer TextDeltas and flush
         # them only after _process_output passes -- otherwise the tokens stream
@@ -780,9 +990,29 @@ class AgentCore:
                 continue
 
             if final_response.is_complete:
+                # Self-healing P0-C: re-ask a complete-but-empty response within
+                # budget + while a next iteration remains (parity with the non-stream
+                # path); otherwise fall through (never raise on the last iteration).
+                if (
+                    self._is_empty_terminal(final_response)
+                    and empty_reasks < self.empty_response_reask_limit
+                    and (i + 1) < self.max_iterations
+                ):
+                    empty_reasks += 1
+                    self._empty_response_reasked = empty_reasks
+                    self._log(
+                        f"Empty response; nudging and re-asking ({empty_reasks}/{self.empty_response_reask_limit})"
+                    )
+                    self._nudge_empty_response()
+                    self._journal_step(i, status="empty_reask", response=final_response)
+                    continue
                 # May raise AgentGuardrailError (block) -- the buffer is then
                 # discarded, so the blocked tokens never reach the stream.
                 output = await self._process_output(final_response.content or "", final_response, i)
+                if self._reflection_retry_requested:
+                    # P1: streaming reflection is deferred (doc §risks); complete without
+                    # retrying. The critique already ran; the run completes normally.
+                    self._log("Reflection retry requested but streaming -- completing (P1 defers stream reflection)")
                 for d in delta_buffer:
                     yield d
                 self._journal_step(i, status="complete", response=final_response, is_terminal=True)
@@ -826,6 +1056,30 @@ class AgentCore:
 
         self._journal_max_iter()
         await self._emit(HookEvent.SESSION_END, iteration=self.max_iterations)
+        # Self-healing P3: graceful degrade in streaming -- summarize partial progress
+        # instead of yielding an AgentMaxIterationsError ErrorEvent (opt-in).
+        if self.graceful_max_iter:
+            output = await self._graceful_max_iter_summary()
+            output = await self._process_graceful_output(output)
+            unique_tools = list(dict.fromkeys(_stream_tools_used))
+            trace_id = ""
+            if self.hooks:
+                lf_hook = self.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
+                if lf_hook:
+                    trace_id = getattr(lf_hook, "_trace_id", "") or ""
+            meta = self._run_metadata(resumed=False, last_step=self.max_iterations - 1)
+            meta["max_iter_degraded"] = True
+            yield TextDeltaEvent(content=output)
+            yield CompleteEvent(
+                response=AgentResponse(content=output),
+                content=output,
+                elapsed_seconds=_time.monotonic() - _start,
+                iterations_used=self.max_iterations,
+                tools_used=unique_tools,
+                trace_id=trace_id,
+                metadata=meta,
+            )
+            return
         yield ErrorEvent(error=AgentMaxIterationsError(self.max_iterations))
 
     async def chat(self, user_message: str | list) -> RunResult:

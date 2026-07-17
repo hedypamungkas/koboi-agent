@@ -20,7 +20,7 @@ from collections.abc import Callable
 
 from koboi.guardrails.approval_types import ApprovalOutcome
 from koboi.modes import AgentMode
-from koboi.types import RiskLevel, ToolCall
+from koboi.types import RiskLevel, ToolCall, ToolExecOutcome
 
 if TYPE_CHECKING:
     from koboi.guardrails.rate_limiter import RateLimiter
@@ -37,6 +37,24 @@ _log = _logging.getLogger("koboi.pipeline")
 # Callback type for yielding events during streaming
 EventCallback = Callable[[str, dict], None]
 
+# Self-healing P0-D: actionable hints appended to an errored tool_result. The
+# leading "Error:" prefix from ToolRegistry.execute_outcome() is preserved so
+# internal callers that string-match it (orchestrator node-failure detection)
+# keep working; this only adds guidance for the LLM.
+_ERROR_HINTS: dict[str, str] = {
+    "tool_not_found": "This tool does not exist; pick an available tool.",
+    "invalid_args": "The arguments were invalid; fix the JSON/types and retry.",
+    "timeout": "The tool timed out; simplify the request or retry.",
+    "execution_error": "Review the arguments and retry, or try a different approach.",
+}
+
+
+def _format_tool_error(outcome: ToolExecOutcome, idempotent: bool) -> str:
+    """Append an actionable, prefix-preserving hint to an errored tool result."""
+    hint = _ERROR_HINTS.get(outcome.error_kind or "", _ERROR_HINTS["execution_error"])
+    suffix = " (warning: this tool has side effects; a retry will re-run it)" if not idempotent else ""
+    return f"{outcome.content} {hint}{suffix}"
+
 
 @dataclass
 class ToolPipelineResult:
@@ -47,6 +65,13 @@ class ToolPipelineResult:
     result: str
     skipped: bool = False
     skip_reason: str = ""
+    # Self-healing P0-D: structured error signal (additive; the P1 ReflectionHook
+    # keys on this instead of fragile string-matching). ``errored`` = the tool ran
+    # and failed; denied/skipped tools set ``error_kind`` but stay ``skipped=True``
+    # (they never executed). ``idempotent`` is carried for P1 retry decisions.
+    errored: bool = False
+    error_kind: str | None = None
+    idempotent: bool = True
 
 
 class ToolExecutionPipeline:
@@ -109,6 +134,10 @@ class ToolExecutionPipeline:
             result=message,
             skipped=True,
             skip_reason=skip_reason,
+            # Self-healing P0-D: classify the deny/skip so P1 reflection can route
+            # (skip_reason strings are already a clean taxonomy: rate_limit /
+            # policy_denied / mode_blocked / denied). skipped=True stays authoritative.
+            error_kind=skip_reason,
         )
 
     def _deny_tool(
@@ -299,8 +328,15 @@ class ToolExecutionPipeline:
             if not confirm_outcome.proceed:
                 return self._deny_tool(tc, risk, "policy_denied", f"Policy confirm denied: {policy_reason}", on_event)
 
-        # 6. Execute tool
-        tool_result = await self.tools.execute(tc.name, tc.arguments)
+        # 6. Execute tool (self-healing P0-D: structured outcome -> actionable msg)
+        exec_outcome = await self.tools.execute_outcome(tc.name, tc.arguments)
+        tool_result = exec_outcome.content
+        errored = exec_outcome.errored
+        error_kind = exec_outcome.error_kind
+        td = self.tools.get_definition(tc.name)
+        idempotent = td.idempotent if td is not None else True
+        if errored:
+            tool_result = _format_tool_error(exec_outcome, idempotent)
 
         # 7. POST_TOOL_USE hook
         if self.hooks:
@@ -314,6 +350,9 @@ class ToolExecutionPipeline:
                 tool_arguments=tc.arguments,
                 tool_result=tool_result,
             )
+            # Self-healing P2a: surface P0-D's structured error signal onto the ctx so
+            # FailureClassifierHook can tag failure_class without string-matching.
+            post_ctx.metadata["tool_error_kind"] = error_kind
             post_ctx = await self.hooks.emit(post_ctx)
             for msg in post_ctx.inject_messages:
                 self.memory.add_context_message(msg, label="hook_inject")
@@ -368,4 +407,7 @@ class ToolExecutionPipeline:
             tool_call_id=tc.id,
             tool_name=tc.name,
             result=tool_result,
+            errored=errored,
+            error_kind=error_kind,
+            idempotent=idempotent,
         )

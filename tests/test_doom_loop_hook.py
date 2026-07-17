@@ -11,10 +11,10 @@ from koboi.harness.doom_loop import DoomLoopConfig, DoomLoopResult
 
 
 class TestDoomLoopHook:
-    def test_handles_returns_post_tool_use(self):
-        """DoomLoopHook should handle POST_TOOL_USE event."""
+    def test_handles_returns_session_start_and_post_tool_use(self):
+        """DoomLoopHook handles POST_TOOL_USE (detection) + SESSION_START (per-run reset)."""
         hook = DoomLoopHook()
-        assert hook.handles() == [HookEvent.POST_TOOL_USE]
+        assert hook.handles() == [HookEvent.SESSION_START, HookEvent.POST_TOOL_USE]
 
     async def test_passthrough_when_no_tool_name(self):
         """Should return context unchanged when no tool_name provided."""

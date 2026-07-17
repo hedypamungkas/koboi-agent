@@ -30,6 +30,7 @@ def _stem_from_url(url: str) -> str:
     description="Fetch a URL and add its content to the live knowledge corpus so it can be "
     "recalled in later turns. Use for sources worth remembering (not one-off lookups).",
     risk_level=RiskLevel.MODERATE,
+    idempotent=False,  # self-healing: mutates the live corpus -- carry forward on replan / skip on resume
     parameters={
         "type": "object",
         "properties": {

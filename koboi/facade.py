@@ -1433,6 +1433,86 @@ class AgentAssembler:
                 )
             )
 
+        # Self-healing P1: tool-grounded reflection loop (opt-in). Verifier-fed
+        # (GroundingGuardrail ref for low-grounding; P0-D errored signal for tools).
+        if self.hook_chain and self.config.get("self_healing", "enabled", default=False):
+            from koboi.guardrails.grounding import GroundingGuardrail
+            from koboi.hooks.reflection_hook import ReflectionHook
+            from koboi.llm.resolve import resolve_llm_spec
+
+            grounding = next(
+                (g for g in (self.output_guardrails or []) if isinstance(g, GroundingGuardrail)),
+                None,
+            )
+            if grounding is None:
+                logging.getLogger(__name__).warning(
+                    "self_healing.enabled without a grounding_check output guardrail "
+                    "-- low-grounding reflection will be inert; only tool-error critique fires"
+                )
+            # P2a: shared per-run recovery budget (owned by the router, consumed by
+            # ReflectionHook on an actual reflect). The 'handover' rung needs
+            # HandoverDetectionHook (handover.detection.enabled) to actually escalate.
+            from koboi.harness.recovery_budget import RecoveryBudget
+
+            budget = RecoveryBudget(max_turns=self.config.get("self_healing", "max_turns", default=3))
+            if not self.config.get("handover", "detection", "enabled", default=False):
+                logging.getLogger(__name__).warning(
+                    "self_healing enabled without handover.detection -- the ladder's "
+                    "'handover' rung will be inert (escalate-to-human unavailable)"
+                )
+            critic_client = self.client
+            critic_spec = self.config.get("self_healing", "critic_llm", default=None)
+            if critic_spec:
+                try:  # fail-soft: fall back to the main client on any resolve/build error
+                    resolved = resolve_llm_spec(critic_spec, self.config) or {}
+                    from koboi.llm.factory import create_client
+
+                    critic_client = create_client(
+                        provider=resolved.get("provider") or "openai",
+                        model=resolved.get("model") or "",
+                        api_key=resolved.get("api_key") or "",
+                        base_url=resolved.get("base_url") or "",
+                        timeout=self.config.get("self_healing", "critic_timeout", default=120.0),
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "self_healing.critic_llm resolve/build failed (%s); reusing main client", exc
+                    )
+                    critic_client = self.client
+            self.hook_chain.add(
+                ReflectionHook(
+                    client=critic_client,
+                    grounding=grounding,
+                    max_turns=self.config.get("self_healing", "max_turns", default=3),
+                    fail_soft=self.config.get("self_healing", "fail_soft", default=True),
+                    tool_error_threshold=self.config.get(
+                        "self_healing", "triggers", "tool_error", "repeat_threshold", default=2
+                    ),
+                    grounding_threshold=self.config.get(
+                        "self_healing", "triggers", "low_grounding", "threshold", default=0.6
+                    ),
+                    budget=budget,
+                    tools=self.tools
+                    if self.config.get("self_healing", "tool_verification", "enabled", default=False)
+                    else None,
+                    verifier_tools=self.config.get("self_healing", "tool_verification", "tools", default=None),
+                    max_claims=self.config.get("self_healing", "tool_verification", "max_claims", default=5),
+                )
+            )
+            # P2a: escalation ladder -- classifier + router. The shared per-run budget
+            # built above is consumed by ReflectionHook on an actual reflect; the router
+            # arbitrates reflect<->handover on POST_OUTPUT and resets it on SESSION_START.
+            from koboi.hooks.failure_classifier_hook import FailureClassifierHook
+            from koboi.hooks.ladder_router_hook import LadderRouterHook
+
+            self.hook_chain.add(FailureClassifierHook(grounding=grounding))
+            self.hook_chain.add(
+                LadderRouterHook(
+                    budget=budget,
+                    ladder=self.config.get("self_healing", "ladder", default=None) or None,
+                )
+            )
+
         from koboi.loop import AgentCore
 
         core = AgentCore(
@@ -1440,6 +1520,9 @@ class AgentAssembler:
             memory=self.memory,
             tools=self.tools,
             max_iterations=self.config.max_iterations,
+            graceful_max_iter=self.config.get("self_healing", "graceful_max_iter", default=False),
+            self_consistency_config=self.config.get("self_healing", "self_consistency", default=None),
+            empty_response_reask_limit=self.config.get("self_healing", "empty_response_reask_limit", default=1),
             verbose=self.verbose,
             logger=self.logger,
             system_prompt=None,

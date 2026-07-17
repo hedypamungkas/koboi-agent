@@ -41,6 +41,7 @@ from koboi.types import RiskLevel
         "required": ["tasks"],
     },
     risk_level=RiskLevel.SAFE,
+    idempotent=False,  # self-healing: spawns sub-agents (side effects) -- carry forward on replan / skip on resume
     deps=["subagent_manager"],
 )
 async def delegate_tasks(tasks: list[dict], _deps: dict | None = None) -> str:
