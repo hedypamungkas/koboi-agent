@@ -179,7 +179,7 @@ class ReflectionHook(Hook):
     @staticmethod
     def _tool_key(ctx: HookContext) -> str:
         args = ctx.tool_arguments or ""
-        digest = hashlib.sha1(args.encode("utf-8", "replace")).hexdigest()[:12]
+        digest = hashlib.sha1(args.encode("utf-8", "replace"), usedforsecurity=False).hexdigest()[:12]
         return f"{ctx.tool_name}:{digest}"
 
     async def _critique_tool_error(self, ctx: HookContext, result: str) -> str | None:
