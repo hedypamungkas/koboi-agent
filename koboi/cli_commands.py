@@ -536,6 +536,13 @@ def cmd_eval(config_path: str, cases: str | None) -> int:
         with open(cases) as f:
             data = yaml.safe_load(f) or {}
         for idx, case_data in enumerate(data.get("cases", [])):
+            # Guard: non-dict rows cannot be iterated for key hints below.
+            if not isinstance(case_data, dict):
+                print(
+                    f"Eval case row {idx} is invalid (expected a mapping, got {type(case_data).__name__}): {case_data!r}",
+                    file=sys.stderr,
+                )
+                return 2
             # Loud per-row validation: a YAML typo or unknown key must surface with the row
             # index + offending key, not be silently filtered into a false-green run.
             try:

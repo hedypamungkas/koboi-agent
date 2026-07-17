@@ -391,6 +391,29 @@ class TestEvalRun:
         assert "row 0" in captured.err
         assert "oops_typo" in captured.err
 
+    @pytest.mark.parametrize(
+        "bad_row,row_type_name",
+        [
+            (None, "NoneType"),
+            (42, "int"),
+            (True, "bool"),
+            ("somestring", "str"),
+            ([1, 2], "list"),
+        ],
+    )
+    def test_eval_cases_file_non_dict_row_fails_closed(self, tmp_path, capsys, bad_row, row_type_name):
+        # Non-dict rows (null, int, bool, string, list) must be caught before the
+        # try/except block, otherwise the key_hint generator crashes with TypeError.
+        cases_file = tmp_path / "cases.yaml"
+        cases_file.write_text(yaml.dump({"cases": [bad_row]}))
+        cfg = _write_cfg(tmp_path)
+        rc = cmd_eval(cfg, str(cases_file))
+        assert rc == 2
+        captured = capsys.readouterr()
+        assert "row 0" in captured.err
+        assert "expected a mapping" in captured.err
+        assert row_type_name in captured.err
+
     def test_eval_factory_systemexit_propagates(self, tmp_path, capsys):
         # Real EvalRunner drives the harness_factory; a failing from_config makes
         # factory() print + raise SystemExit, which cmd_eval re-raises (314-318, 325).
