@@ -915,6 +915,104 @@ class TestPerTenantLimit:
             assert r.json()["error"]["code"] == "too_many_jobs_per_tenant"
 
 
+class TestPerTenantRace:
+    """#50: a burst of concurrent POST /v1/jobs must not bypass per_tenant_max
+    during the await window between the admission check and register(). The fix
+    reserves the slot synchronously (status='reserved') before any await."""
+
+    @staticmethod
+    def _config(per_tenant: int = 5, max_concurrent: int = 64, queue_depth: int = 1) -> Config:
+        return Config.from_dict(
+            {
+                "agent": {"name": "t", "max_iterations": 1},
+                "llm": {"provider": "openai", "model": "m", "api_key": "x", "base_url": "http://x"},
+                "memory": {"backend": "in_memory"},
+                "sandbox": {"backend": "restricted"},  # C3: jobs require containment
+                "server": {"auth_required": True},
+                "jobs": {"per_tenant_max": per_tenant, "max_concurrent": max_concurrent, "queue_depth": queue_depth},
+            },
+            validate=True,
+        )
+
+    async def test_burst_20_admits_at_most_per_tenant(self):
+        per_tenant = 5
+        app = create_app(
+            self._config(per_tenant=per_tenant, max_concurrent=64, queue_depth=1),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+            api_keys=["secret"],
+        )
+        # Gate pool.get_or_create so every admitted request parks, forcing the
+        # worst-case schedule where all submitters read counts during the same
+        # await window. The gate is opened by the test after all tasks have had a
+        # chance to start (so both red and green states resolve deterministically).
+        pool = app.state.pool
+        original_get_or_create = pool.get_or_create
+        gate = asyncio.Event()
+
+        async def gated(session_id):
+            await gate.wait()
+            return await original_get_or_create(session_id)
+
+        pool.get_or_create = gated
+
+        auth = {"Authorization": "Bearer secret"}
+        n = 20
+        async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+            tasks = [asyncio.ensure_future(c.post("/v1/jobs", json={"message": "j"}, headers=auth)) for _ in range(n)]
+            # Let every request start and reach either the gate (admitted) or
+            # return 429 (rejected) before any proceeds.
+            await asyncio.sleep(0.2)
+            gate.set()
+            responses = await asyncio.gather(*tasks)
+
+        admitted = [r for r in responses if r.status_code == 202]
+        rejected = [r for r in responses if r.status_code == 429]
+        # At most per_tenant admitted.
+        assert len(admitted) <= per_tenant, f"admitted {len(admitted)} > per_tenant_max {per_tenant}"
+        # The rest are 429 too_many_jobs_per_tenant.
+        assert len(admitted) + len(rejected) == n
+        for r in rejected:
+            assert r.json()["error"]["code"] == "too_many_jobs_per_tenant"
+        # Registry-level: running+reserved for this owner never exceeds the cap.
+        owner = "env:" + hashlib.sha256(b"secret").hexdigest()[:12]
+        assert app.state.job_registry.active_count_for_owner(owner) <= per_tenant
+
+    async def test_unexpected_exception_releases_reserved_slot(self):
+        # #50: an unexpected error (e.g. sqlite3.OperationalError from job_store.insert)
+        # between reserve_admit and commit_reserve must release the reserved slot so
+        # admission is not permanently starved by a leaked "reserved" placeholder.
+        import sqlite3
+
+        app = create_app(
+            self._config(per_tenant=5, max_concurrent=64, queue_depth=1),
+            client_factory=lambda: MockClient([make_mock_response(content="ok")]),
+            enable_cors=False,
+            api_keys=["secret"],
+        )
+        owner = "env:" + hashlib.sha256(b"secret").hexdigest()[:12]
+        baseline = app.state.job_registry.active_count_for_owner(owner)
+        real_insert = app.state.job_store.insert
+
+        def failing_insert(*a, **kw):
+            raise sqlite3.OperationalError("database is locked")
+
+        app.state.job_store.insert = failing_insert
+        try:
+            async with httpx.AsyncClient(base_url="http://testserver", transport=ASGITransport(app=app)) as c:
+                # ASGITransport propagates the server-side OperationalError (uvicorn would
+                # convert it to 500); either way the request is NOT a 202 admit.
+                try:
+                    r = await c.post("/v1/jobs", json={"message": "j"}, headers={"Authorization": "Bearer secret"})
+                    assert r.status_code != 202
+                except sqlite3.OperationalError:
+                    pass  # expected propagation through the test transport
+        finally:
+            app.state.job_store.insert = real_insert
+        # The reserved slot was released — no permanent leak toward the caps.
+        assert app.state.job_registry.active_count_for_owner(owner) == baseline
+
+
 class TestJobQueueBacklog:
     """G5c-b: overflow queues (up to queue_depth) then 429s; cancel + drain."""
 

@@ -311,9 +311,7 @@ class TestJobStoreReap:
         store = JobStore(str(tmp_path / "jobs.db"))
         store.insert("handover", "s", "a", "m")
         store.update_status("handover", "awaiting_human")
-        store._conn.execute(
-            "UPDATE jobs SET updated_at = ? WHERE job_id = ?", (_time.time() - 200000, "handover")
-        )
+        store._conn.execute("UPDATE jobs SET updated_at = ? WHERE job_id = ?", (_time.time() - 200000, "handover"))
         store._conn.commit()
 
         reaped = store.reap_terminal_older_than(_time.time() - 86400)
@@ -352,3 +350,89 @@ class TestJobRegistryQueue:
         reg.forget(["j1"])
         assert reg.get("j1") is None
         assert reg.pending_count == 0
+
+
+class TestJobRegistryReserveAdmit:
+    """#50: reserve_admit atomically reserves an admission slot synchronously so
+    N concurrent submitters can't all read pre-increment counts during the await
+    window between the admission check and register()."""
+
+    def test_five_run_then_sixth_too_many_per_tenant(self):
+        reg = JobRegistry()
+        owner = "alice"
+        # 5 sequential reservations all admit as "run" (global 64, per-tenant 5);
+        # each reserved placeholder counts toward the per-tenant cap immediately.
+        for _ in range(5):
+            decision, rid = reg.reserve_admit(owner, 64, 0, per_tenant_max=5)
+            assert decision == "run"
+            assert rid.startswith("job_")
+        # The 6th is blocked by the per-tenant cap (5 reserved already counted).
+        decision6, _ = reg.reserve_admit(owner, 64, 0, per_tenant_max=5)
+        assert decision6 == "too_many_jobs_per_tenant"
+        # 5 reserved slots still held (reject path self-releases, leaves the 5).
+        assert reg.active_count_for_owner(owner) == 5
+
+    def test_per_tenant_disabled_when_none(self):
+        reg = JobRegistry()
+        # per_tenant_max=None disables the per-tenant check (dev mode).
+        for _ in range(10):
+            decision, _ = reg.reserve_admit("dev", 64, 0, per_tenant_max=None)
+            assert decision == "run"
+        assert reg.active_count == 10
+
+    def test_release_reserve_no_slot_leak(self):
+        reg = JobRegistry()
+        before = reg.active_count_for_owner("alice")
+        decision, rid = reg.reserve_admit("alice", 64, 0, per_tenant_max=5)
+        assert decision == "run"
+        assert reg.active_count_for_owner("alice") == before + 1
+        reg.release_reserve(rid)
+        assert reg.active_count_for_owner("alice") == before  # slot returned
+        # Re-reserve works (the slot was released, not leaked).
+        decision2, _ = reg.reserve_admit("alice", 64, 0, per_tenant_max=5)
+        assert decision2 == "run"
+
+    def test_release_reserve_idempotent(self):
+        reg = JobRegistry()
+        _decision, rid = reg.reserve_admit("alice", 64, 0, per_tenant_max=5)
+        reg.release_reserve(rid)
+        reg.release_reserve(rid)  # no-op, no error
+        reg.release_reserve("nonexistent")  # no-op
+
+    def test_global_reject_never_reserves(self):
+        reg = JobRegistry()
+        # Fill global capacity with 2 running jobs.
+        reg.register("j1", "s", "a").status = "running"
+        reg.register("j2", "s", "a").status = "running"
+        # queue_depth=0 -> reject; no placeholder is created.
+        decision, rid = reg.reserve_admit("a", 2, 0, per_tenant_max=5)
+        assert decision == "reject"
+        reg.release_reserve(rid)  # defensive no-op (nothing was reserved)
+        assert rid not in reg._jobs
+        assert reg.active_count == 2  # unchanged
+
+    def test_commit_reserve_rekeys_and_sets_pending(self):
+        reg = JobRegistry()
+        decision, rid = reg.reserve_admit("alice", 64, 0, per_tenant_max=5)
+        assert decision == "run"
+        record = reg.commit_reserve(rid, real_job_id="jobX", session_id="sess1")
+        assert record.job_id == "jobX"
+        assert record.session_id == "sess1"
+        assert record.status == "pending"
+        # Re-keyed under the real job_id; the reserved placeholder id is gone.
+        assert reg.get("jobX") is record
+        assert reg.get(rid) is None
+        # "pending" is NOT counted as active; only running/reserved are.
+        assert reg.active_count_for_owner("alice") == 0
+        record.status = "running"
+        assert reg.active_count_for_owner("alice") == 1
+
+    def test_commit_reserve_same_id_updates_in_place(self):
+        reg = JobRegistry()
+        decision, rid = reg.reserve_admit("alice", 64, 0, per_tenant_max=5)
+        assert decision == "run"
+        # Commit with real_job_id == reserved_id (update fields in place).
+        record = reg.commit_reserve(rid, real_job_id=rid, session_id="sess1")
+        assert record.job_id == rid
+        assert record.status == "pending"
+        assert reg.get(rid) is record

@@ -1514,6 +1514,9 @@ def _register_routes(
         """Admit one job: mark running, spawn run_job, attach drain-on-complete."""
         job = job_store.get(job_id)
         if job is None or job["status"] != "pending":
+            # #50: a reserved-then-committed record that can't start must not leak a
+            # reserved/pending slot. release_reserve is idempotent (no-op if already gone).
+            job_registry.release_reserve(job_id)
             return  # cancelled or reaped while queued
         task = asyncio.create_task(
             run_job(
@@ -1575,18 +1578,27 @@ def _register_routes(
                     "session_id": existing["session_id"],
                 }
 
-        # G5c-b: global admission — run now, queue (up to queue_depth), or reject.
-        admit = job_registry.peek_admit(job_max_concurrent, job_queue_depth)
-        if admit == "reject":
+        # #50: atomic admission — synchronously reserve a slot BEFORE any await so a
+        # burst of concurrent submitters can't all read pre-increment counts during
+        # the await window and overrun per_tenant_max / max_concurrent. The reserved
+        # placeholder (status="reserved") counts toward both caps immediately; every
+        # later failure path releases it, the success path commits it to "pending".
+        decision, reserved_id = job_registry.reserve_admit(
+            owner,
+            job_max_concurrent,
+            job_queue_depth,
+            per_tenant_max=job_per_tenant if auth_enabled else None,
+        )
+        if decision == "reject":
+            job_registry.release_reserve(reserved_id)  # defensive (reject never reserves)
             return _error_response(
                 429,
                 "queue_full",
                 f"max_concurrent ({job_max_concurrent}) + queue_depth ({job_queue_depth}) reached",
                 request,
             )
-
-        # G5a: per-tenant running cap — hard 429 (not queued); skipped in dev mode.
-        if auth_enabled and job_registry.active_count_for_owner(owner) >= job_per_tenant:
+        if decision == "too_many_jobs_per_tenant":
+            job_registry.release_reserve(reserved_id)  # defensive (too_many never reserves)
             return _error_response(
                 429,
                 "too_many_jobs_per_tenant",
@@ -1595,59 +1607,73 @@ def _register_routes(
             )
 
         # Session: dedicated by default, or reuse existing (with ownership check).
-        session_id = body.session_id or pool.new_session_id()
-        if body.session_id:
-            if not is_safe_session_id(session_id):
-                return _error_response(400, "bad_request", "invalid session_id", request)
-            err = _check_owner(ownership, session_id, request)
-            if err:
-                return err
-            # H1: claim ownership of a reused session that currently has none.
-            if ownership.get_owner(session_id) is None:
-                ownership.set_owner(session_id, owner)
-        else:
-            # workflow_ref + plain cache/replay jobs build a fresh agent and never
-            # touch the pooled one, so skip materializing it (avoids wasting an LRU
-            # pool slot + a spurious pool_full under burst submit).
-            if not body.workflow_ref and body.replay_mode not in ("cache", "replay"):
-                try:
-                    await pool.get_or_create(session_id)
-                except PoolFull as exc:
-                    return _error_response(429, "pool_full", str(exc), request)
-            # H1: dedicated new session — always acquires an owner.
-            ownership.set_owner(session_id, owner)
-
-        job_id = new_job_id()
+        # #50: the reservation is held across this block; every failure path (early
+        # return OR unexpected exception) releases it so a reserved slot never leaks.
         try:
-            job_store.insert(
-                job_id,
-                session_id,
-                owner,
-                body.message,
-                idempotency_key=idem_key,
-                mode=job_mode.value if job_mode else None,
-                max_iterations=job_max_iter,
-                workflow_ref=body.workflow_ref,
-                replay_mode=body.replay_mode,
-            )
-        except DuplicateIdempotencyKey as exc:
-            # M1: a concurrent same-key submit won the race -- return the canonical
-            # job (if ours) or 409 so the client retries without the key.
-            existing = job_store.get(exc.existing_job_id)
-            if existing and existing["owner"] == owner:
-                return {  # type: ignore[return-value]  # (same FastAPI route-dict noise as the other handlers)
-                    "job_id": existing["job_id"],
-                    "status": existing["status"],
-                    "session_id": existing["session_id"],
-                }
-            return _error_response(
-                409,
-                "duplicate_request",
-                "Idempotency-Key already used for this session within the window",
-                request,
-            )
-        job_registry.register(job_id, session_id, owner)
-        if admit == "run":
+            session_id = body.session_id or pool.new_session_id()
+            if body.session_id:
+                if not is_safe_session_id(session_id):
+                    job_registry.release_reserve(reserved_id)
+                    return _error_response(400, "bad_request", "invalid session_id", request)
+                err = _check_owner(ownership, session_id, request)
+                if err:
+                    job_registry.release_reserve(reserved_id)
+                    return err
+                # H1: claim ownership of a reused session that currently has none.
+                if ownership.get_owner(session_id) is None:
+                    ownership.set_owner(session_id, owner)
+            else:
+                # workflow_ref + plain cache/replay jobs build a fresh agent and never
+                # touch the pooled one, so skip materializing it (avoids wasting an LRU
+                # pool slot + a spurious pool_full under burst submit).
+                if not body.workflow_ref and body.replay_mode not in ("cache", "replay"):
+                    try:
+                        await pool.get_or_create(session_id)
+                    except PoolFull as exc:
+                        job_registry.release_reserve(reserved_id)
+                        return _error_response(429, "pool_full", str(exc), request)
+                # H1: dedicated new session — always acquires an owner.
+                ownership.set_owner(session_id, owner)
+
+            job_id = new_job_id()
+            try:
+                job_store.insert(
+                    job_id,
+                    session_id,
+                    owner,
+                    body.message,
+                    idempotency_key=idem_key,
+                    mode=job_mode.value if job_mode else None,
+                    max_iterations=job_max_iter,
+                    workflow_ref=body.workflow_ref,
+                    replay_mode=body.replay_mode,
+                )
+            except DuplicateIdempotencyKey as exc:
+                # M1: a concurrent same-key submit won the race -- return the canonical
+                # job (if ours) or 409 so the client retries without the key.
+                job_registry.release_reserve(reserved_id)
+                existing = job_store.get(exc.existing_job_id)
+                if existing and existing["owner"] == owner:
+                    return {  # type: ignore[return-value]  # (same FastAPI route-dict noise as the other handlers)
+                        "job_id": existing["job_id"],
+                        "status": existing["status"],
+                        "session_id": existing["session_id"],
+                    }
+                return _error_response(
+                    409,
+                    "duplicate_request",
+                    "Idempotency-Key already used for this session within the window",
+                    request,
+                )
+        except Exception:
+            # #50: an unexpected error (e.g. sqlite3.Error from ownership/job_store, or
+            # a pool build failure) must not leak a reserved admission slot. Early
+            # returns above already released; this catches propagated exceptions only.
+            job_registry.release_reserve(reserved_id)
+            raise
+        # #50: commit the reservation into the real pending record (re-keyed under job_id).
+        job_registry.commit_reserve(reserved_id, real_job_id=job_id, session_id=session_id)
+        if decision == "run":
             _start_job(job_id)
         else:  # "queue" — wait for a running slot to free (drained on completion)
             job_registry.enqueue_pending(job_id)
