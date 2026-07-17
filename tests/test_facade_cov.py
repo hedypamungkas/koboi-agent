@@ -1553,8 +1553,6 @@ class TestOrchestrationOptInHooksReachable:
         return {type(h).__name__ for h in chain._hooks} if chain is not None else set()
 
     def test_self_healing_hook_attached_in_orchestration(self):
-        from koboi.hooks.reflection_hook import ReflectionHook
-
         cfg = _base_config()
         cfg["memory"] = {"backend": "memory"}
         cfg["orchestration"] = {
@@ -1571,8 +1569,6 @@ class TestOrchestrationOptInHooksReachable:
         assert "LadderRouterHook" in names, f"LadderRouterHook missing: {names}"
 
     def test_handover_detection_hook_attached_in_orchestration(self):
-        from koboi.hooks.handover_detection_hook import HandoverDetectionHook
-
         cfg = _base_config()
         cfg["memory"] = {"backend": "memory"}
         cfg["orchestration"] = {
@@ -1587,8 +1583,6 @@ class TestOrchestrationOptInHooksReachable:
         assert "HandoverDetectionHook" in names, f"HandoverDetectionHook missing: {names}"
 
     def test_proactive_extraction_hook_attached_in_orchestration(self):
-        from koboi.hooks.proactive_extraction_hook import ProactiveExtractionHook
-
         cfg = _base_config()
         cfg["memory"] = {"backend": "memory", "proactive": {"enabled": True, "extract": True}}
         cfg["orchestration"] = {
@@ -1630,6 +1624,7 @@ class TestOrchestrationMediaWiring:
         cfg["memory"] = {"backend": "memory"}
         cfg["media"] = {"enabled": True, "image": {"provider": "mock"}}
         cfg["tools"] = {"builtin": ["generate_image"]}
+        cfg["websearch"] = {"provider": "mock"}
         cfg["orchestration"] = {
             "enabled": True,
             "execution": {"mode": "sequential"},
@@ -1645,6 +1640,16 @@ class TestOrchestrationMediaWiring:
         sub_tools = getattr(sub_agent, "tools", None)
         assert sub_tools is not None, "sub-agent has no tools registry"
         assert sub_tools.get_dep("media_provider") is not None, "media_provider dep missing on sub-agent"
+        # Wave2 #5: search_provider and fetch_provider must also reach sub-agent registries.
+        assert sub_tools.get_dep("search_provider") is not None, "search_provider dep missing on sub-agent"
+        assert sub_tools.get_dep("fetch_provider") is not None, "fetch_provider dep missing on sub-agent"
+        # Verify identity: shared instances, not duplicates.
+        orch_search_provider = agent.orchestrator._agents_map.get("w").tools.get_dep("search_provider")
+        orch_fetch_provider = agent.orchestrator._agents_map.get("w").tools.get_dep("fetch_provider")
+        assert orch_search_provider is not None, "orchestrator search_provider missing"
+        assert orch_fetch_provider is not None, "orchestrator fetch_provider missing"
+        assert sub_tools.get_dep("search_provider") is orch_search_provider, "search_provider should be shared"
+        assert sub_tools.get_dep("fetch_provider") is orch_fetch_provider, "fetch_provider should be shared"
 
     def test_no_media_backend_when_disabled(self):
         cfg = _base_config()

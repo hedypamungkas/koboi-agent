@@ -1401,8 +1401,8 @@ class Orchestrator:
             return report
         from koboi.orchestration.research import generate_research_media
 
-        max_items = int(research_media.get("max_items", 2))
         try:
+            max_items = max(0, int(research_media.get("max_items", 2)))
             section, _artifacts = await generate_research_media(
                 client=self.client,
                 report=report,

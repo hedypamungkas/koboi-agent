@@ -228,3 +228,55 @@ class TestDeepResearchMediaIntegration:
         text_chunks = [e.content for e in events if isinstance(e, TextDeltaEvent)]
         assert "## Generated media" not in "".join(text_chunks)
         assert backend.calls == {}, f"backend should not have been called, got {backend.calls}"
+
+    async def test_max_items_non_coercible_soft_fails(self, tmp_path):
+        """max_items with non-integer value (e.g. 'two') soft-fails instead of crashing."""
+        backend = _MockMediaBackend()
+        client = _FakeClient()
+        orch = _orch(
+            client,
+            {
+                "max_depth": 1,
+                "coverage_threshold": 0.7,
+                "capabilities": ["image"],
+                "media": {"max_items": "two"},  # non-coercible string
+            },
+            {"enabled": True},
+            tmp_path,
+            media_backend=backend,
+        )
+        # Should not raise - returns report unchanged
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        text_chunks = [e.content for e in events if isinstance(e, TextDeltaEvent)]
+        combined = "".join(text_chunks)
+        # Report should be present but media section absent (soft failure)
+        assert "## Report" in combined, f"base report missing: {combined!r}"
+        assert "## Generated media" not in combined, f"media section should be absent after soft fail"
+        assert backend.calls == {}, f"backend should not have been called, got {backend.calls}"
+        # Run should complete cleanly
+        assert any(isinstance(e, OrchestrationCompleteEvent) for e in events)
+
+    async def test_max_items_negative_clamps_to_zero(self, tmp_path):
+        """Negative max_items clamps to 0 (no generation) instead of slicing wrong."""
+        backend = _MockMediaBackend()
+        client = _FakeClient(media_selection={"image_prompts": ["p1", "p2"]})
+        orch = _orch(
+            client,
+            {
+                "max_depth": 1,
+                "coverage_threshold": 0.7,
+                "capabilities": ["image"],
+                "media": {"max_items": -1},  # negative - clamps to 0
+            },
+            {"enabled": True},
+            tmp_path,
+            media_backend=backend,
+        )
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+        text_chunks = [e.content for e in events if isinstance(e, TextDeltaEvent)]
+        combined = "".join(text_chunks)
+        # When max_items is 0, no generation occurs and media section is absent (soft-fail)
+        assert "## Generated media" not in combined, f"media section should be absent when max_items=0: {combined!r}"
+        # No calls should be made (get returns None if key missing, treat as 0)
+        assert backend.calls.get("image") in (0, None), f"expected 0 calls, got {backend.calls.get('image')}"
+        assert any(isinstance(e, OrchestrationCompleteEvent) for e in events)
