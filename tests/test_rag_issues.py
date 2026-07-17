@@ -1,7 +1,7 @@
 """tests/test_rag_issues.py -- Regression guards for the 6 empirically-confirmed RAG issues.
 
 Each test asserts the FIXED behaviour (so it fails on the buggy code and passes after the
-fix). One test per issue. These are the CI source of truth; ``verify_rag_issues.py`` is the
+fix). One test per issue. These are the CI source of truth; ``scripts/verify_rag_issues.py`` is the
 runnable demo companion.
 """
 
