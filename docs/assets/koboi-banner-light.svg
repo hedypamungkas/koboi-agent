@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 230" width="700" height="230" role="img" aria-label="koboi-agent — Agents you can actually leave running">
+  <g>
+    <polygon points="44,120 74,68 134,68 164,120 134,172 74,172" fill="none" stroke="#6366f1" stroke-width="5" stroke-linejoin="round"/>
+    <circle cx="104" cy="120" r="30" fill="none" stroke="#6366f1" stroke-width="6"/>
+    <circle cx="104" cy="120" r="9" fill="#6366f1"/>
+    <circle cx="104" cy="90" r="7" fill="#f59e0b"/>
+  </g>
+  <text x="208" y="64" font-family="Inter, 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2.4" fill="#6366f1">TRUSTWORTHY · UNATTENDED · AUTONOMY</text>
+  <text x="206" y="132" font-family="Inter, 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif" font-size="60" font-weight="800" letter-spacing="-1.5">
+    <tspan fill="#0f172a">koboi</tspan><tspan fill="#6366f1" font-weight="700">-agent</tspan>
+  </text>
+  <text x="208" y="172" font-family="Inter, 'Segoe UI', system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif" font-size="22" font-weight="600" fill="#64748b">Agents you can actually leave running.</text>
+</svg>
