@@ -132,3 +132,9 @@ Built-in routers:
 - DAG durability: `dag_scheduler` writes `graph_plan` + `graph_node_complete` rows to the `steps`
   table (graph-cursor-resume primitives). The plain seq/parallel path is not journaled, so
   `koboi run --resume` does not apply to sequential/parallel orchestration.
+- **Per-node/subtree retry on replan (self-healing P2b)**: when `max_replans>0` fires, only the
+  *failed subtree* (directly-failed + transitive downstream via `Orchestrator._downstream_closure`)
+  re-runs — succeeded AND side-effecting nodes (`AgentResult.had_non_idempotent_tool`, set when
+  `idempotent=False` OR `risk_level ∈ {MODERATE, DESTRUCTIVE}`) are carried forward via
+  `_run_dag_waves_with_flow(cached_results=...)` (no re-run/re-record, event parity), instead of
+  double-firing non-idempotent tools on a whole-graph replan.

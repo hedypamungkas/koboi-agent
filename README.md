@@ -32,6 +32,7 @@ Try the HITL flow on a bare install — `python examples/hitl_client.py` (httpx-
 - **RAG pipeline**: chunking (fixed/sentence/paragraph/semantic), retrieval (keyword/BM25/semantic/hybrid), cross-encoder rerank (jina/cohere/local), augmentation, query rewriting/HyDE, metadata filtering, Indonesian stopwords/stemmer, remote sources (HTTP/S3)
 - **Guardrails**: input/output validation, rate limiting, approval workflows, policy engine
 - **Confidence-awareness + human handover**: opt-in grounding guardrail (claim-decomposition + NLI judge — abstains when ungrounded), the `transfer_to_human` tool, and structural handover detection — the bot yields to a human operator when it should (see [docs/channel-bridge.md](docs/channel-bridge.md))
+- **Self-healing (bounded reflection + escalation ladder)**: opt-in `self_healing:` config drives a verifier-grounded reflection loop (tool-error critique + low-grounding reground), a declarative escalation ladder (reflect → replan → handover under a shared recovery budget), per-node/subtree replay on orchestration node failure, graceful degrade on `max_iterations`, and optional CRITIC tool-verification + self-consistency sampling
 - **Multi-agent orchestration**: keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, dynamic (LLM-planned), and **deep_research** (coverage-gated, cited web research) execution
 - **Cross-instance agent-to-agent (A2A)**: a remote peer's orchestration node runs as a first-class agent (`AgentDef.endpoint:` → `RemoteAgentProxy`) via `POST /v1/peer/invoke`; the `call_peer_agent` tool, signed agent-card discovery (`GET /.well-known/agent-card`), and W3C trace-context propagation across the fan-out — opt-in via `peers:` config, inert by default
 - **Deterministic workflow export**: freeze a run into a re-runnable config bundle (`koboi export`/`import`), and optionally capture the LLM response cache for byte-identical **offline** replay (`koboi capture --with-cache`, `run --replay-mode replay` — no API key)
@@ -219,7 +220,7 @@ pytest --cov=koboi            # with coverage
 
 ## Examples
 
-`examples/` contains 37 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
+`examples/` contains 38 numbered scripts covering every feature, plus `server_built_in.py` / `server_customize.py` (HTTP serving), `hitl_client.py` (HITL client), `_command_hook_forwarder.py` (external-command hook forwarder), and workflow-graph demos (`workflow_graph_demo.py`, `dynamic_workflow_live.py`, `phase3_live_e2e.py`):
 
 | Range | Features |
 |-------|----------|
@@ -238,6 +239,7 @@ pytest --cov=koboi            # with coverage
 | 35 | Confidence-aware CS with human handover (`configs/cs_confidence_handover.yaml`; the confidence ladder) |
 | 36 | Deterministic workflow export/import (`koboi export`/`import`; bundle = config + determinism profile) |
 | 37 | Workflow cache + capture + offline replay (`koboi capture --with-cache`; `run --replay-mode replay`, no API key) |
+| 38 | Self-healing demo (bounded reflection, escalation ladder, graceful degrade, CRITIC verification; `configs/self_healing_demo.yaml`) |
 | a2a_fanout | Cross-instance A2A: remote orchestration nodes via `call_peer_agent` / `/v1/peer/invoke` |
 | configs/deep_research_demo.yaml | Deep research (coverage-gated cited web research; `koboi run` + `koboi serve`) |
 | server_* | `koboi serve` (built-in) and `create_app()` (customize) |
@@ -263,6 +265,7 @@ For a detailed architecture overview (agent loop lifecycle, hook system, tool pi
 - **RetryClient** (`client.py`) -- LLM HTTP transport with retry
 - **ToolRegistry** (`tools/`) -- tool registration and execution
 - **HookChain** (`hooks/`) -- lifecycle event dispatch (15 events)
+- **Self-healing** (`hooks/reflection_hook.py`, `hooks/failure_classifier_hook.py`, `hooks/ladder_router_hook.py`, `harness/recovery_budget.py`, `self_consistency.py`) -- opt-in bounded reflection + declarative escalation ladder (retry → reflect → replan → handover), shared per-run recovery budget, optional CRITIC tool-verification + self-consistency sampling
 - **ContextManager** (`context/`) -- context window strategies
 - **AugmentationStrategy** (`rag/`) -- RAG pipeline
 - **Guardrails** (`guardrails/`) -- input/output validation

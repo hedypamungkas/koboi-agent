@@ -16,6 +16,7 @@ telemetry.py      TelemetryCollector -- session metrics; weighted health_score()
 carryover.py      CarryoverState -- metadata that survives compaction; to_context_message()/from_context_message() round-trip
 doom_loop.py      DoomLoopDetector -- detects consecutive_identical/repeating_pattern/error_retry; record()+check() (sync, stateful, cap 200)
 env.py            build_safe_env(tool_config) -> sanitized dict for subprocess env=; block-list WINS over allow-list; configure_env_defaults()
+recovery_budget.py  RecoveryBudget -- shared per-run recovery-turn cap (self-healing P2a); owned by LadderRouterHook (built in facade.py, not the declarative hooks/registry.py pattern), consumed by ReflectionHook only on an actual fire; reset on SESSION_START
 utils.py          is_tool_error(result_str) -- doom-loop/telemetry error detection
 ```
 

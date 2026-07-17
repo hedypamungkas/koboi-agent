@@ -287,7 +287,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (30)
+### Config sections (31)
 
 | Section | Controls |
 |---------|----------|
@@ -321,6 +321,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `handover` | Confidence-aware handover: `detection` (structural handover, B1.5), `digest` (warm-handoff summary, B4), `webhooks` (HMAC `handover.requested` callbacks) |
 | `media` | Multimodal generation (image/video/music/speech/transcription; Surplus gateway + mock), `budget` caps, `storage` (local/r2/s3), `profiles` (ModelProfile), async jobs |
 | `peers` | Cross-instance A2A (opt-in, inert by default): outbound peer defs (name/URL/token), inbound token hashes, `org_secret` (agent-card HMAC claim), rate limits |
+| `self_healing` | Opt-in bounded reflection + declarative escalation ladder (retry/reflect/replan/handover): `enabled`, `max_turns`, `fail_soft`, `graceful_max_iter`, `triggers` (tool_error/low_grounding/tool_verification), `ladder`, `self_consistency` |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
@@ -650,7 +651,7 @@ Three variants:
 
 ## Harness Subsystems
 
-Three harness subsystems run as hooks, providing observability and resilience.
+Four harness subsystems run as hooks, providing observability and resilience.
 
 ### TelemetryCollector
 
@@ -667,7 +668,15 @@ Three harness subsystems run as hooks, providing observability and resilience.
 - **Repeating pattern**: circular sequence of tool calls
 - **Error retry**: same error produced N times
 
-When detected, emits `DOOM_LOOP_DETECTED` hook event with recovery hints.
+When detected, emits `DOOM_LOOP_DETECTED` hook event with recovery hints. Resets on
+`SESSION_START` (a prior leak carried history across runs).
+
+### RecoveryBudget
+
+`koboi/harness/recovery_budget.py` -- shared per-run recovery-turn cap for the self-healing
+escalation ladder (`max_turns`, default 3). Owned by `LadderRouterHook` (built in `facade.py`,
+not the declarative `hooks/registry.py` pattern), consumed by `ReflectionHook` only when it
+actually fires a reflect/reground turn. Resets on `SESSION_START`.
 
 ---
 
@@ -765,7 +774,7 @@ Production quality bar + smoke scenarios: `docs/deep-research-smoke.md`.
 | `parallel` | Routed agents run via `asyncio.gather` |
 | `dag` | `DagScheduler` groups agents into topological waves from `AgentDef.depends_on`; waves run in sequence, nodes within a wave in parallel. `full_graph` runs the whole configured graph |
 | `conditional` | `dag` plus output-predicate branching (`dag_scheduler.conditionals`: `{to, when:{contains\|regex}}`) -- only matching branches run |
-| `dynamic` | `planner.plan_or_skip()` makes one LLM call: simple queries answer directly; multi-step queries get an extracted step graph run as dag waves. `max_replans` re-plans on failure |
+| `dynamic` | `planner.plan_or_skip()` makes one LLM call: simple queries answer directly; multi-step queries get an extracted step graph run as dag waves. `max_replans` re-plans on failure (self-healing P2b: only the failed subtree re-runs -- see below) |
 
 `DagScheduler` (`orchestration/dag_scheduler.py`) persists a durable graph plan and per-node
 completion to the `steps` table (graph-cursor-resume primitives). `WorkflowGraph`
@@ -984,7 +993,7 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
 
 ### Core dataclasses (`koboi/types.py`)
 
-`RunResult`, `AgentResponse`, `ToolCall`, `ToolDefinition`, `TokenUsage`, `GuardrailResult`, `AuditEntry`, `RateLimitConfig`, `RoutingDecision`, `AgentResult`, `OrchestratorResult`, `EvalCase`, `EvalScore`, `EvalResult`, `SkillDefinition`, `MCPToolInfo`
+`RunResult`, `AgentResponse`, `ToolCall`, `ToolDefinition`, `TokenUsage`, `GuardrailResult`, `AuditEntry`, `RateLimitConfig`, `RoutingDecision`, `AgentResult` (self-healing: `had_non_idempotent_tool` gates P2b subtree carry-forward), `OrchestratorResult`, `EvalCase`, `EvalScore`, `EvalResult`, `SkillDefinition`, `MCPToolInfo`, `ToolExecOutcome` (self-healing P0-D: `content`/`errored`/`error_kind`)
 
 ### Workflow export (`koboi/workflows/definition.py`)
 

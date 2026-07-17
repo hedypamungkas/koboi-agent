@@ -1,4 +1,4 @@
-"""examples/36_self_healing_demo.py -- self-healing initiative demo (P0-P4).
+"""examples/38_self_healing_demo.py -- self-healing initiative demo (P0-P4).
 
 Demonstrates the full self-healing stack:
   - P0-C: empty-response re-ask (always-on)
@@ -13,8 +13,8 @@ Two modes:
              P4 CRITIC). Requires OPENAI_API_KEY + RAG docs.
 
 Usage:
-  python examples/36_self_healing_demo.py --mock
-  OPENAI_API_KEY=... python examples/36_self_healing_demo.py
+  python examples/38_self_healing_demo.py --mock
+  OPENAI_API_KEY=... python examples/38_self_healing_demo.py
 """
 
 from __future__ import annotations

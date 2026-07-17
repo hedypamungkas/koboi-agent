@@ -35,6 +35,7 @@ web_brave.yaml            Brave Search provider demo (`websearch.search.provider
 web_firecrawl.yaml        Firecrawl search+fetch provider demo (`websearch.search.provider: firecrawl`)
 deep_research_demo.yaml   Deep research demo (`execution.mode: deep_research`; coverage-gated cited web research)
 workflow_export_demo.yaml  Deterministic workflow export demo (sentiment-routing DAG; `orchestration.determinism` + node `output_schema`; `koboi export`/`import` + `run --workflow`)
+self_healing_demo.yaml    Self-healing demo (bounded reflection + escalation ladder + graceful degrade + CRITIC; P0-P4; `examples/38_self_healing_demo.py`)
 a2a_instance_x.yaml        Cross-instance A2A -- instance X (agent A; `peers:` outbound to peer C; `call_peer_agent` tool)
 a2a_instance_y.yaml        Cross-instance A2A -- instance Y (agent C; accepts peer calls via `POST /v1/peer/invoke`, `inbound_tokens`)
 a2a_dag_remote.yaml        Cross-instance A2A -- DAG with a REMOTE node (`orchestration.agents[].endpoint: peerY`); run alongside a2a_instance_y.yaml
@@ -53,7 +54,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `peers`, `media`
+`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `peers`, `media`, `self_healing`
 
 ### Notable sub-sections (recently added)
 - `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
@@ -66,6 +67,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 - `handover.detection` — opt-in structural handover (B1.5): `enabled`, `coverage_threshold` (A3 grounding coverage below this triggers handover; default 0.5), `ask_patterns` (regexes for explicit "talk to a human" requests). Pairs with `grounding_check` — without it the coverage trigger is inert (only explicit user-ask fires) and `facade.py` logs a build-time warning.
 - `handover.digest` — opt-in warm-handoff summary (B4): `enabled` generates a side-LLM case-card summary attached to `HandoverEvent.summary`.
 - `handover.webhooks` — HMAC-signed mid-conversation callbacks on `handover.requested` (see `docs/channel-bridge.md`).
+- `self_healing:` — opt-in bounded reflection + escalation ladder (P0-P4): `enabled` (master, default false), `max_turns` (shared reflect/doom budget, default 3), `fail_soft` (default true), `graceful_max_iter` (opt-in `max_iterations`-exhaustion summary, independent of `enabled`), `empty_response_reask_limit` (default 1), `critic_llm` (named `providers:` ref or None = reuse agent client), `triggers.tool_error.repeat_threshold` (default 2) / `triggers.low_grounding.threshold` (default 0.6) / `triggers.tool_verification` (CRITIC, P4), `ladder` (failure_class → rung ordering, empty = built-in default), `self_consistency` (`n_samples`/`max_concurrency`/`modes`, P4). See `docs/self-healing-feasibility.md`, `configs/self_healing_demo.yaml`.
 - `orchestration.determinism` — `{temperature, seed, top_p, model_pin, replay_mode}`: workflow-level determinism default; a per-node `determinism:` overrides via `DeterminismProfile.merge` (node wins). Drives the cache/replay tiers. No `seed` on Anthropic.
 - `orchestration.agents[].output_schema` — structured output (JSON schema) on a node; `force_response_format_with_tools` forces it even with tools (Gap A+B).
 - `replay:` — `{mode: live|cache|replay, cache_dir}` set by `koboi run --replay-mode`; `replay` is offline (raise-on-miss, no API key).

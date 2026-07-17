@@ -94,6 +94,7 @@ koboi chat examples/01_simple_chat.yaml
 | 35 | [Confidence + Handover](35_confidence_handover_demo.py) | Confidence-aware CS + human handover (grounding, transfer_to_human) | `python examples/35_confidence_handover_demo.py` |
 | 36 | [Workflow Export/Import](36_workflow_export_import.py) | Deterministic workflow bundle (`koboi export`/`import`) | `python examples/36_workflow_export_import.py` |
 | 37 | [Workflow Cache + Replay](37_workflow_cache_capture_replay.py) | Capture response cache + offline `replay` (no API key) | `python examples/37_workflow_cache_capture_replay.py` |
+| 38 | [Self-Healing Demo](38_self_healing_demo.py) | Bounded reflection loop, escalation ladder, graceful degrade, CRITIC verification | `python examples/38_self_healing_demo.py --mock` |
 
 ### Server
 
@@ -147,6 +148,7 @@ koboi chat examples/01_simple_chat.yaml
 | Confidence-aware + human handover | 35 |
 | Deterministic workflow export/import | 36 |
 | Workflow cache + capture + offline replay | 37 |
+| Self-healing (reflection, escalation ladder, graceful degrade, CRITIC) | 38 |
 | HTTP/SSE server (built-in + code-customized) | server_built_in, server_customize |
 
 ## Notes

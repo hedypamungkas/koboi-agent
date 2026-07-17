@@ -4,8 +4,8 @@
 # escalation ladder (P2a), graceful degrade (P3), and CRITIC tool-verification (P4).
 # Requires `grounding_check` (the verifier) + `handover.detection` (the terminal rung).
 #
-#   python examples/36_self_healing_demo.py --mock    # offline scripted demo
-#   OPENAI_API_KEY=... python examples/36_self_healing_demo.py  # real LLM
+#   python examples/38_self_healing_demo.py --mock    # offline scripted demo
+#   OPENAI_API_KEY=... python examples/38_self_healing_demo.py  # real LLM
 
 agent:
   name: self-healing-demo
