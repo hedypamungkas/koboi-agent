@@ -125,7 +125,7 @@ class TestAggregateStructured:
         bad = AgentResponse(content="not json")
         canonical, agreement = aggregate_structured([good, bad])
         assert canonical is good
-        assert agreement == 1.0
+        assert agreement == 0.0  # bad JSON -> no aggregation (0.0 = not aggregated, was 1.0 before fix)
 
     def test_usage_summed(self):
         samples = [

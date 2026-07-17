@@ -1515,6 +1515,14 @@ class AgentAssembler:
 
         from koboi.loop import AgentCore
 
+        # P4 review fix: warn if self_consistency is enabled but no output_schema (structured output required).
+        sc_cfg = self.config.get("self_healing", "self_consistency", default=None) or {}
+        if sc_cfg.get("enabled") and not self.config.get("agent", "output_schema", default=None):
+            logging.getLogger(__name__).warning(
+                "self_healing.self_consistency enabled without agent.output_schema "
+                "-- self-consistency requires structured output and will be inert"
+            )
+
         core = AgentCore(
             client=self.client,
             memory=self.memory,

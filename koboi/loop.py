@@ -393,8 +393,8 @@ class AgentCore:
             for m in reversed(self.memory.get_messages()):
                 if m.get("role") == "assistant" and (m.get("content") or "").strip():
                     return f"[partial] {(m.get('content') or '').strip()}"
-        except Exception:  # nosec B110 - intentionally swallowed; the fallback must never break the graceful degrade
-            pass
+        except Exception as exc:
+            self._log(f"Graceful fallback (last-assistant) failed: {exc}")
         return "I was unable to complete the task within the allowed steps."
 
     async def _process_graceful_output(self, output: str) -> str:
@@ -423,12 +423,17 @@ class AgentCore:
         # Mode gate: act+ only (self-consistency multiplies spend on terminal answers);
         # configurable via self_consistency.modes (default [act, auto, yolo]).
         if self.mode_manager is not None:
-            from koboi.modes import AgentMode
+            try:
+                from koboi.modes import AgentMode
 
-            allowed = {
-                AgentMode[m.upper()] if isinstance(m, str) else m for m in cfg.get("modes", ["act", "auto", "yolo"])
-            }
-            if self.mode_manager.current_mode not in allowed:
+                allowed = {
+                    AgentMode[m.upper()] if isinstance(m, str) else m
+                    for m in (cfg.get("modes") or ["act", "auto", "yolo"])
+                }
+                if self.mode_manager.current_mode not in allowed:
+                    return False
+            except Exception:
+                self._log("Self-consistency: bad modes config, skipping SC")
                 return False
         return True
 
@@ -446,9 +451,12 @@ class AgentCore:
                 return await self.client.complete(messages=messages, tools=tool_defs, response_format=rf)
 
         others = await asyncio.gather(*[_one() for _ in range(n - 1)], return_exceptions=True)
+        failed = [r for r in others if not isinstance(r, AgentResponse)]
         samples = [first] + [r for r in others if isinstance(r, AgentResponse)]
         if len(samples) < 2:
-            return first, 1.0
+            if failed:
+                self._log(f"Self-consistency: {len(failed)}/{n - 1} sampler calls failed, skipping aggregation")
+            return first, 0.0
         return aggregate_structured(samples)
 
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
