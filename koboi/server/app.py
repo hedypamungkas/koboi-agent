@@ -504,7 +504,7 @@ def create_app(
     # rework in koboi/server/jobs.py. Int is rebound on each admit/release; the
     # per-owner dict is mutated in place. Both updated synchronously (race-free).
     app.state.media_inflight_global = 0
-    app.state.media_inflight_per_owner: dict[str, int] = {}
+    app.state.media_inflight_per_owner = {}  # dict[str, int]; mypy rejects annotating app.state.* attrs
     app.state.session_events = session_events  # B2: per-session replay buffer
     app.state.session_streams_per_owner = session_streams_per_owner  # B2 slowloris guard
     app.state.session_streams = {}  # B2: owner -> active session-stream count
