@@ -11,12 +11,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         libseccomp-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir "cython<3" \
+    && pip install --no-cache-dir "cython<3" setuptools wheel \
     && pip install --no-cache-dir --no-build-isolation git+https://github.com/seccomp/libseccomp@v2.5.5#subdirectory=src/python
 # Build notes: pin Cython<3 (libseccomp 2.5.5's seccomp.pyx predates Cython 3 and
-# fails to cythonize under it) and use --no-build-isolation (the binding's
-# build-system meta does not declare Cython, so PEP-517 isolation hides the
-# preinstalled one → "ModuleNotFoundError: No module named 'Cython'").
+# fails to cythonize under it) and use --no-build-isolation so pip reuses the
+# preinstalled Cython (the binding's build-system meta does not declare Cython,
+# so PEP-517 isolation hides it → "ModuleNotFoundError: No module named 'Cython'").
+# Preinstall setuptools+wheel too: python:3.12-slim ships neither, and
+# --no-build-isolation won't fetch them → "BackendUnavailable: Cannot import
+# 'setuptools.build_meta'".
 
 # ---- base: runtime image ----
 FROM python:3.12-slim AS base
