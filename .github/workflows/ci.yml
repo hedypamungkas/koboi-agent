@@ -152,8 +152,19 @@ jobs:
           /tmp/v/bin/pip install --upgrade pip
           /tmp/v/bin/pip install -e ".[dev]"
 
-      - name: Run seccomp egress + fallback tests
-        # These prove the HARD filter blocks python3 socket / bash /dev/tcp /
-        # absolute-path interpreter / real outbound TCP at the syscall layer.
+      - name: Run seccomp egress + fallback + fail-closed tests
+        # TestSeccompEgress proves the HARD filter blocks python3 socket / bash
+        # /dev/tcp / absolute-path interpreter / real outbound TCP at the syscall
+        # layer. TestSeccompFallback covers the legacy soft-degrade back-compat.
+        # TestSeccompInstallerFailClosed covers issue #51: the installer refuses to
+        # load a default-ALLOW filter when a deny rule can't be added, and the
+        # seccomp_strict opt-in fails closed at boot when bindings are missing.
         run: |
-          /tmp/v/bin/python -m pytest tests/test_sandbox.py::TestSeccompEgress tests/test_sandbox.py::TestSeccompFallback -v
+          /tmp/v/bin/python -m pytest tests/test_sandbox.py::TestSeccompEgress tests/test_sandbox.py::TestSeccompFallback tests/test_sandbox.py::TestSeccompInstallerFailClosed -v
+
+      - name: Build Docker image (validates seccomp-builder stage + bindings smoke)
+        # Issue #51: the Dockerfile now has a seccomp-builder stage that compiles
+        # the libseccomp Python bindings from source for /usr/local/bin/python3.12,
+        # then a `RUN python -c "import seccomp"` smoke check. Building the image
+        # FAILS if the bindings don't compile or don't land. We don't push.
+        run: docker build -t koboi-agent:seccomp-smoke .

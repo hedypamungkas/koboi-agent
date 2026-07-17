@@ -13,8 +13,12 @@ but cannot stop a determined attacker (e.g. ``python3 -c 'import urllib'`` or
 ``bash -c 'echo > /dev/tcp/...'``). For HARD network isolation on Linux set
 ``network_isolation: seccomp`` (requires the ``python3-seccomp`` system package) -- the
 seccomp filter blocks egress at the syscall layer so interpreters and shell
-builtins cannot connect out. For full OS-level isolation (filesystem too), use
-the Docker backend (P0c).
+builtins cannot connect out. The seccomp installer is FAIL-CLOSED: if a deny rule
+cannot be added the child refuses to load the filter (rather than silently
+permitting egress under a default-ALLOW filter). For a fail-closed-at-boot variant
+that refuses to start when seccomp is unavailable (instead of soft-degrading), use
+``network_isolation: seccomp_strict``. For full OS-level isolation (filesystem
+too), use the Docker backend (P0c).
 
 Rlimit correctness: ``setrlimit`` affects the calling process, so we apply it
 in ``preexec_fn`` (runs in the child between fork and exec), NOT in the worker
@@ -106,14 +110,28 @@ except ImportError:
 _HAS_SECCOMP = _HAS_SECCOMP_LIB and sys.platform == "linux"
 
 # Egress syscalls blocked under network_isolation="seccomp". Denying connect /
-# connectat / sendto / sendmsg blocks TCP/UDP egress. v1 does NOT arg-filter by
-# socket family, so AF_UNIX connect() is blocked too (over-blocking is safe for
-# network=deny; add family arg-filtering later if local unix-socket IPC must work).
-# socket() creation itself is allowed (harmless without connect). The action enum
+# sendto / sendmsg / sendmmsg blocks TCP/UDP egress (sendmmsg covers the
+# vectorized multi-message send path). v1 does NOT arg-filter by socket family,
+# so AF_UNIX connect() is blocked too (over-blocking is safe for network=deny;
+# add family arg-filtering later if local unix-socket IPC must work). socket()
+# creation itself is allowed (harmless without connect). The action enum
 # (seccomp.Action.ALLOW / .ERRNO) is resolved inside the child at install time so
 # we use the canonical names of whatever python3-seccomp version is present (the
-# libseccomp bindings ship as a system package, not on PyPI).
-_SECCOMP_EGRESS_SYSCALLS: tuple[str, ...] = ("connect", "connectat", "sendto", "sendmsg")
+# libseccomp bindings ship as a system package, not on PyPI). On 32-bit x86 the
+# kernel multiplexes socket syscalls through a single ``socketcall`` entry point;
+# that one rule is added best-effort inside ``_install`` (arch-gated) since it is
+# absent on every other arch and a missing-name error there must NOT be fatal.
+#
+# NOTE (issue #51): ``connectat`` was previously listed here but is NOT a Linux
+# syscall -- it is FreeBSD/Solaris-only and absent from libseccomp's syscall
+# table, so ``add_rule("connectat")`` always fails. The old installer SWALLOWED
+# that failure (silent no-op); the new fail-closed installer makes add_rule
+# failures FATAL, so keeping ``connectat`` would break all seccomp-filtered
+# execution on Linux. It is removed: on Linux ``connect`` already covers TCP
+# connect (there is no dirfd-relative connect variant). Verified against the
+# libseccomp 2.5.5 syscall table (connect/sendto/sendmsg/sendmmsg present;
+# connectat absent).
+_SECCOMP_EGRESS_SYSCALLS: tuple[str, ...] = ("connect", "sendto", "sendmsg", "sendmmsg")
 
 # One-time warning when seccomp is requested but unavailable (non-Linux / system
 # package python3-seccomp not installed) -- degrade to soft deny rather than crash.
@@ -279,20 +297,44 @@ class RestrictedProcessBackend(BaseSandbox):
         the forked child, or None when seccomp is off/unavailable.
 
         Activated only when ``network == "deny"`` AND
-        ``network_isolation == "seccomp"`` AND seccomp is available (Linux host
-        with the ``python3-seccomp`` system package). When requested but unavailable,
-        logs a one-time warning and returns None so the backend degrades to the
-        soft token-deny rather than crashing.
+        ``network_isolation in ("seccomp", "seccomp_strict")``. Two modes:
 
-        The filter is built AND loaded entirely inside the child (between fork and
+        - ``"seccomp_strict"`` (opt-in, fail-closed at boot): if seccomp is
+          unavailable (non-Linux host or the ``python3-seccomp`` system package not
+          installed) this RAISES at construction time -- refusing to start with a
+          bypassable soft boundary. Use this when the operator has arranged the
+          runtime (Linux + bindings, or the Dockerfile build stage) and wants the
+          sandbox to refuse boot rather than silently degrade.
+        - ``"seccomp"`` (legacy, back-compat): if seccomp is unavailable, logs a
+          one-time warning and returns None so the backend degrades to the soft
+          token-deny. Shipped configs (server_deploy.yaml / e2e_full.yaml) use this
+          and MUST keep working unchanged.
+
+        The installer (``_install``) is FAIL-CLOSED: a per-syscall ``add_rule``
+        failure or an unresolvable deny action raises ``RuntimeError`` instead of
+        loading a default-ALLOW filter that would silently permit egress. The
+        filter is built AND loaded entirely inside the child (between fork and
         exec) -- the canonical seccomp+subprocess pattern: no parent-built filter
         context crosses the fork, and the filter persists across the subsequent
         execve so the exec'd binary (python3/bash/curl) inherits the deny list.
-        Blocks ``connect``/``connectat``/``sendto``/``sendmsg`` (TCP/UDP egress).
+        Blocks ``connect``/``sendto``/``sendmsg``/``sendmmsg``
+        (TCP/UDP egress).
         """
-        if not (self._network == "deny" and self._network_isolation == "seccomp"):
+        if not (self._network == "deny" and self._network_isolation in ("seccomp", "seccomp_strict")):
             return None
+        strict = self._network_isolation == "seccomp_strict"
         if not _HAS_SECCOMP:
+            if strict:
+                # Fail-closed at boot: the operator asked for a HARD boundary and
+                # the host can't provide one -- refuse to start rather than ship a
+                # bypassable soft boundary labeled as strict.
+                raise RuntimeError(
+                    "network_isolation='seccomp_strict' requested but seccomp is "
+                    "unavailable on this host (non-Linux or python3-seccomp not "
+                    "installed); refusing to start with a bypassable soft boundary. "
+                    "Use 'seccomp' for soft-degrade back-compat or install "
+                    "python3-seccomp (apt install python3-seccomp on Debian/Ubuntu)."
+                )
             global _seccomp_unavailable_warned
             if not _seccomp_unavailable_warned:
                 _seccomp_unavailable_warned = True
@@ -300,7 +342,8 @@ class RestrictedProcessBackend(BaseSandbox):
                     "sandbox.network_isolation='seccomp' requested but unavailable "
                     "(non-Linux host or python3-seccomp system package not installed); "
                     "falling back to SOFT network deny. Install on a Linux host with: "
-                    "apt install python3-seccomp (Debian/Ubuntu)."
+                    "apt install python3-seccomp (Debian/Ubuntu). For fail-closed "
+                    "behavior use network_isolation: seccomp_strict."
                 )
             return None
         egress = _SECCOMP_EGRESS_SYSCALLS
@@ -313,6 +356,7 @@ class RestrictedProcessBackend(BaseSandbox):
             # with an errno value: seccomp.ERRNO(errno.EPERM) -- the bare seccomp.ERRNO
             # raises TypeError("an integer is required").
             import errno as _errno
+            import platform as _platform
             import seccomp
 
             f = seccomp.SyscallFilter(defaction=seccomp.ALLOW)
@@ -321,13 +365,42 @@ class RestrictedProcessBackend(BaseSandbox):
             except (TypeError, AttributeError):
                 # Older/different bindings -- fall back to KILL (terminate on call).
                 deny = getattr(seccomp, "KILL", None)
-            if deny is not None:
-                for sc in egress:
-                    try:
-                        f.add_rule(deny, sc)
-                    except (RuntimeError, ValueError, TypeError):
-                        # Syscall name not recognized on this kernel/arch -- best effort.
-                        pass
+            if deny is None:
+                # FAIL CLOSED: never load a filter whose deny action we could not
+                # construct -- a default-ALLOW filter would silently permit egress.
+                raise RuntimeError(
+                    "seccomp: unable to construct deny action (ERRNO/KILL "
+                    "unavailable); refusing to load a default-ALLOW filter."
+                )
+            added = 0
+            for sc in egress:
+                # FAIL CLOSED: do NOT swallow -- a missing rule for a primary egress
+                # syscall (e.g. connect) would leave that path permitted under a
+                # default-ALLOW filter. Raise so the child Popen fails and surfaces
+                # as a non-zero SandboxResult instead of silent egress.
+                try:
+                    f.add_rule(deny, sc)
+                except (RuntimeError, ValueError, TypeError) as exc:
+                    raise RuntimeError(
+                        f"seccomp: failed to add deny rule for '{sc}'; refusing to "
+                        f"load a filter that would silently permit egress. {exc}"
+                    ) from exc
+                added += 1
+            # 32-bit x86 multiplexes socket calls through a single ``socketcall``
+            # entry point; add it best-effort (arch-gated) so a missing-name error
+            # on every other arch is harmless. Every primary egress syscall above
+            # is already fatal-on-failure; this ONE extra rule is the only tolerated
+            # best-effort path.
+            if _platform.machine() in ("i386", "i686"):
+                try:
+                    f.add_rule(deny, "socketcall")
+                    added += 1
+                except (RuntimeError, ValueError, TypeError):
+                    pass
+            if added < 1:
+                raise RuntimeError(
+                    "seccomp: no egress deny rules were added; refusing to load an empty (default-ALLOW) filter."
+                )
             f.load()
 
         return _install
@@ -353,7 +426,24 @@ class RestrictedProcessBackend(BaseSandbox):
         if preexec is not None:
             popen_kwargs["preexec_fn"] = preexec
 
-        proc = subprocess.Popen(command, **popen_kwargs)
+        try:
+            proc = subprocess.Popen(command, **popen_kwargs)
+        except Exception as exc:  # noqa: BLE001 - preexec_fn failure must fail closed
+            # preexec_fn (seccomp filter / rlimits) runs in the forked child; if it
+            # raises (e.g. the seccomp installer refuses to load a default-ALLOW
+            # filter) Popen re-raises in the parent during __init__. Surface that as
+            # a non-zero SandboxResult so the agent loop sees a clean failure rather
+            # than silent egress or an uncaught crash. When no preexec_fn is set we
+            # propagate the genuine Popen error unchanged (pre-existing behavior).
+            if preexec is None:
+                raise
+            _logger.error("sandbox preexec_fn failed (fail-closed): %s", exc)
+            return SandboxResult(
+                returncode=126,
+                stdout="",
+                stderr=f"blocked: sandbox isolation failed to apply (fail-closed): {exc}",
+                timed_out=False,
+            )
         try:
             stdout, stderr = proc.communicate(input=input, timeout=timeout)
         except subprocess.TimeoutExpired:
