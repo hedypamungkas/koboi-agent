@@ -317,7 +317,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `pools` | Named provider pools (failover / round_robin) wrapping multiple `providers` members |
 | `embedding` | Embedding provider config for RAG semantic retrieval + proactive recall (inline or named `providers` ref) |
 | `subagent` | Parallel sub-agent delegation config |
-| `eval` | Evaluation suite cases/scorers (e.g. `eval_suite.yaml`, `benchmark_eval.yaml`) |
+| `eval` | Evaluation suite cases/scorers (legacy YAML-suite path; the canonical eval surfaces are `koboi eval-test evals/` and `examples/27_benchmark_suite.py`) |
 | `handover` | Confidence-aware handover: `detection` (structural handover, B1.5), `digest` (warm-handoff summary, B4), `webhooks` (HMAC `handover.requested` callbacks) |
 | `media` | Multimodal generation (image/video/music/speech/transcription; Surplus gateway + mock), `budget` caps, `storage` (local/r2/s3), `profiles` (ModelProfile), async jobs |
 | `peers` | Cross-instance A2A (opt-in, inert by default): outbound peer defs (name/URL/token), inbound token hashes, `org_secret` (agent-card HMAC claim), rate limits |
@@ -966,6 +966,134 @@ Token values support `${VAR}` / `${VAR:default}` env interpolation.
   `mode.read_only_tools: [...]`. SAFE read-only MCP tools can be allowlisted there.
 - **Protocol version**: the client negotiates `2025-03-26` and tolerates servers advertising
   other versions.
+
+---
+
+## Self-Healing
+
+Opt-in bounded recovery layered onto the existing hook/config seams (PR #70; default off via
+`self_healing:`). The design goal is **trustworthy unattended autonomy**: a run should detect
+its own failures, attempt a bounded recovery, and escalate deterministically rather than
+silently looping or returning a wrong answer. See `docs/self-healing-feasibility.md` for the
+full strategy and `docs/self-healing-strategy.md` for the design.
+
+- **P0 always-on (where noted)**: `Orchestrator._run_single` sets `failed=True` on exceptions;
+  `AgentCore.empty_response_reask_limit` bounded-reasks an empty LLM response (default-ON, 1×);
+  `ToolPipelineResult.errored`/`error_kind`/`idempotent` (`loop_pipeline.py`) + the standalone
+  `ToolExecOutcome` dataclass (`types.py`) carry structured tool-failure signal instead of
+  string-matching `"Error:"`.
+- **P1 reflection** (`hooks/reflection_hook.py`, priority 60): POST_TOOL_USE repeated-error
+  critique + POST_OUTPUT low-grounding reground (verifier = `GroundingGuardrail`) + optional
+  CRITIC tool-verification (P4; hardcoded SAFE allowlist `{calculate, web_search}`); retries
+  via a `_process_output`→`_run_loop` bounded-`continue` seam (`reflection_retry`; non-stream
+  only — `run_stream` skips it).
+- **P2a escalation ladder**: `FailureClassifierHook` (priority 5, tags `failure_class`) +
+  `LadderRouterHook` (priority 6, picks ONE rung/turn — reflect-if-budget else handover) share
+  a `RecoveryBudget` (`harness/recovery_budget.py`, `max_turns`, reset on SESSION_START);
+  `DoomLoopHook` also resets on SESSION_START.
+- **P2b orchestration**: `max_replans>0` re-runs only the **failed subtree**
+  (`Orchestrator._downstream_closure` + `AgentResult.had_non_idempotent_tool`), carrying
+  forward succeeded/side-effecting nodes via `cached_results` — no whole-graph double-fire.
+- **P3 graceful degrade**: `AgentCore.graceful_max_iter` returns a degraded but `success=True`
+  `RunResult` (side-LLM summary, fail-soft) instead of an iteration-limit error.
+- **P4 self-consistency** (`harness/self_consistency.py`): optional exact-match majority vote
+  on structured JSON (`n_samples`/`max_concurrency`/`modes`).
+
+Config: the `self_healing:` section (`enabled`, `max_turns`, `fail_soft`, `graceful_max_iter`,
+`triggers` (tool_error/low_grounding/tool_verification), `ladder`, `self_consistency`). Demo:
+`configs/self_healing_demo.yaml` + `examples/38_self_healing_demo.py`.
+
+---
+
+## Multimodal Generation
+
+Opt-in image/video/music/speech + transcription (STT) via a pluggable provider gateway (PR #43;
+`media:` config, inert by default). The facade builds a `MediaBackend` (`koboi/media/`, injected
+as the `media_provider` tool dep) only when `media.enabled` is set + a provider configured; the
+default backend is the **Surplus Intelligence** gateway (OpenAI-compatible); `mock` providers
+run offline. See `koboi/media/CLAUDE.md` for the per-modality registry + provider conventions.
+
+Seven agent tools (`koboi/tools/builtin/media.py`, all `group="media"`, `deps=["media_provider"]`):
+`generate_image` (MODERATE), `generate_video` (DESTRUCTIVE; timeout 1800s), `generate_music`
+(MODERATE; async), `generate_speech` (MODERATE), `transcribe_audio` (MODERATE), plus the
+non-blocking async pair `submit_media_job` (MODERATE) + `check_media_job` (SAFE) for
+video/music (submit → poll → fetch). Video/music are async at the provider layer; the blocking
+facades poll internally.
+
+REST surface: `POST /v1/media/generate` (sync), `POST /v1/media/jobs` (async, 202) +
+`GET /v1/media/jobs/{job_id}` (poll). Storage backends `local`/`r2`/`s3` (r2/s3 need the
+`[media-cloud]` extra, `boto3`); budget caps are fail-soft (over-budget → rejected with a
+clear message, never a crash). `ModelProfile` (`media/model_profile.py`) validates a request
+(sizes/durations/voices) before the billed call and auto-corrects where it can. Deep Research
+auto-multimedia-briefing via `research.capabilities` + `research.media` (generates an image /
+short video / speech clip after the cited report). TUI **F3** opens the Media Gallery.
+`MediaGeneratedEvent` (`events.py`) is emitted when a media tool fires.
+
+Config: the `media:` section (`enabled`, per-modality `{image|video|music|speech|transcription}`
+with `provider` + nested provider kwargs, `budget` caps, `storage` backend, `profiles`
+overrides, `custom_modules` for `@register_*_provider` extensions).
+
+---
+
+## Cross-Instance A2A
+
+Opt-in agent-to-agent fan-out across koboi instances (PR #65; `peers:` config, inert by default).
+A remote peer's orchestration node runs as a first-class agent instead of a local `AgentCore`:
+an `AgentDef` with `endpoint: <peer_name>` becomes a `RemoteAgentProxy`
+(`orchestration/remote_proxy.py`) that duck-types as a node (`await node.run(query) -> RunResult`)
+but POSTs to the peer's `POST /v1/peer/invoke` under the hood. Ignored in `dynamic`/`deep_research`
+modes (they rebuild local agents per-query). A peer failure degrades to
+`RunResult(content="Error: ...")` rather than crashing the run. See
+`koboi/orchestration/CLAUDE.md` and `docs/a2a-smoke.md`.
+
+The tool surface is `call_peer_agent` (`koboi/tools/builtin/peer.py`, SAFE; needs `peers:` config
++ the `peer_registry` dep). The inbound receiver `POST /v1/peer/invoke` authenticates via
+`peers.inbound_tokens` (hashed), runs through `AutonomousApprovalHandler` (deny-by-default on
+destructive tools without a Trust-DB rule), and uses an ephemeral session so it never collides
+with a human-driven `/chat/stream`. Signed agent-card discovery lives at
+`GET /.well-known/agent-card` (`koboi/server/agent_card.py`: `build_agent_card`/`sign_card`/
+`verify_card`) — open (no Bearer), served regardless of `peers.enabled`, HMAC-claimed to an
+`org_secret` so a caller can verify the peer is who it says it is.
+
+W3C trace-context propagation (`koboi/tracing_context.py`, P4) carries a trace-id in a
+`contextvars.ContextVar` so a multi-instance fan-out is one trace tree: `begin_request` at
+`/v1/chat/stream`, `/v1/peer/invoke`, and `run_job` honors an inbound `traceparent` else mints
+a root; `invoke_peer` stamps a **child** `traceparent` on the outbound POST. The current trace-id
+lands on every `steps` row (`journal.record_step` → additive `trace_id` column) and in
+`RunResult.metadata["trace_id"]`. Config: the `peers:` section (outbound peer defs
+`name`/`url`/`token`, inbound token hashes, `org_secret`, rate limits).
+
+---
+
+## Deterministic Workflow Export
+
+Freeze a run into a self-contained, re-runnable config bundle (PR #42; `koboi/workflows/`),
+and optionally capture its LLM response cache so a re-run is byte-identical **offline** (no API
+key). The `workflow:` envelope carries provenance + a `DeterminismProfile`; it is stripped
+before `Config` loads, so a bundle IS a valid koboi config plus metadata. Three determinism
+tiers: **export** (frozen config bundle) → **capture** (bundle + response-cache sidecar) →
+**replay** (offline, raise-on-cache-miss). See `koboi/workflows/CLAUDE.md` for the file/layout
+conventions and `docs/deterministic-workflow-export-strategy.md` for the design.
+
+There is **no top-level `workflows:` config section**. Determinism lives in ordinary config:
+`orchestration.determinism:` (`{temperature, seed, top_p, model_pin, replay_mode}`) is the
+workflow-level default, and a per-node `determinism:` on an `AgentDef` overrides via
+`DeterminismProfile.merge` (node wins). `model_pin` is part of the cache key, so a pinned model
+never collides with a different one. `replay:` (`{mode: live|cache|replay, cache_dir}`) is set
+by `koboi run --replay-mode`; precedence: `replay.mode` >
+`orchestration.determinism.replay_mode` > `live`.
+
+CLI surfaces: `koboi export <config>` (→ bundle), `koboi import <bundle>`, `koboi workflows
+list|show|delete`, `koboi capture <config> --with-cache`, and `koboi run --workflow <name>
+--replay-mode {live|cache|replay}` (`--clear-cache` in cache mode). Server surfaces:
+`POST/GET/GET{name}/DELETE /v1/workflows` (owner-scoped SQLite `koboi/server/workflow_store.py`),
+`POST /v1/jobs/{id}/capture` (freeze a completed `workflow_ref` job into a bundle + cache
+sidecar), and `workflow_ref` + `replay_mode` on `POST /v1/jobs`. The `ResponseCache` +
+`CachedClient` decorator (`koboi/llm/cache.py`, wired by `facade._maybe_wrap_cache`) memoizes
+`complete()` by a SHA-256 of model+messages+tools+response_format. `replay` mode raises
+`CacheMissError` on any uncached call (`CacheMissPolicy.RAISE`); `cache` mode live-fetches +
+stores on miss. Both export and capture redact via `koboi.redact.redact_config_for_export`
+before persisting.
 
 ---
 

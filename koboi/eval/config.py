@@ -1,11 +1,20 @@
 """koboi/eval/config.py -- Config-driven eval suite configuration.
 
 Parses the `eval` section from YAML config and builds scorers/suites.
+
+.. deprecated::
+    The YAML-suite eval path (``EvalConfig.build_suite`` / ``EvalConfig.build_scorers``,
+    ``configs/eval_suite.yaml``) is orphaned -- it has zero runtime callers and no ``--suite``
+    CLI flag exists. The canonical eval surfaces are the eve-style ``t`` authoring DSL
+    (``koboi eval-test evals/ --mock --strict``; see ``koboi/eval/t/``) and the programmatic
+    loader/scorer path (``examples/27_benchmark_suite.py``). The methods below remain for
+    API compatibility but emit ``DeprecationWarning`` when called.
 """
 
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
@@ -83,7 +92,20 @@ class EvalConfig:
         return None
 
     def build_scorers(self, **extra_kwargs: Any) -> list[BaseScorer]:
-        """Build default scorer list from config."""
+        """Build default scorer list from config.
+
+        .. deprecated:: 0.18
+            The YAML-suite eval path is orphaned (zero runtime callers; no ``--suite`` flag).
+            Use ``koboi eval-test evals/`` (eve-style ``t`` DSL) or compose scorers via
+            ``koboi.eval.registry.ScorerRegistry.from_config(...)`` directly.
+        """
+        warnings.warn(
+            "EvalConfig.build_scorers is deprecated: the YAML-suite eval path is orphaned. "
+            "Use `koboi eval-test evals/` (t-authoring DSL) or ScorerRegistry.from_config() "
+            "directly. See koboi/eval/CLAUDE.md.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from koboi.eval.registry import ScorerRegistry
 
         if not self.default_scorers:
@@ -101,7 +123,21 @@ class EvalConfig:
         suite_name: str,
         **extra_kwargs: Any,
     ) -> tuple[list[EvalCase], list[BaseScorer]]:
-        """Load cases and build scorers for a named suite."""
+        """Load cases and build scorers for a named suite.
+
+        .. deprecated:: 0.18
+            The YAML-suite eval path is orphaned (zero runtime callers; no ``--suite`` flag).
+            Use ``koboi eval-test evals/`` (eve-style ``t`` DSL) or the programmatic
+            loader/scorer path in ``examples/27_benchmark_suite.py``.
+        """
+        warnings.warn(
+            "EvalConfig.build_suite is deprecated: the YAML-suite eval path is orphaned "
+            "(zero runtime callers, no --suite flag). Use `koboi eval-test evals/` "
+            "(t-authoring DSL) or compose loaders/scorers programmatically. "
+            "See koboi/eval/CLAUDE.md.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from koboi.eval.registry import ScorerRegistry
         from koboi.eval.loaders import LoaderRegistry
 

@@ -524,13 +524,39 @@ def cmd_eval(config_path: str, cases: str | None) -> int:
     ]
 
     eval_cases: list[EvalCase] = []
-    if cases and Path(cases).exists():
+    if cases is not None:
+        # Fail-closed (#21): a missing --cases file is an operator error (likely a typo in
+        # the path). Silently returning exit 0 here was a false-green -- CI would believe
+        # the suite passed without running a single case.
+        if not Path(cases).exists():
+            print(f"Eval cases file not found: {cases}", file=sys.stderr)
+            return 2
         import yaml
 
         with open(cases) as f:
             data = yaml.safe_load(f) or {}
-        for case_data in data.get("cases", []):
-            eval_cases.append(EvalCase(**case_data))
+        for idx, case_data in enumerate(data.get("cases", [])):
+            # Guard: non-dict rows cannot be iterated for key hints below.
+            if not isinstance(case_data, dict):
+                print(
+                    f"Eval case row {idx} is invalid (expected a mapping, got {type(case_data).__name__}): {case_data!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            # Loud per-row validation: a YAML typo or unknown key must surface with the row
+            # index + offending key, not be silently filtered into a false-green run.
+            try:
+                eval_cases.append(EvalCase(**case_data))
+            except (TypeError, ValueError) as e:
+                key_hint = next(
+                    (k for k in case_data if k not in EvalCase.__dataclass_fields__),
+                    "value",
+                )
+                print(
+                    f"Eval case row {idx} is invalid ({key_hint!r}): {e}",
+                    file=sys.stderr,
+                )
+                return 2
 
     if not eval_cases:
         print("No eval cases found. Provide --cases file.")
