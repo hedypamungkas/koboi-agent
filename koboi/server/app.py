@@ -1783,7 +1783,12 @@ def _register_routes(
             return _error_response(400, "bad_request", "invalid X-Session-Id", request)
         session_id = body.session_id or header_sid or pool.new_session_id()
         owner = getattr(request.state, "api_key_id", "dev")
-        if header_sid is not None:
+        # #69: gate on ANY caller-supplied session id (body OR header), mirroring
+        # /v1/jobs — otherwise a body.session_id with no X-Session-Id header skips
+        # _check_owner and runs generation in another tenant's pooled agent (IDOR).
+        if body.session_id is not None or header_sid is not None:
+            if not is_safe_session_id(session_id):
+                return _error_response(400, "bad_request", "invalid session_id", request)
             err = _check_owner(ownership, session_id, request)
             if err:
                 return err
@@ -1812,7 +1817,12 @@ def _register_routes(
             return _error_response(400, "bad_request", "invalid X-Session-Id", request)
         session_id = body.session_id or header_sid or pool.new_session_id()
         owner = getattr(request.state, "api_key_id", "dev")
-        if header_sid is not None:
+        # #69: gate on ANY caller-supplied session id (body OR header), mirroring
+        # /v1/jobs — otherwise a body.session_id with no X-Session-Id header skips
+        # _check_owner and runs the job in another tenant's pooled agent (IDOR).
+        if body.session_id is not None or header_sid is not None:
+            if not is_safe_session_id(session_id):
+                return _error_response(400, "bad_request", "invalid session_id", request)
             err = _check_owner(ownership, session_id, request)
             if err:
                 return err
