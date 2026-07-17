@@ -393,8 +393,8 @@ class AgentCore:
             for m in reversed(self.memory.get_messages()):
                 if m.get("role") == "assistant" and (m.get("content") or "").strip():
                     return f"[partial] {(m.get('content') or '').strip()}"
-        except Exception:
-            pass  # never let the fallback itself break the graceful degrade
+        except Exception:  # nosec B110 - intentionally swallowed; the fallback must never break the graceful degrade
+            pass
         return "I was unable to complete the task within the allowed steps."
 
     async def _process_graceful_output(self, output: str) -> str:

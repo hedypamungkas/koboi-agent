@@ -329,14 +329,14 @@ class ToolExecutionPipeline:
                 return self._deny_tool(tc, risk, "policy_denied", f"Policy confirm denied: {policy_reason}", on_event)
 
         # 6. Execute tool (self-healing P0-D: structured outcome -> actionable msg)
-        outcome = await self.tools.execute_outcome(tc.name, tc.arguments)
-        tool_result = outcome.content
-        errored = outcome.errored
-        error_kind = outcome.error_kind
+        exec_outcome = await self.tools.execute_outcome(tc.name, tc.arguments)
+        tool_result = exec_outcome.content
+        errored = exec_outcome.errored
+        error_kind = exec_outcome.error_kind
         td = self.tools.get_definition(tc.name)
         idempotent = td.idempotent if td is not None else True
         if errored:
-            tool_result = _format_tool_error(outcome, idempotent)
+            tool_result = _format_tool_error(exec_outcome, idempotent)
 
         # 7. POST_TOOL_USE hook
         if self.hooks:
