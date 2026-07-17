@@ -20,7 +20,6 @@ anthropic_chat.yaml       Anthropic provider example
 anthropic_apikey.yaml     Anthropic with API key auth
 anthropic_oauth.yaml      Anthropic with OAuth token
 cloudflare_worker.yaml    Cloudflare Workers AI
-eval_suite.yaml           Evaluation configuration
 swe_bench.yaml            SWE-bench evaluation
 benchmark_baseline.yaml   Retrieval baseline benchmark
 benchmark_eval.yaml       Benchmark evaluation config

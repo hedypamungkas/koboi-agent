@@ -138,3 +138,15 @@ Built-in routers:
   `idempotent=False` OR `risk_level ∈ {MODERATE, DESTRUCTIVE}`) are carried forward via
   `_run_dag_waves_with_flow(cached_results=...)` (no re-run/re-record, event parity), instead of
   double-firing non-idempotent tools on a whole-graph replan.
+- **Opt-in hooks + media are now wired into orchestration mode (issue #81, fixed)**: `facade.py`'s
+  `_build_orchestration` used to call individual `build_*()` steps directly and never
+  `assembler.build_opt_in_hooks()` — so under `orchestration.enabled: true`, EVERY opt-in hook
+  configured via YAML (self-healing reflection/ladder, handover detection, proactive-memory
+  extraction, skill/task persistence) was silently dropped, and media generation was completely
+  non-functional (the `Orchestrator` never received a `media_backend`). Fixed by extracting
+  `AgentAssembler.build_opt_in_hooks()` as a shared step called by BOTH the single-agent path and
+  `_build_orchestration`, and by forwarding `search_provider`/`fetch_provider`/`media_provider`
+  into `AgentFactory.create_all_configured()` + `media_conf`/`media_backend` into the
+  `Orchestrator` ctor. This also un-dead-coded the deep_research auto-multimedia briefing under
+  orchestration mode. If you're on an older version and self-healing/handover/media silently don't
+  fire under `orchestration.enabled: true`, this is why — upgrade.

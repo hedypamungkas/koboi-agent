@@ -287,7 +287,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (31)
+### Config sections (32)
 
 | Section | Controls |
 |---------|----------|
@@ -307,7 +307,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `orchestration` | Router type, agents, execution mode (`sequential`/`parallel`/`dag`/`conditional`/`dynamic`/`deep_research`); `determinism` (workflow + per-node merge), node `output_schema` (workflow export) |
 | `websearch` | Pluggable search/fetch providers for `web_search`/`web_fetch` (`search.provider` brave/firecrawl/ddg/mock, `fetch.provider` httpx/firecrawl) |
 | `research` | deep_research knobs: `max_depth`, `max_searches`/`max_fetches`, `coverage_threshold`, `citations`, `persist_findings` |
-| `sandbox` | Backend (passthrough/restricted), workdir strategy, network, network_isolation (seccomp), rlimits |
+| `sandbox` | Backend (passthrough/restricted), workdir, network, network_isolation (seccomp/seccomp_strict), git_init, rlimits -- fail-closed on invalid/typo'd keys |
 | `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume |
 | `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
 | `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup, `webhooks` (HMAC-signed terminal-status callbacks) |
@@ -322,6 +322,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `media` | Multimodal generation (image/video/music/speech/transcription; Surplus gateway + mock), `budget` caps, `storage` (local/r2/s3), `profiles` (ModelProfile), async jobs |
 | `peers` | Cross-instance A2A (opt-in, inert by default): outbound peer defs (name/URL/token), inbound token hashes, `org_secret` (agent-card HMAC claim), rate limits |
 | `self_healing` | Opt-in bounded reflection + declarative escalation ladder (retry/reflect/replan/handover): `enabled`, `max_turns`, `fail_soft`, `graceful_max_iter`, `triggers` (tool_error/low_grounding/tool_verification), `ladder`, `self_consistency` |
+| `replay` | Offline determinism override for workflow export: `mode` (`live`/`cache`/`replay`) + `cache_dir`; set by `koboi run --replay-mode` |
 
 For the complete YAML schema reference, see `.claude/skills/yaml-config.md`.
 
