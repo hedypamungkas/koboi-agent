@@ -158,6 +158,17 @@ POST   /v1/media/jobs                 Async media job (202; video/music); poll G
   breaks preflight handling and loses `X-Request-Id` on 401/403.
 - **`auth_required=true` fails closed**: no keys + auth_required -> 401, never open;
   `serve_app` refuses non-loopback bind with auth_required + no keys.
+- **Job admission is a synchronous reservation (issue #50, TOCTOU fix)**: `JobRegistry.reserve_admit`
+  mints a `status="reserved"` placeholder BEFORE any `await`, so concurrent submitters can't all
+  read pre-increment counts and overrun `max_concurrent`/`per_tenant_max` during the await window
+  before `register`/`set_running`. `commit_reserve` finalizes it into a real `pending` job;
+  `release_reserve` idempotently drops it on any failure path. `/v1/media/jobs` enforces the SAME
+  numeric policy (`jobs.max_concurrent`/`jobs.per_tenant_max`) via SEPARATE race-free counters
+  (`app.state.media_inflight_global`/`media_inflight_per_owner`, issue #74) — media doesn't touch
+  `JobRegistry` (so it composes cleanly with #50), but the checks read `job_registry`'s counts so a
+  tenant can't bypass the cap by routing through media instead of `/v1/jobs`. `_MediaJobTracker` is
+  capped at 1000 entries (oldest-terminal-first eviction; pending/in-flight entries are never evicted)
+  to bound its unmanaged in-memory growth.
 - **Output guardrail buffering lives in `loop.py`** (not here): when output guardrails
   are configured, TextDeltas buffer until `_process_output` passes (G8). Transparent to
   this package -- `sse_stream` just sees delayed deltas.
