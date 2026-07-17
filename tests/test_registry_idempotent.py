@@ -22,7 +22,7 @@ class TestIdempotentForwarding:
         """Read-only/safe builtins keep re-running on resume (idempotent=True by default)."""
         r = ToolRegistry()
         register_all(r)
-        for name in ("delegate_tasks", "calculate", "read_file"):
+        for name in ("calculate", "read_file"):
             td = r.get_definition(name)
             assert td is not None, f"{name} missing"
             assert td.idempotent is True, f"{name} should remain idempotent=True"

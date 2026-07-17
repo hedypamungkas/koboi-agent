@@ -647,6 +647,12 @@ class SelfHealingConfig(BaseModel):
     ladder: dict = Field(default_factory=dict)
     # failure-class -> ordered recovery rungs, e.g. {grounding: [reflect, handover]}.
     # empty = built-in DEFAULT_LADDER (see koboi/hooks/ladder_router_hook.py). P2a.
+    tool_verification: dict = Field(default_factory=dict)
+    # P4 CRITIC: tool-grounded claim verification. .enabled (default false),
+    # .tools (subset of {calculate, web_search}; default [calculate, web_search]), .max_claims (default 5).
+    self_consistency: dict = Field(default_factory=dict)
+    # P4 self-consistency: N-sample aggregation for structured-output terminal answers.
+    # .enabled, .n_samples (default 3), .max_concurrency (default 3), .modes (default [act, auto, yolo]).
 
 
 class KoboiConfig(BaseModel):

@@ -35,7 +35,9 @@ coverage handover wins; on recoverable-low coverage reflection retries.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent
@@ -45,6 +47,7 @@ if TYPE_CHECKING:
     from koboi.guardrails.grounding import GroundingGuardrail
     from koboi.harness.recovery_budget import RecoveryBudget
     from koboi.llm.base import LLMClient
+    from koboi.tools.registry import ToolRegistry
 
 _logger = logging.getLogger(__name__)
 
@@ -62,6 +65,26 @@ _GROUNDING_CRITIQUE_PROMPT = (
     "ungrounded claim(s) and instruct the agent to either ground them strictly from "
     "the provided context or to hedge/refuse.\n\n"
     "Answer (redacted): {answer}\n\nCritique:"
+)
+
+# P4 CRITIC: tool-grounded claim verification. registry.execute bypasses the
+# approval/policy pipeline (MCP-bridge precedent), so the hook hardcodes a SAFE
+# allowlist; config may subset, never extend beyond these.
+_SAFE_VERIFIER_TOOLS = {"calculate", "web_search"}
+
+_TYPED_DECOMPOSE_PROMPT = (
+    "Decompose the following AI agent answer into atomic claims. For each claim, set "
+    "'kind' to 'math' (a numerical/arithmetic statement), 'fact' (a checkable factual "
+    "assertion), or 'other' (opinion/recommendation). For math claims, set 'hint' to the "
+    "expression to evaluate (e.g. '2+2'). Respond ONLY as a JSON array, at most {max_claims} "
+    'items: [{{"claim": "...", "kind": "math|fact|other", "hint": "..."}}].\n\n'
+    "Answer (redacted): {answer}\n\nJSON:"
+)
+
+_FACT_NLI_PROMPT = (
+    "Does the following web search snippet SUPPORT, REFUTE, or remain NEUTRAL toward the "
+    "claim? Respond with exactly one word: SUPPORT, REFUTE, or NEUTRAL.\n\n"
+    "Claim: {claim}\nSnippet (redacted): {snippet}\n\nVerdict:"
 )
 
 # Note on fail-soft: when the critic has no client or errors, ``_ask`` returns
@@ -85,6 +108,9 @@ class ReflectionHook(Hook):
         tool_error_threshold: int = 2,
         grounding_threshold: float = 0.6,
         budget: RecoveryBudget | None = None,
+        tools: ToolRegistry | None = None,
+        verifier_tools: list[str] | None = None,
+        max_claims: int = 5,
     ) -> None:
         self._client = client
         self._grounding = grounding
@@ -95,6 +121,11 @@ class ReflectionHook(Hook):
         # Shared per-run budget (router-owned); consumed here only when the router chose
         # "reflect" and the critique actually fires. None in standalone mode (P1 path).
         self._budget = budget
+        # P4 CRITIC: tool registry for tool-grounded claim verification. The verifier
+        # only ever calls tools in the hardcoded _SAFE_VERIFIER_TOOLS allowlist.
+        self._tools = tools
+        self._verifier_tools = [t for t in (verifier_tools or ["calculate", "web_search"]) if t in _SAFE_VERIFIER_TOOLS]
+        self._max_claims = int(max_claims)
         # Per-run state (reset on SESSION_START).
         self._turns_used = 0
         self._tool_error_counts: dict[str, int] = {}
@@ -180,9 +211,14 @@ class ReflectionHook(Hook):
         # TODO(P2): if ctx.iteration == max_iterations-1 the loop's (i+1) < max guard
         # will skip the retry, so this critic call + budget are wasted. Pass
         # max_iterations so the hook can decline to critique with no iteration left.
-        critique = await self._critique_grounding(coverage, self._answer_text(ctx))
+        # P4 CRITIC: prefer tool-grounded verification (external signal -- what the
+        # literature says actually enables self-correction) over intrinsic self-critique;
+        # fall back to the intrinsic critique when no tools / no tool evidence.
+        critique = await self._tool_verify_claims(self._answer_text(ctx))
         if critique is None:
-            return  # no client / critic error -> fail-soft skip (fall through to abstain/handover)
+            critique = await self._critique_grounding(coverage, self._answer_text(ctx))
+        if critique is None:
+            return  # no client / no tool evidence / critic error -> fail-soft skip
         if plan is None:
             self._turns_used += 1  # standalone: count against own budget
         elif self._budget is not None:
@@ -208,6 +244,104 @@ class ReflectionHook(Hook):
             return None
         prompt = _GROUNDING_CRITIQUE_PROMPT.format(coverage=float(coverage), answer=redact_value(answer[:2000]))
         return await self._ask(prompt)
+
+    # -- P4 CRITIC: tool-grounded claim verification ----------------------------
+
+    async def _tool_verify_claims(self, answer: str) -> str | None:
+        """Verify the answer's claims via tools (P4 CRITIC). Return a tool-grounded
+        critique, or None if no tools / no verifiable claims / all verified OK."""
+        if self._tools is None or self._client is None or not self._verifier_tools:
+            return None
+        claims = await self._typed_decompose(answer)
+        if not claims:
+            return None
+        findings: list[str] = []
+        for c in claims[: self._max_claims]:
+            kind = (c.get("kind") or "").strip()
+            claim = (c.get("claim") or "").strip()
+            hint = (c.get("hint") or "").strip()
+            if kind == "math" and hint and "calculate" in self._verifier_tools:
+                ev = await self._verify_math(claim, hint)
+                if ev:
+                    findings.append(ev)
+            elif kind == "fact" and claim and "web_search" in self._verifier_tools:
+                ev = await self._verify_fact(claim)
+                if ev:
+                    findings.append(ev)
+        if not findings:
+            return None
+        return "[TOOL-VERIFIED] " + " ".join(findings)
+
+    async def _typed_decompose(self, answer: str) -> list[dict]:
+        prompt = _TYPED_DECOMPOSE_PROMPT.format(max_claims=self._max_claims, answer=redact_value(answer[:2000]))
+        text = await self._ask(prompt)
+        if not text:
+            return []
+        start = text.find("[")
+        if start < 0:
+            return []
+        try:
+            # raw_decode stops at the first JSON value, ignoring trailing prose.
+            data, _ = json.JSONDecoder().raw_decode(text[start:])
+        except Exception:
+            return []
+        return [c for c in data if isinstance(c, dict)]
+
+    async def _verify_math(self, claim: str, hint: str) -> str | None:
+        if self._tools is None:
+            return None
+        try:
+            outcome = await self._tools.execute_outcome("calculate", json.dumps({"expression": hint}))
+        except Exception:
+            return None
+        content = outcome.content or ""
+        # calculate RETURNS (not raises) "Error calculating '...': ..." on a bad expression,
+        # wrapped as errored=False -- guard explicitly so we don't parse digits from the error.
+        if outcome.errored or "Error calculating" in content:
+            return None
+        computed = self._parse_number(content.split("=", 1)[-1])
+        claim_nums = re.findall(r"-?\d+(?:\.\d+)?", claim)
+        if computed is not None and claim_nums:
+            claimed = float(claim_nums[-1])  # last number in the claim = asserted result
+            if abs(computed - claimed) > 1e-9:
+                return f"math claim '{claim}' is incorrect: '{hint}' = {computed:g} (not {claimed:g})."
+        return None
+
+    async def _verify_fact(self, claim: str) -> str | None:
+        if self._tools is None:
+            return None
+        try:
+            outcome = await self._tools.execute_outcome("web_search", json.dumps({"query": claim}))
+        except Exception:
+            return None
+        if outcome.errored:
+            return None
+        snippet = (outcome.content or "").strip()
+        if not snippet:
+            return None
+        # NLI: only flag the claim if the snippet REFUTES it. A supporting/neutral snippet
+        # must NOT trigger a spurious reflection retry on a correct answer (review C1).
+        if await self._fact_nli(claim, snippet) != "refuted":
+            return None
+        return f"fact claim '{claim[:160]}' is contradicted by web_search: {snippet[:300]}."
+
+    async def _fact_nli(self, claim: str, snippet: str) -> str:
+        """Side-LLM NLI: does the snippet support/refute/neutral the claim?"""
+        text = await self._ask(_FACT_NLI_PROMPT.format(claim=claim[:300], snippet=redact_value(snippet[:1000])))
+        t = (text or "").lower()
+        if "refut" in t:
+            return "refuted"
+        if "support" in t:
+            return "supported"
+        return "neutral"
+
+    @staticmethod
+    def _parse_number(text: str) -> float | None:
+        m = re.search(r"-?\d+(?:\.\d+)?", text)
+        try:
+            return float(m.group()) if m else None
+        except (ValueError, AttributeError):
+            return None
 
     # -- side-LLM helper --------------------------------------------------------
 

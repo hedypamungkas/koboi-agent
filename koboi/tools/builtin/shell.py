@@ -90,7 +90,6 @@ def _check_command_blocked(command: str) -> str | None:
     # AutonomousApprovalHandler auto-approves everything below DESTRUCTIVE.
     # (Matches .claude/rules/builtin-tools.md; was previously MODERATE -- a C2 fix.)
     risk_level=RiskLevel.DESTRUCTIVE,
-    idempotent=False,  # self-healing: re-runs the command -- carry forward on replan / skip on resume
     deps=["sandbox"],
     # Issue #48: shell mutates the host fs/network; on crash-resume the loop's
     # _repair_interrupted_turn must NOT silently replay it (duplicate commits,

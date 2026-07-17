@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging as _logging
 import time as _time
 from collections.abc import AsyncGenerator
@@ -93,6 +94,7 @@ class AgentCore:
         max_iterations: int = 10,
         empty_response_reask_limit: int = 1,
         graceful_max_iter: bool = False,
+        self_consistency_config: dict | None = None,
         verbose: bool = False,
         logger: AgentLogger | None = None,
         system_prompt: str | None = None,
@@ -128,6 +130,10 @@ class AgentCore:
         # Self-healing P3: on max_iterations exhaustion, return a side-LLM summary of
         # partial progress instead of raising AgentMaxIterationsError (opt-in).
         self.graceful_max_iter = graceful_max_iter
+        # Self-healing P4: self-consistency (N-sample aggregation) for structured-output
+        # terminal answers. Opt-in; structured-only; mode act+. None/empty = disabled.
+        self.self_consistency_config = self_consistency_config or {}
+        self._last_self_consistency: dict | None = None
         self.verbose = verbose
         self.context_manager = context_manager
         self.max_context_tokens = max_context_tokens
@@ -406,6 +412,45 @@ class AgentCore:
             self.memory.add_assistant_message(output)
             return output
 
+    # -- P4: self-consistency (structured terminal answers) ---------------------
+
+    def _self_consistency_applies(self, rf: dict | None) -> bool:
+        cfg = self.self_consistency_config
+        if not cfg.get("enabled") or int(cfg.get("n_samples", 3)) < 2:
+            return False
+        if rf is None:  # structured-output only (exact-match majority on normalized JSON)
+            return False
+        # Mode gate: act+ only (self-consistency multiplies spend on terminal answers);
+        # configurable via self_consistency.modes (default [act, auto, yolo]).
+        if self.mode_manager is not None:
+            from koboi.modes import AgentMode
+
+            allowed = {
+                AgentMode[m.upper()] if isinstance(m, str) else m for m in cfg.get("modes", ["act", "auto", "yolo"])
+            }
+            if self.mode_manager.current_mode not in allowed:
+                return False
+        return True
+
+    async def _self_consistent_sample(
+        self, messages: list[dict], tool_defs: list[dict] | None, rf: dict, first: AgentResponse
+    ) -> tuple[AgentResponse, float]:
+        from koboi.self_consistency import aggregate_structured
+
+        n = int(self.self_consistency_config.get("n_samples", 3))
+        max_concurrency = int(self.self_consistency_config.get("max_concurrency", 3))
+        sem = asyncio.Semaphore(max(1, max_concurrency))
+
+        async def _one() -> AgentResponse:
+            async with sem:
+                return await self.client.complete(messages=messages, tools=tool_defs, response_format=rf)
+
+        others = await asyncio.gather(*[_one() for _ in range(n - 1)], return_exceptions=True)
+        samples = [first] + [r for r in others if isinstance(r, AgentResponse)]
+        if len(samples) < 2:
+            return first, 1.0
+        return aggregate_structured(samples)
+
     async def _process_output(self, output: str, response: object, iteration: int) -> str:
         """Run output guardrails, emit POST_OUTPUT, save to memory.
 
@@ -599,6 +644,8 @@ class AgentCore:
             "empty_response_reasked": getattr(self, "_empty_response_reasked", 0),
             # Self-healing P1: reflection retry count (0 = none / disabled / streaming).
             "reflection_retries": getattr(self, "_reflection_retries", 0),
+            # Self-healing P4: self-consistency outcome (None = not fired / streaming / off).
+            "self_consistency": getattr(self, "_last_self_consistency", None),
         }
         # R4: stamp retrieved chunks so evals can assert on retrieval (t.retrievedChunk)
         # without a live LLM. last_results is overwritten each retrieval (not accumulated).
@@ -720,6 +767,7 @@ class AgentCore:
         # Self-healing P1: reflection-retry state (reset per run).
         self._reflection_retry_requested = None
         self._reflection_retries = 0
+        self._last_self_consistency = None
 
         for i in range(self.max_iterations):
             messages = await self._prepare_iteration(i)
@@ -737,7 +785,11 @@ class AgentCore:
             response = await self.client.complete(messages=messages, tools=tool_defs, response_format=_rf)
             await self._emit(HookEvent.POST_LLM_CALL, iteration=i, llm_response=response)
 
-            total_usage = self._update_usage(response, total_usage)
+            # P4: defer usage accounting when self-consistency will fire (counted once
+            # after the N-sample swap, since the canonical carries the summed usage).
+            _sc_applies = self._self_consistency_applies(_rf)
+            if not _sc_applies:
+                total_usage = self._update_usage(response, total_usage)
 
             if response.content and self.skills and self._activate_skill(response.content):
                 self._journal_step(i, status="skill", response=response)
@@ -763,6 +815,15 @@ class AgentCore:
                     self._nudge_empty_response()
                     self._journal_step(i, status="empty_reask", response=response)
                     continue
+                # Self-healing P4: self-consistency -- for structured terminal answers,
+                # fan out N samples + pick the majority (before guardrails/reflection).
+                if _sc_applies:
+                    response, sc_agreement = await self._self_consistent_sample(messages, tool_defs, _rf, response)
+                    total_usage = self._update_usage(response, total_usage)  # count the summed canonical once
+                    self._last_self_consistency = {
+                        "n": int(self.self_consistency_config.get("n_samples", 3)),
+                        "agreement": round(sc_agreement, 4),
+                    }
                 output = await self._process_output(response.content, response, i)
                 # Self-healing P1: POST_OUTPUT reflection retry (low-grounding reground).
                 # The hook owns the soft max_turns budget; (i+1) < max is the hard
@@ -878,6 +939,7 @@ class AgentCore:
         # Self-healing P1: reflection-retry state (reset per run; streaming skips retry).
         self._reflection_retry_requested = None
         self._reflection_retries = 0
+        self._last_self_consistency = None
         _stream_tools_used: list[str] = []
         # G8b: when output guardrails are configured, buffer TextDeltas and flush
         # them only after _process_output passes -- otherwise the tokens stream

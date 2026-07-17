@@ -1491,6 +1491,11 @@ class AgentAssembler:
                         "self_healing", "triggers", "low_grounding", "threshold", default=0.6
                     ),
                     budget=budget,
+                    tools=self.tools
+                    if self.config.get("self_healing", "tool_verification", "enabled", default=False)
+                    else None,
+                    verifier_tools=self.config.get("self_healing", "tool_verification", "tools", default=None),
+                    max_claims=self.config.get("self_healing", "tool_verification", "max_claims", default=5),
                 )
             )
             # P2a: escalation ladder -- classifier + router. The shared per-run budget
@@ -1515,6 +1520,7 @@ class AgentAssembler:
             tools=self.tools,
             max_iterations=self.config.max_iterations,
             graceful_max_iter=self.config.get("self_healing", "graceful_max_iter", default=False),
+            self_consistency_config=self.config.get("self_healing", "self_consistency", default=None),
             empty_response_reask_limit=self.config.get("self_healing", "empty_response_reask_limit", default=1),
             verbose=self.verbose,
             logger=self.logger,

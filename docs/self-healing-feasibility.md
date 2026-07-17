@@ -260,6 +260,10 @@ Effort is rough (S=≤1 day, M=2-4 days, L=1 wk+) relative to this codebase's pa
 - **CRITIC-generalization:** run `calculator`/`web_search`/code tools to verify code/math/fact claims (generalizes grounding beyond RAG).
 - **Self-consistency:** sample N completions, majority/structured-merge, for high-stakes outputs (multi-provider pool already supports parallel calls). Strictly opt-in — 3-5× spend.
 - **Deliverable value:** measurable answer-quality gains where a verifier exists; keep off by default.
+- **STATUS (2026-07-17): SHIPPED.** Both techniques delivered:
+  - **CRITIC** (`ReflectionHook._tool_verify_claims`): typed-decompose claims (one side-LLM call) → verify math via `calculate` (deterministic: parse RHS, numeric mismatch; guarded against error strings) + facts via `web_search` (snippet → side-LLM NLI → only REFUTED claims flagged, not supported/neutral). Tool-grounded critique flows into the existing `reflection_retry` channel (composes with P1/P2a). Hardcoded SAFE allowlist `{calculate, web_search}` (registry.execute bypasses approval; config may subset). Config `self_healing.triggers.tool_verification`.
+  - **Self-consistency** (`koboi/self_consistency.py` + `AgentCore._self_consistent_sample`): exact-match majority on normalized JSON (structured-output only; free-text deferred — no in-codebase similarity primitive). Semaphore-bounded N-1 fan-out on the same stateless client; token usage summed across all N samples (reconciled accounting). Gated: `enabled` + `n_samples≥2` + `response_schema` set + `modes` (default act+). Config `self_healing.self_consistency`.
+  - 13 tests; 4637 pass. Both default off → inert.
 
 ---
 
