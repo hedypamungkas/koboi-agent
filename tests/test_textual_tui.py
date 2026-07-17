@@ -192,7 +192,6 @@ class TestInputBox:
 
 
 class TestStreamBridge:
-    @pytest.mark.asyncio
     async def test_text_deltas(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -212,7 +211,6 @@ class TestStreamBridge:
         assert isinstance(msg1, StreamDelta)
         assert msg1.content == " world"
 
-    @pytest.mark.asyncio
     async def test_tool_call(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -229,7 +227,6 @@ class TestStreamBridge:
         assert msg.tool_call_id == "tc_1"
         assert msg.arguments == '{"x":1}'
 
-    @pytest.mark.asyncio
     async def test_tool_result(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -245,7 +242,6 @@ class TestStreamBridge:
         assert msg.tool_name == "calc"
         assert msg.result == "42"
 
-    @pytest.mark.asyncio
     async def test_iteration_event(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -262,7 +258,6 @@ class TestStreamBridge:
         assert msg.messages_count == 10
         assert msg.tokens_estimated == 500
 
-    @pytest.mark.asyncio
     async def test_error_event(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -276,7 +271,6 @@ class TestStreamBridge:
         assert isinstance(msg, StreamError)
         assert isinstance(msg.error, ValueError)
 
-    @pytest.mark.asyncio
     async def test_complete_event(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -290,7 +284,6 @@ class TestStreamBridge:
         assert isinstance(msg, StreamComplete)
         assert msg.content == "final answer"
 
-    @pytest.mark.asyncio
     async def test_complete_event_empty_content(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -304,7 +297,6 @@ class TestStreamBridge:
         assert isinstance(msg, StreamComplete)
         assert msg.content == ""
 
-    @pytest.mark.asyncio
     async def test_empty_stream(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -316,7 +308,6 @@ class TestStreamBridge:
         await bridge.process_stream(stream())
         app.post_message.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_mixed_events(self):
         app = MagicMock()
         bridge = StreamBridge(app)
@@ -351,19 +342,16 @@ class TestStreamBridge:
 
 
 class TestMessageBubble:
-    @pytest.mark.asyncio
     async def test_user_bubble_has_user_class(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test():
             bubble = MessageBubble("user", "hello")
             assert "message-user" in bubble.classes
 
-    @pytest.mark.asyncio
     async def test_assistant_bubble_has_assistant_class(self):
         bubble = MessageBubble("assistant", "hi")
         assert "message-assistant" in bubble.classes
 
-    @pytest.mark.asyncio
     async def test_streamable_bubble_accumulates(self):
         bubble = MessageBubble("assistant", "", is_streamable=True)
         assert bubble._content == ""
@@ -387,7 +375,6 @@ class TestMessageBubble:
 
 
 class TestChatLog:
-    @pytest.mark.asyncio
     async def test_add_message(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -397,7 +384,6 @@ class TestChatLog:
             await pilot.pause()
             assert len(chat.query(MessageBubble)) == 1
 
-    @pytest.mark.asyncio
     async def test_begin_stream(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -407,7 +393,6 @@ class TestChatLog:
             assert bubble._is_streamable is True
             await pilot.pause()
 
-    @pytest.mark.asyncio
     async def test_add_system_message(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -416,7 +401,6 @@ class TestChatLog:
             await pilot.pause()
             assert len(chat.query(MessageBubble)) == 1
 
-    @pytest.mark.asyncio
     async def test_clear_messages(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -429,7 +413,6 @@ class TestChatLog:
             await pilot.pause()
             assert len(chat.query(MessageBubble)) == 0
 
-    @pytest.mark.asyncio
     async def test_add_tool_call(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -446,7 +429,6 @@ class TestChatLog:
 
 
 class TestKoboiApp:
-    @pytest.mark.asyncio
     async def test_app_compose(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -460,7 +442,6 @@ class TestKoboiApp:
             app.query_one("#chat-area", ChatLog)
             app.query_one("#input-box", InputBox)
 
-    @pytest.mark.asyncio
     async def test_input_focus_on_mount(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -468,7 +449,6 @@ class TestKoboiApp:
             input_box = app.query_one("#input-box", InputBox)
             assert input_box.has_focus
 
-    @pytest.mark.asyncio
     async def test_submit_message_triggers_stream(self):
         agent = _make_mock_agent()
 
@@ -487,7 +467,6 @@ class TestKoboiApp:
             status = app.query_one("#status-bar", StatusBar)
             assert status.turn_count == 1
 
-    @pytest.mark.asyncio
     async def test_empty_input_ignored(self):
         agent = _make_mock_agent()
         agent.run_stream = AsyncMock()
@@ -501,7 +480,6 @@ class TestKoboiApp:
             assert status.turn_count == 0
             agent.run_stream.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_tool_call_updates_status(self):
         agent = _make_mock_agent()
 
@@ -522,7 +500,6 @@ class TestKoboiApp:
             status = app.query_one("#status-bar", StatusBar)
             assert status.turn_count == 1
 
-    @pytest.mark.asyncio
     async def test_slash_command_does_not_call_agent(self):
         agent = _make_mock_agent()
         agent.run_stream = AsyncMock()
@@ -536,7 +513,6 @@ class TestKoboiApp:
             status = app.query_one("#status-bar", StatusBar)
             assert status.turn_count == 0
 
-    @pytest.mark.asyncio
     async def test_slash_reset_clears_chat(self):
         agent = _make_mock_agent()
         agent.reset = MagicMock()
@@ -553,7 +529,6 @@ class TestKoboiApp:
             agent.reset.assert_called_once()
             assert len(chat.query(MessageBubble)) == 1  # system message only
 
-    @pytest.mark.asyncio
     async def test_history_tracking(self):
         agent = _make_mock_agent()
         agent.run_stream = AsyncMock()
@@ -566,7 +541,6 @@ class TestKoboiApp:
 
             assert app._history == ["first", "second"]
 
-    @pytest.mark.asyncio
     async def test_command_palette_opens(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)
@@ -643,7 +617,6 @@ class TestThinkingBlockWidget:
         widget.toggle()
         assert widget.collapsed is True
 
-    @pytest.mark.asyncio
     async def test_mounted_has_header(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -728,7 +701,6 @@ class TestToolCallWidget:
 
 
 class TestChatLogPhase3:
-    @pytest.mark.asyncio
     async def test_add_tool_call_creates_widget(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -739,7 +711,6 @@ class TestChatLogPhase3:
             assert len(widgets) == 1
             assert "tc_1" in chat._tool_widgets
 
-    @pytest.mark.asyncio
     async def test_update_tool_result_finds_widget(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -752,7 +723,6 @@ class TestChatLogPhase3:
             widget = chat.query(ToolCallWidget)[0]
             assert widget._state == "completed"
 
-    @pytest.mark.asyncio
     async def test_update_tool_result_missing_id(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -763,7 +733,6 @@ class TestChatLogPhase3:
             fallbacks = chat.query(".tool-result")
             assert len(fallbacks) == 1
 
-    @pytest.mark.asyncio
     async def test_collapse_all_tools(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -778,7 +747,6 @@ class TestChatLogPhase3:
             await pilot.pause()
             assert all(w.collapsed for w in chat.query(ToolCallWidget))
 
-    @pytest.mark.asyncio
     async def test_clear_messages_resets_tool_widgets(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -790,7 +758,6 @@ class TestChatLogPhase3:
             await pilot.pause()
             assert len(chat._tool_widgets) == 0
 
-    @pytest.mark.asyncio
     async def test_add_iteration_marker(self):
         app = KoboiApp(_make_mock_agent())
         async with app.run_test() as pilot:
@@ -807,7 +774,6 @@ class TestChatLogPhase3:
 
 
 class TestKoboiAppPhase3:
-    @pytest.mark.asyncio
     async def test_tool_call_passes_full_data(self):
         agent = _make_mock_agent()
 
@@ -830,7 +796,6 @@ class TestKoboiAppPhase3:
             assert widgets[0]._tool_name == "calc"
             assert widgets[0]._result == "42"
 
-    @pytest.mark.asyncio
     async def test_iteration_updates_status_and_chat(self):
         agent = _make_mock_agent()
 
@@ -853,7 +818,6 @@ class TestKoboiAppPhase3:
             markers = chat.query(".iteration-marker")
             assert len(markers) == 1
 
-    @pytest.mark.asyncio
     async def test_tab_toggles_tools_when_not_on_input(self):
         agent = _make_mock_agent()
         app = KoboiApp(agent)

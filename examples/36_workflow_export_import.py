@@ -1,4 +1,4 @@
-"""Example 35 -- Workflow export/import (v1).
+"""Example 36 -- Workflow export/import (v1).
 
 Demonstrates the self-contained workflow bundle: export a config to a portable,
 secret-redacted YAML bundle (with a ``workflow:`` envelope + provenance), then
@@ -6,11 +6,11 @@ import it back and re-load it as a valid Config. No API key needed (serializatio
 only).
 
 CLI equivalent:
-    koboi export configs/support.yaml --output support_bot.yaml
+    koboi export configs/workflow_export_demo.yaml --output support_bot.yaml
     koboi import support_bot.yaml --name support-bot
     koboi run --workflow support-bot -m "hi"
 
-Run: python examples/35_workflow_export_import.py
+Run: python examples/36_workflow_export_import.py
 """
 
 import os

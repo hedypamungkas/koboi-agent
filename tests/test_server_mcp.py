@@ -120,7 +120,6 @@ def _app():
     return create_app(Config.from_dict(cfg, validate=True), client_factory=factory, enable_cors=False)
 
 
-@pytest.mark.asyncio
 async def test_add_list_reconnect_delete_mcp_server():
     server = os.path.join(REPO, "mcp_servers", "todo_server.py")
     if not os.path.exists(server):
@@ -157,7 +156,6 @@ async def test_add_list_reconnect_delete_mcp_server():
         assert not any(s["id"] == server_id for s in r.json()["servers"])
 
 
-@pytest.mark.asyncio
 async def test_mcp_endpoints_404s():
     app = _app()
     async with httpx.AsyncClient(base_url="http://t", transport=ASGITransport(app=app)) as c:
@@ -169,7 +167,6 @@ async def test_mcp_endpoints_404s():
         assert (await c.post(f"/v1/sessions/{sid}/mcp/servers/no-such/reconnect")).status_code == 404
 
 
-@pytest.mark.asyncio
 async def test_add_mcp_server_bad_command_400():
     app = _app()
     async with httpx.AsyncClient(base_url="http://t", transport=ASGITransport(app=app)) as c:
@@ -199,7 +196,6 @@ def test_register_after_ensure_populated_no_duplicate():
 # --- 29-D: registration failure -> 502 + client closed (not orphaned) ---
 
 
-@pytest.mark.asyncio
 async def test_add_mcp_server_register_failure_502(monkeypatch):
     """29-D: connect succeeds but discover_tools fails -> 502 + client.close() called."""
     app = _app()
@@ -258,7 +254,6 @@ async def test_add_mcp_server_register_failure_502(monkeypatch):
 # --- 29-F: unexpected exception propagates to 500 (not 400) ---
 
 
-@pytest.mark.asyncio
 async def test_add_mcp_server_unexpected_exception_500(monkeypatch):
     """29-F: an exception NOT in the caught family (TypeError) propagates to 500."""
     app = _app()
@@ -281,7 +276,6 @@ async def test_add_mcp_server_unexpected_exception_500(monkeypatch):
 # --- 29-E: delete_session clears the MCP registry ---
 
 
-@pytest.mark.asyncio
 async def test_delete_session_clears_mcp_registry():
     """29-E: deleting a session removes its entry from app.state.mcp_registries."""
     app = _app()

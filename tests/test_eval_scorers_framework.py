@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from koboi.eval.scorers.bfcl_scorer import (
     ToolCallingScorer,
@@ -30,20 +29,17 @@ def _case(**kwargs):
 
 
 class TestToolCallingScorer:
-    @pytest.mark.asyncio
     async def test_no_expected_calls(self):
         s = ToolCallingScorer()
         score = await s.score(_case(), "out", {})
         assert score.value == 1.0
 
-    @pytest.mark.asyncio
     async def test_no_actual_calls(self):
         s = ToolCallingScorer()
         case = _case(expected_tool_calls=[{"name": "read", "arguments": {"path": "f.py"}}])
         score = await s.score(case, "out", {})
         assert score.value == 0.0
 
-    @pytest.mark.asyncio
     async def test_perfect_match(self):
         from unittest.mock import MagicMock
 
@@ -109,62 +105,53 @@ class TestToolCallingScorer:
 
 
 class TestGAIAVerificationScorer:
-    @pytest.mark.asyncio
     async def test_no_expected_answer(self):
         s = GAIAVerificationScorer()
         score = await s.score(_case(), "output", {})
         assert score.value == 0.0
 
-    @pytest.mark.asyncio
     async def test_exact_match(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="42")
         score = await s.score(case, "42", {})
         assert score.value == 1.0
 
-    @pytest.mark.asyncio
     async def test_case_insensitive(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="Hello World")
         score = await s.score(case, "hello world", {})
         assert score.value == 1.0
 
-    @pytest.mark.asyncio
     async def test_numeric_match(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="1000")
         score = await s.score(case, "1,000", {})
         assert score.value == 1.0
 
-    @pytest.mark.asyncio
     async def test_numeric_mismatch(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="1000")
         score = await s.score(case, "2000", {})
         assert score.value == 0.0
 
-    @pytest.mark.asyncio
     async def test_unit_stripping(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="50 percent")
         score = await s.score(case, "50%", {})
         assert score.value == 1.0
 
-    @pytest.mark.asyncio
     async def test_partial_match(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="42")
         score = await s.score(case, "the answer is 42", {})
         assert score.value == 0.8
 
-    @pytest.mark.asyncio
     async def test_mismatch(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="apple")
         score = await s.score(case, "orange", {})
         assert score.value == 0.0
 
-    @pytest.mark.asyncio
     async def test_custom_verification(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="42")
@@ -172,7 +159,6 @@ class TestGAIAVerificationScorer:
         score = await s.score(case, "the answer is 42", {})
         assert score.value == 1.0
 
-    @pytest.mark.asyncio
     async def test_custom_verification_error(self):
         s = GAIAVerificationScorer()
         case = _case(expected_answer="42")
@@ -195,20 +181,17 @@ class TestGAIAVerificationScorer:
 
 
 class TestPatchGenerationScorer:
-    @pytest.mark.asyncio
     async def test_no_expected_patch(self):
         s = PatchGenerationScorer()
         score = await s.score(_case(), "out", {})
         assert score.value == 0.0
 
-    @pytest.mark.asyncio
     async def test_no_patch_in_output(self):
         s = PatchGenerationScorer()
         case = _case(expected_answer="diff --git a/f.py b/f.py")
         score = await s.score(case, "no patch here", {})
         assert score.value == 0.0
 
-    @pytest.mark.asyncio
     async def test_with_patch(self):
         s = PatchGenerationScorer()
         patch = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1,3 +1,4 @@\n+new line"
@@ -269,7 +252,6 @@ class TestDiffHelpers:
 
 
 class TestRAGASScorer:
-    @pytest.mark.asyncio
     async def test_not_installed(self):
         """If ragas is not installed, should return 0.0 gracefully."""
         import koboi.eval.scorers.ragas_scorer as mod
@@ -291,7 +273,6 @@ class TestRAGASScorer:
 
 
 class TestDeepEvalScorer:
-    @pytest.mark.asyncio
     async def test_not_installed(self):
         """If deepeval is not installed, should return 0.0 gracefully."""
         import koboi.eval.scorers.deepeval_scorer as mod
@@ -308,7 +289,6 @@ class TestDeepEvalScorer:
         finally:
             mod._DEEPEVAL_AVAILABLE = original
 
-    @pytest.mark.asyncio
     async def test_safety_not_installed(self):
         import koboi.eval.scorers.deepeval_scorer as mod
 
@@ -323,7 +303,6 @@ class TestDeepEvalScorer:
         finally:
             mod._DEEPEVAL_AVAILABLE = original
 
-    @pytest.mark.asyncio
     async def test_agentic_not_installed(self):
         import koboi.eval.scorers.deepeval_scorer as mod
 

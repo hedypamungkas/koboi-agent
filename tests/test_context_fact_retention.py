@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 
 from koboi.context.manager import KeyFactsManager, SmartTruncationManager
 
 
-@pytest.mark.asyncio
 class TestSmartTruncationFactRetention:
     async def test_mid_conversation_user_fact_preserved(self):
         SECRET = "MY FLIGHT IS BA2490 CONFIRMATION XYZ789"
@@ -49,7 +47,6 @@ class TestSmartTruncationFactRetention:
         assert "X" * 50 in note["content"]
 
 
-@pytest.mark.asyncio
 class TestKeyFactsUserAssistant:
     async def test_user_assistant_tool_all_promoted(self):
         msgs = [{"role": "system", "content": "sys"}]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from koboi.context.manager import SlidingWindowManager
 from koboi.memory_sqlite import SQLiteMemory
@@ -19,7 +18,6 @@ def _seed_messages() -> list[dict]:
     return msgs
 
 
-@pytest.mark.asyncio
 class TestSlidingWindowSummaryPersist:
     async def test_summary_persisted_and_hydrated(self, tmp_path):
         db = str(tmp_path / "sw.db")

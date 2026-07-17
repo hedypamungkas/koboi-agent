@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from koboi.eval.runner import EvalRunner, _default_scorers
 from koboi.types import EvalCase, EvalResult, EvalScore, RunResult, TokenUsage
@@ -35,7 +34,6 @@ def _make_harness_mock(response="response text"):
 
 
 class TestEvalRunner:
-    @pytest.mark.asyncio
     async def test_run_case_basic(self):
         harness = _make_harness_mock("test output")
         factory = MagicMock(return_value=harness)
@@ -46,7 +44,6 @@ class TestEvalRunner:
         assert result.case_name == "test_case"
         assert result.output == "test output"
 
-    @pytest.mark.asyncio
     async def test_run_case_with_scorers(self):
         harness = _make_harness_mock("result")
         factory = MagicMock(return_value=harness)
@@ -60,7 +57,6 @@ class TestEvalRunner:
         assert result.overall_score == 0.9
         assert result.passed is True
 
-    @pytest.mark.asyncio
     async def test_run_case_scorer_error(self):
         harness = _make_harness_mock()
         factory = MagicMock(return_value=harness)
@@ -74,7 +70,6 @@ class TestEvalRunner:
         assert result.scores[0].value == 0.0
         assert "Error" in result.scores[0].reason
 
-    @pytest.mark.asyncio
     async def test_run_case_with_tool_definitions(self):
         harness = _make_harness_mock()
         harness.inject_tool_definitions = MagicMock()
@@ -87,7 +82,6 @@ class TestEvalRunner:
         await runner.run_case(case)
         harness.inject_tool_definitions.assert_called_once()
 
-    @pytest.mark.asyncio
     async def test_run_case_with_file_attachments(self, tmp_path):
         f = tmp_path / "test.txt"
         f.write_text("file content here")
@@ -101,7 +95,6 @@ class TestEvalRunner:
         call_msg = harness.run.call_args[0][0]
         assert "file content here" in call_msg
 
-    @pytest.mark.asyncio
     async def test_run_suite_sequential(self):
         harness = _make_harness_mock("ok")
         factory = MagicMock(return_value=harness)
@@ -110,7 +103,6 @@ class TestEvalRunner:
         results = await runner.run_suite(cases, parallel=False)
         assert len(results) == 2
 
-    @pytest.mark.asyncio
     async def test_run_suite_parallel(self):
         harness = _make_harness_mock("ok")
         factory = MagicMock(return_value=harness)

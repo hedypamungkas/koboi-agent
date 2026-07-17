@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from koboi.orchestration.factory import (
     AgentFactory,
@@ -126,7 +125,6 @@ class TestDynamicAgentBuilder:
         agent = builder.build_agent(blueprint)
         assert agent is not None
 
-    @pytest.mark.asyncio
     async def test_analyze_domain_llm_failure(self):
         client = MagicMock()
         client.complete = AsyncMock(side_effect=Exception("LLM down"))
@@ -135,7 +133,6 @@ class TestDynamicAgentBuilder:
         assert domain == "general"
         assert is_known is False
 
-    @pytest.mark.asyncio
     async def test_analyze_domain_success(self):
         client = MagicMock()
         resp = MagicMock()
@@ -146,7 +143,6 @@ class TestDynamicAgentBuilder:
         assert domain == "hr"
         assert is_known is True
 
-    @pytest.mark.asyncio
     async def test_analyze_domain_unknown(self):
         client = MagicMock()
         resp = MagicMock()
@@ -157,14 +153,12 @@ class TestDynamicAgentBuilder:
         assert domain == "quantum"
         assert is_known is False
 
-    @pytest.mark.asyncio
     async def test_find_relevant_chunks(self):
         client = MagicMock()
         builder = DynamicAgentBuilder(client=client)
         chunks = await builder.find_relevant_chunks("product pricing")
         assert isinstance(chunks, list)
 
-    @pytest.mark.asyncio
     async def test_generate_system_prompt_success(self):
         client = MagicMock()
         resp = MagicMock()
@@ -174,7 +168,6 @@ class TestDynamicAgentBuilder:
         prompt = await builder.generate_system_prompt("test", "test", [])
         assert len(prompt) > 50
 
-    @pytest.mark.asyncio
     async def test_generate_system_prompt_fallback(self):
         client = MagicMock()
         client.complete = AsyncMock(side_effect=Exception("fail"))
@@ -182,7 +175,6 @@ class TestDynamicAgentBuilder:
         prompt = await builder.generate_system_prompt("test", "custom_domain", [])
         assert "custom_domain" in prompt
 
-    @pytest.mark.asyncio
     async def test_build_blueprint(self):
         client = MagicMock()
         resp = MagicMock()

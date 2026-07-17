@@ -55,7 +55,6 @@ class TestEffectiveTokensUsesTokenizer:
         assert mgr._effective_tokens([{"role": "user", "content": "x"}]) == 9000
 
 
-@pytest.mark.asyncio
 class TestSafetyMargin:
     async def test_margin_triggers_compaction_earlier(self):
         # tokens between (max - margin) and max -> with margin, compact; without, passthrough.

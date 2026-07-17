@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from koboi.config import Config
 from koboi.tui.keybindings import get_keybinding_display, load_keybindings
@@ -133,7 +132,6 @@ class TestKeybindings:
 
 
 class TestVimMode:
-    @pytest.mark.asyncio
     async def test_vim_toggle_via_slash(self):
         """Toggling vim mode via /vim command."""
         agent = _make_mock_agent()
@@ -157,7 +155,6 @@ class TestVimMode:
             assert not input_box.vim_enabled
             assert input_box.vim_mode == "insert"
 
-    @pytest.mark.asyncio
     async def test_vim_normal_mode_h_l(self):
         """h and l move cursor in normal mode."""
         agent = _make_mock_agent()
@@ -178,7 +175,6 @@ class TestVimMode:
             await pilot.press("h")
             assert input_box.cursor_position == 5
 
-    @pytest.mark.asyncio
     async def test_vim_normal_mode_i_enters_insert(self):
         """'i' in normal mode switches to insert mode."""
         agent = _make_mock_agent()
@@ -191,7 +187,6 @@ class TestVimMode:
             await pilot.press("i")
             assert input_box.vim_mode == "insert"
 
-    @pytest.mark.asyncio
     async def test_vim_escape_returns_to_normal(self):
         """Escape in insert mode returns to normal mode."""
         agent = _make_mock_agent()
@@ -204,7 +199,6 @@ class TestVimMode:
             await pilot.press("escape")
             assert input_box.vim_mode == "normal"
 
-    @pytest.mark.asyncio
     async def test_vim_x_deletes_char(self):
         """'x' in normal mode deletes character under cursor."""
         agent = _make_mock_agent()
@@ -220,7 +214,6 @@ class TestVimMode:
             await pilot.press("x")
             assert input_box.value == "hllo"
 
-    @pytest.mark.asyncio
     async def test_vim_dd_deletes_line(self):
         """'dd' in normal mode deletes entire line."""
         agent = _make_mock_agent()
@@ -236,7 +229,6 @@ class TestVimMode:
             await pilot.press("d")
             assert input_box.value == ""
 
-    @pytest.mark.asyncio
     async def test_vim_p_pastes_buffer(self):
         """'p' in normal mode pastes from the buffer."""
         agent = _make_mock_agent()
@@ -258,7 +250,6 @@ class TestVimMode:
             await pilot.press("p")
             assert input_box.value == "ehllo"
 
-    @pytest.mark.asyncio
     async def test_vim_A_enters_insert_at_end(self):
         """'A' in normal mode enters insert mode at end of line."""
         agent = _make_mock_agent()
@@ -275,7 +266,6 @@ class TestVimMode:
             assert input_box.vim_mode == "insert"
             assert input_box.cursor_position == 5
 
-    @pytest.mark.asyncio
     async def test_vim_zero_moves_to_start(self):
         """'0' in normal mode moves cursor to start."""
         agent = _make_mock_agent()
@@ -291,7 +281,6 @@ class TestVimMode:
             await pilot.press("0")
             assert input_box.cursor_position == 0
 
-    @pytest.mark.asyncio
     async def test_vim_dollar_moves_to_end(self):
         """'$' in normal mode moves cursor to end."""
         agent = _make_mock_agent()
@@ -307,7 +296,6 @@ class TestVimMode:
             await pilot.press("dollar")
             assert input_box.cursor_position == 5
 
-    @pytest.mark.asyncio
     async def test_vim_enter_does_not_submit_in_normal(self):
         """Enter in normal mode does NOT submit the message."""
         agent = _make_mock_agent()
@@ -325,7 +313,6 @@ class TestVimMode:
             # Value should still be there (not cleared by submit)
             assert input_box.value == "hello"
 
-    @pytest.mark.asyncio
     async def test_vim_w_moves_to_next_word(self):
         """'w' in normal mode moves to next word start."""
         agent = _make_mock_agent()
@@ -341,7 +328,6 @@ class TestVimMode:
             await pilot.press("w")
             assert input_box.cursor_position == 6  # start of "world"
 
-    @pytest.mark.asyncio
     async def test_vim_mode_posts_message(self):
         """Changing vim_mode posts VimModeChanged message."""
         agent = _make_mock_agent()
@@ -379,7 +365,6 @@ class TestVimMode:
 
 
 class TestSubagentMonitor:
-    @pytest.mark.asyncio
     async def test_agent_states_updated_on_dispatch(self):
         """Agent dispatch events update _agent_states."""
         from koboi.tui.bridge import StreamAgentDispatch, StreamRoutingDecision
@@ -401,7 +386,6 @@ class TestSubagentMonitor:
             await pilot.pause()
             assert app._agent_states["hr"]["status"] == "running"
 
-    @pytest.mark.asyncio
     async def test_agent_states_updated_on_result(self):
         """Agent result events update _agent_states."""
         from koboi.tui.bridge import (
@@ -426,7 +410,6 @@ class TestSubagentMonitor:
             assert app._agent_states["hr"]["status"] == "done"
             assert app._agent_states["hr"]["elapsed"] == 1.5
 
-    @pytest.mark.asyncio
     async def test_agent_states_updated_on_failure(self):
         """Failed agents are tracked."""
         from koboi.tui.bridge import (
@@ -450,7 +433,6 @@ class TestSubagentMonitor:
             await pilot.pause()
             assert app._agent_states["sales"]["status"] == "failed"
 
-    @pytest.mark.asyncio
     async def test_agent_states_cleared_on_new_routing(self):
         """New routing decision clears previous agent states."""
         from koboi.tui.bridge import StreamRoutingDecision
@@ -466,7 +448,6 @@ class TestSubagentMonitor:
             assert "old_agent" not in app._agent_states
             assert "new_agent" in app._agent_states
 
-    @pytest.mark.asyncio
     async def test_subagent_dispatch_updates_states(self):
         """SubagentUIHook dispatch events update _agent_states."""
         from koboi.hooks.subagent_hook import _SubagentDispatch
@@ -479,7 +460,6 @@ class TestSubagentMonitor:
             assert "task-1" in app._agent_states
             assert app._agent_states["task-1"]["status"] == "running"
 
-    @pytest.mark.asyncio
     async def test_subagent_result_updates_states(self):
         """SubagentUIHook result events update _agent_states."""
         from koboi.hooks.subagent_hook import _SubagentDispatch, _SubagentResult

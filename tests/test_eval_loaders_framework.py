@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 
 from koboi.eval.loaders.bfcl_loader import BFCLLoader, _parse_python_call
 from koboi.eval.loaders.gaia_loader import GAIALoader
@@ -15,7 +14,6 @@ class TestBFCLLoader:
     def test_framework_name(self):
         assert BFCLLoader().framework_name() == "bfcl"
 
-    @pytest.mark.asyncio
     async def test_load_jsonl(self, tmp_path):
         entry = {
             "question": ["What is the weather?"],
@@ -30,7 +28,6 @@ class TestBFCLLoader:
         assert cases[0].user_message == "What is the weather?"
         assert "bfcl" in cases[0].tags
 
-    @pytest.mark.asyncio
     async def test_load_directory(self, tmp_path):
         entry = {
             "question": ["query"],
@@ -42,13 +39,11 @@ class TestBFCLLoader:
         cases = await loader.load(str(tmp_path))
         assert len(cases) == 1
 
-    @pytest.mark.asyncio
     async def test_load_nonexistent(self, tmp_path):
         loader = BFCLLoader()
         cases = await loader.load(str(tmp_path / "nonexistent"))
         assert len(cases) == 0
 
-    @pytest.mark.asyncio
     async def test_max_cases(self, tmp_path):
         for i in range(5):
             entry = {"question": [f"q{i}"], "function": [], "ground_truth": []}
@@ -155,13 +150,11 @@ class TestGAIALoader:
         assert case.user_message == "Q?"
         assert case.name == "gaia_5"
 
-    @pytest.mark.asyncio
     async def test_load_local_nonexistent(self):
         loader = GAIALoader()
         cases = await loader.load("/nonexistent/path", local_only=True)
         assert len(cases) == 0
 
-    @pytest.mark.asyncio
     async def test_load_local_dir_empty(self, tmp_path):
         loader = GAIALoader()
         cases = await loader.load(str(tmp_path), local_only=True)
@@ -175,13 +168,11 @@ class TestSWEBenchLoader:
     def test_framework_name(self):
         assert SWEBenchLoader().framework_name() == "swe-bench"
 
-    @pytest.mark.asyncio
     async def test_load_nonexistent(self):
         loader = SWEBenchLoader()
         cases = await loader.load("/nonexistent/path", local_only=True)
         assert len(cases) == 0
 
-    @pytest.mark.asyncio
     async def test_load_empty_dir(self, tmp_path):
         loader = SWEBenchLoader()
         cases = await loader.load(str(tmp_path), local_only=True)

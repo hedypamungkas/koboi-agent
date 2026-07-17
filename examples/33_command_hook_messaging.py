@@ -54,14 +54,14 @@ class _MockClient:
     def model(self) -> str:
         return self._model
 
-    async def complete(self, messages, tools=None):
+    async def complete(self, messages, tools=None, response_format=None):
         return AgentResponse(
             content="Hello! This response is forwarded to the channel by an external command hook.",
             tool_calls=[],
             usage=TokenUsage(1, 1),
         )
 
-    async def complete_stream(self, messages, tools=None):
+    async def complete_stream(self, messages, tools=None, response_format=None):
         resp = await self.complete(messages, tools)
         if resp.content:
             yield TextDeltaEvent(content=resp.content)

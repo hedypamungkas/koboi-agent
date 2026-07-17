@@ -29,7 +29,6 @@ def _mock_agent(entries):
 
 
 class TestMcpStatusScreenOpen:
-    @pytest.mark.asyncio
     async def test_opens_via_keybinding(self):
         agent = _mock_agent(
             [{"id": "todo", "name": "todo", "transport": "stdio", "connected": True, "tool_names": ["add_todo"]}]
@@ -40,7 +39,6 @@ class TestMcpStatusScreenOpen:
             await pilot.pause()
             assert isinstance(app.screen, McpStatusScreen)
 
-    @pytest.mark.asyncio
     async def test_empty_state(self):
         agent = _mock_agent([])
         app = KoboiApp(agent)

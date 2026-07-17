@@ -178,7 +178,6 @@ class TestRegisterMCPTools:
         assert registered == ["tool1", "tool2"]
         assert len(registry._tools) == 2
 
-    @pytest.mark.asyncio
     async def test_registered_tool_handler(self):
         client = MagicMock()
         client.discover_tools.return_value = [
