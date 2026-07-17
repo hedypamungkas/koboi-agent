@@ -518,9 +518,19 @@ class SandboxConfig(BaseModel):
     @classmethod
     def _warn_unknown_sandbox_keys(cls, data: dict) -> dict:
         # Surface key-name typos (e.g. ``network_isolaton``) that ``extra='ignore'``
-        # would otherwise silently drop. Mirrors ``KoboiConfig._warn_unknown_keys``.
+        # would otherwise silently drop. Fail-closed on typos to match the value-typo
+        # behavior (e.g. ``network_isolation: seccop`` raises ValueError).
         if isinstance(data, dict):
-            _warn_unknown_keys(data, cls, path="sandbox")
+            known = set(cls.model_fields.keys())
+            unknown = set(data.keys()) - known
+            if unknown:
+                # Suggest the closest known field if plausible
+                suggestions = sorted(known)
+                err_msg = f"Unknown sandbox config key(s) {sorted(unknown)} (typo?). Known keys: {suggestions}."
+                # Common typo: network_isolaton -> network_isolation
+                if "network_isolaton" in unknown:
+                    err_msg += " Did you mean 'network_isolation'?"
+                raise ValueError(err_msg)
         return data
 
 

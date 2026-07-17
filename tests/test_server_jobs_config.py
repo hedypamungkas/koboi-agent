@@ -89,12 +89,13 @@ class TestServerJobsConfig:
         with pytest.raises(ValueError):
             Config.from_dict({**_base(), "sandbox": {"network_isolation": "seccop"}}, validate=True)
 
-    def test_sandbox_unknown_key_warns(self, caplog):
-        # A key-name typo (e.g. ``network_isolaton``) MUST warn (extra='ignore' would
-        # otherwise silently drop it, masking a misconfigured HARD-egress invariant).
-        with caplog.at_level(logging.WARNING):
+    def test_sandbox_unknown_key_raises(self):
+        # A key-name typo (e.g. ``network_isolaton``) MUST raise (fail-closed to
+        # match value-typo behavior; extra='ignore' would otherwise silently drop it).
+        import pytest
+
+        with pytest.raises(ValueError, match=r"(network_isolat|Unknown sandbox)"):
             Config.from_dict({**_base(), "sandbox": {"network_isolaton": "seccomp"}}, validate=True)
-        assert any("network_isolaton" in r.message for r in caplog.records)
 
     def test_no_unknown_key_warning_for_server_jobs(self, caplog):
         # server/jobs are now declared top-level keys -> no "Unknown config key" warning.
