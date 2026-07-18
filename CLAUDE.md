@@ -67,13 +67,13 @@ koboi/              Main package (260 .py files)
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
   tui/              Terminal UI (Textual): app, screens/ (11), widgets/ (12)
 tests/              339 .py files (309 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
-configs/            38 YAML agent configs
-examples/           38 numbered example scripts (01-38) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), a2a_fanout (cross-instance A2A demo), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
+configs/            39 YAML agent configs
+examples/           39 numbered example scripts (01-39, incl. 39_aegis_ops_full_demo -- nearly all 32 KoboiConfig sections in one DAG scenario) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), a2a_fanout (cross-instance A2A demo), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
-data/               Sample documents for RAG demos (Acme Corp)
-scripts/            Reproducible-RAG corpus builders for the IR eval (build_ir_corpus.py, build_id_native_corpus.py, generate_rag_golden.py) + reload-model.sh + run_baseline.py + a2a_docker_smoke.py (multi-instance A2A Docker smoke)
+data/               Sample documents for RAG demos (Acme Corp) + aegis_kb/ (faq.md, runbooks.md -- example 39's knowledge base)
+scripts/            Reproducible-RAG corpus builders for the IR eval (build_ir_corpus.py, build_id_native_corpus.py, generate_rag_golden.py) + reload-model.sh + run_baseline.py + a2a_docker_smoke.py (multi-instance A2A Docker smoke) + verify_rag_issues.py + experiments/ (7 experiment_*.py scratch/validation scripts, relocated out of repo root)
 benchmarks/         BFCL benchmark data (DO NOT read benchmarks/results.json -- 183MB)
 docs/               Architecture overview, REST/SSE requirements, performance benchmarking, custom command-hooks guide, RAG production-readiness eval, trustworthy-unattended-autonomy positioning, one-pager, skills/eve research, strategy audits
 ```

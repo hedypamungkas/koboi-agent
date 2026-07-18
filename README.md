@@ -234,7 +234,7 @@ sandbox:
   backend: "restricted"        # passthrough (default) | restricted (+ seccomp HARD)
 ```
 
-See [`configs/`](configs/) for 38 ready-to-run configs and `docs/architecture.md` for the full schema. Notable configs: `self_healing_demo.yaml`, `deep_research_demo.yaml`, `workflow_export_demo.yaml`, `hitl_demo.yaml`, `a2a_instance_x.yaml`.
+See [`configs/`](configs/) for 39 ready-to-run configs and `docs/architecture.md` for the full schema. Notable configs: `self_healing_demo.yaml`, `deep_research_demo.yaml`, `workflow_export_demo.yaml`, `hitl_demo.yaml`, `a2a_instance_x.yaml`, `aegis_ops_full.yaml` (nearly all 32 `KoboiConfig` sections in one DAG-orchestrated scenario).
 
 ## Architecture
 
@@ -275,7 +275,7 @@ Reusable, supply-chain-hardened **skills** (agentskills.io-aligned) ship in [`sk
 
 ## Examples
 
-[`examples/`](examples) has 38 numbered scripts plus server, HITL, A2A, and workflow demos:
+[`examples/`](examples) has 39 numbered scripts plus server, HITL, A2A, and workflow demos:
 
 | Range | Features |
 |---|---|
@@ -291,6 +291,7 @@ Reusable, supply-chain-hardened **skills** (agentskills.io-aligned) ship in [`sk
 | 35 | Confidence-aware CS with human handover |
 | 36–37 | **Deterministic workflow export → capture → offline replay (no API key)** |
 | 38 | **Self-healing demo** (reflection, escalation ladder, graceful degrade, CRITIC) |
+| 39 | **Aegis Ops full sample** — nearly all 32 `KoboiConfig` sections in one DAG-orchestrated scenario |
 | `a2a_fanout` | Cross-instance A2A via `call_peer_agent` / `/v1/peer/invoke` |
 | `hitl_client` | Human-in-the-loop approval client (bare-install-safe) |
 | `deep_research_demo.yaml` | Coverage-gated cited web research |

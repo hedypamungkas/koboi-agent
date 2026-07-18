@@ -38,7 +38,9 @@ self_healing_demo.yaml    Self-healing demo (bounded reflection + escalation lad
 a2a_instance_x.yaml        Cross-instance A2A -- instance X (agent A; `peers:` outbound to peer C; `call_peer_agent` tool)
 a2a_instance_y.yaml        Cross-instance A2A -- instance Y (agent C; accepts peer calls via `POST /v1/peer/invoke`, `inbound_tokens`)
 a2a_dag_remote.yaml        Cross-instance A2A -- DAG with a REMOTE node (`orchestration.agents[].endpoint: peerY`); run alongside a2a_instance_y.yaml
-aegis_ops_full.yaml       "Full sample" -- exercises all 32 KoboiConfig top-level sections in one DAG-orchestrated customer-ops scenario (providers/pools failover, RAG+rerank, proactive memory, self_healing, handover, restricted sandbox, MCP, media, peers, server/jobs, hooks, eval); see `examples/39_aegis_ops_full_demo.py` for the (also documented) orchestration-mode feature-coverage gaps it surfaced
+a2a_docker_x.yaml          Cross-instance A2A -- Docker-networked instance X (see `docker-compose.a2a.yml`)
+a2a_docker_y.yaml          Cross-instance A2A -- Docker-networked instance Y (see `docker-compose.a2a.yml`)
+aegis_ops_full.yaml       "Full sample" -- exercises 29 of 32 KoboiConfig top-level sections (all but `research`/`keybindings`/`replay`, mutually exclusive with the DAG structure) in one DAG-orchestrated customer-ops scenario (providers/pools failover, RAG+rerank, proactive memory, self_healing, handover, restricted sandbox, MCP, media, peers, server/jobs, hooks, eval); see `examples/39_aegis_ops_full_demo.py` for the (also documented) orchestration-mode feature-coverage gaps it surfaced
 ```
 **Server configs** (`server_simple.yaml`, `server_deploy.yaml`) drive `koboi serve`.
 `server_deploy.yaml` is the production reference for `server:`/`jobs:`/`sandbox:`/`tracing:`; the Dockerfile `CMD` defaults to `server_simple.yaml` (override at run time via `KOBOI_CONFIG=/app/configs/server_deploy.yaml`).

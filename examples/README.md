@@ -95,7 +95,7 @@ koboi chat examples/01_simple_chat.yaml
 | 36 | [Workflow Export/Import](36_workflow_export_import.py) | Deterministic workflow bundle (`koboi export`/`import`) | `python examples/36_workflow_export_import.py` |
 | 37 | [Workflow Cache + Replay](37_workflow_cache_capture_replay.py) | Capture response cache + offline `replay` (no API key) | `python examples/37_workflow_cache_capture_replay.py` |
 | 38 | [Self-Healing Demo](38_self_healing_demo.py) | Bounded reflection loop, escalation ladder, graceful degrade, CRITIC verification | `python examples/38_self_healing_demo.py --mock` |
-| 39 | [Aegis Ops -- Full Sample](39_aegis_ops_full_demo.py) | "Full sample": all 32 `KoboiConfig` top-level sections in one DAG-orchestrated scenario (providers/pools, RAG+rerank, proactive memory, self_healing, handover, sandbox, MCP, media, peers, server/jobs, hooks, eval) -- also documents the orchestration-mode feature-coverage gaps it surfaced | `python examples/39_aegis_ops_full_demo.py` |
+| 39 | [Aegis Ops -- Full Sample](39_aegis_ops_full_demo.py) | "Full sample": 29 of 32 `KoboiConfig` top-level sections in one DAG-orchestrated scenario (providers/pools, RAG+rerank, proactive memory, self_healing, handover, sandbox, MCP, media, peers, server/jobs, hooks, eval) -- also documents the orchestration-mode feature-coverage gaps it surfaced | `python examples/39_aegis_ops_full_demo.py` |
 
 ### Server
 
@@ -150,12 +150,13 @@ koboi chat examples/01_simple_chat.yaml
 | Deterministic workflow export/import | 36 |
 | Workflow cache + capture + offline replay | 37 |
 | Self-healing (reflection, escalation ladder, graceful degrade, CRITIC) | 38 |
+| Full-sample config (29 of 32 KoboiConfig sections, DAG-orchestrated) | 39 |
 | HTTP/SSE server (built-in + code-customized) | server_built_in, server_customize |
 
 ## Notes
 
 - Examples 02, 12 (standalone part), 19, and 20 **do not require an API key** (config inspection or simulation only)
-- All examples use sample data from `data/sample/` (Acme Corp)
+- Most examples use sample data from `data/sample/` (Acme Corp); example 39 uses `data/aegis_kb/` instead
 - Interactive mode: type `quit` to exit
 - For the Anthropic provider, set `ANTHROPIC_API_KEY` in `.env`
 - Shared utilities are in `conftest.py` (setup, dual-mode helpers, agent creation)
