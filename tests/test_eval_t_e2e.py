@@ -41,11 +41,14 @@ class TestShippedEvalsGolden:
         # self-skip under mock (DispatchingClient W6.1 + fail-fast OPENAI_API_KEY guard).
         # Production smoke evals (4): deep_research_prod_{multifaceted,recency,comparative,adversarial}
         # -- live-only, self-skip under mock (live_ready guard). Real-provider run is pre-release.
-        assert len(results) == 61
+        # Aegis Ops full-sample smoke (1): aegis_ops -- live-only (DAG orchestration config,
+        # --mock false-greens per the t-runner only swapping orchestrator.client); self-skips
+        # under mock via t.live_ready(extra=None), so it passes here.
+        assert len(results) == 62
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 61
+        assert len(passed) == 62
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing

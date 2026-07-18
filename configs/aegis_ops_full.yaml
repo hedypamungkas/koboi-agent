@@ -1,0 +1,440 @@
+# Aegis Ops -- Northwind Cloud customer-ops agent.
+#
+# A "full sample" config -- exercises (nearly) every top-level koboi-agent
+# subsystem in one coherent scenario: a DAG (intake -> support_kb/ops_runbook
+# -> synthesis) triages support requests, backed by RAG, proactive memory,
+# self-healing, handover, sandboxed tools, MCP ticketing, subagent fan-out,
+# media (mock), a served REST/SSE surface with async jobs, and CI-gated evals.
+#
+# Companion example: examples/39_aegis_ops_full_demo.py
+#   python examples/39_aegis_ops_full_demo.py --mock     # fully offline
+#   OPENAI_API_KEY=... python examples/39_aegis_ops_full_demo.py --live
+#
+# NOT included here (mutually exclusive with the DAG structure below; see the
+# example's printed caveats for how to exercise them separately):
+#   - orchestration.execution.mode: deep_research (see configs/deep_research_demo.yaml)
+#   - replay.mode: replay (two-phase capture-then-replay; see configs/workflow_export_demo.yaml)
+
+agent:
+  name: aegis-ops
+  description: "Northwind Cloud customer-ops agent -- support triage, infra runbooks, incident escalation"
+  system_prompt: |
+    You are Aegis, Northwind Cloud's customer-ops assistant. Diagnose issues,
+    consult the knowledge base or runbooks, and escalate to a human when unsure.
+  mode: act
+  max_iterations: 12
+
+mode:
+  # Lets SAFE read-only tools through in chat/plan without a full mode: act
+  # switch -- documented but unused by this act-mode config; kept for reference.
+  read_only_tools: [web_search, web_fetch]
+
+llm:
+  provider: openai
+  model: ${AEGIS_MODEL:gpt-5.4}
+  api_key: ${OPENAI_API_KEY:}
+  base_url: ${OPENAI_BASE_URL:}
+  temperature: 0.3
+  max_tokens: 1024
+  timeout: 60
+  max_retries: 3
+  retry_backoff_base: 2.0
+  embedding_model: text-embedding-3-small
+  # Tier-2: resolve the chat client from the `primary_pool` below instead of an
+  # inline spec. Comment this out (and the two keys above become the live
+  # spec) to run single-provider without pools.
+  # pool: primary_pool
+
+# Tier-1 named provider specs, referenced by `pools:` below (and by
+# `llm.pool`/`embedding.pool`/`self_healing.critic_llm` if enabled).
+providers:
+  openai_primary:
+    provider: openai
+    model: ${AEGIS_MODEL:gpt-5.4}
+    api_key: ${OPENAI_API_KEY:}
+    base_url: ${OPENAI_BASE_URL:}
+  openai_fallback:
+    provider: openai
+    model: gpt-4o-mini
+    # NOTE: koboi's ${VAR:default} interpolation does not support nesting another
+    # ${...} inside the default -- keep it a plain fallback var, not a chained one.
+    api_key: ${OPENAI_API_KEY_BACKUP:}
+    base_url: ${OPENAI_FALLBACK_BASE_URL:}
+
+# Tier-2 provider pool: failover + circuit breaker across the two named
+# providers above. Referenced via `llm.pool: primary_pool` (commented above)
+# or `orchestration.agents[].llm: {pool: primary_pool}` (used by ops_runbook).
+pools:
+  primary_pool:
+    providers: [openai_primary, openai_fallback]
+    policy: failover
+    circuit_breaker:
+      failures: 3
+      cooldown_s: 30
+
+# Dedicated embedding client, decoupled from the chat provider -- required for
+# `memory.proactive.recall` (cosine similarity needs real embeddings) and used
+# by the RAG hybrid retriever's semantic leg.
+embedding:
+  provider: openai
+  # The surplus chat gateway (OPENAI_BASE_URL) has no /embeddings endpoint --
+  # semantic retrieval + proactive-memory recall need a dedicated embedding
+  # endpoint. EMBEDDING_BASE_URL / EMBEDDING_API_KEY point at it (e.g.
+  # https://ai.sumopod.com/v1). Falls back to the chat client (then keyword
+  # retrieval) if unset, per the CLAUDE.md gotcha.
+  base_url: ${EMBEDDING_BASE_URL:}
+  api_key: ${EMBEDDING_API_KEY:}
+  model: ${EMBEDDING_MODEL:text-embedding-3-small}
+
+# NOTE: this top-level `tools:` section is INERT while `orchestration.enabled:
+# true` -- `_build_orchestration` (koboi/facade.py) never calls `build_tools()`,
+# so only each node's own `orchestration.agents[].tools:` block (below) governs
+# what that node can call. It is kept here, populated, and documented so the
+# same file demonstrates the *single-agent* shape too (see the example's
+# "Aegis Solo" section, which loads this file with orchestration.enabled
+# monkey-patched to false to exercise delegate_tasks/task_*, which -- unlike
+# call_peer_agent -- have no per-node dependency-injection path in
+# orchestration mode as of this version).
+tools:
+  builtin:
+    - calculate
+    - list_files
+    - read_file
+    - write_file
+    - grep_search
+    - glob_find
+    - run_shell
+    - git_status
+    - git_log
+    - memory_store
+    - memory_recall
+    - task_create
+    - task_list
+    - task_update
+    - delegate_tasks
+    - web_search
+    - web_fetch
+    - transfer_to_human
+    - generate_image
+  defaults:
+    timeout: 30
+    max_output: 8000
+  overrides:
+    run_shell:
+      timeout: 45
+  # DENYLIST: remove entirely (LLM never sees it, can't be invoked).
+  disabled: [delete_file]
+  # ADVERTISE-ALLOWLIST by group: only tools in these groups are shown to the
+  # LLM (the tools still execute if called directly). Real builtin groups are
+  # math/file/web/git/memory/task/handover/media/system (see `group=` in
+  # koboi/tools/builtin/*.py) -- listing all of them advertises everything,
+  # demonstrating the feature without accidentally hiding tools. To hide a
+  # group, drop it from this list.
+  groups: [math, file, web, git, memory, task, handover, media, system]
+  memory_file: .aegis_ops_memory.json
+
+context:
+  strategy: smart_truncation
+  max_context_tokens: 6000
+  keep_last: 6
+  summarization_truncation: 400
+  safety_margin: 200
+
+rag:
+  enabled: true
+  chunker: sentence
+  chunk_size: 500
+  retriever: hybrid
+  top_k: 6
+  augmentation: on_the_fly
+  documents:
+    - path: ./data/aegis_kb/runbooks.md
+    - path: ./data/aegis_kb/faq.md
+  synonyms:
+    outage: [downtime, incident]
+    checkout: [payment, billing]
+  stopwords: en
+  # Legacy heuristic rerank (no extra install needed). For a true cross-encoder,
+  # swap to: rerank: {provider: local, fetch_multiplier: 3, score_threshold: 0.2}
+  # (needs `pip install koboi-agent[rerank-local]`).
+  rerank: true
+  embedding_cache_path: .cache/aegis_embeddings.json
+  document_cache_path: .cache/aegis_documents.json
+  max_document_size_mb: 5
+  query_rewrite: true
+  # Relevance scoping (NOT an ACL) over the `source` tag every chunk is
+  # stamped with (the doc filename stem) -- restricts support_kb to the FAQ.
+  filter:
+    source: {$in: [faq]}
+
+websearch:
+  search:
+    provider: mock
+    max_results: 5
+  fetch:
+    provider: httpx
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 4000
+  output:
+    - name: content_filter
+      detect_sensitive: true
+    - name: grounding_check
+      provider: openai
+      model: ${AEGIS_MODEL:gpt-5.4}
+      api_key: ${OPENAI_API_KEY:}
+      base_url: ${OPENAI_BASE_URL:}
+      threshold: 0.65
+  rate_limit:
+    max_calls_per_session: 40
+    max_calls_per_minute: 20
+  audit:
+    db_path: .aegis_ops_audit.db
+  approval:
+    handler: cli
+
+policy:
+  rules:
+    - tool: run_shell
+      pattern: "rm -rf *"
+      action: deny
+    - tool: run_shell
+      pattern: "systemctl restart *"
+      action: confirm
+
+memory:
+  backend: sqlite
+  db_path: aegis_ops_memory.db
+  retention:
+    max_messages: 500
+  owner: northwind-support
+  proactive:
+    enabled: true
+    extract: true
+    recall: true
+    core_block: true
+    top_k: 4
+    min_score: 0.2
+    max_facts: 150
+
+harness:
+  telemetry: true
+  carryover: true
+  doom_loop:
+    consecutive_identical_threshold: 3
+
+tracing:
+  provider: langfuse
+  public_key: ${LANGFUSE_PUBLIC_KEY:}
+  secret_key: ${LANGFUSE_SECRET_KEY:}
+  base_url: ${LANGFUSE_BASE_URL:http://localhost:3300}
+
+skills:
+  search_paths: [./skills]
+  budget_chars: 6000
+
+mcp:
+  servers:
+    - command: python3
+      args: ["mcp_servers/todo_server.py"]
+      group: ticketing
+      risk_level: moderate
+      timeout: 20
+  fail_fast: false
+  connect_retries: 2
+  namespace: true
+
+subagent:
+  timeout: 45
+  max_iterations: 4
+
+orchestration:
+  enabled: true
+  router:
+    type: keyword
+  execution:
+    mode: dag
+    max_replans: 1
+    max_revisions: 1
+    use_revision: false
+    full_graph: true
+  share_mcp: true
+  determinism:
+    temperature: 0.2
+    seed: 7
+  agents:
+    - name: intake
+      description: "Classify the request as product-question or infra-incident"
+      system_prompt: "You are Aegis' intake triage node. Classify the request as either a product/billing question or an infra incident."
+      keywords: [help, issue, question, error, down, outage]
+    - name: support_kb
+      description: "Answer product/billing questions from the knowledge base"
+      system_prompt: "Answer the customer's question using the knowledge base (RAG)."
+      depends_on: [intake]
+      rag:
+        enabled: true
+      conditionals:
+        - to: synthesis
+          when: {contains: "policy"}
+    - name: ops_runbook
+      description: "Diagnose an infra incident using shell/git tools"
+      system_prompt: "Diagnose the infra incident using shell/git tools against the sandboxed workdir. Never run destructive commands."
+      depends_on: [intake]
+      tools:
+        builtin: [run_shell, git_status, git_log, write_file, generate_image]
+      determinism:
+        temperature: 0.0
+      llm:
+        pool: primary_pool
+    - name: synthesis
+      description: "Produce the final structured resolution"
+      system_prompt: "Synthesize the intake, support_kb, and ops_runbook outputs into a final resolution."
+      depends_on: [support_kb, ops_runbook]
+      output_schema:
+        type: object
+        properties:
+          resolution: {type: string}
+          confidence: {type: number}
+        required: [resolution]
+      interrupt_after: true
+      # endpoint: billing-peer   # A2A variant: make this node a REMOTE peer agent (see peers: below)
+
+sandbox:
+  backend: restricted
+  workdir: ./.aegis_workdir
+  network: deny
+  network_binaries: [nc, ssh]
+  env_passthrough: false
+  # NOTE: rlimits.as_mb (RLIMIT_AS) is documented as "best-effort on Darwin"
+  # but koboi/sandbox/restricted.py's preexec_fn does not currently catch a
+  # setrlimit ValueError -- on some macOS hosts RLIMIT_AS's current limit
+  # already exceeds the requested max, which raises and fails the sandbox
+  # closed (every tool call blocked). cpu (RLIMIT_CPU) is safe cross-platform.
+  rlimits:
+    cpu: 30
+  timeout: 30
+  max_output: 10000
+  safe_path: [./data/aegis_kb]
+
+journal:
+  enabled: true
+  record_tool_calls: true
+
+server:
+  enabled: true
+  host: 0.0.0.0
+  port: 8088
+  api_keys_file: ~/.koboi/keys.json
+  auth_required: true
+  docs_enabled: true
+  cors:
+    allow_origins: ["https://support.northwind.example"]
+  timeouts:
+    request_seconds: 120
+    approval_seconds: 60
+    drain_seconds: 20
+  limits:
+    max_iterations_cap: 20
+  idempotency:
+    chat_ttl_seconds: 60
+  allowed_modes: [chat, plan, act, auto]
+
+jobs:
+  enabled: true
+  max_concurrent: 16
+  per_tenant_max: 3
+  queue_depth: 16
+  event_buffer:
+    max_events: 500
+  timeout_seconds: 900
+  webhooks:
+    - url: ${AEGIS_WEBHOOK_URL:https://hooks.northwind.example/incidents}
+      events: [completed, failed]
+      secret: ${AEGIS_WEBHOOK_SECRET:}
+
+hooks:
+  allow_exec: true
+  command_timeout: 8
+  on_event:
+    # `sandbox.run()` (which every command hook goes through) resolves `cwd`
+    # to `sandbox.workdir` by default -- a relative script path here would be
+    # looked up INSIDE ./.aegis_workdir, not the repo root. AEGIS_PROJECT_ROOT
+    # is set by examples/39_aegis_ops_full_demo.py before loading this config
+    # (mirrors how examples/33_command_hook_messaging.py builds an absolute
+    # `sys.executable` + Path(__file__) command programmatically).
+    - command: ["${AEGIS_PYTHON:python3}", "${AEGIS_PROJECT_ROOT}/examples/_command_hook_forwarder.py", ".aegis_ops_notify.log"]
+      events: [post_output]
+      fire_and_forget: true
+
+media:
+  enabled: true
+  image:
+    provider: mock
+  budget:
+    max_images: 10
+    max_cost_usd: 2.0
+  storage:
+    backend: local
+
+handover:
+  detection:
+    enabled: true
+    coverage_threshold: 0.55
+    ask_patterns:
+      - "talk to (a )?human"
+      - "speak to (an )?agent"
+  digest:
+    enabled: true
+  webhooks:
+    - url: ${AEGIS_HANDOVER_WEBHOOK:https://hooks.northwind.example/handover}
+      secret: ${AEGIS_WEBHOOK_SECRET:}
+
+# Cross-instance A2A -- inert/no-op unless a second koboi instance is actually
+# running (see examples/a2a_fanout.py for the two-instance-in-one-process
+# pattern). Registers `call_peer_agent` for an optional billing escalation.
+peers:
+  enabled: true
+  peers:
+    - name: billing-peer
+      url: ${BILLING_PEER_URL:http://localhost:8089}
+      token: ${BILLING_PEER_TOKEN:}
+      agent_name: billing-agent
+      org: northwind
+  inbound_tokens: ["${AEGIS_INBOUND_TOKEN:dev-inbound-token}"]
+  # Safe-by-default SSRF posture: strict (false). The billing-peer URL above is
+  # localhost, so under `false` it is SSRF-skipped at load with a one-line warning
+  # (the peer is inert anyway -- no second instance runs in this single-process demo).
+  # Flip to `true` ONLY when you vouch for a same-org peer that genuinely lives on
+  # a private/loopback network; never for operator-untrusted peer discovery.
+  allow_private_network: false
+  org: northwind
+  org_secret: ${AEGIS_ORG_SECRET:}
+  public_base_url: ${AEGIS_PUBLIC_URL:http://localhost:8088}
+
+self_healing:
+  enabled: true
+  max_turns: 3
+  fail_soft: true
+  graceful_max_iter: true
+  critic_llm: openai_fallback
+  critic_timeout: 30
+  triggers:
+    tool_error:
+      repeat_threshold: 2
+    low_grounding:
+      threshold: 0.55
+  tool_verification:
+    enabled: true
+    tools: [calculate, web_search]
+
+eval:
+  threshold: 0.6
+  scorers:
+    - name: tool_usage
+    - name: keyword_presence
+  suites:
+    - name: aegis_smoke
+      framework: t
+      source: evals/aegis_ops.eval.py
