@@ -44,11 +44,13 @@ class TestShippedEvalsGolden:
         # Aegis Ops full-sample smoke (1): aegis_ops -- live-only (DAG orchestration config,
         # --mock false-greens per the t-runner only swapping orchestrator.client); self-skips
         # under mock via t.live_ready(extra=None), so it passes here.
-        assert len(results) == 62
+        # Coding-harness demo (1): coding_fix -- mock-driven REAL edit_file execution in a
+        # restricted sandbox + test_suite scorer running the actual unittest suite (Wave 1).
+        assert len(results) == 63
 
         passed = [r for r in results if r.passed]
         failed = [r for r in results if not r.passed]
-        assert len(passed) == 62
+        assert len(passed) == 63
         assert len(failed) == 0
         # All shipped sample evals pass. The weather file's second case demonstrates
         # GATE-vs-SOFT: a non-matching SOFT check dents the score without failing

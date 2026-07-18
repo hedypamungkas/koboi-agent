@@ -377,6 +377,14 @@ class EvalCase:
     tool_definitions: list[dict] = field(default_factory=list)
     expected_tool_calls: list[dict] = field(default_factory=list)
     file_attachments: list[str] = field(default_factory=list)
+    # Coding-harness fields (Wave 1): all optional -- None/[] means a plain
+    # (non-coding) case with zero behavior change. When `repo` is set the
+    # EvalRunner materializes a per-case workspace (clone/copy + checkout +
+    # setup) and TestSuiteScorer gates on `test_command`'s exit code.
+    repo: str | None = None
+    base_commit: str | None = None
+    setup_commands: list[str] = field(default_factory=list)
+    test_command: str | None = None
 
     def __post_init__(self):
         if self.max_iterations < 1:

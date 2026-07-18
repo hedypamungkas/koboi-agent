@@ -5,7 +5,8 @@ Evaluation runner for benchmarking agent quality across multiple frameworks.
 
 ## Key files
 ```
-runner.py           EvalRunner -- executes eval cases against an agent
+runner.py           EvalRunner -- executes eval cases against an agent (+ Wave 1 workspace lifecycle)
+workspace.py        prepare_workspace/cleanup_workspace -- per-case repo materialization (coding harness)
 config.py           EvalConfig -- eval suite configuration
 registry.py         ScorerRegistry (LoaderRegistry lives in loaders/__init__.py)
 regression.py       RegressionTracker (compare against baseline)
@@ -27,11 +28,15 @@ base.py               BaseScorer ABC + 11 base scorer classes (ToolUsageScorer, 
                         CostScorer, RAGNoiseScorer, ContextEfficiencyScorer, ToolSelectionScorer,
                         TokenEfficiencyScorer). `register_default_scorers` (registry.py) registers these
                         + 4 mock-safe RAG/CI/skill classes (RetrievalMetricScorer, CitationGroundingScorer,
-                        BootstrapCIScorer, SkillTriggerAccuracyScorer) = **15 unique classes / 20 registered
-                        names** (the 5 retrieval_* aliases share one class).
+                        BootstrapCIScorer, SkillTriggerAccuracyScorer) + TestSuiteScorer = **16 unique
+                        classes / 21 registered names** (the 5 retrieval_* aliases share one class).
 bfcl_scorer.py        BFCL function-calling accuracy
 gaia_scorer.py        GAIA exact-match
-swe_bench_scorer.py   SWE-bench patch-apply
+swe_bench_scorer.py   SWE-bench patch TEXT-SIMILARITY (Jaccard file overlap + hunk-structure; it never
+                      applies the patch or runs tests -- for ground truth use test_suite instead)
+test_suite.py         TestSuiteScorer ("test_suite") -- coding-harness ground truth: runs the case's real
+                      test suite (case.test_command) inside a restricted sandbox anchored at the case
+                      workspace; 1.0 iff exit code 0; N/A (1.0) when a case has no test_command/workspace
 ragas_scorer.py       RAGAS faithfulness/relevancy
 deepeval_scorer.py    DeepEval integration
 retrieval_metric.py   Mock-safe IR ranking: RetrievalMetricScorer (recall@k/precision@k/mrr/ndcg@k/hit) -- stdlib-only
@@ -52,6 +57,25 @@ Live structural + RAGAS-faithfulness evals: `deep_research_citations.eval.py` /
 `deep_research_faithfulness.eval.py`. **Production smoke** (Tier 2, real Firecrawl + `gpt-5.4`,
 env-gated, GATE-severity bar): `evals/deep_research_prod_{multifaceted,recency,comparative,adversarial}.eval.py`.
 The passing grade + run commands are documented in `docs/deep-research-smoke.md`.
+
+## Coding harness (Wave 1)
+Proves a coding task ACTUALLY succeeded (real tests, not text similarity). `EvalCase` fields:
+`repo` (local path or git URL), `base_commit`, `setup_commands`, `test_command` -- all optional,
+inert when unset. Lifecycle (`runner.py` + `workspace.py`): when `case.repo` is set, `run_case`
+materializes an isolated workspace BEFORE building the harness (mkdtemp -> `git clone
+--no-hardlinks` local repos / copytree plain dirs / clone URLs -> `git checkout --detach
+base_commit` -> `setup_commands` in a restricted sandbox), surfaces it as `context["workspace"]`
++ `case.metadata["workspace"]`, and cleans it up in a `finally` (opt-out: `keep_failed_workspaces=True`
+retains failures, path in `EvalResult.metadata["workspace"]`). Setup failure = failed EvalResult
+(`workspace_setup 0.0`), never a crash. **Factory seam**: a `harness_factory(workspace)` that
+accepts a positional arg receives the workspace path (anchor the agent via
+`KoboiAgent.from_dict({... "sandbox": {"backend": "restricted", "workdir": workspace}})` --
+`koboi eval --cases` does this automatically); legacy zero-arg factories keep working (loud
+warning, agent runs outside the workspace). Scoring: `TestSuiteScorer` / `t.judge("test_suite",
+test_command=..., workspace=...)`. Two soft boundaries: restricted `network: deny` is a soft
+token-scan gate, and the sandbox env is scrubbed -- write test commands in interpreter-module
+form (`python3 -m unittest`), not bare PATH lookups (`pytest`). Offline demo:
+`evals/coding_fix.eval.py` (`koboi eval-test evals/coding_fix.eval.py --mock --strict`).
 
 ## How to run evals
 - **eve-style `t` authoring DSL** (canonical, CI-native, no API key with `--mock`):

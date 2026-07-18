@@ -562,9 +562,34 @@ def cmd_eval(config_path: str, cases: str | None) -> int:
         print("No eval cases found. Provide --cases file.")
         return 0
 
-    def factory() -> KoboiAgent:
+    import copy
+
+    from koboi.config import Config
+
+    try:
+        base_conf = Config.from_yaml(config_path).to_dict()
+    except Exception as e:
+        print(f"Error loading config for eval: {e}", file=sys.stderr)
+        return 1
+
+    # Coding-harness cases (repo: set) append the ground-truth test_suite
+    # scorer; gate on it only when at least one case actually declares a
+    # test_command (its N/A score would otherwise dilute plain suites).
+    if any(c.test_command for c in eval_cases):
+        from koboi.eval.scorers import TestSuiteScorer
+
+        scorers.append(TestSuiteScorer())
+
+    def factory(workspace: str | None = None) -> KoboiAgent:
         try:
-            return KoboiAgent.from_config(config_path)
+            # to_dict() is shallow -- deepcopy so per-case sandbox overrides
+            # can never bleed between cases.
+            conf = copy.deepcopy(base_conf)
+            if workspace:
+                sb = conf.setdefault("sandbox", {})
+                sb.setdefault("backend", "restricted")
+                sb["workdir"] = workspace
+            return KoboiAgent.from_dict(conf)
         except Exception as e:
             print(f"Error creating agent for eval: {e}", file=sys.stderr)
             raise SystemExit(1) from None

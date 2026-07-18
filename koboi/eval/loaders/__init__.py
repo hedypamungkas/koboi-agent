@@ -65,6 +65,10 @@ class YAMLLoader(DatasetLoader):
                     expected_answer=item.get("expected_answer"),
                     context_docs=item.get("context_docs", []),
                     metadata=item.get("metadata", {}),
+                    repo=item.get("repo"),
+                    base_commit=item.get("base_commit"),
+                    setup_commands=item.get("setup_commands", []),
+                    test_command=item.get("test_command"),
                 )
             )
         return cases

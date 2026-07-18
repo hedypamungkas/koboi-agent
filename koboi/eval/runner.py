@@ -9,6 +9,7 @@ Adapted from agent/eval.py.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ from collections.abc import Callable
 
 from koboi.types import EvalCase, EvalScore, EvalResult
 from koboi.eval.scorers.base import BaseScorer
+from koboi.eval.workspace import WorkspaceSetupError, cleanup_workspace, prepare_workspace
 
 _logger = logging.getLogger(__name__)
 
@@ -40,6 +42,10 @@ class EvalRunner:
         session_id: str | None = None,
         console: Console | None = None,
         threshold: float = 0.6,
+        workspace_root: str | Path | None = None,
+        keep_failed_workspaces: bool = False,
+        setup_timeout: float = 600.0,
+        workspace_network: str = "deny",
     ):
         self.harness_factory = harness_factory
         self._external_hook = langfuse_hook
@@ -47,6 +53,11 @@ class EvalRunner:
         self._console = console
         self.scorers = scorers or _default_scorers()
         self.threshold = threshold
+        self.workspace_root = workspace_root
+        self.keep_failed_workspaces = keep_failed_workspaces
+        self.setup_timeout = setup_timeout
+        self.workspace_network = workspace_network
+        self._factory_ws: bool | None = None  # cached _factory_takes_workspace()
 
     def _create_hook(self) -> LangfuseTracingHook | None:
         if not self._external_hook and not _LANGFUSE_AVAILABLE:
@@ -59,9 +70,46 @@ class EvalRunner:
         return hook if hook.available else None
 
     async def run_case(self, case: EvalCase) -> EvalResult:
+        # Coding-harness cases (case.repo set): materialize an isolated
+        # workspace BEFORE building the harness so the factory can anchor the
+        # agent's sandbox workdir there. Setup failures are a failed result,
+        # never a crash of the suite.
+        try:
+            workspace = await asyncio.to_thread(
+                prepare_workspace,
+                case,
+                root=self.workspace_root,
+                setup_timeout=self.setup_timeout,
+                network=self.workspace_network,
+            )
+        except WorkspaceSetupError as e:
+            _logger.warning("workspace setup failed for case %s: %s", case.name, e)
+            return EvalResult(
+                case_name=case.name,
+                output="",
+                scores=[EvalScore("workspace_setup", 0.0, f"workspace setup failed: {e}")],
+                overall_score=0.0,
+                passed=False,
+                metadata={
+                    "tags": case.tags,
+                    "framework": case.metadata.get("framework"),
+                    "workspace_error": str(e),
+                },
+            )
+        passed_out: dict = {}
+        try:
+            return await self._run_case_in_workspace(case, workspace, passed_out)
+        finally:
+            # Covers the harness.run exception path too -- no workspace leaks.
+            if workspace is not None:
+                if self.keep_failed_workspaces and not passed_out.get("passed", False):
+                    _logger.warning("keeping failed workspace for case %s: %s", case.name, workspace)
+                else:
+                    cleanup_workspace(workspace)
 
+    async def _run_case_in_workspace(self, case: EvalCase, workspace: Path | None, passed_out: dict) -> EvalResult:
         hook = self._create_hook()
-        harness = self.harness_factory()
+        harness = self._build_harness(workspace)
 
         # KoboiAgent exposes the hook chain as `core.hooks` (loop.py), not
         # `hook_chain`; fall back so a real agent attaches LangfuseTracingHook.
@@ -108,6 +156,13 @@ class EvalRunner:
         if tool_calls:
             context["tool_calls"] = tool_calls
 
+        # Coding harness: surface the materialized workspace to scorers
+        # (TestSuiteScorer runs case.test_command inside it). Plain assignment,
+        # not setdefault -- a reused case must never keep a stale path.
+        if workspace is not None:
+            context["workspace"] = str(workspace)
+            case.metadata["workspace"] = str(workspace)
+
         scores = []
         for scorer in self.scorers:
             try:
@@ -118,11 +173,16 @@ class EvalRunner:
 
         overall = sum(s.value for s in scores) / len(scores) if scores else 0.0
         passed = overall >= self.threshold
+        passed_out["passed"] = passed
 
         trace_id = None
         if hook:
             trace_id = hook.trace_id
             self._push_scores_to_langfuse(harness, trace_id, scores)
+
+        metadata = {"tags": case.tags, "framework": case.metadata.get("framework")}
+        if workspace is not None and self.keep_failed_workspaces and not passed:
+            metadata["workspace"] = str(workspace)
 
         return EvalResult(
             case_name=case.name,
@@ -135,8 +195,37 @@ class EvalRunner:
             token_usage=token_usage,
             tool_calls_made=tool_calls,
             passed=passed,
-            metadata={"tags": case.tags, "framework": case.metadata.get("framework")},
+            metadata=metadata,
         )
+
+    def _build_harness(self, workspace: Path | None):
+        """Build the per-case agent; pass the workspace when the factory accepts one.
+
+        Backward-compatible seam: legacy zero-arg factories keep working
+        unchanged -- but a repo-case agent then runs OUTSIDE its workspace, so
+        warn loudly (the test_suite score will be a deterministic fail).
+        """
+        if workspace is not None:
+            if self._factory_takes_workspace():
+                return self.harness_factory(str(workspace))
+            _logger.warning(
+                "case has a repo workspace but harness_factory() takes no arguments; "
+                "the agent will NOT run inside the workspace"
+            )
+        return self.harness_factory()
+
+    def _factory_takes_workspace(self) -> bool:
+        if self._factory_ws is None:
+            try:
+                sig = inspect.signature(self.harness_factory)
+            except (TypeError, ValueError):
+                self._factory_ws = False
+            else:
+                self._factory_ws = any(
+                    p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)
+                    for p in sig.parameters.values()
+                )
+        return self._factory_ws
 
     @staticmethod
     def _load_attachments(file_paths: list[str]) -> str:

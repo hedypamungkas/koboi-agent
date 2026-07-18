@@ -17,6 +17,7 @@ from koboi.eval.scorers.base import (
     ToolSelectionScorer,
     TokenEfficiencyScorer,
 )
+from koboi.eval.scorers.test_suite import TestSuiteScorer
 
 __all__ = [
     "BaseScorer",
@@ -31,4 +32,5 @@ __all__ = [
     "ContextEfficiencyScorer",
     "ToolSelectionScorer",
     "TokenEfficiencyScorer",
+    "TestSuiteScorer",
 ]

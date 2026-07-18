@@ -64,7 +64,7 @@ koboi/              Main package (260 .py files)
   media/            Multimodal generation: MediaBackend + per-modality provider registries (image/video/music/speech/transcription; Surplus+mock), store (local/R2/S3), budget, ModelProfile, async jobs
   mcp/              MCP client (stdio + HTTP) and server
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
-  eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/
+  eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/, workspace (coding harness: per-case repo materialization + test_suite exit-code scorer)
   tui/              Terminal UI (Textual): app, screens/ (11), widgets/ (12)
 tests/              339 .py files (309 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
 configs/            39 YAML agent configs

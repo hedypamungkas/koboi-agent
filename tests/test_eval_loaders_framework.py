@@ -192,6 +192,10 @@ class TestSWEBenchLoader:
         assert case.user_message == "Fix the bug"
         assert case.expected_answer == "diff --git a/f.py"
         assert "swe-bench" in case.tags
+        # Wave 1 coding-harness fields (metadata keys kept for back-compat)
+        assert case.repo == "https://github.com/org/repo.git"
+        assert case.base_commit == "abc123"
+        assert case.metadata["repo"] == "org/repo"
 
     def test_row_to_eval_case_no_statement(self):
         loader = SWEBenchLoader()
