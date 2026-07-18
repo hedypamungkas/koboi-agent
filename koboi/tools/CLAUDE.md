@@ -3,7 +3,7 @@
 ## What this is
 The tool layer. `ToolRegistry` holds tool definitions + handlers, exposes them to the
 LLM as OpenAI function specs, and executes calls (sync tools run in a thread via
-`asyncio.to_thread`; async tools awaited). 12 built-ins live in `builtin/` -- see
+`asyncio.to_thread`; async tools awaited). 13 built-in modules live in `builtin/` -- see
 `.claude/rules/builtin-tools.md` for those. THIS doc covers the registry, the `@tool()`
 decorator, `RiskLevel`, and dependency injection.
 

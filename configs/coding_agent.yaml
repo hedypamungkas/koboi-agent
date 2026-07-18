@@ -1,11 +1,17 @@
 agent:
   name: "coding-agent"
   description: "Coding assistant with filesystem and shell tools"
+  # act is REQUIRED: the default chat mode blocks every mutating tool
+  # (write_file/edit_file/run_shell), so a coding agent cannot work without it.
+  mode: "act"
   system_prompt: |
     You are a coding assistant. Help users write, debug, and understand code.
-    Use filesystem tools to read and write files, and shell tools to run commands.
-    Always explain what you're doing and why.
-  max_iterations: 20
+    Prefer edit_file (exact string replacement) over write_file when modifying
+    existing files; use write_file only to create new files. For large files,
+    read a line range with read_file's offset/limit instead of the whole file.
+    After each change, run the project's tests with run_shell and iterate until
+    they pass. Always explain what you're doing and why.
+  max_iterations: 120
 
 llm:
   provider: "openai"
@@ -15,15 +21,17 @@ llm:
   # temperature: 0.3          # Lower for deterministic code generation
 
 tools:
-  builtin: [list_files, read_file, write_file, delete_file, run_shell, grep_search, glob_find, git_status, git_log, git_diff]
+  builtin: [list_files, read_file, edit_file, write_file, delete_file, run_shell, grep_search, glob_find, git_status, git_log, git_diff]
   defaults:
     timeout: 60
     max_output: 15000
   overrides:
     # Keys must be the registered tool name (run_shell, not "shell").
     run_shell:
-      timeout: 120
-      max_output: 20000
+      timeout: 600        # builds/test suites routinely exceed the 30s default
+      max_output: 30000
+    read_file:
+      max_read_size: 100000
     git_status:
       timeout: 30
     git_log:
@@ -33,10 +41,14 @@ tools:
       timeout: 30
   # disabled: [run_shell]   # example denylist: removes a tool from LLM view + execution
 
+# smart_truncation is WRONG for coding: it keeps only system + first user +
+# last N messages, silently dropping the agent's own recent file reads/edits.
+# Plain truncation with a generous budget keeps the working set intact.
 context:
-  strategy: "smart_truncation"
-  max_context_tokens: 12000
-  keep_last: 10
+  strategy: "truncation"
+  max_context_tokens: 100000
+  keep_last: 40
+  safety_margin: 8000
 
 guardrails:
   input:
@@ -45,8 +57,13 @@ guardrails:
   output:
     detect_sensitive: true
   rate_limit:
-    max_calls_per_session: 200
-    max_calls_per_minute: 30
+    max_calls_per_session: 600
+    max_calls_per_minute: 60
+
+self_healing:
+  # Degrade to a best-effort summary at the iteration cap instead of erroring
+  # (works independently of self_healing.enabled).
+  graceful_max_iter: true
 
 policy:
   rules:

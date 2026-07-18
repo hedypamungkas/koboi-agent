@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from fnmatch import fnmatch
 
 from koboi.tools.registry import tool
@@ -111,7 +112,9 @@ def list_files(path: str, pattern: str | None = None, _deps: dict | None = None)
     name="read_file",
     group="file",
     deps=["sandbox"],
-    description="Read text file content",
+    description=(
+        "Read text file content. For large files, pass offset/limit to read a line range (returned with line numbers)."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -119,11 +122,25 @@ def list_files(path: str, pattern: str | None = None, _deps: dict | None = None)
                 "type": "string",
                 "description": "Path of the file to read",
             },
+            "offset": {
+                "type": "integer",
+                "description": "1-based line number to start reading from (optional)",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of lines to read (optional; default: to end of file)",
+            },
         },
         "required": ["path"],
     },
 )
-def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = None) -> str:
+def read_file(
+    path: str,
+    offset: int | None = None,
+    limit: int | None = None,
+    _tool_config: dict | None = None,
+    _deps: dict | None = None,
+) -> str:
     cfg = _tool_config or {}
     max_read_size = cfg.get("max_read_size", _MAX_READ_SIZE)
     try:
@@ -132,10 +149,12 @@ def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = 
         ts = (_deps or {}).get("tool_state")  # M6: per-session tracking
         if ts is not None:
             ts.read_paths.add(path)
+        if offset is not None or limit is not None:
+            return _read_file_range(path, offset, limit, max_read_size)
         with open(path) as f:
             content = f.read(max_read_size)
         if len(content) == max_read_size:
-            content += "\n... (file truncated, too long)"
+            content += f"\n... (truncated at {max_read_size} chars -- use offset/limit to read the rest)"
         return content
     except FileNotFoundError:
         return f"Error: file '{path}' not found"
@@ -143,6 +162,22 @@ def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = 
         return f"Error: no access to '{path}'"
     except IsADirectoryError:
         return f"Error: '{path}' is a directory, not a file"
+
+
+def _read_file_range(path: str, offset: int | None, limit: int | None, max_read_size: int) -> str:
+    """Return a numbered line range of ``path`` (1-based ``offset``, ``limit`` lines)."""
+    start = max(1, offset or 1)
+    with open(path) as f:
+        lines = f.readlines()
+    total = len(lines)
+    if start > total:
+        return f"Error: offset {start} is beyond end of file '{path}' ({total} lines)"
+    end = total if limit is None else min(total, start + max(1, limit) - 1)
+    selected = lines[start - 1 : end]
+    body = "".join(f"{i:>6}\t{line}" for i, line in enumerate(selected, start=start))
+    if len(body) > max_read_size:
+        body = body[:max_read_size] + f"\n... (truncated at {max_read_size} chars -- narrow the range)"
+    return f"(lines {start}-{end} of {total} in '{path}')\n{body}"
 
 
 @tool(
@@ -185,6 +220,92 @@ def write_file(path: str, content: str, _deps: dict | None = None) -> str:
         return f"Successfully wrote {len(content)} characters to '{path}'{note}"
     except PermissionError:
         return f"Error: no access to write to '{path}'"
+    except IsADirectoryError:
+        return f"Error: '{path}' is a directory, not a file"
+
+
+@tool(
+    name="edit_file",
+    group="file",
+    deps=["sandbox"],
+    description=(
+        "Edit a text file by replacing an exact string. old_string must match "
+        "exactly (including whitespace) and be unique in the file unless "
+        "replace_all is set. Preferred over write_file for modifying existing files."
+    ),
+    risk_level=RiskLevel.DESTRUCTIVE,
+    # Issue #48: editing mutates the fs; on crash-resume the loop's
+    # _repair_interrupted_turn must NOT silently replay it (double edits).
+    idempotent=False,
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path of the file to edit",
+            },
+            "old_string": {
+                "type": "string",
+                "description": "Exact text to replace (must be unique in the file unless replace_all)",
+            },
+            "new_string": {
+                "type": "string",
+                "description": "Replacement text",
+            },
+            "replace_all": {
+                "type": "boolean",
+                "description": "Replace every occurrence of old_string (default: false)",
+            },
+        },
+        "required": ["path", "old_string", "new_string"],
+    },
+)
+def edit_file(
+    path: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+    _deps: dict | None = None,
+) -> str:
+    if old_string == new_string:
+        return "Error: old_string and new_string are identical -- nothing to change"
+    try:
+        path = _validate_path(path, sandbox=(_deps or {}).get("sandbox"))
+        note = ""
+        if path not in _read_paths_for(_deps):  # M6: per-session when wired
+            note = f"\nNote: editing '{path}' without having read it first -- verify the path is correct."
+        with open(path) as f:
+            content = f.read()
+        count = content.count(old_string)
+        if count == 0:
+            return f"Error: old_string not found in '{path}' -- re-read the file and match the exact text"
+        if count > 1 and not replace_all:
+            return (
+                f"Error: old_string matched {count} times in '{path}'; provide more "
+                "surrounding context to make it unique, or set replace_all"
+            )
+        new_content = content.replace(old_string, new_string)
+        # Atomic swap: write to a temp file in the same directory, then os.replace,
+        # so a crash mid-write can never leave a truncated file behind.
+        dir_ = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(dir=dir_, prefix=".edit_file_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(new_content)
+            os.chmod(tmp, os.stat(path).st_mode)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        replaced = count if replace_all else 1
+        return f"Successfully replaced {replaced} occurrence(s) in '{path}'{note}"
+    except FileNotFoundError:
+        return f"Error: file '{path}' not found"
+    except PermissionError:
+        return f"Error: no access to '{path}'"
     except IsADirectoryError:
         return f"Error: '{path}' is a directory, not a file"
 

@@ -15,7 +15,7 @@ globs: ["koboi/tools/builtin/**/*.py"]
 
 ## Built-in tools (13)
 - `calculator.py` -- math expression evaluator (SAFE)
-- `filesystem.py` -- read/write/list files (MODERATE)
+- `filesystem.py` -- list/read/write/edit/delete files (`list_files`/`read_file` SAFE; `write_file`/`edit_file`/`delete_file` DESTRUCTIVE, idempotent=False). `edit_file` = exact-string replace (unique match or `replace_all`), atomic temp+`os.replace` write; `read_file` takes optional `offset`/`limit` (1-based line range, numbered output)
 - `shell.py` -- execute shell commands (DESTRUCTIVE)
 - `web.py` -- web search and fetch (SAFE)
 - `memory.py` -- persistent memory store/recall (SAFE)

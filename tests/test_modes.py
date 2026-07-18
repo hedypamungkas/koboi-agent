@@ -133,3 +133,65 @@ class TestYoloMode:
         mgr.switch_mode(AgentMode.YOLO)
         assert mgr.current_mode == AgentMode.YOLO
         assert mgr.config.permission_level == "yolo"
+
+
+class TestReadOnlyToolMatcher:
+    """Snake_case builtin names must pass the read-only matcher (Wave 0 fix).
+
+    Before the `_` separator was added, is_read_only_tool matched only exact
+    names or `prefix.`-namespaced names, so CHAT/PLAN blocked every builtin --
+    including read_file and grep_search.
+    """
+
+    def test_builtin_read_tools_are_read_only(self):
+        from koboi.modes import is_read_only_tool
+
+        for name in [
+            "read_file",
+            "list_files",
+            "grep_search",
+            "glob_find",
+            "git_status",
+            "git_log",
+            "git_diff",
+            "web_search",
+            "web_fetch",
+            "calculator",
+            "delegate_tasks",
+        ]:
+            assert is_read_only_tool(name), f"{name} should be read-only"
+
+    def test_mutating_tools_are_not_read_only(self):
+        from koboi.modes import is_read_only_tool
+
+        for name in [
+            "write_file",
+            "edit_file",
+            "delete_file",
+            "run_shell",
+            "git_commit",
+            "git_push",
+            "memory_store",
+            "ingest_url",
+            "task_create",
+        ]:
+            assert not is_read_only_tool(name), f"{name} must NOT be read-only"
+
+    def test_mode_manager_gates_edit_file_by_mode(self):
+        mgr = ModeManager(AgentMode.CHAT)
+        allowed, reason = mgr.is_tool_allowed("edit_file")
+        assert allowed is False
+        assert "CHAT mode" in reason
+
+        read_allowed, _ = mgr.is_tool_allowed("read_file")
+        assert read_allowed is True
+
+        mgr.switch_mode(AgentMode.PLAN)
+        allowed, reason = mgr.is_tool_allowed("edit_file")
+        assert allowed is False
+        assert "PLAN mode" in reason
+
+        mgr.switch_mode(AgentMode.ACT)
+        allowed, reason = mgr.is_tool_allowed("edit_file")
+        assert allowed is True
+        assert reason == ""

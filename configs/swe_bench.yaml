@@ -1,6 +1,8 @@
 agent:
   name: "swe-bench-agent"
   description: "Coding agent for SWE-bench patch generation"
+  # act is REQUIRED: the default chat mode blocks write_file/edit_file.
+  mode: "act"
   system_prompt: |
     You are a software engineering agent that fixes bugs in code.
 
@@ -22,7 +24,7 @@ agent:
     - Keep the diff SMALL — only include lines that actually change.
     - Do NOT add extra context lines, blank lines, or explanatory comments in the diff.
     - Do NOT explain the fix separately — the patch IS the answer.
-  max_iterations: 8
+  max_iterations: 30
 
 llm:
   provider: "openai"
@@ -31,7 +33,7 @@ llm:
   base_url: "${OPENAI_BASE_URL:}"
 
 tools:
-  builtin: [list_files, read_file, write_file, git_diff]
+  builtin: [list_files, read_file, edit_file, write_file, git_diff]
   defaults:
     timeout: 60
     max_output: 15000

@@ -9,7 +9,7 @@ The 13 shipped tools, each a `@tool()`-decorated function in its own module and 
 ## Tools
 ```
 calculator.py   calculate                                SAFE        math expression evaluator
-filesystem.py   list_files / read_file / write_file / delete_file   MODERATE   read/write/list/delete files
+filesystem.py   list_files / read_file / edit_file / write_file / delete_file   SAFE (list/read) + DESTRUCTIVE (write/edit/delete; idempotent=False)   file ops; edit_file = exact-string replace (unique match or replace_all, atomic swap); read_file takes optional offset/limit (numbered line range)
 shell.py        run_shell                                DESTRUCTIVE execute shell commands
 web.py          web_search / web_fetch                   SAFE        web search + fetch (backends in koboi/websearch/)
 memory.py       memory_store / memory_recall             SAFE        persistent KV memory
@@ -39,4 +39,7 @@ media.py        generate_image/video/music/speech +       MODERATE+   multimodal
 - **`ingest_url` needs `rag.live: true`** -- the facade wires the `LiveCorpus` + `fetch_provider`
   deps only then; without it the tool returns an error string.
 - **Mode-blocking is name-keyed** (`modes.py`): non-read-only tools are blocked in chat/plan unless
-  allowlisted in `mode.read_only_tools` or the agent runs in act+.
+  allowlisted in `mode.read_only_tools` or the agent runs in act+. The read-only matcher accepts
+  exact names plus `prefix.`/`prefix_` separators (so `read_file`/`grep_search`/`glob_find`/`list_files`
+  and the exact names `git_status`/`git_log`/`git_diff` pass); `edit_file`/`write_file`/`run_shell`
+  never do -- a coding agent needs `agent.mode: act`.
