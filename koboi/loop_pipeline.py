@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from collections.abc import Callable
 
 from koboi.guardrails.approval_types import ApprovalOutcome
+from koboi.harness.utils import parse_exit_code
 from koboi.modes import AgentMode
 from koboi.types import RiskLevel, ToolCall, ToolExecOutcome
 
@@ -337,6 +338,14 @@ class ToolExecutionPipeline:
         idempotent = td.idempotent if td is not None else True
         if errored:
             tool_result = _format_tool_error(exec_outcome, idempotent)
+        elif parse_exit_code(tool_result) not in (None, 0):
+            # Shell commands report failure as a normal "[exit code: N]" string
+            # (the @tool contract is -> str, so run_shell can't raise on N != 0).
+            # Lift it into the structured signal so ReflectionHook /
+            # FailureClassifierHook see real command failures -- but keep the
+            # output as-is: the command's own output IS the diagnostic.
+            errored = True
+            error_kind = "command_failed"
 
         # 7. POST_TOOL_USE hook
         if self.hooks:

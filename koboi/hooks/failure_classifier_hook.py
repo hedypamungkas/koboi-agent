@@ -36,6 +36,10 @@ _TOOL_CLASS: dict[str, str] = {
     "timeout": "transient",
     "execution_error": "transient",
     "rate_limit": "transient",
+    # Wave 2: non-zero shell exit lifted into the structured signal by the
+    # pipeline ("[exit code: N]" parse). Transient: a failing build/test is a
+    # normal, retryable step of an edit->test loop, not a schema/policy fault.
+    "command_failed": "transient",
     "policy_denied": "policy",
     "mode_blocked": "policy",
     "denied": "policy",

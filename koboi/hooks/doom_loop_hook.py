@@ -5,6 +5,7 @@ Records tool calls and checks for doom loop patterns after each tool execution.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent
@@ -44,11 +45,17 @@ class DoomLoopHook(Hook):
         # Determine if the tool result was an error
         is_error = is_tool_error(ctx.tool_result)
 
-        # Record the tool call
+        # Record the tool call, with an output fingerprint so the detector can
+        # tell "stuck" (identical output every time) from "progressing"
+        # (identical call, changing output -- e.g. a shrinking test-failure list).
+        fingerprint = None
+        if ctx.tool_result:
+            fingerprint = hashlib.sha1(ctx.tool_result.encode("utf-8", "replace")).hexdigest()  # nosec B324
         self.detector.record(
             tool_name=ctx.tool_name,
             arguments=ctx.tool_arguments or "",
             is_error=is_error,
+            result_fingerprint=fingerprint,
         )
 
         # Check for doom loop patterns
