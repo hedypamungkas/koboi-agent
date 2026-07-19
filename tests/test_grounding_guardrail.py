@@ -41,8 +41,14 @@ class _BoomJudge:
         pass
 
 
-def _guard(judge=None, threshold: float = 0.8) -> GroundingGuardrail:
-    g = GroundingGuardrail(provider="openai", model="gpt-4o-mini", api_key="x", threshold=threshold)
+def _guard(judge=None, threshold: float = 0.8, fail_closed: bool = False) -> GroundingGuardrail:
+    g = GroundingGuardrail(
+        provider="openai",
+        model="gpt-4o-mini",
+        api_key="x",
+        threshold=threshold,
+        fail_closed=fail_closed,
+    )
     if judge is not None:
         g._client = judge  # bypass lazy create_client
     return g
@@ -118,6 +124,65 @@ class TestGroundingGuardrail:
         result = await g.check("answer", context=["ctx"])
         assert result.passed is True
 
+    # ---- T2: fail-closed mode (opt-in). Default False preserves v0.18.3 fail-soft. ----
+
+    async def test_fail_closed_on_judge_error_hands_over(self):
+        # fail_closed=True + judge raises -> action="handover" (NOT pass-through).
+        g = _guard(_BoomJudge(), fail_closed=True)
+        result = await g.check("answer", context=["ctx"])
+        assert result.passed is False
+        assert result.action == "handover"
+        assert "fail-closed" in result.reason
+        assert result.sanitized_content  # the refusal text
+        assert g.last_coverage is None
+
+    async def test_fail_closed_on_no_client_hands_over(self):
+        # Unknown provider -> _get_client returns None -> fail_closed hands over.
+        g = GroundingGuardrail(provider="badprovider", model="x", api_key="", fail_closed=True)
+        result = await g.check("answer", context=["ctx"])
+        assert result.passed is False
+        assert result.action == "handover"
+
+    async def test_fail_closed_on_no_context_hands_over(self):
+        g = _guard(_ScriptedJudge(["should not be called"]), fail_closed=True)
+        result = await g.check("answer", context=[])
+        assert result.passed is False
+        assert result.action == "handover"
+
+    async def test_fail_closed_on_no_claims_hands_over(self):
+        # judge returns an empty claim array -> fail_closed hands over.
+        judge = _ScriptedJudge(["[]"])
+        g = _guard(judge, fail_closed=True)
+        result = await g.check("answer", context=["ctx"])
+        assert result.passed is False
+        assert result.action == "handover"
+
+    async def test_fail_closed_false_preserves_fail_soft(self):
+        # Regression: fail_closed=False (default) keeps v0.18.3 pass-through on judge error.
+        g = _guard(_BoomJudge(), fail_closed=False)
+        result = await g.check("answer", context=["ctx"])
+        assert result.passed is True
+
+    async def test_fail_closed_does_not_change_low_coverage_abstain(self):
+        # fail_closed only flips error/skip paths; a real low-coverage answer still abstains.
+        judge = _ScriptedJudge(['["a is x", "b is z"]', '["SUPPORTED", "UNSUPPORTED"]'])
+        g = _guard(judge, threshold=0.8, fail_closed=True)
+        result = await g.check("a is x. b is z.", context=["a is x"])
+        assert result.passed is False
+        assert result.action == "abstain"  # NOT "handover"
+        assert g.last_coverage == 0.5
+
+    async def test_fail_closed_factory_passthrough(self):
+        # YAML -> GuardrailRegistry.create(**kwargs) -> __init__: fail_closed flows through.
+        from koboi.guardrails.registry import GuardrailRegistry, register_builtin_guardrails
+
+        register_builtin_guardrails()
+        grd = GuardrailRegistry.create("grounding_check", provider="openai", api_key="x", fail_closed=True)
+        assert isinstance(grd, GroundingGuardrail)
+        assert grd._fail_closed is True
+        grd2 = GuardrailRegistry.create("grounding_check", provider="openai", api_key="x")
+        assert grd2._fail_closed is False  # default preserved when omitted
+
     async def test_registered_as_grounding_check(self):
         from koboi.guardrails.registry import GuardrailRegistry, register_builtin_guardrails
 
@@ -165,3 +230,101 @@ class TestGroundingGuardrailIntegration:
         assert "I don't have enough grounded information" in result.content
         assert "9bn" not in result.content  # the hallucinated claim did not survive
         assert result.metadata.get("guardrail_outcomes", [{}])[0].get("action") == "abstain"
+
+    async def test_fail_closed_grounding_raises_handover_in_loop(self):
+        """T2 e2e: a fail-closed GroundingGuardrail whose judge errors causes
+        ``_process_output`` to save the refusal to memory and then raise
+        ``AgentHandoverError`` (reusing the B1 pipeline -> awaiting_human /
+        HandoverEvent + handover.webhooks) instead of passing the unverified answer."""
+        import pytest
+        from koboi.exceptions import AgentHandoverError
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from koboi.rag.types import Chunk, RetrievalResult
+        from koboi.tools.registry import ToolRegistry
+        from tests.conftest import MockClient
+
+        guard = _guard(_BoomJudge(), threshold=0.8, fail_closed=True)
+
+        class _FakeAug:
+            # Non-empty last_results so the loop threads non-empty context to the
+            # guardrail (otherwise the no-context cost-gate short-circuits the judge).
+            last_results = [RetrievalResult(Chunk(id="c1", doc_id="d", content="some context"), 0.9, "keyword")]
+            last_rewrite = None
+
+            async def augment_for_memory(self, user_message: str) -> str:
+                return user_message
+
+            async def augment_for_llm(self, messages):
+                return messages
+
+        core = AgentCore(
+            client=MockClient([]),
+            memory=ConversationMemory(),
+            tools=ToolRegistry(),
+            output_guardrails=[guard],
+            max_iterations=1,
+        )
+        core.augmentation = _FakeAug()  # type: ignore[assignment]
+        with pytest.raises(AgentHandoverError):
+            await core._process_output("some unverified answer", response=None, iteration=0)
+        # flag cleared after the raise (no stale state for the next run)
+        assert core._handover_from_guardrail is None
+
+    async def test_fail_closed_grounding_propagates_through_run_stream(self):
+        """T2 e2e (streaming): a fail-closed GroundingGuardrail whose judge errors
+        propagates ``AgentHandoverError`` out of ``run_stream`` -- the same seam the
+        server layer converts to ``HandoverEvent`` (interactive SSE) / ``awaiting_human``
+        (jobs) + ``handover.webhooks``. Also locks two invariants:
+
+        - G8 buffering: with an output guardrail configured, TextDeltas are held until
+          ``_process_output`` passes; the raise discards them, so the unverified answer
+          never reaches the stream.
+        - The handover ``summary`` is empty (NOT the user-facing refusal) so the B4
+          warm-handoff digest generates the operator summary instead of reusing user copy.
+        """
+        import pytest
+
+        from koboi.events import TextDeltaEvent
+        from koboi.exceptions import AgentHandoverError
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from koboi.rag.types import Chunk, RetrievalResult
+        from koboi.tools.registry import ToolRegistry
+        from tests.conftest import MockClient, make_mock_response
+
+        guard = _guard(_BoomJudge(), threshold=0.8, fail_closed=True)
+
+        class _FakeAug:
+            # Non-empty last_results so the loop threads non-empty context to the
+            # guardrail (otherwise the no-context cost-gate short-circuits the judge).
+            last_results = [RetrievalResult(Chunk(id="c1", doc_id="d", content="some context"), 0.9, "keyword")]
+            last_rewrite = None
+
+            async def augment_for_memory(self, user_message: str) -> str:
+                return user_message
+
+            async def augment_for_llm(self, messages):
+                return messages
+
+        core = AgentCore(
+            client=MockClient([make_mock_response(content="some unverified answer")]),
+            memory=ConversationMemory(),
+            tools=ToolRegistry(),
+            output_guardrails=[guard],
+            max_iterations=2,
+        )
+        core.augmentation = _FakeAug()  # type: ignore[assignment]
+
+        yielded: list = []
+        with pytest.raises(AgentHandoverError) as ei:
+            async for ev in core.run_stream("please answer"):
+                yielded.append(ev)
+        # Propagated with the fail-closed reason + EMPTY summary (B4 digest generates).
+        assert "fail-closed" in ei.value.reason
+        assert ei.value.summary == ""
+        # G8: the unverified answer was buffered and discarded on handover -- it never
+        # reached the stream as a TextDelta (only iteration bookkeeping was yielded).
+        assert not any(isinstance(ev, TextDeltaEvent) for ev in yielded)
+        # Stale-flag cleared (no spurious handover on the next run).
+        assert core._handover_from_guardrail is None

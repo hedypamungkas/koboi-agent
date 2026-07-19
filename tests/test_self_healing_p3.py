@@ -107,3 +107,38 @@ class TestGracefulMaxIter:
         assert result.metadata["max_iter_degraded"] is True
         assert "leaked secret" not in result.content  # guardrail blocked the raw summary
         assert "unable to complete" in result.content  # fell back to the generic notice
+
+    async def test_graceful_summary_propagates_handover_guardrail(self, mock_client):
+        # T2: a handover action on the graceful summary PROPAGATES (does NOT degrade to
+        # the generic notice). A fail-closed deployment opted into "never ship an
+        # unverified answer"; swallowing the handover at max_iter would defeat that.
+        # Contrast with the block-guardrail test above (block still degrades). Mirrors
+        # the real fail-closed GroundingGuardrail via a synthetic handover guardrail.
+        from koboi.exceptions import AgentHandoverError
+
+        class _HandoverGuardrail(BaseGuardrail):
+            async def check(self, content, context=None):
+                return GuardrailResult(
+                    passed=False,
+                    reason="fail-closed: unverified summary",
+                    action="handover",
+                    sanitized_content="I don't have enough grounded information to answer this confidently.",
+                )
+
+        client = _looping_client(mock_client, 2, make_mock_response("unverified summary"))
+        agent = AgentCore(
+            client=client,
+            memory=ConversationMemory(),
+            tools=make_tool_registry(),
+            max_iterations=2,
+            graceful_max_iter=True,
+            output_guardrails=[_HandoverGuardrail()],
+        )
+        with pytest.raises(AgentHandoverError) as ei:
+            await agent.run("do a big task")
+        assert "fail-closed" in ei.value.reason
+        # The refusal (not the raw summary) is what _process_output saved to memory
+        # before raising -- the generic notice was NOT additionally written.
+        assistant_msgs = [m["content"] for m in agent.memory.get_messages() if m.get("role") == "assistant"]
+        assert any("don't have enough grounded information" in m for m in assistant_msgs)
+        assert not any("unable to complete" in m for m in assistant_msgs)
