@@ -129,9 +129,13 @@ class GroundingGuardrail(BaseGuardrail):
         # Cost-gate: no retrieved context -> A2 already cued abstention; no point
         # judging an answer with nothing to ground against.
         if not content or not context:
+            # No answer, or no retrieved context to ground against. This is NOT a
+            # verification failure (the judge didn't break) -- it's a conversational
+            # / OOS turn (greeting, smalltalk, off-topic) the agent answers per its
+            # prompt. fail_closed covers only JUDGE failures (no-client / judge-
+            # error / no-claims); pass here regardless of fail_closed so greetings
+            # and OOS don't spuriously hand over.
             self.last_coverage = None
-            if self._fail_closed:
-                return self._handover("fail-closed: no retrieved context to ground against")
             return GuardrailResult(passed=True)
         client = self._get_client()
         if client is None:

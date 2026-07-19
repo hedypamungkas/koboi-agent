@@ -143,11 +143,13 @@ class TestGroundingGuardrail:
         assert result.passed is False
         assert result.action == "handover"
 
-    async def test_fail_closed_on_no_context_hands_over(self):
+    async def test_fail_closed_no_context_still_passes(self):
+        # No retrieved context is conversational/OOS, NOT a verification failure:
+        # even with fail_closed it passes (the agent answers greetings/OOS per its
+        # prompt). Only judge failures (no-client / judge-error) hand over.
         g = _guard(_ScriptedJudge(["should not be called"]), fail_closed=True)
         result = await g.check("answer", context=[])
-        assert result.passed is False
-        assert result.action == "handover"
+        assert result.passed is True
 
     async def test_fail_closed_on_no_claims_hands_over(self):
         # judge returns an empty claim array -> fail_closed hands over.
