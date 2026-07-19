@@ -546,6 +546,21 @@ class SandboxConfig(BaseModel):
         return data
 
 
+class JournalCheckpointConfig(BaseModel):
+    """``journal.checkpoint`` sub-section (Wave 2) -- shadow-repo tree checkpoints.
+
+    When enabled, every mutating (non-idempotent) tool call commits the sandbox
+    workdir into a shadow git repo (``<workdir>/.koboi-checkpoint/``) keyed to
+    the journal step, and crash resume rolls back the interrupted call's
+    partial effects. Requires the journal + a resolvable sandbox workdir.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = True
+    git_timeout: float = Field(default=60.0, gt=0)
+
+
 class JournalConfig(BaseModel):
     """Top-level ``journal:`` section -- step journal + resume (P2-A).
 
@@ -558,6 +573,10 @@ class JournalConfig(BaseModel):
 
     enabled: bool = True
     record_tool_calls: bool = True
+    # Wave 2: opt-in workdir checkpoints -- ``checkpoint: true`` or a
+    # ``{enabled, git_timeout}`` mapping. Default off (a baseline git commit of
+    # an arbitrary workdir is not a zero-cost surprise).
+    checkpoint: bool | JournalCheckpointConfig = False
 
 
 class ServerConfig(BaseModel):

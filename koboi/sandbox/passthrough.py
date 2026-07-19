@@ -22,6 +22,13 @@ class PassthroughBackend(BaseSandbox):
     def __init__(self):
         self._legacy_sandbox_dir = os.environ.get("KOBOI_SANDBOX_DIR")
 
+    @property
+    def workdir(self) -> str | None:
+        """Legacy KOBOI_SANDBOX_DIR when set, else None (no anchored root)."""
+        if self._legacy_sandbox_dir:
+            return os.path.realpath(self._legacy_sandbox_dir)
+        return None
+
     def run(
         self,
         command,

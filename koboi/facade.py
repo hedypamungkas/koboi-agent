@@ -1160,6 +1160,7 @@ class AgentAssembler:
         self.hook_chain: HookChain | None = None
         self.sandbox: BaseSandbox | None = None
         self.journal: StepJournal | None = None
+        self.checkpointer = None  # Wave 2: WorkdirCheckpointer | None (journal.checkpoint)
         # Wave2 #1: proactive_memory is only populated by ``build_proactive_memory()``,
         # but ``build_opt_in_hooks()`` (shared with the orchestration path) reads it
         # unconditionally -- default to None so the attribute always exists.
@@ -1233,6 +1234,40 @@ class AgentAssembler:
             record_tool_calls=record_tool_calls,
         )
         return self.journal
+
+    def build_checkpointer(self) -> object:
+        """Build the workdir checkpointer (Wave 2, ``journal.checkpoint``).
+
+        Opt-in. Requires the journal (the sha is stamped onto step rows) and a
+        resolvable sandbox workdir -- silently git-baselining the process cwd
+        would be a surprise, so no workdir means warn + disable. Called after
+        ``build_sandbox()``.
+        """
+        conf = self.config.get("journal", "checkpoint", default=False)
+        enabled = conf if isinstance(conf, bool) else bool((conf or {}).get("enabled", True))
+        if not enabled:
+            self.checkpointer = None
+            return None
+        if self.journal is None:
+            logging.getLogger(__name__).warning(
+                "journal.checkpoint enabled but the journal is unavailable "
+                "(disabled or non-sqlite memory) -- checkpoints disabled"
+            )
+            self.checkpointer = None
+            return None
+        workdir = getattr(self.sandbox, "workdir", None) or self.config.get("sandbox", "workdir", default=None)
+        if not workdir:
+            logging.getLogger(__name__).warning(
+                "journal.checkpoint enabled but no sandbox workdir is configured -- "
+                "refusing to git-baseline the process cwd; checkpoints disabled"
+            )
+            self.checkpointer = None
+            return None
+        from koboi.checkpoint import WorkdirCheckpointer
+
+        git_timeout = 60.0 if isinstance(conf, bool) else float((conf or {}).get("git_timeout", 60.0))
+        self.checkpointer = WorkdirCheckpointer(str(workdir), git_timeout=git_timeout)
+        return self.checkpointer
 
     def build_tools(self) -> ToolRegistry:
         self.tools = _build_tools(self.config)
@@ -1511,6 +1546,7 @@ class AgentAssembler:
         self.build_journal()
         self.build_tools()
         self.build_sandbox()
+        self.build_checkpointer()
         self.build_mcp()
         self.build_context()
         self.build_rag()
@@ -1573,6 +1609,7 @@ class AgentAssembler:
             hook_chain=self.hook_chain,
             mode_manager=self.mode_manager,
             journal=self.journal,
+            checkpointer=self.checkpointer,
             trust_db=self.trust_db,
             output_schema=self.config.get("agent", "output_schema", default=None),
             proactive_memory=self.proactive_memory,
@@ -1759,9 +1796,7 @@ def _build_policy(config: Config):
 
     # Module-level option so the shell tool and skills !`cmd` gate (which call
     # check_command_blocked directly, without an engine) honor it too.
-    set_policy_options(
-        allow_interpreter_exec=config.get("policy", "allow_interpreter_exec", default=False)
-    )
+    set_policy_options(allow_interpreter_exec=config.get("policy", "allow_interpreter_exec", default=False))
 
     engine = PolicyEngine()
     rules_conf = config.get("policy", "rules", default=[])

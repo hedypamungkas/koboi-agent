@@ -219,6 +219,11 @@ class RestrictedProcessBackend(BaseSandbox):
 
     # -- public API --------------------------------------------------------
 
+    @property
+    def workdir(self) -> str:
+        """The containment root (Wave 2: anchors the workdir checkpointer)."""
+        return self._workdir
+
     def run(self, command, *, cwd=None, env=None, timeout=None, shell=False, input=None) -> SandboxResult:
         effective_timeout = timeout if timeout is not None else self._timeout
 

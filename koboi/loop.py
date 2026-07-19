@@ -120,6 +120,7 @@ class AgentCore:
         hook_chain: HookChain | None = None,
         mode_manager: ModeManager | None = None,
         journal: StepJournal | None = None,
+        checkpointer: object | None = None,
         trust_db: TrustStore | None = None,
         output_schema: dict | None = None,
         force_response_format_with_tools: bool = False,
@@ -173,6 +174,9 @@ class AgentCore:
         self.hooks = hook_chain or HookChain()
         self.mode_manager = mode_manager
         self.journal = journal
+        # Wave 2: WorkdirCheckpointer | None -- shadow-repo tree checkpoint per
+        # mutating tool call (journal.checkpoint); enables safe crash-resume.
+        self.checkpointer = checkpointer
         self.trust_db = trust_db
         # JSON Schema dict (provider-agnostic) for structured final output, or None.
         self.response_schema = output_schema
@@ -638,7 +642,28 @@ class AgentCore:
             user_message = await self._augment_memory(user_message)
         self.memory.add_user_message(user_message)
         tool_defs = self.tools.get_definitions() or None
+        # Wave 2: baseline the shadow checkpoint repo once per run (idempotent;
+        # never re-baselines an existing shadow). Off-thread: a first `git add -A`
+        # over a large tree must not block the event loop.
+        if self.checkpointer is not None:
+            await asyncio.to_thread(self.checkpointer.ensure)
         return user_message, tool_defs, _time.monotonic()
+
+    async def _checkpoint_after_call(self, tc: ToolCall, pr, step_index: int) -> None:
+        """Commit the workdir after an executed mutating tool call (Wave 2).
+
+        Per-CALL (not per-iteration): resume repairs at tool-call granularity,
+        and shadow HEAD must always equal "state after the last call whose
+        result is persisted". Commits even on errored calls (the tool ran;
+        HEAD must reflect the post-call tree) but never on skipped ones
+        (denied/blocked = never executed). Fail-soft via the checkpointer.
+        """
+        if self.checkpointer is None or pr.skipped or pr.idempotent:
+            return
+        label = f"koboi: turn {self._turn_index} step {step_index} {tc.name} ({tc.id})"
+        sha = await asyncio.to_thread(self.checkpointer.commit, label)
+        if sha and self.journal:
+            self.journal.stamp_checkpoint(self._turn_index, step_index, sha)
 
     def _store_tool_response_in_memory(self, response: AgentResponse) -> None:
         """Store assistant message with tool call details in conversation memory."""
@@ -770,6 +795,30 @@ class AgentCore:
         if not missing:
             return
         self._log(f"Resume: re-executing {len(missing)} missing tool call(s)")
+
+        def _is_non_idempotent(tc_dict: dict) -> bool:
+            fn = tc_dict.get("function", {}) if isinstance(tc_dict, dict) else {}
+            name = fn.get("name", "") if isinstance(fn, dict) else ""
+            td = (
+                self._pipeline.tools.get_definition(name)
+                if getattr(self._pipeline, "tools", None) is not None
+                else None
+            )
+            return td is not None and not td.idempotent
+
+        # Wave 2: an interrupted MUTATING call may have left partial effects in
+        # the workdir. Every completed mutating call committed to the shadow
+        # repo, so shadow HEAD == state after the last persisted call --
+        # restoring removes exactly the interrupted call's partial effects.
+        # Gated on a missing non-idempotent call: an LLM-phase crash must never
+        # reset operator hand-edits. No shadow (feature enabled only after the
+        # crash) -> restore_to_head() is False -> tree untouched, legacy message.
+        restored_sha: str | None = None
+        if self.checkpointer is not None and any(_is_non_idempotent(tc) for tc in missing):
+            if await asyncio.to_thread(self.checkpointer.restore_to_head):
+                restored_sha = self.checkpointer.head()
+                self._log(f"Resume: workspace rolled back to checkpoint {restored_sha}")
+
         for tc_dict in missing:
             fn = tc_dict.get("function", {}) if isinstance(tc_dict, dict) else {}
             name = fn.get("name", "") if isinstance(fn, dict) else ""
@@ -793,10 +842,15 @@ class AgentCore:
                     f"Resume: skipping non-idempotent tool '{name}' re-execution "
                     f"(marked idempotent=False); recording synthetic result"
                 )
-                self.memory.add_tool_result(
-                    tc.id,
-                    f"[skipped on resume: non-idempotent tool '{name}'; re-invoke explicitly if needed]",
-                )
+                if restored_sha:
+                    synthetic = (
+                        f"[skipped on resume: non-idempotent tool '{name}'; the workspace was "
+                        f"rolled back to checkpoint {restored_sha[:12]}, so partial effects of "
+                        f"this call were reverted; re-invoke explicitly if needed]"
+                    )
+                else:
+                    synthetic = f"[skipped on resume: non-idempotent tool '{name}'; re-invoke explicitly if needed]"
+                self.memory.add_tool_result(tc.id, synthetic)
                 continue
             await self._pipeline.execute_tool_call(tc, iteration=0)
 
@@ -944,6 +998,7 @@ class AgentCore:
                     # tool_calls_made (and the derived tools_used) -- eval false positive.
                     if not pr.skipped:
                         tool_calls_made.append(tc)
+                    await self._checkpoint_after_call(tc, pr, i)
                     pipeline_outcomes.append(
                         {
                             "tool_call_id": tc.id,
@@ -999,6 +1054,11 @@ class AgentCore:
                 self.journal.mark_interrupted(open_rows)
             self._turn_index = self.journal.turn_index
         await self._repair_interrupted_turn()
+        # Wave 2: (re)ensure the shadow baseline AFTER repair -- restore must
+        # see the pre-crash baseline, and a missing baseline must stay missing
+        # until the repair decision is made.
+        if self.checkpointer is not None:
+            await asyncio.to_thread(self.checkpointer.ensure)
         tool_defs = self.tools.get_definitions() or None
         return await self._run_loop(tool_defs, _time.monotonic(), resumed=True)
 
@@ -1144,6 +1204,7 @@ class AgentCore:
                     # Mirror the non-streaming path: a skipped tool is not "used".
                     if not pipeline_result.skipped:
                         _stream_tools_used.append(tc.name)
+                    await self._checkpoint_after_call(tc, pipeline_result, i)
                     yield ToolResultEvent(
                         tool_name=tc.name,
                         tool_call_id=tc.id,

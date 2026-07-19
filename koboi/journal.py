@@ -192,19 +192,36 @@ class StepJournal:
         cols = ["id", "turn_index", "step_index", "status", "is_terminal", "error", "created_at"]
         return dict(zip(cols, rows[0], strict=False))
 
+    def stamp_checkpoint(self, turn_index: int, step_index: int, sha: str) -> None:
+        """Stamp the shadow-repo checkpoint sha onto an existing step row (Wave 2).
+
+        A narrow UPDATE (not a ``record_step`` upsert): the sha is known
+        mid-iteration between the ``running`` insert and the ``tool_calls``
+        outcome update, and the outcome's SET clause must not clobber it.
+        Fail-soft -- checkpoint stamping is auxiliary; never break the loop.
+        """
+        try:
+            self._conn.execute(
+                "UPDATE steps SET checkpoint_sha = ? WHERE session_id = ? AND turn_index = ? AND step_index = ?",
+                (sha, self._session_id, turn_index, step_index),
+            )
+            self._conn.commit()
+        except Exception:
+            _logger.warning("stamp_checkpoint failed", exc_info=True)
+
     def list_steps(self, turn_index: int | None = None) -> list[dict]:
         """List steps for this session (optionally one turn), oldest first."""
         if turn_index is None:
             rows = self._conn.execute(
                 "SELECT id, turn_index, step_index, status, llm_prompt_tokens, "
-                "llm_completion_tokens, tool_call_count, is_terminal, error, created_at "
+                "llm_completion_tokens, tool_call_count, is_terminal, error, checkpoint_sha, created_at "
                 "FROM steps WHERE session_id = ? ORDER BY id",
                 (self._session_id,),
             ).fetchall()
         else:
             rows = self._conn.execute(
                 "SELECT id, turn_index, step_index, status, llm_prompt_tokens, "
-                "llm_completion_tokens, tool_call_count, is_terminal, error, created_at "
+                "llm_completion_tokens, tool_call_count, is_terminal, error, checkpoint_sha, created_at "
                 "FROM steps WHERE session_id = ? AND turn_index = ? ORDER BY id",
                 (self._session_id, turn_index),
             ).fetchall()
@@ -218,6 +235,7 @@ class StepJournal:
             "tool_call_count",
             "is_terminal",
             "error",
+            "checkpoint_sha",
             "created_at",
         ]
         return [dict(zip(cols, r, strict=False)) for r in rows]
