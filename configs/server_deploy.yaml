@@ -57,6 +57,15 @@ jobs:
   resume_on_startup: true
   timeout_seconds: 1800
   ttl_seconds: 86400
+  # Job-scoped run_shell auto-approve (command globs) for unattended coding
+  # jobs -- avoids a blanket Trust-DB rule. Hardcoded policy denies always win.
+  # Prefer anchored patterns; a matched prefix approves the WHOLE command line.
+  # shell_allowlist:
+  #   - "pytest*"
+  #   - "python* -m *"
+  #   - "npm test*"
+  #   - "git status*"
+  #   - "git commit*"
 
 tracing:
   provider: ${LANGFUSE_PROVIDER:}

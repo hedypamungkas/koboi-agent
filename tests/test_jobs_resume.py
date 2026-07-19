@@ -60,6 +60,7 @@ async def test_resume_on_startup_resumes_running_and_requeues_pending(monkeypatc
         workflow_ref=None,
         workflow_store=None,
         replay_mode=None,
+        shell_allowlist=None,
     ):
         calls.append((job_id, resume))
         return None

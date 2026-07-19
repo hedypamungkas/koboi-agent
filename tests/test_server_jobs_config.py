@@ -43,6 +43,18 @@ class TestServerJobsConfig:
         assert cfg.schema.jobs.max_concurrent == 16
         assert cfg.schema.jobs.ttl_seconds == 3600
 
+    def test_jobs_shell_allowlist_parses(self):
+        cfg = Config.from_dict(
+            {**_base(), "jobs": {"enabled": True, "shell_allowlist": ["pytest*", "git commit*"]}},
+            validate=True,
+        )
+        assert cfg.schema.jobs.shell_allowlist == ["pytest*", "git commit*"]
+        # Runtime read path (dotted-path over raw data) sees it too.
+        assert cfg.get("jobs", "shell_allowlist", default=[]) == ["pytest*", "git commit*"]
+        # Default: empty (deny-by-default preserved).
+        cfg2 = Config.from_dict({**_base(), "jobs": {"enabled": True}}, validate=True)
+        assert cfg2.schema.jobs.shell_allowlist == []
+
     def test_server_invalid_port_rejected(self):
         import pytest
 
@@ -60,13 +72,7 @@ class TestServerJobsConfig:
         assert cfg.server["enabled"] is True
 
     def test_builder_jobs(self):
-        cfg = (
-            Config.builder()
-            .agent(name="t")
-            .llm(model="m")
-            .jobs(max_concurrent=16, ttl_seconds=3600)
-            .build()
-        )
+        cfg = Config.builder().agent(name="t").llm(model="m").jobs(max_concurrent=16, ttl_seconds=3600).build()
         assert cfg.jobs["max_concurrent"] == 16
         assert cfg.jobs["ttl_seconds"] == 3600
         # default_dedicated_session was removed (dead -- dedicated is unconditional at app.py submit)

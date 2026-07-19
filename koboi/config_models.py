@@ -634,6 +634,10 @@ class JobsConfig(BaseModel):
     timeout_seconds: float = Field(default=1800.0, gt=0)
     ttl_seconds: float = Field(default=86400.0, gt=0)
     webhooks: list[JobWebhookConfig] = Field(default_factory=list)
+    # Wave 2: command globs auto-approved for run_shell in autonomous jobs
+    # (e.g. ["pytest*", "npm test*", "git commit*"]). Operator-configured;
+    # hardcoded policy denies always win. Empty = prior deny-by-default.
+    shell_allowlist: list[str] = Field(default_factory=list)
 
 
 class CommandHookConfig(BaseModel):

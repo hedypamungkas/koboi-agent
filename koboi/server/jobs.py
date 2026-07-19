@@ -639,6 +639,7 @@ async def run_job(
     workflow_ref: str | None = None,
     workflow_store: Any | None = None,
     replay_mode: str | None = None,
+    shell_allowlist: list[str] | None = None,
 ) -> None:
     """Execute a job: create agent, install AutonomousApprovalHandler, run, drain events.
 
@@ -668,6 +669,7 @@ async def run_job(
                 workflow_ref=workflow_ref,
                 workflow_store=workflow_store,
                 replay_mode=replay_mode,
+                shell_allowlist=shell_allowlist,
             ),
             timeout=timeout,
         )
@@ -721,6 +723,7 @@ async def _execute_workflow_job(
     owner: str,
     resume: bool = False,
     replay_mode: str | None = None,
+    shell_allowlist: list[str] | None = None,
 ) -> str | None:
     """Run a stored workflow bundle as an autonomous job.
 
@@ -786,6 +789,7 @@ async def _execute_workflow_job(
             trust_db=agent.trust_db,
             audit_trail=agent._core.audit_trail,
             auto_approve_tools={"write_file", "delete_file"},
+            shell_allowlist=shell_allowlist,
         )
     store.update_status(job_id, "running")
     final_content: str | None = None
@@ -809,6 +813,7 @@ async def _execute_plain_cache_job(
     mode: str | None = None,
     max_iterations: int | None = None,
     replay_mode: str = "cache",
+    shell_allowlist: list[str] | None = None,
 ) -> str | None:
     """Run a PLAIN (non-workflow_ref) job in cache/replay mode with an isolated
     per-job cache_dir (the pooled agent's shared client can't isolate a run).
@@ -846,6 +851,7 @@ async def _execute_plain_cache_job(
         trust_db=agent.trust_db,
         audit_trail=agent._core.audit_trail,
         auto_approve_tools={"write_file", "delete_file"},
+        shell_allowlist=shell_allowlist,
     )
     if mode is not None:
         agent._core.mode_manager.switch_mode(AgentMode(mode))
@@ -876,6 +882,7 @@ async def _execute_job(
     workflow_ref: str | None = None,
     workflow_store: Any | None = None,
     replay_mode: str | None = None,
+    shell_allowlist: list[str] | None = None,
 ) -> str | None:
     """Inner execution: agent setup + run_stream → event buffer.
 
@@ -896,13 +903,23 @@ async def _execute_job(
             record.owner,
             resume=resume,
             replay_mode=replay_mode,
+            shell_allowlist=shell_allowlist,
         )
     if replay_mode in ("cache", "replay"):
         # v3 #4-a: a plain (non-workflow_ref) cache/replay job builds a fresh
         # per-job agent (the pooled agent shares one client and can't isolate
         # this run's cache). Restricted sandbox + AutonomousApprovalHandler apply.
         return await _execute_plain_cache_job(
-            job_id, pool, registry, store, message, record, mode, max_iterations, replay_mode
+            job_id,
+            pool,
+            registry,
+            store,
+            message,
+            record,
+            mode,
+            max_iterations,
+            replay_mode,
+            shell_allowlist=shell_allowlist,
         )
 
     from koboi.events import CompleteEvent, OrchestrationCompleteEvent
@@ -994,6 +1011,10 @@ async def _execute_job(
                 # to auto-approve. Without this, every write_file/delete_file is
                 # denied and file-producing jobs can't run (e.g. job_multi_write_grep).
                 auto_approve_tools={"write_file", "delete_file"},
+                # Wave 2: operator-configured command globs (jobs.shell_allowlist)
+                # let a coding job run its build/test/git commands without a
+                # blanket Trust-DB rule; hardcoded policy denies still win.
+                shell_allowlist=shell_allowlist,
             )
             if mode is not None:
                 agent._core.mode_manager.switch_mode(AgentMode(mode))
@@ -1026,6 +1047,7 @@ async def resume_on_startup(
     timeout: float,
     webhooks: list[dict] | None = None,
     workflow_store: Any | None = None,
+    shell_allowlist: list[str] | None = None,
 ) -> int:
     """Resume interrupted jobs + requeue pending ones (#5: rehydrate-and-continue).
 
@@ -1076,6 +1098,7 @@ async def resume_on_startup(
                 workflow_ref=job.get("workflow_ref"),
                 workflow_store=workflow_store,
                 replay_mode=job.get("replay_mode"),
+                shell_allowlist=shell_allowlist,
             )
         )
         registry.set_running(job["job_id"], task)
@@ -1099,6 +1122,7 @@ async def resume_on_startup(
                 workflow_ref=job.get("workflow_ref"),
                 workflow_store=workflow_store,
                 replay_mode=job.get("replay_mode"),
+                shell_allowlist=shell_allowlist,
             )
         )
         registry.set_running(job["job_id"], task)

@@ -260,6 +260,13 @@ class AutonomousApprovalHandler(ApprovalHandler):
     use this instead of seeding a Trust-DB rule because the trust DB is shared
     across all pooled agents (one ``db_path``), so a persistent seeded rule
     would leak auto-approve to chat sessions.
+
+    ``shell_allowlist`` (Wave 2, ``jobs.shell_allowlist``) is the run_shell
+    analog: a job-scoped list of COMMAND glob patterns (``pytest*``,
+    ``git commit*``) auto-approved without a Trust-DB wildcard -- so an
+    unattended coding job can run its build/test/git commands while every
+    non-matching command still falls through to the trust-db-or-deny flow.
+    The hardcoded policy deny-list is re-checked first and always wins.
     """
 
     def __init__(
@@ -267,10 +274,34 @@ class AutonomousApprovalHandler(ApprovalHandler):
         trust_db: TrustDatabase | None = None,
         audit_trail: AuditTrail | None = None,
         auto_approve_tools: set[str] | None = None,
+        shell_allowlist: list[str] | None = None,
     ) -> None:
         self._trust_db = trust_db
         self.audit_trail = audit_trail
         self._auto_approve_tools = set(auto_approve_tools or ())
+        self._shell_allowlist = list(shell_allowlist or ())
+
+    def _shell_allowlist_decision(self, arguments: str) -> tuple[bool, str] | None:
+        """Match a run_shell command against the job allowlist.
+
+        Returns (approved, audit_reason) when the allowlist decides, or None to
+        fall through to the trust-db/deny flow (no pattern matched).
+        """
+        from fnmatch import fnmatch
+
+        from koboi.harness.policy import _extract_command, check_command_blocked
+
+        command = _extract_command(arguments)
+        if not command:
+            return None
+        blocked = check_command_blocked(command)
+        if blocked:
+            # Hardcoded safety wins even over a matching pattern.
+            return False, f"denied (job shell allowlist: {blocked})"
+        for pattern in self._shell_allowlist:
+            if fnmatch(command, pattern):
+                return True, f"auto-approve (job shell allowlist: {pattern})"
+        return None
 
     def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
         # Job-scoped allowlist first: auto-approve (e.g. in-workdir writes for
@@ -286,6 +317,13 @@ class AutonomousApprovalHandler(ApprovalHandler):
                 source="Autonomous",
             )
             return True
+        # Wave 2: job-scoped shell COMMAND allowlist (glob on the command string).
+        if tool_name == "run_shell" and self._shell_allowlist:
+            decision = self._shell_allowlist_decision(arguments)
+            if decision is not None:
+                approved, reason = decision
+                self._audit(tool_name, arguments, risk_level, approved, reason, source="Autonomous")
+                return approved
         # Safe / moderate: allow (base behavior).
         if risk_level != RiskLevel.DESTRUCTIVE:
             return True
