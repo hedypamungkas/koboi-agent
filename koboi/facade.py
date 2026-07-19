@@ -1752,7 +1752,13 @@ def _build_policy(config: Config):
 
     Always returns an engine -- the hardcoded deny-list works without user rules.
     """
-    from koboi.harness.policy import PolicyEngine, PolicyRule, PolicyAction
+    from koboi.harness.policy import PolicyEngine, PolicyRule, PolicyAction, set_policy_options
+
+    # Module-level option so the shell tool and skills !`cmd` gate (which call
+    # check_command_blocked directly, without an engine) honor it too.
+    set_policy_options(
+        allow_interpreter_exec=config.get("policy", "allow_interpreter_exec", default=False)
+    )
 
     engine = PolicyEngine()
     rules_conf = config.get("policy", "rules", default=[])

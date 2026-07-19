@@ -265,6 +265,11 @@ class PolicyConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     rules: list[PolicyRuleConfig] = Field(default_factory=list)
+    # Wave 2: lift ONLY the interpreter inline-code gate (python -c / bash -c /
+    # -e / stdin-redirect) for coding agents whose builds legitimately spawn
+    # them (Makefiles, npm scripts). All other hardcoded denies stay
+    # unconditional. Default off.
+    allow_interpreter_exec: bool = False
 
 
 class MemoryRetentionConfig(BaseModel):
