@@ -24,6 +24,13 @@ class AgentConfig(BaseModel):
     description: str = ""
     system_prompt: str = ""
     max_iterations: int = Field(default=10, ge=1)
+    # Wave 2: per-run budget ceiling. None = unbounded (prior behavior). With
+    # self_healing.graceful_max_iter the run degrades to a summary instead of
+    # raising AgentBudgetExceededError. token_prices (per-1k USD) drives the
+    # max_cost_usd math; defaults mirror eval CostScorer.
+    max_total_tokens: int | None = Field(default=None, ge=1)
+    max_cost_usd: float | None = Field(default=None, gt=0)
+    token_prices: dict[str, float] | None = None
     mode: str = "chat"
     theme: str = "koboi-dark"
     # JSON Schema dict; when set, the agent requests provider-enforced structured

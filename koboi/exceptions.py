@@ -13,6 +13,28 @@ class AgentMaxIterationsError(AgentError):
         super().__init__(message or f"Agent reached maximum iterations ({iterations})")
 
 
+class AgentBudgetExceededError(AgentError):
+    """Raised when a run exceeds its configured token/cost budget (Wave 2).
+
+    Configured via ``agent.max_total_tokens`` / ``agent.max_cost_usd``; with
+    ``self_healing.graceful_max_iter`` on, the loop degrades to a summary
+    instead of raising.
+    """
+
+    def __init__(
+        self,
+        *,
+        spent_tokens: int,
+        spent_usd: float,
+        limit: str,
+        message: str = "",
+    ):
+        self.spent_tokens = spent_tokens
+        self.spent_usd = spent_usd
+        self.limit = limit
+        super().__init__(message or f"Agent budget exceeded ({limit}): spent {spent_tokens} tokens (~${spent_usd:.4f})")
+
+
 class AgentGuardrailError(AgentError):
     def __init__(self, reason: str, direction: str = "input"):
         self.reason = reason

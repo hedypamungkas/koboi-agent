@@ -18,6 +18,7 @@ from koboi.events import (
 )
 from koboi.exceptions import (
     AgentAbortedError,
+    AgentBudgetExceededError,
     AgentGuardrailError,
     AgentHandoverError,
     AgentMaxIterationsError,
@@ -83,6 +84,12 @@ def _langfuse_trace_id(hooks: HookChain | None) -> str:
     return (getattr(lf, "_trace_id", "") or "") if lf else ""
 
 
+# Wave 2 budget: default per-1k-token prices for the cost ceiling. Same
+# constants as eval CostScorer (the only pricing in the codebase); override
+# per config via agent.token_prices.
+_DEFAULT_TOKEN_PRICES = {"input_per_1k": 0.005, "output_per_1k": 0.015}
+
+
 class AgentCore:
     """Core agent with async loop and built-in hook chain."""
 
@@ -92,6 +99,9 @@ class AgentCore:
         memory: ConversationMemory | None = None,
         tools: ToolRegistry | None = None,
         max_iterations: int = 10,
+        max_total_tokens: int | None = None,
+        max_cost_usd: float | None = None,
+        token_prices: dict | None = None,
         empty_response_reask_limit: int = 1,
         graceful_max_iter: bool = False,
         self_consistency_config: dict | None = None,
@@ -123,6 +133,12 @@ class AgentCore:
         self.memory = memory if memory is not None else ConversationMemory(logger=logger, system_prompt=system_prompt)
         self.tools = tools if tools is not None else ToolRegistry()
         self.max_iterations = max_iterations
+        # Wave 2: per-run token/cost ceiling (None = unbounded, prior behavior).
+        # Checked at each iteration top -- stops STARTING new iterations once
+        # the accumulated usage crosses a limit; a completed answer still returns.
+        self.max_total_tokens = max_total_tokens
+        self.max_cost_usd = max_cost_usd
+        self.token_prices = {**_DEFAULT_TOKEN_PRICES, **(token_prices or {})}
         # Self-healing P0-C: bounded re-ask budget for complete-but-empty responses
         # (default 1 = default-ON; 0 disables). An empty answer is never useful.
         self.empty_response_reask_limit = empty_response_reask_limit
@@ -563,6 +579,32 @@ class AgentCore:
         messages = await self._augment_llm(messages)
         return messages
 
+    def _budget_exceeded_info(self, total_usage: TokenUsage | None) -> dict | None:
+        """Return budget metadata when the run crossed a token/cost ceiling, else None.
+
+        Spent cost = prompt*input_price + completion*output_price (per 1k),
+        using agent.token_prices (defaults mirror eval CostScorer).
+        """
+        if total_usage is None or (self.max_total_tokens is None and self.max_cost_usd is None):
+            return None
+        spent_tokens = total_usage.total_tokens
+        spent_usd = (
+            total_usage.prompt_tokens * self.token_prices["input_per_1k"]
+            + total_usage.completion_tokens * self.token_prices["output_per_1k"]
+        ) / 1000.0
+        limit = None
+        if self.max_total_tokens is not None and spent_tokens >= self.max_total_tokens:
+            limit = f"max_total_tokens={self.max_total_tokens}"
+        elif self.max_cost_usd is not None and spent_usd >= self.max_cost_usd:
+            limit = f"max_cost_usd={self.max_cost_usd}"
+        if limit is None:
+            return None
+        return {
+            "budget_limit": limit,
+            "budget_spent_tokens": spent_tokens,
+            "budget_spent_usd": round(spent_usd, 6),
+        }
+
     def _update_usage(self, response: AgentResponse, total_usage: TokenUsage | None) -> TokenUsage | None:
         """Update token usage from response. Returns updated total_usage."""
         if not response.usage:
@@ -778,6 +820,33 @@ class AgentCore:
         self._last_self_consistency = None
 
         for i in range(self.max_iterations):
+            # Wave 2 budget: refuse to START another iteration once the run has
+            # crossed its token/cost ceiling (a completed answer still returns).
+            budget_info = self._budget_exceeded_info(total_usage)
+            if budget_info is not None:
+                self._log(f"Budget exceeded: {budget_info['budget_limit']}")
+                await self._emit(HookEvent.SESSION_END, iteration=i)
+                if self.graceful_max_iter:
+                    output = await self._graceful_max_iter_summary()
+                    output = await self._process_graceful_output(output)
+                    meta = self._run_metadata(resumed=resumed, last_step=i - 1)
+                    meta["budget_degraded"] = True
+                    meta.update(budget_info)
+                    return RunResult(
+                        content=output,
+                        iterations_used=i,
+                        tool_calls_made=tool_calls_made,
+                        pipeline_outcomes=pipeline_outcomes,
+                        token_usage=total_usage,
+                        success=True,
+                        elapsed_seconds=_time.monotonic() - _start,
+                        metadata=meta,
+                    )
+                raise AgentBudgetExceededError(
+                    spent_tokens=budget_info["budget_spent_tokens"],
+                    spent_usd=budget_info["budget_spent_usd"],
+                    limit=budget_info["budget_limit"],
+                )
             messages = await self._prepare_iteration(i)
             self._journal_step(i, status="running")
             tokens = estimate_tokens(messages)
@@ -955,8 +1024,30 @@ class AgentCore:
         # runs on the complete response, so a blocked output leaks. With no output
         # guardrail, stream live (current behavior; no latency cost).
         should_buffer = bool(self.output_guardrails)
+        total_usage: TokenUsage | None = None
 
         for i in range(self.max_iterations):
+            # Wave 2 budget: parity with the non-stream loop -- stop before
+            # starting an iteration once the token/cost ceiling is crossed.
+            budget_info = self._budget_exceeded_info(total_usage)
+            if budget_info is not None:
+                self._log(f"Budget exceeded: {budget_info['budget_limit']}")
+                await self._emit(HookEvent.SESSION_END, iteration=i)
+                if self.graceful_max_iter:
+                    output, ev = await self._graceful_stream_complete(
+                        _stream_tools_used, _start, i, {"budget_degraded": True, **budget_info}
+                    )
+                    yield TextDeltaEvent(content=output)
+                    yield ev
+                    return
+                yield ErrorEvent(
+                    error=AgentBudgetExceededError(
+                        spent_tokens=budget_info["budget_spent_tokens"],
+                        spent_usd=budget_info["budget_spent_usd"],
+                        limit=budget_info["budget_limit"],
+                    )
+                )
+                return
             messages = await self._prepare_iteration(i)
             self._journal_step(i, status="running")
             tokens = estimate_tokens(messages)
@@ -980,10 +1071,10 @@ class AgentCore:
 
             await self._emit(HookEvent.POST_LLM_CALL, iteration=i, llm_response=final_response)
 
-            if final_response and final_response.usage:
-                self._last_prompt_tokens = final_response.usage.prompt_tokens
-                if self.context_manager:
-                    self.context_manager.last_actual_tokens = final_response.usage.prompt_tokens
+            if final_response is not None:
+                # Also accumulates total_usage for the budget ceiling (Wave 2);
+                # keeps the _last_prompt_tokens / context-manager side effects.
+                total_usage = self._update_usage(final_response, total_usage)
 
             if final_response is None:
                 for d in delta_buffer:
@@ -1067,28 +1158,36 @@ class AgentCore:
         # Self-healing P3: graceful degrade in streaming -- summarize partial progress
         # instead of yielding an AgentMaxIterationsError ErrorEvent (opt-in).
         if self.graceful_max_iter:
-            output = await self._graceful_max_iter_summary()
-            output = await self._process_graceful_output(output)
-            unique_tools = list(dict.fromkeys(_stream_tools_used))
-            trace_id = ""
-            if self.hooks:
-                lf_hook = self.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
-                if lf_hook:
-                    trace_id = getattr(lf_hook, "_trace_id", "") or ""
-            meta = self._run_metadata(resumed=False, last_step=self.max_iterations - 1)
-            meta["max_iter_degraded"] = True
-            yield TextDeltaEvent(content=output)
-            yield CompleteEvent(
-                response=AgentResponse(content=output),
-                content=output,
-                elapsed_seconds=_time.monotonic() - _start,
-                iterations_used=self.max_iterations,
-                tools_used=unique_tools,
-                trace_id=trace_id,
-                metadata=meta,
+            output, ev = await self._graceful_stream_complete(
+                _stream_tools_used, _start, self.max_iterations, {"max_iter_degraded": True}
             )
+            yield TextDeltaEvent(content=output)
+            yield ev
             return
         yield ErrorEvent(error=AgentMaxIterationsError(self.max_iterations))
+
+    async def _graceful_stream_complete(
+        self, tools_used: list[str], _start: float, iterations_used: int, meta_extra: dict
+    ) -> tuple[str, CompleteEvent]:
+        """Build the degraded-summary output + CompleteEvent for graceful stream exits.
+
+        Shared by the max-iterations tail and the budget ceiling (Wave 2).
+        """
+        output = await self._graceful_max_iter_summary()
+        output = await self._process_graceful_output(output)
+        unique_tools = list(dict.fromkeys(tools_used))
+        trace_id = _langfuse_trace_id(self.hooks)
+        meta = self._run_metadata(resumed=False, last_step=max(iterations_used - 1, 0))
+        meta.update(meta_extra)
+        return output, CompleteEvent(
+            response=AgentResponse(content=output),
+            content=output,
+            elapsed_seconds=_time.monotonic() - _start,
+            iterations_used=iterations_used,
+            tools_used=unique_tools,
+            trace_id=trace_id,
+            metadata=meta,
+        )
 
     async def chat(self, user_message: str | list) -> RunResult:
         return await self.run(user_message)
