@@ -514,10 +514,14 @@ class AgentCore:
                     output = out_result.sanitized_content or (
                         "I don't have enough grounded information to answer this confidently."
                     )
-                    self._handover_from_guardrail = (
-                        out_result.reason or "handover requested",
-                        out_result.sanitized_content or "",
-                    )
+                    # Summary is intentionally "" -- the refusal (sanitized_content)
+                    # is already saved to memory below as the user-facing output, so
+                    # the operator still sees it via B2 replay. Passing the refusal as
+                    # the handover ``summary`` would (a) mislabel user copy as the
+                    # operator digest and (b) suppress the B4 warm-handoff digest
+                    # branch in server/app.py (``if not _summary and handoff_digest``).
+                    # Empty lets B4 generate a real summary (or B2 replay serves it).
+                    self._handover_from_guardrail = (out_result.reason or "handover requested", "")
                     break
                 self._last_output_guardrail = {
                     "guardrail": type(grd).__name__,

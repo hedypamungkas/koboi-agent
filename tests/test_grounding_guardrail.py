@@ -43,8 +43,11 @@ class _BoomJudge:
 
 def _guard(judge=None, threshold: float = 0.8, fail_closed: bool = False) -> GroundingGuardrail:
     g = GroundingGuardrail(
-        provider="openai", model="gpt-4o-mini", api_key="x",
-        threshold=threshold, fail_closed=fail_closed,
+        provider="openai",
+        model="gpt-4o-mini",
+        api_key="x",
+        threshold=threshold,
+        fail_closed=fail_closed,
     )
     if judge is not None:
         g._client = judge  # bypass lazy create_client
@@ -266,4 +269,62 @@ class TestGroundingGuardrailIntegration:
         with pytest.raises(AgentHandoverError):
             await core._process_output("some unverified answer", response=None, iteration=0)
         # flag cleared after the raise (no stale state for the next run)
+        assert core._handover_from_guardrail is None
+
+    async def test_fail_closed_grounding_propagates_through_run_stream(self):
+        """T2 e2e (streaming): a fail-closed GroundingGuardrail whose judge errors
+        propagates ``AgentHandoverError`` out of ``run_stream`` -- the same seam the
+        server layer converts to ``HandoverEvent`` (interactive SSE) / ``awaiting_human``
+        (jobs) + ``handover.webhooks``. Also locks two invariants:
+
+        - G8 buffering: with an output guardrail configured, TextDeltas are held until
+          ``_process_output`` passes; the raise discards them, so the unverified answer
+          never reaches the stream.
+        - The handover ``summary`` is empty (NOT the user-facing refusal) so the B4
+          warm-handoff digest generates the operator summary instead of reusing user copy.
+        """
+        import pytest
+
+        from koboi.events import TextDeltaEvent
+        from koboi.exceptions import AgentHandoverError
+        from koboi.loop import AgentCore
+        from koboi.memory import ConversationMemory
+        from koboi.rag.types import Chunk, RetrievalResult
+        from koboi.tools.registry import ToolRegistry
+        from tests.conftest import MockClient, make_mock_response
+
+        guard = _guard(_BoomJudge(), threshold=0.8, fail_closed=True)
+
+        class _FakeAug:
+            # Non-empty last_results so the loop threads non-empty context to the
+            # guardrail (otherwise the no-context cost-gate short-circuits the judge).
+            last_results = [RetrievalResult(Chunk(id="c1", doc_id="d", content="some context"), 0.9, "keyword")]
+            last_rewrite = None
+
+            async def augment_for_memory(self, user_message: str) -> str:
+                return user_message
+
+            async def augment_for_llm(self, messages):
+                return messages
+
+        core = AgentCore(
+            client=MockClient([make_mock_response(content="some unverified answer")]),
+            memory=ConversationMemory(),
+            tools=ToolRegistry(),
+            output_guardrails=[guard],
+            max_iterations=2,
+        )
+        core.augmentation = _FakeAug()  # type: ignore[assignment]
+
+        yielded: list = []
+        with pytest.raises(AgentHandoverError) as ei:
+            async for ev in core.run_stream("please answer"):
+                yielded.append(ev)
+        # Propagated with the fail-closed reason + EMPTY summary (B4 digest generates).
+        assert "fail-closed" in ei.value.reason
+        assert ei.value.summary == ""
+        # G8: the unverified answer was buffered and discarded on handover -- it never
+        # reached the stream as a TextDelta (only iteration bookkeeping was yielded).
+        assert not any(isinstance(ev, TextDeltaEvent) for ev in yielded)
+        # Stale-flag cleared (no spurious handover on the next run).
         assert core._handover_from_guardrail is None
