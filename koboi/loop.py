@@ -146,6 +146,7 @@ class AgentCore:
         if output_guardrail is not None and output_guardrail not in self.output_guardrails:
             self.output_guardrails.insert(0, output_guardrail)
         self._last_output_guardrail: dict | None = None  # R2: warn outcome -> RunResult.metadata
+        self._handover_from_guardrail: tuple[str, str] | None = None  # T2: guardrail handover pending raise
         # Self-healing P1: reflection-retry state. Stashed by _process_output from a
         # ReflectionHook's POST_OUTPUT flag; honored by _run_loop. None when no hook.
         self._reflection_retry_requested: dict | None = None
@@ -475,6 +476,9 @@ class AgentCore:
         if self.augmentation is not None:
             _results = getattr(self.augmentation, "last_results", None) or []
             retrieved_context = [r.chunk.content for r in _results]
+        # T2: clear any stale guardrail-handover flag from a prior interrupted call
+        # so a non-handover run cannot trip a spurious AgentHandoverError.
+        self._handover_from_guardrail = None
         for grd in self.output_guardrails:
             out_result = await grd.check(output, context=retrieved_context)
             self._audit("output_check", details=f"guardrail={type(grd).__name__} passed={out_result.passed}")
@@ -495,6 +499,24 @@ class AgentCore:
                     }
                     output = out_result.sanitized_content or (
                         "I don't have enough grounded information to answer this confidently."
+                    )
+                    break
+                if action.lower() == "handover":
+                    # T2: a guardrail (e.g. fail-closed GroundingGuardrail) requested
+                    # handover. Swap the output for the refusal, then raise
+                    # AgentHandoverError after the memory write below so the B1
+                    # pipeline turns it into awaiting_human + handover.webhooks.
+                    self._last_output_guardrail = {
+                        "guardrail": type(grd).__name__,
+                        "reason": out_result.reason,
+                        "action": "handover",
+                    }
+                    output = out_result.sanitized_content or (
+                        "I don't have enough grounded information to answer this confidently."
+                    )
+                    self._handover_from_guardrail = (
+                        out_result.reason or "handover requested",
+                        out_result.sanitized_content or "",
                     )
                     break
                 self._last_output_guardrail = {
@@ -520,6 +542,13 @@ class AgentCore:
         if _hr:
             raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
         self.memory.add_assistant_message(output)
+        # T2: honor a guardrail-requested handover AFTER saving the refusal to
+        # memory. Reuses the B1 pipeline (AgentHandoverError -> awaiting_human /
+        # HandoverEvent + handover.webhooks).
+        _hg = self._handover_from_guardrail
+        if _hg is not None:
+            self._handover_from_guardrail = None
+            raise AgentHandoverError(_hg[0], _hg[1])
         return output
 
     def _activate_skill(self, content: str) -> tuple[str, str] | None:
