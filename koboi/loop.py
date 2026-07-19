@@ -399,16 +399,26 @@ class AgentCore:
         return "I was unable to complete the task within the allowed steps."
 
     async def _process_graceful_output(self, output: str) -> str:
-        """Run output guardrails on the graceful-degrade summary + persist it (fail-soft).
+        """Run output guardrails on the graceful-degrade summary + persist it.
 
         Routes the summary through ``_process_output`` (the single guardrail + persist
-        gate) so it gets the same treatment as any terminal answer. A guardrail block
-        / handover / abort on the degrade falls back to the generic notice (preserve
-        the graceful "never raise" contract). Self-healing P3.
+        gate) so it gets the same treatment as any terminal answer. A ``block`` /
+        ``abort`` on the degrade falls back to the generic notice -- the summary is
+        task-progress meta-commentary, not a must-ship factual answer, so degrading it
+        preserves the graceful "no hard failure" contract. Self-healing P3.
+
+        A ``handover`` action (T2: a fail-closed GroundingGuardrail whose judge errors
+        on the summary, or a POST_OUTPUT handover hook) PROPAGATES rather than
+        degrading. A fail-closed deployment opted into "never ship an unverified
+        answer"; swallowing the handover at max_iter would silently defeat that.
+        Handover is a controlled yield (-> awaiting_human / HandoverEvent +
+        handover.webhooks), not a hard error, so P3's "no hard failure" spirit holds.
+        ``_process_output`` has already saved the refusal to memory before raising, so
+        the generic-notice fallback below does not double-write on the handover path.
         """
         try:
             return await self._process_output(output, AgentResponse(content=output), self.max_iterations - 1)
-        except (AgentGuardrailError, AgentHandoverError, AgentAbortedError):
+        except (AgentGuardrailError, AgentAbortedError):
             output = "I was unable to complete the task within the allowed steps."
             self.memory.add_assistant_message(output)
             return output
