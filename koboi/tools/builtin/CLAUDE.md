@@ -1,7 +1,7 @@
 # koboi/tools/builtin/ -- Built-in tool implementations
 
 ## What this is
-The 13 shipped tools, each a `@tool()`-decorated function in its own module and registered by
+The 14 shipped tools, each a `@tool()`-decorated function in its own module and registered by
 `register_all()` (`__init__.py`, called from the facade). Sync tools run in a thread via
 `asyncio.to_thread`; the registry calls `str(result)` on every return. See the parent
 `koboi/tools/CLAUDE.md` for the registry, `@tool()`, `RiskLevel`, and dependency-injection mechanics.
@@ -21,6 +21,7 @@ ingest.py       ingest_url                               MODERATE    fetch a URL
 handover.py     transfer_to_human                        SAFE        yield the conversation to a human operator (B1; raises AgentHandoverError)
 peer.py         call_peer_agent                          SAFE        cross-instance A2A fan-out (POSTs each peer's /v1/peer/invoke; needs `peers:` config + the `peer_registry` dep; idempotent=False; SAFE like web_fetch so it works in the interactive path without HITL approval)
 media.py        generate_image/video/music/speech +       MODERATE+   multimodal generation (Surplus/mock); deps=media_provider; generate_video=DESTRUCTIVE (1800s); +async submit_media_job/check_media_job (opt-in via media:)
+repo_map.py     repo_map                                 SAFE        directory tree + best-effort symbol outline (W4); read-only, on the chat/plan allowlist; Python = real ast.parse signatures, other langs = regex best-effort
 ```
 
 ## Conventions

@@ -113,6 +113,7 @@ _READ_ONLY_TOOLS: set[str] = {
     "git_status",
     "git_log",
     "git_diff",
+    "repo_map",
 }
 
 
