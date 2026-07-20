@@ -28,10 +28,23 @@ __init__.py    Re-exports register_sandbox, build_sandbox, BaseSandbox; calls re
 - **Path containment**: `validate_path(path)` anchors relative paths to the workdir and
   rejects anything resolving outside it (`PermissionError`). Defense-in-depth:
   `session_id` is validated at the server route boundary AND in `workdir_for()`.
-- **Network** (two layers):
-  - *Soft* (default): token-scan deny of obvious egress binaries (`curl`/`wget`/etc. via
+- **Network** (three layers):
+  - *Soft deny* (default): token-scan deny of obvious egress binaries (`curl`/`wget`/etc. via
     `network_binaries`). SOFT -- does NOT block interpreters (`python3 -c 'import urllib'`)
-    or shell builtins (`bash /dev/tcp`).
+    or shell builtins (`bash /dev/tcp`). NOTE: pip/npm/git are NOT in the deny scan --
+    under plain `deny` they fetch from anywhere.
+  - *Soft allowlist* (Wave 3, `network: allowlist` + `network_allowlist: [host globs]`):
+    scanned binaries (the deny set PLUS `pip`/`pip3`/`npm`/`pnpm`/`yarn`/`git`) may only
+    reference allowlisted hosts (`scheme://host` URLs + `git@host:` SSH forms); violations
+    return rc 126. **Intent-limiting, NOT enforcement**: it constrains hosts WRITTEN in the
+    command (`--index-url http://evil`, `git clone https://evil`) -- a command with no host
+    tokens passes (default-index fetches are unscannable), and interpreters still bypass it.
+    Realistic host set for a coding job: `pypi.org`, `files.pythonhosted.org`,
+    `registry.npmjs.org`, `github.com`, `codeload.github.com`, `*.githubusercontent.com`.
+    Proxy env vars are stripped like under deny. `sandbox.network` values are fail-closed
+    (`allow`/`deny`/`allowlist`; a typo raises at config load -- previously any non-"deny"
+    string silently meant allow). Hard per-destination enforcement awaits a container/netns
+    backend.
   - *Hard* (`network_isolation: seccomp` | `seccomp_strict`): syscall-layer deny of
     `connect`/`sendto`/`sendmsg`/`sendmmsg` via a seccomp filter applied in the
     child (preexec_fn) that persists across execve. Blocks interpreters + builtins too.

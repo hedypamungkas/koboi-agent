@@ -507,11 +507,26 @@ class SandboxConfig(BaseModel):
     # Per-session workdir is seeded as a git repo when true (read at pool.py:194).
     git_init: bool = False
     network_binaries: list[str] = Field(default_factory=list)
+    # Wave 3 ``network: allowlist`` tier: host globs a scanned network binary
+    # (deny set + pip/npm/git) may reference. SOFT/intent-limiting -- it
+    # constrains hosts written in the command, not what a tool resolves.
+    network_allowlist: list[str] = Field(default_factory=list)
     safe_path: list[str] = Field(default_factory=list)
     env_passthrough: bool = False
     rlimits: RlimitsConfig | None = None
     timeout: float = Field(default=30.0, gt=0)
     max_output: int = Field(default=10000, ge=1)
+
+    @field_validator("network")
+    @classmethod
+    def _validate_network(cls, v: str) -> str:
+        # Fail-closed (Wave 3): the backend treats any non-"deny" string as
+        # allow, so a typo like ``alowlist`` would silently open the network
+        # wide. Raise on unknown values instead.
+        allowed = {"allow", "deny", "allowlist"}
+        if v not in allowed:
+            raise ValueError(f"sandbox.network must be one of {sorted(allowed)}; got {v!r}")
+        return v
 
     @field_validator("network_isolation")
     @classmethod

@@ -25,6 +25,17 @@ sandbox:
   workdir: /data/workspace              # Docker volume mount (per-session subdir is automatic in server mode)
   network: deny                         # No outbound network from tools
   network_isolation: seccomp            # HARD egress deny via seccomp (needs python3-seccomp system package + Linux; falls back to soft otherwise)
+  # Coding jobs that must pip/npm/git-fetch: switch to the soft allowlist tier
+  # (drop network_isolation -- seccomp would block the installs). Intent-limiting,
+  # not enforcement: it constrains hosts WRITTEN in commands.
+  # network: allowlist
+  # network_allowlist:
+  #   - pypi.org
+  #   - files.pythonhosted.org
+  #   - registry.npmjs.org
+  #   - github.com
+  #   - codeload.github.com
+  #   - "*.githubusercontent.com"
   timeout: 30
   max_output: 20000
 
