@@ -1598,6 +1598,7 @@ class AgentAssembler:
             max_total_tokens=self.config.get("agent", "max_total_tokens", default=None),
             max_cost_usd=self.config.get("agent", "max_cost_usd", default=None),
             token_prices=self.config.get("agent", "token_prices", default=None),
+            parallel_tools_config=self.config.get("agent", "parallel_tools", default=None),
             graceful_max_iter=self.config.get("self_healing", "graceful_max_iter", default=False),
             self_consistency_config=self.config.get("self_healing", "self_consistency", default=None),
             empty_response_reask_limit=self.config.get("self_healing", "empty_response_reask_limit", default=1),

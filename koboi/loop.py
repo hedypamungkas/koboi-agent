@@ -102,6 +102,7 @@ class AgentCore:
         max_total_tokens: int | None = None,
         max_cost_usd: float | None = None,
         token_prices: dict | None = None,
+        parallel_tools_config: dict | None = None,
         empty_response_reask_limit: int = 1,
         graceful_max_iter: bool = False,
         self_consistency_config: dict | None = None,
@@ -140,6 +141,11 @@ class AgentCore:
         self.max_total_tokens = max_total_tokens
         self.max_cost_usd = max_cost_usd
         self.token_prices = {**_DEFAULT_TOKEN_PRICES, **(token_prices or {})}
+        # Wave 3: opt-in concurrent execution of all-read-only tool batches
+        # (agent.parallel_tools). Non-stream path only; default off.
+        _pt = parallel_tools_config or {}
+        self._parallel_enabled = bool(_pt.get("enabled", False))
+        self._parallel_max_concurrency = max(1, int(_pt.get("max_concurrency", 4)))
         # Self-healing P0-C: bounded re-ask budget for complete-but-empty responses
         # (default 1 = default-ON; 0 disables). An empty answer is never useful.
         self.empty_response_reask_limit = empty_response_reask_limit
@@ -652,6 +658,80 @@ class AgentCore:
             await asyncio.to_thread(self.checkpointer.ensure)
         return user_message, tool_defs, _time.monotonic()
 
+    def _parallel_batch_eligible(self, tool_calls: list[ToolCall]) -> bool:
+        """All-or-nothing gate for concurrent execution (Wave 3).
+
+        Every call must be read-only + SAFE + idempotent -- these bypass
+        approval prompting under every shipped handler default, never
+        checkpoint, and have no ordering-dependent side effects beyond the
+        deferred memory writes. Mixed batches stay fully sequential.
+        """
+        if not self._parallel_enabled or len(tool_calls) < 2:
+            return False
+        from koboi.modes import is_read_only_tool
+        from koboi.types import RiskLevel
+
+        for tc in tool_calls:
+            td = self.tools.get_definition(tc.name)
+            if td is None or not td.idempotent:
+                return False
+            if (self.tools.get_risk_level(tc.name) or RiskLevel.SAFE) != RiskLevel.SAFE:
+                return False
+            if not is_read_only_tool(tc.name):
+                return False
+        return True
+
+    async def _execute_tool_batch(self, tool_calls: list[ToolCall], iteration: int) -> list:
+        """Execute a tool-call batch; concurrently when eligible (Wave 3).
+
+        Concurrent path: semaphore-bounded gather with defer_record=True, then
+        ORDERED recording -- all tool results in original call order, then all
+        hook inject_messages (completion-order memory writes would break
+        Anthropic tool_result pairing and replay determinism). Any raised
+        Exception is synthesized into an errored result (an unanswered
+        tool_call_id would 400 the next LLM call); non-Exception
+        BaseExceptions re-raise after the writes.
+        """
+        if not self._parallel_batch_eligible(tool_calls):
+            return [await self._pipeline.execute_tool_call(tc, iteration=iteration) for tc in tool_calls]
+
+        from koboi.loop_pipeline import ToolPipelineResult
+
+        sem = asyncio.Semaphore(self._parallel_max_concurrency)
+
+        async def _one(tc: ToolCall):
+            async with sem:
+                return await self._pipeline.execute_tool_call(tc, iteration=iteration, defer_record=True)
+
+        raw = await asyncio.gather(*(_one(tc) for tc in tool_calls), return_exceptions=True)
+        results: list[ToolPipelineResult] = []
+        pending_raise: BaseException | None = None
+        for tc, r in zip(tool_calls, raw, strict=True):
+            if isinstance(r, ToolPipelineResult):
+                results.append(r)
+                continue
+            if isinstance(r, BaseException) and not isinstance(r, Exception):
+                pending_raise = pending_raise or r  # KeyboardInterrupt / SystemExit
+            elif isinstance(r, AgentHandoverError):
+                pending_raise = pending_raise or r  # unreachable via the predicate; fail correct
+            results.append(
+                ToolPipelineResult(
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result=f"Error executing '{tc.name}': {r}",
+                    errored=True,
+                    error_kind="execution_error",
+                )
+            )
+        for pr in results:  # ordered recording: results first...
+            self.memory.add_tool_result(pr.tool_call_id, pr.result)
+        for pr in results:  # ...then hook injects, grouped in original call order
+            for msg in pr.injected_context:
+                self.memory.add_context_message(msg, label="hook_inject")
+        if pending_raise is not None:
+            raise pending_raise
+        return results
+
     async def _checkpoint_after_call(self, tc: ToolCall, pr, step_index: int) -> None:
         """Commit the workdir after an executed mutating tool call (Wave 2).
 
@@ -994,8 +1074,8 @@ class AgentCore:
             if response.tool_calls:
                 self._log(f"LLM requested {len(response.tool_calls)} tool call(s)")
                 self._store_tool_response_in_memory(response)
-                for tc in response.tool_calls:
-                    pr = await self._pipeline.execute_tool_call(tc, iteration=i)
+                prs = await self._execute_tool_batch(response.tool_calls, i)
+                for tc, pr in zip(response.tool_calls, prs, strict=True):
                     # Only count tools that actually executed -- skipped/denied/blocked
                     # tools (rate-limit, approval, policy, mode) must NOT pollute
                     # tool_calls_made (and the derived tools_used) -- eval false positive.

@@ -31,6 +31,9 @@ class AgentConfig(BaseModel):
     max_total_tokens: int | None = Field(default=None, ge=1)
     max_cost_usd: float | None = Field(default=None, gt=0)
     token_prices: dict[str, float] | None = None
+    # Wave 3: opt-in concurrent execution of all-read-only tool batches
+    # ({enabled: bool, max_concurrency: int}); non-stream path only.
+    parallel_tools: dict | None = None
     mode: str = "chat"
     theme: str = "koboi-dark"
     # JSON Schema dict; when set, the agent requests provider-enforced structured

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging as _logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from collections.abc import Callable
 
@@ -73,6 +73,10 @@ class ToolPipelineResult:
     errored: bool = False
     error_kind: str | None = None
     idempotent: bool = True
+    # Wave 3 parallel execution: hook inject_messages collected (not written to
+    # memory) when the call ran with defer_record=True -- the loop replays them
+    # in original call order AFTER the batch's tool results.
+    injected_context: list[str] = field(default_factory=list)
 
 
 class ToolExecutionPipeline:
@@ -117,13 +121,18 @@ class ToolExecutionPipeline:
         message: str,
         skip_reason: str,
         on_event: EventCallback | None = None,
+        defer_record: bool = False,
+        injected_context: list[str] | None = None,
     ) -> ToolPipelineResult:
         """Common deny/skip tail: persist the tool result + emit event + build result.
 
         ``message`` is used for both conversation memory and the streamed result,
-        so there is one canonical string per deny path.
+        so there is one canonical string per deny path. With ``defer_record``
+        (Wave 3 parallel batches) the memory write is skipped -- the loop
+        replays ``pr.result`` in original call order.
         """
-        self.memory.add_tool_result(tc.id, message)
+        if not defer_record:
+            self.memory.add_tool_result(tc.id, message)
         if on_event:
             on_event(
                 "tool_result",
@@ -139,6 +148,7 @@ class ToolExecutionPipeline:
             # (skip_reason strings are already a clean taxonomy: rate_limit /
             # policy_denied / mode_blocked / denied). skipped=True stays authoritative.
             error_kind=skip_reason,
+            injected_context=list(injected_context or ()),
         )
 
     def _deny_tool(
@@ -148,6 +158,8 @@ class ToolExecutionPipeline:
         skip_reason: str,
         details: str,
         on_event: EventCallback | None = None,
+        defer_record: bool = False,
+        injected_context: list[str] | None = None,
     ) -> ToolPipelineResult:
         """Unified tool-denial: log + audit(``tool_denied``) + deny/skip tail.
 
@@ -162,7 +174,14 @@ class ToolExecutionPipeline:
             risk_level=risk.value,
             details=details,
         )
-        return self._deny_or_skip(tc, "Error: Tool execution denied by user", skip_reason, on_event)
+        return self._deny_or_skip(
+            tc,
+            "Error: Tool execution denied by user",
+            skip_reason,
+            on_event,
+            defer_record=defer_record,
+            injected_context=injected_context,
+        )
 
     async def _resolve_approval(
         self,
@@ -243,6 +262,7 @@ class ToolExecutionPipeline:
         tc: ToolCall,
         iteration: int,
         on_event: EventCallback | None = None,
+        defer_record: bool = False,
     ) -> ToolPipelineResult:
         """Execute a single tool call through the full pipeline.
 
@@ -250,11 +270,26 @@ class ToolExecutionPipeline:
             tc: The tool call to execute.
             iteration: Current loop iteration number.
             on_event: Optional callback(event_type, data) for streaming events.
+            defer_record: Wave 3 parallel batches -- skip ALL memory writes
+                (tool result + hook inject_messages); the caller replays them
+                in original call order (concurrent pipeline runs would append
+                in completion order, breaking Anthropic tool_result pairing
+                and replay determinism). Default False = byte-identical
+                behavior for every existing caller.
 
         Returns:
             ToolPipelineResult with the tool's output or skip reason.
         """
         self._log(f"tool: {tc.name}({tc.arguments[:100]})")  # 16.17: truncate args in logs
+
+        injected: list[str] = []
+
+        def _record_injects(msgs) -> None:
+            for msg in msgs:
+                if defer_record:
+                    injected.append(msg)
+                else:
+                    self.memory.add_context_message(msg, label="hook_inject")
 
         is_yolo = self.mode_manager is not None and self.mode_manager.current_mode == AgentMode.YOLO
 
@@ -264,7 +299,9 @@ class ToolExecutionPipeline:
             if not rl_result.passed:
                 self._log(f"Rate limited: {rl_result.reason}")
                 self._audit("rate_limit", tool_name=tc.name, details=rl_result.reason)
-                return self._deny_or_skip(tc, f"Error: {rl_result.reason}", "rate_limit", on_event)
+                return self._deny_or_skip(
+                    tc, f"Error: {rl_result.reason}", "rate_limit", on_event, defer_record, injected
+                )
             # Record immediately after check passes so subsequent checks
             # see the correct count (prevents off-by-one burst over-limit).
             self.rate_limiter.record(tc.name)
@@ -288,8 +325,7 @@ class ToolExecutionPipeline:
                 tool_arguments=tc.arguments,
             )
             pre_ctx = await self.hooks.emit(pre_ctx)
-            for msg in pre_ctx.inject_messages:
-                self.memory.add_context_message(msg, label="hook_inject")
+            _record_injects(pre_ctx.inject_messages)
 
             # 3a. Policy abort (always enforced, even in YOLO mode). Runs before
             #     approval so a policy-denied tool never wastes an approval prompt.
@@ -297,19 +333,27 @@ class ToolExecutionPipeline:
                 reason = pre_ctx.inject_message or "Blocked by policy"
                 self._log(f"Tool aborted by policy: {tc.name}")
                 self._audit("policy_denied", tool_name=tc.name, arguments=tc.arguments[:200], details=reason)
-                return self._deny_or_skip(tc, f"Error: {reason}", "policy_denied", on_event)
+                return self._deny_or_skip(tc, f"Error: {reason}", "policy_denied", on_event, defer_record, injected)
 
             # 3b. Mode block check (must precede approval; skipped in YOLO mode).
             if not is_yolo and pre_ctx.metadata.get("mode_blocked"):
                 reason = pre_ctx.metadata.get("mode_block_reason", "Blocked by current mode")
                 self._log(f"Mode blocked: {tc.name}")
-                return self._deny_or_skip(tc, f"Error: {reason}", "mode_blocked", on_event)
+                return self._deny_or_skip(tc, f"Error: {reason}", "mode_blocked", on_event, defer_record, injected)
 
         # 4. Approval resolution (trust DB fast-path + risk-based handler) -- unified.
         if not is_yolo:
             outcome = await self._resolve_approval(tc, risk)
             if not outcome.proceed:
-                return self._deny_tool(tc, risk, "denied", outcome.audit_details or "Denied by human", on_event)
+                return self._deny_tool(
+                    tc,
+                    risk,
+                    "denied",
+                    outcome.audit_details or "Denied by human",
+                    on_event,
+                    defer_record=defer_record,
+                    injected_context=injected,
+                )
             approval_prompted = outcome.prompted or outcome.reason == "skipped_via_trust"
 
         # 4c. Policy CONFIRM (M0): when policy asks for confirmation, route to the
@@ -327,7 +371,15 @@ class ToolExecutionPipeline:
                 tc, risk, policy_reason=policy_reason, already_prompted=approval_prompted
             )
             if not confirm_outcome.proceed:
-                return self._deny_tool(tc, risk, "policy_denied", f"Policy confirm denied: {policy_reason}", on_event)
+                return self._deny_tool(
+                    tc,
+                    risk,
+                    "policy_denied",
+                    f"Policy confirm denied: {policy_reason}",
+                    on_event,
+                    defer_record=defer_record,
+                    injected_context=injected,
+                )
 
         # 6. Execute tool (self-healing P0-D: structured outcome -> actionable msg)
         exec_outcome = await self.tools.execute_outcome(tc.name, tc.arguments)
@@ -363,8 +415,7 @@ class ToolExecutionPipeline:
             # FailureClassifierHook can tag failure_class without string-matching.
             post_ctx.metadata["tool_error_kind"] = error_kind
             post_ctx = await self.hooks.emit(post_ctx)
-            for msg in post_ctx.inject_messages:
-                self.memory.add_context_message(msg, label="hook_inject")
+            _record_injects(post_ctx.inject_messages)
             # Honor a hook's modified_tool_result (e.g. a CommandHook rewriting the
             # tool output). Without this, the local `tool_result` below would ignore
             # any POST_TOOL_USE mutation -- memory/audit/on_event/return would all
@@ -392,7 +443,8 @@ class ToolExecutionPipeline:
 
         # 8. Record result
         self._log(f"tool result: {tool_result[:200]}")
-        self.memory.add_tool_result(tc.id, tool_result)
+        if not defer_record:
+            self.memory.add_tool_result(tc.id, tool_result)
 
         self._audit(
             "tool_execute",
@@ -419,4 +471,5 @@ class ToolExecutionPipeline:
             errored=errored,
             error_kind=error_kind,
             idempotent=idempotent,
+            injected_context=injected,
         )
