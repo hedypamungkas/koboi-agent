@@ -234,7 +234,9 @@ class Orchestrator:
         self._media_backend = media_backend
         self._resume_ctx_json: str | None = None
         self._session_id = session_id
-        self._system_prompt = system_prompt or None
+        # ``.strip()`` so empty AND whitespace-only prompts coalesce to "unset"
+        # (byte-identical single-user-message synthesis), not a whitespace system msg.
+        self._system_prompt = (system_prompt or "").strip() or None
         # F9: reentrancy guard. The Orchestrator holds per-run mutable state (_agents_map,
         # _dynamic_blueprints) that is rebuilt each round, so it is NOT safe to drive two
         # concurrent runs on one instance. Today every caller (server pool = one Orchestrator
@@ -1115,10 +1117,46 @@ class Orchestrator:
         await self._emit_research_hook(
             HookEvent.PRE_LLM_CALL, iteration=ctx.depth, messages=[{"role": "user", "content": query}]
         )
-        plan = await plan_research(self.client, query)
+        plan = await plan_research(self.client, query, system_prompt=self._system_prompt)
         await self._emit_research_hook(
             HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=plan.reason or "research plan"
         )
+        if plan.needs_clarification and plan.clarifying_question:
+            # The request is ambiguous/under-scoped enough that research would likely
+            # target the wrong thing -- ask ONE question instead of committing to a
+            # multi-minute run. Ends the turn here, same shape as a normal completion
+            # (status="completed"); the caller decides whether/how to bridge the
+            # user's reply back into a follow-up query (deep_research has no
+            # cross-turn memory of its own).
+            yield RoutingDecisionEvent(
+                agents=["clarify"],
+                confidence=1.0,
+                method="dynamic",
+                reasoning="needs_clarification",
+                domain_label=None,
+            )
+            yield TextDeltaEvent(content=plan.clarifying_question)
+            await self._emit_research_hook(HookEvent.SESSION_END)
+            yield OrchestrationCompleteEvent(
+                final_answer=plan.clarifying_question,
+                elapsed_seconds=time.time() - start,
+                agent_results=[],
+                execution_mode="deep_research",
+                routing_agents=[],
+                routing_confidence=1.0,
+                metadata={
+                    "research_sources": [],
+                    "coverage": 0.0,
+                    "depth": 0,
+                    "run_id": run_id,
+                    "needs_clarification": True,
+                    "plan_nodes": 0,
+                    "used_searches": 0,
+                    "used_fetches": 0,
+                    "nodes_failed": 0,
+                },
+            )
+            return
         if not plan.needs_workflow or not plan.steps:
             # A7: simple request -> one direct node stamped deep_research (do NOT delegate to
             # _run_dynamic, which re-triages via plan_or_skip + mislabels execution_mode).
@@ -1206,7 +1244,7 @@ class Orchestrator:
             await self._emit_research_hook(
                 HookEvent.PRE_LLM_CALL, iteration=ctx.depth, messages=[{"role": "user", "content": drill_query}]
             )
-            plan = await plan_research(self.client, drill_query)
+            plan = await plan_research(self.client, drill_query, system_prompt=self._system_prompt)
             await self._emit_research_hook(
                 HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=plan.reason or "re-plan"
             )

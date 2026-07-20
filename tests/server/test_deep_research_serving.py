@@ -157,9 +157,10 @@ class TestHigh2JobsMiddlePath:
         registry.register("job-1", "job-sess", owner="dev")
         store = JobStore(str(tmp_path / "jobs.db"))
 
-        content = await _execute_job(
+        content, needs_clarification = await _execute_job(
             "job-1", pool, registry, store, "hello", mode=None, max_iterations=None, resume=False
         )
         assert content  # non-empty -- the report was captured from OrchestrationCompleteEvent
         assert "Direct answer" in content
+        assert needs_clarification is False
         await pool.close_all()

@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from koboi.events import OrchestrationCompleteEvent, TextDeltaEvent
+from koboi.events import OrchestrationCompleteEvent, RoutingDecisionEvent, TextDeltaEvent
 from koboi.orchestration.dag_scheduler import DagScheduler
 from koboi.orchestration.orchestrator import Orchestrator
 from koboi.orchestration.planner import plan_research
@@ -42,6 +42,8 @@ class _FakeClient:
         plan_needs_workflow: bool = True,
         synthesis: str = "## Report\nThe topic is X [1] and Y [1].",
         emit_search_call: bool = False,
+        needs_clarification: bool = False,
+        clarifying_question: str = "",
     ) -> None:
         self.node_answer = node_answer
         self.coverage_score = coverage_score
@@ -49,6 +51,8 @@ class _FakeClient:
         self.plan_needs_workflow = plan_needs_workflow
         self.synthesis = synthesis
         self.emit_search_call = emit_search_call
+        self.needs_clarification = needs_clarification
+        self.clarifying_question = clarifying_question
         # AgentCore's SESSION_START hook emit reads client.model; the duck-typed fake needs it.
         self.model = "fake-model"
         self.provider = "fake"
@@ -56,6 +60,19 @@ class _FakeClient:
     async def complete(self, messages, tools=None, response_format=None):
         text = " ".join(m.get("content", "") for m in messages)
         if "research planner" in text:
+            if self.needs_clarification:
+                return AgentResponse(
+                    content=json.dumps(
+                        {
+                            "needs_workflow": False,
+                            "needs_clarification": True,
+                            "clarifying_question": self.clarifying_question,
+                            "reason": "ambiguous",
+                            "steps": [],
+                        }
+                    ),
+                    tool_calls=[],
+                )
             if not self.plan_needs_workflow:
                 return AgentResponse(
                     content=json.dumps({"needs_workflow": False, "reason": "simple", "steps": []}),
@@ -254,6 +271,41 @@ def _orch(client, research, tmp_path):
         research=research,
         dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=str(tmp_path / "r.db")),
     )
+
+
+class TestClarifyingQuestion:
+    """The planner can ask ONE clarifying question instead of committing to a
+    multi-step research run when the request is ambiguous/under-scoped."""
+
+    async def test_needs_clarification_ends_turn_with_the_question(self, tmp_path):
+        client = _FakeClient(needs_clarification=True, clarifying_question="Untuk pasar mana -- Indonesia?")
+        orch = _orch(client, {"max_depth": 2, "coverage_threshold": 0.7}, tmp_path)
+        events = [e async for e in orch._run_deep_research("riset tren sneakers untuk gen z")]
+
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete
+        assert complete[0].final_answer == "Untuk pasar mana -- Indonesia?"
+        assert complete[0].execution_mode == "deep_research"
+        assert complete[0].metadata["needs_clarification"] is True
+        assert complete[0].metadata["depth"] == 0
+        assert complete[0].metadata["plan_nodes"] == 0
+        # No research actually ran -- routing decision is present (required for the
+        # non-streaming run() path) but no per-node dispatch/results were produced.
+        routing = [e for e in events if isinstance(e, RoutingDecisionEvent)]
+        assert routing and routing[0].agents == ["clarify"]
+        assert complete[0].agent_results == []
+
+    async def test_no_clarification_runs_research_as_normal(self, tmp_path):
+        # Backward compat: a _FakeClient that never sets needs_clarification behaves
+        # exactly as before (existing TestRunDeepResearch coverage already proves
+        # this, this is a same-file sanity check tying the two together).
+        client = _FakeClient(coverage_score=0.95)
+        orch = _orch(client, {"max_depth": 1, "coverage_threshold": 0.7}, tmp_path)
+        events = [e async for e in orch._run_deep_research("Tell me about X")]
+
+        complete = [e for e in events if isinstance(e, OrchestrationCompleteEvent)]
+        assert complete
+        assert complete[0].metadata.get("needs_clarification") in (None, False)
 
 
 class TestRunDeepResearch:
@@ -948,11 +1000,15 @@ class TestRunGuard:
 
 class TestSystemPromptReachesSynthesis:
     """Fix: the agent's configured system_prompt now reaches the final research
-    synthesis call -- previously silently dropped for deep_research/dynamic
-    modes (bare user-role prompt only), so tone/language/output-format
-    instructions had no effect on the rendered report."""
+    synthesis call -- previously silently dropped for deep_research mode (bare
+    user-role prompt only), so tone/language/output-format instructions had no
+    effect on the rendered report. (dynamic mode's _combine_results_stream has
+    the same gap and is a separate fast-follow.)"""
 
-    async def test_system_prompt_becomes_leading_system_message(self):
+    async def _capture_synthesis_messages(self, system_prompt):
+        """Run _synthesize_research and return ``(orchestrator, messages)`` where
+        ``messages`` is the list handed to ``client.complete``. ``system_prompt=None``
+        mirrors "not passed" (the param default)."""
         captured = {}
 
         class _CapturingClient(_FakeClient):
@@ -962,36 +1018,33 @@ class TestSystemPromptReachesSynthesis:
                     captured["messages"] = messages
                 return await super().complete(messages, tools, response_format)
 
-        orch = Orchestrator(
-            client=_CapturingClient(),
-            router=KeywordRouter(),
-            system_prompt="Balas ringkas dalam Bahasa Indonesia.",
-        )
+        orch = Orchestrator(client=_CapturingClient(), router=KeywordRouter(), system_prompt=system_prompt)
         ctx = ResearchContext()
         ctx.add_findings("node_a", "some finding")
         await orch._synthesize_research("Tell me about X", ctx)
+        return orch, captured["messages"]
 
-        msgs = captured["messages"]
+    async def test_system_prompt_becomes_leading_system_message(self):
+        _orch, msgs = await self._capture_synthesis_messages("Balas ringkas dalam Bahasa Indonesia.")
+
+        assert len(msgs) == 2
         assert msgs[0] == {"role": "system", "content": "Balas ringkas dalam Bahasa Indonesia."}
         assert msgs[-1]["role"] == "user"
 
     async def test_no_system_prompt_keeps_single_user_message(self):
         # Backward compat: unset system_prompt -> exactly one user message, byte-identical
         # to pre-fix behavior.
-        captured = {}
+        _orch, msgs = await self._capture_synthesis_messages(None)
 
-        class _CapturingClient(_FakeClient):
-            async def complete(self, messages, tools=None, response_format=None):
-                text = " ".join(m.get("content", "") for m in messages)
-                if "synthesizing a cited research report" in text:
-                    captured["messages"] = messages
-                return await super().complete(messages, tools, response_format)
-
-        orch = Orchestrator(client=_CapturingClient(), router=KeywordRouter())  # no system_prompt
-        ctx = ResearchContext()
-        ctx.add_findings("node_a", "some finding")
-        await orch._synthesize_research("Tell me about X", ctx)
-
-        msgs = captured["messages"]
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
+
+    async def test_empty_or_whitespace_system_prompt_treated_as_unset(self):
+        # ``.strip() or None`` coalesces empty AND whitespace-only prompts to
+        # "unset" -> byte-identical single-user-message synthesis (backward compat;
+        # a whitespace-only string is otherwise truthy and would slip through).
+        for blank in ("", "   "):
+            orch, msgs = await self._capture_synthesis_messages(blank)
+            assert orch._system_prompt is None
+            assert len(msgs) == 1
+            assert msgs[0]["role"] == "user"
