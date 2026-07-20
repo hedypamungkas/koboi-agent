@@ -277,7 +277,10 @@ class AgentCore:
             # Authoritative compaction signal: did manage() actually trim?
             # Stamped onto POST_COMPACT metadata so persistence hooks (e.g.
             # ReadBeforeWriteResetHook) only act on a real trim, not every iter.
-            self._last_compacted = len(messages) < pre
+            # Wave 3: body-only eviction (coding strategy) keeps the COUNT
+            # constant -- OR in the manager's honest signal so POST_COMPACT
+            # hooks (ReadBeforeWriteResetHook) still fire on real compaction.
+            self._last_compacted = len(messages) < pre or getattr(self.context_manager, "last_modified", False)
 
         # C/B: proactive long-term memory — ephemerally append recalled facts
         # (and the core block) to the system message AFTER compaction so they

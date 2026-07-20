@@ -41,14 +41,17 @@ tools:
       timeout: 30
   # disabled: [run_shell]   # example denylist: removes a tool from LLM view + execution
 
-# smart_truncation is WRONG for coding: it keeps only system + first user +
-# last N messages, silently dropping the agent's own recent file reads/edits.
-# Plain truncation with a generous budget keeps the working set intact.
+# Wave 3 "coding" strategy: old tool-result BODIES (file reads, test output)
+# collapse to one-line stubs; the newest result per (tool, path) stays
+# verbatim; the recent window is untouched. Falls back to plain truncation
+# when stubbing alone can't fit the budget.
 context:
-  strategy: "truncation"
+  strategy: "coding"
   max_context_tokens: 100000
   keep_last: 40
   safety_margin: 8000
+  # evict_min_chars: 200        # bodies <= this are never stubbed
+  # keep_newest_per_key: 1      # newest N per (tool, path) kept verbatim
 
 guardrails:
   input:

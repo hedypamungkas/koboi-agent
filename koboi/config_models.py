@@ -124,6 +124,11 @@ class ContextConfig(BaseModel):
     # response/tool result can't push an over-budget payload before the next
     # iteration trims. Default 0 preserves prior behavior.
     safety_margin: int = Field(default=0, ge=0)
+    # Wave 3 `strategy: coding` knobs -- tool-result body eviction: bodies
+    # under evict_min_chars are never stubbed; keep_newest_per_key results per
+    # (tool, path) identity stay verbatim.
+    evict_min_chars: int | None = Field(default=None, ge=0)
+    keep_newest_per_key: int | None = Field(default=None, ge=1)
 
 
 class RagConfig(BaseModel):

@@ -853,6 +853,13 @@ def _build_context(config: Config, logger: AgentLogger, client: Client | None = 
     summarization_truncation = config.get("context", "summarization_truncation")
     if summarization_truncation is not None:
         kwargs["summarization_truncation"] = summarization_truncation
+    # Wave 3: coding-strategy knobs. Gated on the strategy name -- build_context
+    # passes kwargs unfiltered, so other strategies would TypeError on them.
+    if strategy == "coding":
+        for key in ("evict_min_chars", "keep_newest_per_key"):
+            val = config.get("context", key)
+            if val is not None:
+                kwargs[key] = val
 
     mgr = build_context(strategy, logger=logger, client=client, **kwargs)
     if mgr is not None:
