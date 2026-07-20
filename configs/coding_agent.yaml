@@ -21,7 +21,7 @@ llm:
   # temperature: 0.3          # Lower for deterministic code generation
 
 tools:
-  builtin: [list_files, read_file, edit_file, write_file, delete_file, run_shell, grep_search, glob_find, git_status, git_log, git_diff]
+  builtin: [list_files, read_file, edit_file, write_file, delete_file, run_shell, grep_search, glob_find, git_status, git_log, git_diff, git_add, git_commit, git_checkout]
   defaults:
     timeout: 60
     max_output: 15000

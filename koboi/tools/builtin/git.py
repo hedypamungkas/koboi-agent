@@ -1,4 +1,4 @@
-"""koboi/tools/builtin/git -- Git repository operations (status, log, diff)."""
+"""koboi/tools/builtin/git -- Git repository operations (status, log, diff, add, commit, checkout, push)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import re
 import subprocess
 
 from koboi.tools.registry import tool, truncate_text
+from koboi.types import RiskLevel
 from koboi.harness.env import build_safe_env
 
 GIT_TIMEOUT = 15
@@ -204,3 +205,194 @@ def git_diff(
     if not parts:
         return "No changes (unstaged or staged)."
     return "\n".join(parts)
+
+
+# --------------------------------------------------------------------------- #
+# Write tools (Wave 3): add / commit / checkout / push. All reuse _run_git's
+# argv path (shell=False, "-C repo") -- no shell interpolation surface.
+# --------------------------------------------------------------------------- #
+
+_FALLBACK_IDENTITY = ("koboi-agent", "agent@koboi.local")  # matches pool._git_init_workdir
+
+
+def _validate_ref(value: str, arg_name: str) -> str | None:
+    """Option-injection + charset guard for ref-like args (git_diff precedent)."""
+    if value.startswith("-"):
+        return f"Error: {arg_name} cannot start with '-' (option injection guard)"
+    if not SAFE_TARGET_RE.match(value):
+        return f"Error: {arg_name} contains disallowed characters"
+    return None
+
+
+def _identity_args(repo_path: str, tool_config: dict | None, sandbox) -> list[str]:
+    """``-c user.name/email`` fallback when the repo has no commit identity.
+
+    build_safe_env strips GIT_* vars, so commits rely on git config. When the
+    repo (or allowed global config) already has user.email, return [] -- never
+    override an existing identity.
+    """
+    existing = _run_git(["config", "user.email"], repo_path, tool_config, sandbox=sandbox)
+    if existing.startswith("Error") or existing.strip() in ("", "(no output)"):
+        name, email = _FALLBACK_IDENTITY
+        return ["-c", f"user.name={name}", "-c", f"user.email={email}"]
+    return []
+
+
+@tool(
+    name="git_add",
+    group="git",
+    deps=["sandbox"],
+    description="Stage files for commit (git add). Defaults to all changes.",
+    risk_level=RiskLevel.MODERATE,
+    parameters={
+        "type": "object",
+        "properties": {
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Paths to stage. Default: ['.'] (all changes).",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": "Path to git repository. Default: current directory.",
+            },
+        },
+        "required": [],
+    },
+)
+def git_add(
+    paths: list[str] | None = None,
+    repo_path: str = ".",
+    _tool_config: dict | None = None,
+    _deps: dict | None = None,
+) -> str:
+    paths = [p for p in (paths or ["."]) if p]
+    for p in paths:
+        if p.startswith("-"):
+            return "Error: paths cannot start with '-' (option injection guard)"
+    # "--" separator: path args can never be parsed as options.
+    return _run_git(["add", "--"] + paths, repo_path, _tool_config, sandbox=(_deps or {}).get("sandbox"))
+
+
+@tool(
+    name="git_commit",
+    group="git",
+    deps=["sandbox"],
+    description="Commit staged changes (git commit -m). Stage first with git_add.",
+    risk_level=RiskLevel.MODERATE,
+    # Committing twice creates two commits; crash-resume must not silently
+    # replay it (issue #48 semantics), and the Wave-2 checkpointer keys its
+    # per-call commits on idempotent=False.
+    idempotent=False,
+    parameters={
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "Commit message",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": "Path to git repository. Default: current directory.",
+            },
+        },
+        "required": ["message"],
+    },
+)
+def git_commit(
+    message: str,
+    repo_path: str = ".",
+    _tool_config: dict | None = None,
+    _deps: dict | None = None,
+) -> str:
+    if not message or not message.strip():
+        return "Error: commit message must not be empty"
+    sandbox = (_deps or {}).get("sandbox")
+    identity = _identity_args(repo_path, _tool_config, sandbox)
+    return _run_git(identity + ["commit", "-m", message], repo_path, _tool_config, sandbox=sandbox)
+
+
+@tool(
+    name="git_checkout",
+    group="git",
+    deps=["sandbox"],
+    description="Switch branches or create one (git checkout [-b]).",
+    risk_level=RiskLevel.MODERATE,
+    parameters={
+        "type": "object",
+        "properties": {
+            "target": {
+                "type": "string",
+                "description": "Branch, tag, or commit to check out",
+            },
+            "create": {
+                "type": "boolean",
+                "description": "Create the branch (checkout -b). Default: false.",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": "Path to git repository. Default: current directory.",
+            },
+        },
+        "required": ["target"],
+    },
+)
+def git_checkout(
+    target: str,
+    create: bool = False,
+    repo_path: str = ".",
+    _tool_config: dict | None = None,
+    _deps: dict | None = None,
+) -> str:
+    err = _validate_ref(target, "target")
+    if err:
+        return err
+    args = ["checkout", "-b", target] if create else ["checkout", target]
+    return _run_git(args, repo_path, _tool_config, sandbox=(_deps or {}).get("sandbox"))
+
+
+@tool(
+    name="git_push",
+    group="git",
+    deps=["sandbox"],
+    description="Push commits to a remote (git push). No force push.",
+    # DESTRUCTIVE: mutates remote state (irreversible for collaborators, can
+    # trigger CI/deploys) -- must never be silently auto-approved in autonomous
+    # jobs the way MODERATE tools are; enable via Trust-DB / explicit intent.
+    risk_level=RiskLevel.DESTRUCTIVE,
+    idempotent=False,
+    parameters={
+        "type": "object",
+        "properties": {
+            "remote": {
+                "type": "string",
+                "description": "Remote name. Default: origin.",
+            },
+            "branch": {
+                "type": "string",
+                "description": "Branch to push. Default: the current branch (git push <remote> HEAD).",
+            },
+            "repo_path": {
+                "type": "string",
+                "description": "Path to git repository. Default: current directory.",
+            },
+        },
+        "required": [],
+    },
+)
+def git_push(
+    remote: str = "origin",
+    branch: str = "",
+    repo_path: str = ".",
+    _tool_config: dict | None = None,
+    _deps: dict | None = None,
+) -> str:
+    err = _validate_ref(remote, "remote")
+    if err:
+        return err
+    if branch:
+        err = _validate_ref(branch, "branch")
+        if err:
+            return err
+    args = ["push", remote, branch or "HEAD"]
+    return _run_git(args, repo_path, _tool_config, sandbox=(_deps or {}).get("sandbox"))

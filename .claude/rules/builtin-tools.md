@@ -20,7 +20,7 @@ globs: ["koboi/tools/builtin/**/*.py"]
 - `web.py` -- web search and fetch (SAFE)
 - `memory.py` -- persistent memory store/recall (SAFE)
 - `search.py` -- regex search in files (SAFE)
-- `git.py` -- git operations (MODERATE)
+- `git.py` -- git operations: `git_status`/`git_log`/`git_diff` (SAFE, read-only, on the chat/plan allowlist) + Wave-3 write tools `git_add`/`git_commit`/`git_checkout` (MODERATE; commit is idempotent=False with a `-c user.name/email` identity fallback) and `git_push` (DESTRUCTIVE, idempotent=False, no force flag)
 - `subagent.py` -- spawn parallel sub-agents (MODERATE)
 - `task.py` -- structured task management (SAFE)
 - `ingest.py` -- fetch a URL + chunk into the live knowledge corpus (MODERATE)
