@@ -1,7 +1,7 @@
 # koboi/tools/builtin/ -- Built-in tool implementations
 
 ## What this is
-The 15 shipped tools, each a `@tool()`-decorated function in its own module and registered by
+The 16 shipped tools, each a `@tool()`-decorated function in its own module and registered by
 `register_all()` (`__init__.py`, called from the facade). Sync tools run in a thread via
 `asyncio.to_thread`; the registry calls `str(result)` on every return. See the parent
 `koboi/tools/CLAUDE.md` for the registry, `@tool()`, `RiskLevel`, and dependency-injection mechanics.
@@ -23,6 +23,7 @@ peer.py         call_peer_agent                          SAFE        cross-insta
 media.py        generate_image/video/music/speech +       MODERATE+   multimodal generation (Surplus/mock); deps=media_provider; generate_video=DESTRUCTIVE (1800s); +async submit_media_job/check_media_job (opt-in via media:)
 repo_map.py     repo_map                                 SAFE        directory tree + best-effort symbol outline (W4); read-only, on the chat/plan allowlist; Python = real ast.parse signatures, other langs = regex best-effort
 github.py       github_create_pr / github_update_pr (DESTRUCTIVE, idempotent=False) + github_list_prs / github_get_pr (SAFE, read-only)   PR tooling (W4); in-process httpx (bypasses sandbox network tiers, like web_fetch); needs `github:` config + `github_client` dep
+background_shell.py  submit_background_shell (DESTRUCTIVE, idempotent=False) + check_background_shell (SAFE) / kill_background_shell (MODERATE, idempotent)   long-running processes (W4); opt-in `agent.background_shell.enabled`; manager in koboi/harness/background_shell.py; live process runs OUTSIDE the approval pipeline once started
 ```
 
 ## Conventions

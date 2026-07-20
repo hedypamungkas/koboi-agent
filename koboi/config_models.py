@@ -17,6 +17,23 @@ def _warn_unknown_keys(data: dict, model: type[BaseModel], path: str = "") -> No
             _logger.warning("Unknown config key '%s' will be ignored (typo?)", dotted)
 
 
+class BackgroundShellConfig(BaseModel):
+    """Opt-in background shell processes (Wave 4; default off).
+
+    Unlike ``run_shell`` (one bounded, approval-gated invocation), a started
+    process runs OUTSIDE the tool-execution pipeline for its whole lifetime --
+    only submit/check/kill are gated. ``max_lifetime_seconds`` is the mitigating
+    cap. See koboi/harness/background_shell.py.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    max_lifetime_seconds: float = Field(default=1800.0, gt=0)
+    max_concurrent: int = Field(default=4, ge=1)
+    output_buffer_chars: int = Field(default=20000, ge=1)
+
+
 class AgentConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -34,6 +51,8 @@ class AgentConfig(BaseModel):
     # Wave 3: opt-in concurrent execution of all-read-only tool batches
     # ({enabled: bool, max_concurrency: int}); non-stream path only.
     parallel_tools: dict | None = None
+    # Wave 4: opt-in submit/check/kill of long-running background shell processes.
+    background_shell: BackgroundShellConfig = Field(default_factory=BackgroundShellConfig)
     mode: str = "chat"
     theme: str = "koboi-dark"
     # JSON Schema dict; when set, the agent requests provider-enforced structured

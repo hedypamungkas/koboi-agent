@@ -317,6 +317,15 @@ class KoboiAgent:
                     await _media_backend.close()
                 except Exception as e:  # nosec B110 - best-effort teardown
                     logging.getLogger(__name__).debug("Media backend close failed: %s", e, exc_info=True)
+            # Kill any still-running background shell processes -- these live
+            # entirely outside the tool-execution pipeline once started, so
+            # nothing else reaps them on close (Wave 4).
+            _bg_manager = _media_tools.get_dep("background_shell_manager") if _media_tools is not None else None
+            if _bg_manager is not None:
+                try:
+                    await _bg_manager.kill_all()
+                except Exception as e:  # nosec B110 - best-effort teardown
+                    logging.getLogger(__name__).debug("Background shell kill_all failed: %s", e, exc_info=True)
             await self._core.client.close()
         # Clean up logger
         if self._logger is not None:
@@ -1610,6 +1619,7 @@ class AgentAssembler:
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
         _setup_peer_registry(self.tools, self.config, peer_registry=peer_registry)
         _setup_github(self.tools, self.config)
+        _setup_background_shell(self.tools, self.config)
 
         # Add the opt-in hooks (skill/task persistence, proactive extraction,
         # handover, self-healing). Shared with _build_orchestration so orchestration
@@ -2332,6 +2342,37 @@ def _setup_github(tools: ToolRegistry, config: Config) -> None:
     if client is None:
         return
     tools.set_dep("github_client", client)
+
+
+def _build_background_shell_manager(agent_conf: dict) -> object | None:
+    """Build a BackgroundShellManager from ``agent.background_shell:`` config, or None.
+
+    Same construction seam as ``_build_github_client`` -- kept as a standalone
+    function so tests can exercise it without a full facade build.
+    """
+    bg_conf = (agent_conf or {}).get("background_shell") or {}
+    if not bg_conf.get("enabled"):
+        return None
+    from koboi.harness.background_shell import BackgroundShellManager
+
+    return BackgroundShellManager(
+        max_concurrent=bg_conf.get("max_concurrent", 4),
+        output_buffer_chars=bg_conf.get("output_buffer_chars", 20000),
+        default_max_lifetime=bg_conf.get("max_lifetime_seconds", 1800.0),
+    )
+
+
+def _setup_background_shell(tools: ToolRegistry, config: Config) -> None:
+    """Inject the background-shell manager dep (submit/check/kill_background_shell).
+
+    Opt-in via ``agent.background_shell.enabled`` (default off) -- the tools are
+    already registered by ``register_all()`` like any other builtin tool; a
+    missing dep makes each tool return a graceful error string.
+    """
+    manager = _build_background_shell_manager(config.get("agent", default={}) or {})
+    if manager is None:
+        return
+    tools.set_dep("background_shell_manager", manager)
 
 
 def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None = None) -> None:

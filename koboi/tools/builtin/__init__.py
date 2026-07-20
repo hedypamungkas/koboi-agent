@@ -5,6 +5,7 @@ from koboi.tools.registry import ToolRegistry, register_decorated
 
 def register_all(registry: ToolRegistry) -> None:
     from koboi.tools.builtin import (
+        background_shell,
         calculator,
         filesystem,
         git,
@@ -23,6 +24,7 @@ def register_all(registry: ToolRegistry) -> None:
     )
 
     for mod in [
+        background_shell,
         calculator,
         filesystem,
         git,
