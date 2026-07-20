@@ -1242,6 +1242,15 @@ class AgentAssembler:
         )
         return self.journal
 
+    def _resolve_workdir(self) -> str | None:
+        """Resolve the sandbox workdir, or None if unresolvable.
+
+        Shared by ``build_checkpointer`` and ``build_proactive_memory`` (repo_scoped)
+        -- both need the same "what is the repo root" answer, and neither should
+        silently fall back to the process cwd.
+        """
+        return getattr(self.sandbox, "workdir", None) or self.config.get("sandbox", "workdir", default=None)
+
     def build_checkpointer(self) -> object:
         """Build the workdir checkpointer (Wave 2, ``journal.checkpoint``).
 
@@ -1262,7 +1271,7 @@ class AgentAssembler:
             )
             self.checkpointer = None
             return None
-        workdir = getattr(self.sandbox, "workdir", None) or self.config.get("sandbox", "workdir", default=None)
+        workdir = self._resolve_workdir()
         if not workdir:
             logging.getLogger(__name__).warning(
                 "journal.checkpoint enabled but no sandbox workdir is configured -- "
@@ -1381,6 +1390,14 @@ class AgentAssembler:
         Constructed only when ``memory.proactive.enabled`` is true. Reuses the
         KV ``_MemoryStore`` (creating one if the memory tool isn't registered)
         and the embedding client (dedicated if configured, else the chat client).
+
+        Wave 4 (``memory.proactive.repo_scoped``): when set, the KV store is
+        re-anchored to ``<workdir>/.koboi/memory.json`` (overwriting the
+        ``memory_store_ref`` dep too, so ``memory_store``/``memory_recall`` share
+        the same repo-scoped file) and the core-memory block is folded into that
+        same file instead of session-scoped ``session_meta`` -- see
+        ``ProactiveMemory``'s ``repo_scoped`` param. Unresolvable workdir -> warn +
+        disable, mirroring ``build_checkpointer``'s refusal posture.
         """
         cfg = self.config.get("memory", "proactive", default={}) or {}
         if not cfg.get("enabled"):
@@ -1389,8 +1406,25 @@ class AgentAssembler:
         from koboi.proactive_memory import ProactiveMemory
         from koboi.tools.builtin.memory import _MemoryStore
 
+        repo_scoped = bool(cfg.get("repo_scoped", False))
         store = self.tools.get_dep("memory_store_ref") if self.tools else None
-        if store is None:
+        if repo_scoped:
+            workdir = self._resolve_workdir()
+            if not workdir:
+                logging.getLogger(__name__).warning(
+                    "memory.proactive.repo_scoped enabled but no sandbox workdir is "
+                    "configured -- refusing to fall back to a global memory file; "
+                    "proactive memory disabled"
+                )
+                self.proactive_memory = None
+                return None
+            import os
+
+            scoped_path = os.path.join(os.path.realpath(str(workdir)), ".koboi", "memory.json")
+            store = _MemoryStore(filepath=scoped_path)
+            if self.tools is not None:
+                self.tools.set_dep("memory_store_ref", store)
+        elif store is None:
             store = _MemoryStore(filepath=self.config.get("tools", "memory_file", default=".agent_memory.json"))
         embedding_client = _build_embedding_client(self.config, self.logger) or self.client
         self.proactive_memory = ProactiveMemory(
@@ -1399,6 +1433,7 @@ class AgentAssembler:
             memory=self.memory,
             store=store,
             config=cfg,
+            repo_scoped=repo_scoped,
         )
         return self.proactive_memory
 

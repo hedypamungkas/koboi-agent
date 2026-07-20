@@ -313,6 +313,11 @@ class ProactiveMemoryConfig(BaseModel):
     top_k: int = Field(default=4, ge=1)  # facts injected per turn (C)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)  # cosine floor (C)
     max_facts: int = Field(default=200, ge=1)  # cap the embedded KV set (C)
+    # Wave 4: anchor the KV store to <sandbox workdir>/.koboi/memory.json (instead
+    # of the global default) and fold the core block into that same file so
+    # conventions survive across sessions on the same repo, not just within one
+    # session_id. Orthogonal to memory.owner (tenant tag) -- don't conflate them.
+    repo_scoped: bool = False
 
 
 class MemoryConfig(BaseModel):
