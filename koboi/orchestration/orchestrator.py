@@ -198,6 +198,10 @@ class Orchestrator:
         # W7: session_id tags persisted research_context rows so GET /v1/sessions/{id}
         # can map a session to its deep-research run. None for non-server callers.
         session_id: str | None = None,
+        # Fix: the agent's configured system_prompt (tone/language/output-format
+        # instructions) previously never reached deep_research's final synthesis
+        # call -- only chat/act/auto modes honored it. See _synthesize_research.
+        system_prompt: str | None = None,
     ):
         self.client = client
         self.router = router
@@ -230,6 +234,7 @@ class Orchestrator:
         self._media_backend = media_backend
         self._resume_ctx_json: str | None = None
         self._session_id = session_id
+        self._system_prompt = system_prompt or None
         # F9: reentrancy guard. The Orchestrator holds per-run mutable state (_agents_map,
         # _dynamic_blueprints) that is rebuilt each round, so it is NOT safe to drive two
         # concurrent runs on one instance. Today every caller (server pool = one Orchestrator
@@ -1362,9 +1367,13 @@ class Orchestrator:
         from koboi.orchestration.research import build_research_synthesis_prompt
 
         prompt = build_research_synthesis_prompt(query, ctx)
+        messages = []
+        if self._system_prompt:
+            messages.append({"role": "system", "content": self._system_prompt})
+        messages.append({"role": "user", "content": prompt})
         report: str | None = None
         try:
-            resp = await self.client.complete(messages=[{"role": "user", "content": prompt}], tools=None)
+            resp = await self.client.complete(messages=messages, tools=None)
             if resp.content and resp.content.strip():
                 report = resp.content
         except Exception as e:  # noqa: BLE001 - synthesis is best-effort
