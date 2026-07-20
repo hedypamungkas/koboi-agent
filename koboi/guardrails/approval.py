@@ -329,9 +329,9 @@ class AutonomousApprovalHandler(ApprovalHandler):
             return True
         # Destructive: check Trust DB; deny if no rule.
         if self._trust_db:
-            decision = self._trust_db.should_auto_approve(tool_name, risk_level, arguments)
-            if decision.auto_approve:
-                self._audit(tool_name, arguments, risk_level, True, decision.reason, source="Autonomous")
+            trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level, arguments)
+            if trust_decision.auto_approve:
+                self._audit(tool_name, arguments, risk_level, True, trust_decision.reason, source="Autonomous")
                 return True
         self._audit(
             tool_name,

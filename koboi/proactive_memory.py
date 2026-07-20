@@ -330,6 +330,6 @@ class ProactiveMemory:
             if self._repo_scoped:
                 self._store.store(_CORE_STORE_KEY, rendered)
             else:
-                self._memory.set_meta(_CORE_META_KEY, rendered)
+                set_meta(_CORE_META_KEY, rendered)  # set_meta resolved via getattr at merge entry
         except Exception as exc:  # nosec - best-effort persist
             _logger.warning("Proactive core block persist failed: %s", exc)

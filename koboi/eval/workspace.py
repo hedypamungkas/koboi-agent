@@ -44,7 +44,7 @@ def _tail(*chunks: str) -> str:
 
 def _git(args: list[str], *, cwd: str | None = None) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(
+        return subprocess.run(  # nosec B607 -- intentional partial-path "git" invocation; argv is a controlled list (no shell), cwd-scoped to the eval workspace
             ["git", *args],
             cwd=cwd,
             capture_output=True,
@@ -111,12 +111,12 @@ def prepare_workspace(
         if case.setup_commands:
             sandbox = build_sandbox({"backend": "restricted", "workdir": str(ws), "network": network})
             for cmd in case.setup_commands:
-                res = sandbox.run(cmd, shell=True, cwd=str(ws), timeout=setup_timeout)
-                if getattr(res, "timed_out", False):
+                sres = sandbox.run(cmd, shell=True, cwd=str(ws), timeout=setup_timeout)
+                if getattr(sres, "timed_out", False):
                     raise WorkspaceSetupError(f"setup command timed out after {setup_timeout}s: {cmd!r}")
-                if res.returncode != 0:
+                if sres.returncode != 0:
                     raise WorkspaceSetupError(
-                        f"setup command failed (exit={res.returncode}): {cmd!r}\n{_tail(res.stdout, res.stderr)}"
+                        f"setup command failed (exit={sres.returncode}): {cmd!r}\n{_tail(sres.stdout, sres.stderr)}"
                     )
     except BaseException:
         shutil.rmtree(ws, ignore_errors=True)

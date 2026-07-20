@@ -29,6 +29,7 @@ from koboi.hooks.chain import HookEvent
 if TYPE_CHECKING:
     import threading
 
+    from koboi.checkpoint import WorkdirCheckpointer
     from koboi.context.manager import ContextManager
     from koboi.events import StreamEvent
     from koboi.guardrails.approval import ApprovalHandler
@@ -1176,7 +1177,7 @@ class AgentAssembler:
         self.hook_chain: HookChain | None = None
         self.sandbox: BaseSandbox | None = None
         self.journal: StepJournal | None = None
-        self.checkpointer = None  # Wave 2: WorkdirCheckpointer | None (journal.checkpoint)
+        self.checkpointer: WorkdirCheckpointer | None = None  # Wave 2: shadow-repo checkpoint (journal.checkpoint)
         # Wave2 #1: proactive_memory is only populated by ``build_proactive_memory()``,
         # but ``build_opt_in_hooks()`` (shared with the orchestration path) reads it
         # unconditionally -- default to None so the attribute always exists.

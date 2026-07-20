@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from koboi.journal import StepJournal
     from koboi.trust import TrustStore
     from koboi.proactive_memory import ProactiveMemory
+    from koboi.checkpoint import WorkdirCheckpointer
 
 _log = _logging.getLogger("koboi.loop")
 
@@ -121,7 +122,7 @@ class AgentCore:
         hook_chain: HookChain | None = None,
         mode_manager: ModeManager | None = None,
         journal: StepJournal | None = None,
-        checkpointer: object | None = None,
+        checkpointer: WorkdirCheckpointer | None = None,
         trust_db: TrustStore | None = None,
         output_schema: dict | None = None,
         force_response_format_with_tools: bool = False,

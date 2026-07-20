@@ -62,7 +62,7 @@ class GithubClient:
 
     async def list_prs(self, owner: str, repo: str, state: str = "open", per_page: int = 30) -> list[dict]:
         url = f"{self._api_base}/repos/{owner}/{repo}/pulls"
-        params = {"state": state, "per_page": min(per_page, 100)}
+        params: dict[str, str | int] = {"state": state, "per_page": min(per_page, 100)}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.get(url, params=params, headers=self._headers())
         resp.raise_for_status()
