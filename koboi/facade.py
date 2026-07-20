@@ -1574,6 +1574,7 @@ class AgentAssembler:
         _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
         _setup_peer_registry(self.tools, self.config, peer_registry=peer_registry)
+        _setup_github(self.tools, self.config)
 
         # Add the opt-in hooks (skill/task persistence, proactive extraction,
         # handover, self-healing). Shared with _build_orchestration so orchestration
@@ -2122,6 +2123,10 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
 
         media_backend = build_media(media_conf)
 
+    # W4: same client-construction path as the single-agent _setup_github, so
+    # orchestration sub-agents get github_* tools too (issue #81's fix pattern).
+    github_client = _build_github_client(config.get("github", default={}) or {})
+
     if agent_defs:
         agents_map = AgentFactory.create_all_configured(
             agent_defs,
@@ -2137,6 +2142,7 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
             search_provider=shared_search_provider,
             fetch_provider=shared_fetch_provider,
             media_provider=media_backend,
+            github_client=github_client,
         )
     else:
         agents_map = {}
@@ -2253,6 +2259,44 @@ def _setup_peer_registry(tools: ToolRegistry, config: Config, peer_registry: Pee
 
         register_decorated(tools, _peer_tool)
     tools.set_dep("peer_registry", registry)
+
+
+def _build_github_client(github_conf: dict) -> object | None:
+    """Build a GithubClient from ``github:`` config, or None if not usable.
+
+    Shared by the single-agent facade path and ``_build_orchestration`` so both
+    wire the same client construction/validation.
+    """
+    if not github_conf or not github_conf.get("enabled"):
+        return None
+    token = github_conf.get("token") or ""
+    if not token:
+        logging.getLogger(__name__).warning(
+            "github.enabled is true but github.token is empty -- github_* tools will "
+            "return an error string until a token is configured."
+        )
+        return None
+    from koboi.tools.builtin.github import GithubClient
+
+    return GithubClient(
+        token=token,
+        api_base=github_conf.get("api_base", "https://api.github.com"),
+        timeout=github_conf.get("timeout", 15),
+    )
+
+
+def _setup_github(tools: ToolRegistry, config: Config) -> None:
+    """Inject the GitHub PR-tooling client (front door: github_create_pr/update_pr/list_prs/get_pr).
+
+    Mirrors ``_setup_peer_registry``: the github tools are already registered by
+    ``register_all()`` (so ``tools.builtin`` allowlisting can name them), but a
+    missing/disabled ``github_client`` dep makes each tool return a graceful error
+    string rather than crash.
+    """
+    client = _build_github_client(config.get("github", default={}) or {})
+    if client is None:
+        return
+    tools.set_dep("github_client", client)
 
 
 def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None = None) -> None:

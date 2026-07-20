@@ -68,3 +68,7 @@ __init__.py    Re-exports register_sandbox, build_sandbox, BaseSandbox; calls re
 - **Autonomous jobs require `restricted`** (`passthrough` refused at job execution -- C3).
 - `register_sandbox` is the extension point for custom backends (e.g. a future Docker/container
   backend). Backends implement `run()`, `validate_path()`, `build_env()` (see BaseSandbox ABC).
+- **In-process HTTP tool calls bypass all three network tiers** (Wave 4): `web_fetch`,
+  `call_peer_agent`, and `github_*` make their outbound request via `httpx` directly in Python,
+  never through a subprocess -- the sandbox's `run()`-based scanning never sees them. Trust for
+  these is config-level (operator-set `api_base`/`peers:`), not the subprocess network scanner.

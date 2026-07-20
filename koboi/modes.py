@@ -114,6 +114,8 @@ _READ_ONLY_TOOLS: set[str] = {
     "git_log",
     "git_diff",
     "repo_map",
+    "github_list_prs",
+    "github_get_pr",
 }
 
 

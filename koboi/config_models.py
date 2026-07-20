@@ -480,6 +480,22 @@ class PeersConfig(BaseModel):
     )
 
 
+class GithubConfig(BaseModel):
+    """GitHub PR tooling configuration (opt-in; inert by default).
+
+    In-process httpx client (not a subprocess) -- see koboi/tools/builtin/github.py
+    for why the token must never ride subprocess env (GITHUB_TOKEN is stripped by
+    build_safe_env's secret blocklist).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    token: str = ""
+    api_base: str = "https://api.github.com"
+    timeout: int = 15
+
+
 class RlimitsConfig(BaseModel):
     """POSIX resource limits applied to restricted sandbox subprocesses.
 
@@ -788,6 +804,7 @@ class KoboiConfig(BaseModel):
     media: MediaConfig = Field(default_factory=MediaConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
+    github: GithubConfig = Field(default_factory=GithubConfig)
     self_healing: SelfHealingConfig = Field(default_factory=SelfHealingConfig)
     handover: dict = Field(default_factory=dict)  # handover.detection / handover.digest / handover.webhooks
     # Pass-through sections read at runtime via ``config.get(<key>, ...)`` but not

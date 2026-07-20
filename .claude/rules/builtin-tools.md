@@ -13,7 +13,7 @@ globs: ["koboi/tools/builtin/**/*.py"]
 - Tool config can be passed via `set_config()` if the module defines it
 - Dependency injection: declare `_deps` and `_tool_config` params, injected at call time
 
-## Built-in tools (14)
+## Built-in tools (15)
 - `calculator.py` -- math expression evaluator (SAFE)
 - `filesystem.py` -- list/read/write/edit/delete files (`list_files`/`read_file` SAFE; `write_file`/`edit_file`/`delete_file` DESTRUCTIVE, idempotent=False). `edit_file` = exact-string replace (unique match or `replace_all`), atomic temp+`os.replace` write; `read_file` takes optional `offset`/`limit` (1-based line range, numbered output)
 - `shell.py` -- execute shell commands (DESTRUCTIVE)
@@ -28,3 +28,4 @@ globs: ["koboi/tools/builtin/**/*.py"]
 - `media.py` -- `generate_image`/`generate_video`/`generate_music`/`generate_speech`/`transcribe_audio` + async `submit_media_job`/`check_media_job` (MODERATE/DESTRUCTIVE; opt-in `media:`)
 - `peer.py` -- `call_peer_agent`: cross-instance A2A fan-out via POST to a peer's `/v1/peer/invoke` (SAFE; needs `peers:` config + `peer_registry` dep)
 - `repo_map.py` -- `repo_map`: directory tree + best-effort symbol outline (SAFE, read-only, on the chat/plan allowlist). Python files get real `ast.parse`-based top-level function/class signatures; other languages get a best-effort (not language-aware) regex scan. Bounded by `max_depth`/`max_entries`; skips `.git`/`node_modules`/`__pycache__`/etc.
+- `github.py` -- GitHub PR tooling: `github_create_pr`/`github_update_pr` (DESTRUCTIVE, idempotent=False) + `github_list_prs`/`github_get_pr` (SAFE, read-only, on the chat/plan allowlist). In-process `httpx` client (needs `github: {enabled: true, token: ${GITHUB_TOKEN:}}`); bypasses sandbox network tiers (like `web_fetch`); token must never ride subprocess env.
