@@ -10,6 +10,7 @@ from koboi.tools.builtin.filesystem import (
     read_file,
     write_file,
     edit_file,
+    apply_patch,
     delete_file,
     _validate_path,
 )
@@ -148,7 +149,7 @@ class TestPathValidation:
             if str(tmp_path) not in result:
                 pass  # Expected - different path
             else:
-                assert False, "Should have raised PermissionError or returned different path"
+                pytest.fail("Should have raised PermissionError or returned different path")
         except PermissionError:
             pass  # Expected
 
@@ -462,3 +463,175 @@ class TestEditFile:
         assert "Error" in result
         assert "no access" in result
         assert outside.read_text() == "secret = 1\n"
+
+
+class TestApplyPatch:
+    def _patch(self, old, new, context_before="", context_after=""):
+        """Build a minimal single-hunk unified diff replacing ``old`` with ``new``."""
+        return (
+            "@@ -1,3 +1,3 @@\n"
+            f"{context_before}"
+            f"-{old}\n"
+            f"+{new}\n"
+            f"{context_after}"
+        )
+
+    def test_apply_patch_single_hunk(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        test_file.write_text("def add(a, b):\n    return a - b\n\ndef sub(a, b):\n    return a - b\n")
+        patch = (
+            "@@ -1,2 +1,2 @@\n"
+            " def add(a, b):\n"
+            "-    return a - b\n"
+            "+    return a + b\n"
+        )
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 1 hunk" in result
+        assert "return a + b" in test_file.read_text()
+        # untouched hunk survives
+        assert "def sub(a, b):\n    return a - b" in test_file.read_text()
+
+    def test_apply_patch_multi_hunk_atomic(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\nc = 3\n")
+        patch = (
+            "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n"
+            "@@ -3,1 +3,1 @@\n-c = 3\n+c = 30\n"
+        )
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 2 hunk" in result
+        assert test_file.read_text() == "a = 10\nb = 2\nc = 30\n"
+
+    def test_apply_patch_all_or_nothing_leaves_file_unchanged(self, tmp_path):
+        """If a later hunk fails, earlier hunks are NOT partially written."""
+        test_file = tmp_path / "code.py"
+        original = "a = 1\nb = 2\n"
+        test_file.write_text(original)
+        patch = (
+            "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n"
+            "@@ -2,1 +2,1 @@\n-NOT PRESENT\n+x\n"
+        )
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Error" in result
+        assert "hunk #2" in result
+        # File is byte-identical to the original -- no partial mutation.
+        assert test_file.read_text() == original
+
+    def test_apply_patch_context_not_found_error(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        original = "a = 1\n"
+        test_file.write_text(original)
+        patch = "@@ -1,1 +1,1 @@\n-missing\n+new\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Error" in result
+        assert "context not found" in result
+        assert test_file.read_text() == original
+
+    def test_apply_patch_ambiguous_context_error(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        original = "dup\na = 1\ndup\n"
+        test_file.write_text(original)
+        patch = "@@ -1,1 +1,1 @@\n-dup\n+unique\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Error" in result
+        assert "matched 2 times" in result
+
+    def test_apply_patch_tolerates_line_drift(self, tmp_path):
+        """@@ says line 1 but the block is now further down -- content match still applies."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("# header\n# more\n\ndef add(a, b):\n    return a - b\n")
+        # Hunk header claims -1 but the real content is at line 4; tolerated.
+        patch = (
+            "@@ -1,2 +1,2 @@\n"
+            " def add(a, b):\n"
+            "-    return a - b\n"
+            "+    return a + b\n"
+        )
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied" in result
+        assert "return a + b" in test_file.read_text()
+
+    def test_apply_patch_no_newline_at_end_of_file(self, tmp_path):
+        """File without a trailing newline patches + keeps no trailing newline."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("x = 1")  # NO trailing newline
+        # The `\ No newline` marker follows BOTH the - and + lines, so the
+        # result also has no trailing newline.
+        patch = (
+            "@@ -1,1 +1,1 @@\n"
+            "-x = 1\n"
+            "\\ No newline at end of file\n"
+            "+x = 2\n"
+            "\\ No newline at end of file\n"
+        )
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied" in result
+        assert test_file.read_text() == "x = 2"
+
+    def test_apply_patch_preserves_permissions(self, tmp_path):
+        import os
+        import stat
+
+        test_file = tmp_path / "script.py"
+        test_file.write_text("def add(a, b):\n    return a - b\n")
+        os.chmod(test_file, 0o755)
+        patch = (
+            "@@ -1,2 +1,2 @@\n"
+            " def add(a, b):\n"
+            "-    return a - b\n"
+            "+    return a + b\n"
+        )
+        apply_patch(path=str(test_file), patch=patch)
+        assert stat.S_IMODE(os.stat(test_file).st_mode) == 0o755
+
+    def test_apply_patch_malformed_patch_error(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+        result = apply_patch(path=str(test_file), patch="this is not a diff")
+        assert "Error" in result
+        assert "hunk header" in result
+
+    def test_apply_patch_accepts_file_header_pair(self, tmp_path):
+        """A --- / +++ header pair (single file) is tolerated and ignored."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+        patch = (
+            "--- a/code.py\n"
+            "+++ b/code.py\n"
+            "@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n"
+        )
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied" in result
+        assert test_file.read_text() == "a = 2\n"
+
+    def test_apply_patch_nonexistent_file(self, tmp_path):
+        result = apply_patch(path=str(tmp_path / "missing.py"), patch="@@ -1,1 +1,1 @@\n-a\n+b\n")
+        assert "Error" in result
+        assert "not found" in result
+
+    def test_apply_patch_outside_sandbox_blocked(self, tmp_path, monkeypatch):
+        import koboi.tools.builtin.filesystem as fs
+
+        sandbox_dir = tmp_path / "sandbox"
+        sandbox_dir.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_text("a = 1\n")
+        monkeypatch.setattr(fs, "_SANDBOX_DIR", str(sandbox_dir))
+
+        result = apply_patch(path=str(outside), patch="@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n")
+        assert "Error" in result
+        assert "no access" in result
+        assert outside.read_text() == "a = 1\n"
+
+    def test_apply_patch_advisory_note_without_prior_read(self, tmp_path):
+        fs_read_paths = tmp_path / "code.py"
+        fs_read_paths.write_text("a = 1\n")
+        fs_mod = pytest.importorskip("koboi.tools.builtin.filesystem")
+        fs_mod.reset_read_before_write()
+        try:
+            patch = "@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n"
+            result = apply_patch(path=str(fs_read_paths), patch=patch)
+            assert "Note:" in result
+        finally:
+            fs_mod.reset_read_before_write()
+

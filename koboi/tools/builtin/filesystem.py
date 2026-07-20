@@ -7,6 +7,7 @@ import tempfile
 from fnmatch import fnmatch
 
 from koboi.tools.registry import tool
+from koboi.tools.builtin._patch import PatchError, apply_hunks, parse_unified_diff
 from koboi.types import RiskLevel
 
 # P0b: kept as a legacy back-compat fallback only. Containment is now driven
@@ -302,6 +303,77 @@ def edit_file(
             raise
         replaced = count if replace_all else 1
         return f"Successfully replaced {replaced} occurrence(s) in '{path}'{note}"
+    except FileNotFoundError:
+        return f"Error: file '{path}' not found"
+    except PermissionError:
+        return f"Error: no access to '{path}'"
+    except IsADirectoryError:
+        return f"Error: '{path}' is a directory, not a file"
+
+
+@tool(
+    name="apply_patch",
+    group="file",
+    deps=["sandbox"],
+    description=(
+        "Apply a unified-diff patch (git diff / `diff -u` style, with @@ hunk "
+        "headers, context, and +/- lines) to an existing file. Each hunk's "
+        "context must match exactly and uniquely; line drift is tolerated "
+        "(matching is content-based, not by the @@ line number). All hunks "
+        "apply atomically -- if any hunk fails the file is left unchanged and "
+        "the error names which hunk failed. Preferred for multi-line or "
+        "multi-hunk edits; use edit_file for a single exact string replacement."
+    ),
+    risk_level=RiskLevel.DESTRUCTIVE,
+    # Issue #48: patching mutates the fs; on crash-resume the loop's
+    # _repair_interrupted_turn must NOT silently replay it (double edits).
+    idempotent=False,
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path of the file to patch",
+            },
+            "patch": {
+                "type": "string",
+                "description": "Unified-diff patch text (one or more @@ hunks for this single file)",
+            },
+        },
+        "required": ["path", "patch"],
+    },
+)
+def apply_patch(path: str, patch: str, _deps: dict | None = None) -> str:
+    try:
+        path = _validate_path(path, sandbox=(_deps or {}).get("sandbox"))
+        note = ""
+        if path not in _read_paths_for(_deps):  # M6: per-session when wired
+            note = f"\nNote: patching '{path}' without having read it first -- verify the path is correct."
+        with open(path) as f:
+            content = f.read()
+        try:
+            hunks = parse_unified_diff(patch)
+            new_content = apply_hunks(content, hunks)
+        except PatchError as e:
+            return f"Error: {e}"
+        if new_content == content:
+            return f"Patch applied to '{path}' but made no changes (every hunk is a no-op){note}"
+        # Atomic swap (same pattern as edit_file): temp file in the same dir,
+        # os.replace so a crash mid-write can never leave a truncated file.
+        dir_ = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(dir=dir_, prefix=".apply_patch_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(new_content)
+            os.chmod(tmp, os.stat(path).st_mode)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return f"Successfully applied {len(hunks)} hunk(s) to '{path}'{note}"
     except FileNotFoundError:
         return f"Error: file '{path}' not found"
     except PermissionError:

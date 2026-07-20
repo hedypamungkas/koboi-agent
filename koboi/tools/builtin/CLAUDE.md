@@ -1,7 +1,7 @@
 # koboi/tools/builtin/ -- Built-in tool implementations
 
 ## What this is
-The 16 shipped tools, each a `@tool()`-decorated function in its own module and registered by
+The 17 shipped tool modules, each a `@tool()`-decorated function in its own module and registered by
 `register_all()` (`__init__.py`, called from the facade). Sync tools run in a thread via
 `asyncio.to_thread`; the registry calls `str(result)` on every return. See the parent
 `koboi/tools/CLAUDE.md` for the registry, `@tool()`, `RiskLevel`, and dependency-injection mechanics.
@@ -9,7 +9,7 @@ The 16 shipped tools, each a `@tool()`-decorated function in its own module and 
 ## Tools
 ```
 calculator.py   calculate                                SAFE        math expression evaluator
-filesystem.py   list_files / read_file / edit_file / write_file / delete_file   SAFE (list/read) + DESTRUCTIVE (write/edit/delete; idempotent=False)   file ops; edit_file = exact-string replace (unique match or replace_all, atomic swap); read_file takes optional offset/limit (numbered line range)
+filesystem.py   list_files / read_file / edit_file / apply_patch / write_file / delete_file   SAFE (list/read) + DESTRUCTIVE (write/edit/patch/delete; idempotent=False)   file ops; edit_file = exact-string replace (unique match or replace_all, atomic swap); apply_patch = unified-diff patch (single file, multi-hunk, content-matched so line drift is tolerated, all-or-nothing atomic swap); read_file takes optional offset/limit (numbered line range); parser in _patch.py
 shell.py        run_shell                                DESTRUCTIVE execute shell commands
 web.py          web_search / web_fetch                   SAFE        web search + fetch (backends in koboi/websearch/)
 memory.py       memory_store / memory_recall             SAFE        persistent KV memory
@@ -24,6 +24,7 @@ media.py        generate_image/video/music/speech +       MODERATE+   multimodal
 repo_map.py     repo_map                                 SAFE        directory tree + best-effort symbol outline (W4); read-only, on the chat/plan allowlist; Python = real ast.parse signatures, other langs = regex best-effort
 github.py       github_create_pr / github_update_pr (DESTRUCTIVE, idempotent=False) + github_list_prs / github_get_pr (SAFE, read-only)   PR tooling (W4); in-process httpx (bypasses sandbox network tiers, like web_fetch); needs `github:` config + `github_client` dep
 background_shell.py  submit_background_shell (DESTRUCTIVE, idempotent=False) + check_background_shell (SAFE) / kill_background_shell (MODERATE, idempotent)   long-running processes (W4); opt-in `agent.background_shell.enabled`; manager in koboi/harness/background_shell.py; live process runs OUTSIDE the approval pipeline once started
+typecheck.py    run_typecheck                            SAFE        run ruff/mypy/pyright on a validated path (fixed allowlist, never a user command -> no injection surface); read-only, on the chat/plan allowlist; non-zero output is prefixed `[exit code: N]` (same token as run_shell); when self_healing is on, TypecheckHook (priority 4) parses the output into structured file:line diagnostics + refines error_kind to `typecheck_failed`
 ```
 
 ## Conventions

@@ -1588,6 +1588,14 @@ class AgentAssembler:
                     ladder=self.config.get("self_healing", "ladder", default=None) or None,
                 )
             )
+            # Wave 2.4: typecheck-signal enrichment (priority 4, before the
+            # classifier at 5). Parses run_typecheck output into structured
+            # diagnostics + refines error_kind to typecheck_failed so
+            # ReflectionHook can name the first failing file:line. Inert unless
+            # the agent actually calls run_typecheck; fail-soft on any hiccup.
+            from koboi.hooks.typecheck_hook import TypecheckHook
+
+            self.hook_chain.add(TypecheckHook())
 
     def build(self, peer_registry: PeerRegistry | None = None) -> KoboiAgent:
         """Run all build steps in dependency order and return assembled agent."""

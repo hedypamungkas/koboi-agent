@@ -448,7 +448,14 @@ class SlidingWindowManager(ContextManager):
 
 
 # File tools whose results carry a per-path identity (from tool_call arguments).
-_FILE_TOOLS = {"read_file", "write_file", "edit_file", "delete_file"}
+_FILE_TOOLS = {
+    "read_file",
+    "write_file",
+    "edit_file",
+    "apply_patch",  # Wave 2.4: mutation confirmation keyed by `path`
+    "delete_file",
+    "run_typecheck",  # Wave 2.4: diagnostic output keyed by `path`
+}
 
 
 @register_context_strategy(

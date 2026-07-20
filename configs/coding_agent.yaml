@@ -7,9 +7,11 @@ agent:
   system_prompt: |
     You are a coding assistant. Help users write, debug, and understand code.
     Prefer edit_file (exact string replacement) over write_file when modifying
-    existing files; use write_file only to create new files. For large files,
+    existing files; use write_file only to create new files. For multi-line or
+    multi-hunk edits, prefer apply_patch (a unified-diff patch). For large files,
     read a line range with read_file's offset/limit instead of the whole file.
-    After each change, run the project's tests with run_shell and iterate until
+    After each change, run run_typecheck (ruff/mypy) for precise file:line
+    diagnostics, then run the project's tests with run_shell and iterate until
     they pass. Always explain what you're doing and why.
   max_iterations: 120
 
@@ -21,7 +23,7 @@ llm:
   # temperature: 0.3          # Lower for deterministic code generation
 
 tools:
-  builtin: [list_files, read_file, edit_file, write_file, delete_file, run_shell, grep_search, glob_find, git_status, git_log, git_diff, git_add, git_commit, git_checkout]
+  builtin: [list_files, read_file, edit_file, apply_patch, write_file, delete_file, run_shell, run_typecheck, grep_search, glob_find, git_status, git_log, git_diff, git_add, git_commit, git_checkout]
   defaults:
     timeout: 60
     max_output: 15000
@@ -30,6 +32,10 @@ tools:
     run_shell:
       timeout: 600        # builds/test suites routinely exceed the 30s default
       max_output: 30000
+    run_typecheck:
+      checker: "ruff"     # ruff|mypy|pyright (override per-call with the `checker` arg)
+      timeout: 120        # typecheckers can be slower than a shell one-liner
+      max_output: 20000
     read_file:
       max_read_size: 100000
     git_status:
@@ -67,6 +73,16 @@ self_healing:
   # Degrade to a best-effort summary at the iteration cap instead of erroring
   # (works independently of self_healing.enabled).
   graceful_max_iter: true
+  # Opt into the full self-healing loop to unlock run_typecheck's structured
+  # signal: when enabled, a failing run_typecheck is parsed into file:line
+  # diagnostics and the reflection critique names the first failing location
+  # (error_kind="typecheck_failed") instead of the generic "try again" hint.
+  # Requires a grounding_check output guardrail + handover.detection for the
+  # full ladder; see configs/self_healing_demo.yaml.
+  # enabled: true
+  # triggers:
+  #   tool_error:
+  #     repeat_threshold: 2
 
 policy:
   rules:

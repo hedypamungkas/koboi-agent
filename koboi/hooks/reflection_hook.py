@@ -59,6 +59,22 @@ _TOOL_ERROR_CRITIQUE_PROMPT = (
     "Arguments (redacted): {args}\n\nSuggested different approach:"
 )
 
+# Wave 2.4: when TypecheckHook attached structured diagnostics, critique against
+# the FIRST failing file:line -- far more actionable than the generic prompt over
+# a truncated result[:500] (a 50-error mypy dump is meaningless past line 1).
+_TYPECHECK_CRITIQUE_PROMPT = (
+    "An AI agent's type/lint checker reported errors. The FIRST error is at "
+    "{file}:{line}: {message}. In 1-2 sentences, name the SINGLE most likely root "
+    "cause and the specific edit to fix it. Do NOT suggest re-running the checker.\n\n"
+    "Top {n} diagnostic(s) (redacted): {diags}\n\nSuggested fix:"
+)
+
+
+def _format_typecheck_diags(diags: list[dict]) -> str:
+    """One-line summary of the top diagnostics for the critique prompt."""
+    return "; ".join(f"{d.get('file')}:{d.get('line')}: {d.get('message')}" for d in diags)
+
+
 _GROUNDING_CRITIQUE_PROMPT = (
     "An AI agent's answer was checked for grounding against retrieved context and "
     "found to have low coverage ({coverage:.2f}). In 1-2 sentences, name the likely "
@@ -185,11 +201,25 @@ class ReflectionHook(Hook):
     async def _critique_tool_error(self, ctx: HookContext, result: str) -> str | None:
         if self._client is None:
             return None
-        prompt = _TOOL_ERROR_CRITIQUE_PROMPT.format(
-            tool=ctx.tool_name or "?",
-            detail=redact_value(result[:500]),
-            args=redact_tool_arguments(ctx.tool_arguments or "{}"),
-        )
+        diags = ctx.metadata.get("typecheck_diagnostics") or []
+        if diags:
+            # Wave 2.4: structured typecheck diagnostics are present -- critique
+            # against the FIRST failing file:line rather than a truncated result.
+            first = diags[0]
+            top = diags[:3]
+            prompt = _TYPECHECK_CRITIQUE_PROMPT.format(
+                file=first.get("file") or "?",
+                line=first.get("line") or "?",
+                message=redact_value(first.get("message") or ""),
+                n=len(top),
+                diags=redact_value(_format_typecheck_diags(top)),
+            )
+        else:
+            prompt = _TOOL_ERROR_CRITIQUE_PROMPT.format(
+                tool=ctx.tool_name or "?",
+                detail=redact_value(result[:500]),
+                args=redact_tool_arguments(ctx.tool_arguments or "{}"),
+            )
         return await self._ask(prompt)
 
     # -- POST_OUTPUT: low-grounding reground-and-retry --------------------------

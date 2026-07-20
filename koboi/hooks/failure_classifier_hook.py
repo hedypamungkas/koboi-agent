@@ -40,6 +40,10 @@ _TOOL_CLASS: dict[str, str] = {
     # pipeline ("[exit code: N]" parse). Transient: a failing build/test is a
     # normal, retryable step of an edit->test loop, not a schema/policy fault.
     "command_failed": "transient",
+    # Wave 2.4: TypecheckHook refines a failing run_typecheck (ruff/mypy/pyright)
+    # to this kind with structured diagnostics on ctx. Same transient class as a
+    # failing test -- a normal, retryable step of an edit->typecheck->test loop.
+    "typecheck_failed": "transient",
     "policy_denied": "policy",
     "mode_blocked": "policy",
     "denied": "policy",

@@ -20,6 +20,7 @@ def register_all(registry: ToolRegistry) -> None:
         shell,
         subagent,
         task,
+        typecheck,
         web,
     )
 
@@ -39,6 +40,7 @@ def register_all(registry: ToolRegistry) -> None:
         shell,
         subagent,
         task,
+        typecheck,
         web,
     ]:
         register_decorated(registry, mod)
