@@ -10,7 +10,7 @@ wired by the facade and the server.
 ## Key files
 ```
 base.py           BaseGuardrail ABC (async check) + PatternGuardrail (regex-driven base)
-input.py          InputGuardrail -- prompt-injection (16 patterns, incl. Bahasa Indonesia) + length check (action "block")
+input.py          InputGuardrail -- prompt-injection (16 patterns, incl. Bahasa Indonesia) + length check (action "block"; opt-in `deflection_text` triggers graceful deflection on injection blocks)
 output.py         OutputGuardrail -- secret/PII leak screen (action "warn")
 grounding.py       GroundingGuardrail -- runtime faithfulness (claim-decompose + NLI vs retrieved context; action "abstain"; A3; fail-soft)
 scope.py          ScopeGuardrail -- output scope guard (relevance-gated LLM judge keeps a specialized agent on-task; action "abstain"; fail-soft)
@@ -68,5 +68,16 @@ __init__.py       Re-exports public surface; calls register_builtin_guardrails()
   `RunResult.metadata["verdict"]`.
 - **Input `reason` is surfaced in the raised error**; output `reason` is logged
   server-side only (the error carries just the guardrail name) so a leaky reason cannot
-  re-leak via the error frame.
+  re-leak via the error frame. **Exception**: when an input block's `sanitized_content`
+  is set (see next bullet), the loop swaps it in as a normal successful reply instead of
+  raising at all -- `reason` never surfaces in that path.
+- **Two different `sanitized_content` mechanisms -- do not conflate them**:
+  `GuardrailResult.sanitized_content` (Grounding/ScopeGuardrail, `action="abstain"`,
+  consumed by `_process_output`) swaps an **output** reply for a refusal/deflection.
+  `AgentGuardrailError.sanitized_content` (`exceptions.py`) is a **different** attribute
+  on the raised exception from an **input**-direction block only; when non-empty
+  (`is_graceful_deflection` property), `AgentCore._graceful_input_deflection` (loop.py)
+  surfaces it as a graceful successful `RunResult`/stream instead of raising. Built-in
+  source: `InputGuardrail(deflection_text=...)` / config `guardrails.input.deflection_text`
+  -- an injection-pattern block carries it through; empty/length blocks never deflect.
 - See `koboi/server/CLAUDE.md` for the autonomous-job approval path.
