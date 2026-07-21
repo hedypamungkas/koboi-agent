@@ -172,8 +172,6 @@ class TestGracefulInputDeflectionConfig:
         from koboi.guardrails.registry import GuardrailRegistry, register_builtin_guardrails
 
         register_builtin_guardrails()
-        grds = GuardrailRegistry.from_config(
-            [{"name": "injection_detector", "deflection_text": "DEFLECT"}]
-        )
+        grds = GuardrailRegistry.from_config([{"name": "injection_detector", "deflection_text": "DEFLECT"}])
         assert len(grds) == 1 and isinstance(grds[0], InputGuardrail)
         assert grds[0].deflection_text == "DEFLECT"

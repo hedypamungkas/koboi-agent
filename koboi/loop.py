@@ -1048,11 +1048,7 @@ class AgentCore:
             # Graceful input deflection: stream the guardrail's sanitized_content as
             # text + a normal Complete (not an ErrorEvent) so the customer gets a
             # graceful reply instead of a generic fallback.
-            if (
-                isinstance(exc, AgentGuardrailError)
-                and exc.direction == "input"
-                and exc.sanitized_content
-            ):
+            if isinstance(exc, AgentGuardrailError) and exc.direction == "input" and exc.sanitized_content:
                 result = self._graceful_input_deflection(exc, _run_start)
                 yield TextDeltaEvent(content=exc.sanitized_content)
                 yield CompleteEvent(
