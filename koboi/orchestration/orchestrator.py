@@ -1476,11 +1476,25 @@ class Orchestrator:
 
     @staticmethod
     def _sources_footer(ctx: ResearchContext, referenced: list[int]) -> str:
-        """A1: build the Sources footer from referenced citation ids only (not all stored)."""
+        """Build the Sources footer from referenced citation ids, extracting the
+        first URL from each finding's text. Findings without a URL are omitted
+        (they would render the step name as a fake citation). Empty when no
+        referenced source yields a URL."""
         if not referenced:
             return ""
-        by_id = {s["citation_id"]: s["node_id"] for s in ctx.source_store.sources_list()}
-        lines = [f"[{cid}] {by_id.get(cid, '?')}" for cid in referenced]
+        by_id = {s["citation_id"]: s for s in ctx.source_store.sources_with_text()}
+        lines: list[str] = []
+        for cid in referenced:
+            s = by_id.get(cid)
+            if not s:
+                continue
+            m = re.search(r"https?://[^\s]+", s.get("text", ""))
+            if not m:
+                continue
+            url = m.group(0).rstrip(".,;:)]}\"'")
+            lines.append(f"[{cid}] {url}")
+        if not lines:
+            return ""
         return "\n\n## Sources\n" + "\n".join(lines)
 
     async def _execute_pipeline(
