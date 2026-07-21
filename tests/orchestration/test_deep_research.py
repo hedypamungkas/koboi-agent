@@ -333,6 +333,7 @@ class TestRunDeepResearch:
         # Cited synthesis: inline marker + Sources footer.
         assert "[1]" in complete[0].final_answer
         assert "## Sources" in complete[0].final_answer
+        assert "https://example.com/x" in complete[0].final_answer  # real URL reaches the footer
 
     async def test_completion_metadata_carries_production_bar_keys(self, tmp_path):
         # W8: the OrchestrationCompleteEvent carries the production-smoke bar keys
@@ -392,7 +393,11 @@ class TestRunDeepResearch:
         # and recoverable via load_research_context_for_session.
         db_path = str(tmp_path / "r.db")
         orch = Orchestrator(
-            client=_FakeClient(coverage_score=0.95, synthesis="## Report\nX [1]."),
+            client=_FakeClient(
+                coverage_score=0.95,
+                node_answer="X per https://example.com/x",
+                synthesis="## Report\nX [1].",
+            ),
             router=KeywordRouter(),
             research={"max_depth": 1, "coverage_threshold": 0.7},
             dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=db_path),
@@ -551,7 +556,7 @@ class TestWave4Correctness:
         from koboi.orchestration.research import ResearchContext
 
         ctx = ResearchContext()
-        ctx.add_findings("node_a", "real finding")
+        ctx.add_findings("node_a", "real finding. Source: https://example.com/a")
         cleaned, referenced = _verify_citations("see [1] and [99] for details", ctx)
         assert "[1]" in cleaned
         assert "[99]" not in cleaned
@@ -689,7 +694,11 @@ class TestHigh3Resume:
         db_path = str(tmp_path / "resume.db")
         # Step 1: run deep_research once -> journals a ctx with findings.
         orch = _orch(
-            _FakeClient(coverage_score=0.95, synthesis="## Report\nFound [1] something."),
+            _FakeClient(
+                coverage_score=0.95,
+                node_answer="Found something per https://example.com/found",
+                synthesis="## Report\nFound [1] something.",
+            ),
             {"max_depth": 1, "coverage_threshold": 0.7},
             tmp_path,
         )
@@ -1069,10 +1078,10 @@ class TestSourcesFooter:
         ctx = ResearchContext()
         ctx.add_findings("market_definition", "Market size is $10B. Source: https://example.com/market")
         result = Orchestrator._sources_footer(ctx, [1])
-        assert "https://example.com/market" in result
+        assert "[1] https://example.com/market" in result
         assert "market_definition" not in result
 
-    def test_finding_without_url_is_itted_entirely(self):
+    def test_finding_without_url_is_omitted_entirely(self):
         """Findings without a URL are omitted entirely (no fake step-name citation)."""
         ctx = ResearchContext()
         ctx.add_findings("node_a", "This finding has no URL.")
@@ -1112,3 +1121,58 @@ class TestSourcesFooter:
         assert ")." not in result.split("[1]")[1].split("\n")[0]
         assert "]," not in result.split("[2]")[1].split("\n")[0]
         assert "\"." not in result.split("[3]")[1].split("\n")[0]
+
+    def test_url_inside_balanced_parens_preserved(self):
+        """A URL whose path legitimately ends with a balanced ``...)`` is NOT truncated — the
+        trailing ``)`` is kept because it balances an opener inside the URL. Covers the
+        Wikipedia/MDN/arXiv shape that a naive ``rstrip(')')`` used to corrupt."""
+        ctx = ResearchContext()
+        ctx.add_findings("wiki", "See https://en.wikipedia.org/wiki/Foo_(bar) for context.")
+        ctx.add_findings("plain", "And https://example.com/x.")
+        result = Orchestrator._sources_footer(ctx, [1, 2])
+        assert "[1] https://en.wikipedia.org/wiki/Foo_(bar)" in result
+        assert "[2] https://example.com/x" in result
+
+    def test_markdown_wrapping_and_trailing_bang_stripped(self):
+        """Markdown emphasis (``**``, backticks) wrapping the URL and a trailing ``!`` are
+        stripped — they are never part of a real URL but the greedy ``[^\\s]+`` capture picks
+        them up from finding text."""
+        ctx = ResearchContext()
+        ctx.add_findings("bold", "See **https://example.com/a** now.")
+        ctx.add_findings("code", "See `https://example.com/b` now.")
+        ctx.add_findings("bang", "End https://example.com/c!")
+        result = Orchestrator._sources_footer(ctx, [1, 2, 3])
+        assert "[1] https://example.com/a" in result
+        assert "[2] https://example.com/b" in result
+        assert "[3] https://example.com/c" in result
+        assert "**" not in result
+        assert "`" not in result
+
+    def test_only_first_url_used_when_finding_has_many(self):
+        """When a finding's text contains several URLs, only the FIRST is cited (one source ->
+        one footer line). Pins the contract so a future switch to ``re.findall`` can't silently
+        change footer shape."""
+        ctx = ResearchContext()
+        ctx.add_findings("multi", "First https://a.example/x then https://b.example/y")
+        result = Orchestrator._sources_footer(ctx, [1])
+        assert "[1] https://a.example/x" in result
+        assert "b.example/y" not in result
+
+    def test_body_markers_and_footer_never_diverge(self):
+        """Regression: a body ``[n]`` for a URL-less finding used to dangle — ``_verify_citations``
+        kept it while ``_sources_footer`` dropped it. Now ``_verify_citations`` drops URL-less
+        markers too, so a body marker always has a matching footer line (and vice versa)."""
+        from koboi.orchestration.orchestrator import _verify_citations
+
+        ctx = ResearchContext()
+        ctx.add_findings("sourced", "Cited claim. Source: https://example.com/sourced")
+        ctx.add_findings("unsourced", "An internal note with no URL.")
+        cleaned, referenced = _verify_citations("sourced claim [1]; internal note [2].", ctx)
+        footer = Orchestrator._sources_footer(ctx, referenced)
+        # [2] (no URL) dropped from BOTH body and footer — no dangling citation.
+        assert "[2]" not in cleaned
+        assert "[2]" not in footer
+        # [1] survives in both, pointing at the real URL.
+        assert "[1]" in cleaned
+        assert "[1] https://example.com/sourced" in footer
+        assert referenced == [1]
