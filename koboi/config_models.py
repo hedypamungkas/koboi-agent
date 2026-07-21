@@ -221,6 +221,19 @@ class InputGuardrailConfig(BaseModel):
     # (sanitized_content) instead of a hard block -> generic fallback.
     deflection_text: str | None = None
 
+    @field_validator("deflection_text", mode="after")
+    @classmethod
+    def _normalize_deflection_text(cls, v: str | None) -> str | None:
+        # Blank/whitespace == "not configured" -> None, and a real value is stripped,
+        # so a non-None value always means "deflection fires" (matches
+        # InputGuardrail.__init__'s normalization and the engine's truthiness gate;
+        # prevents a blank "successful" reply on a YAML typo or an empty ${VAR:}
+        # interpolation).
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
+
 
 class OutputGuardrailConfig(BaseModel):
     model_config = {"extra": "ignore"}

@@ -72,7 +72,14 @@ class InputGuardrail(PatternGuardrail):
         # engine surfaces a graceful in-character reply instead of a hard block ->
         # generic fallback. None (default) preserves the raise-as-before behavior.
         # Empty/length blocks never deflect (no meaningful deflection for those).
-        self.deflection_text = deflection_text
+        # Normalize blank/whitespace -> None so the type and the engine's truthiness
+        # gate agree that ``deflection_text is not None`` ⟹ deflection fires (a stray
+        # " " / "\n" -- a plausible YAML typo or an empty ``${VAR:}`` interpolation --
+        # would otherwise yield a blank "successful" reply).
+        if deflection_text is not None:
+            self.deflection_text = deflection_text.strip() or None
+        else:
+            self.deflection_text = None
 
     async def check(self, user_input: str, context: list[str] | None = None) -> GuardrailResult:
         if not user_input or not user_input.strip():
