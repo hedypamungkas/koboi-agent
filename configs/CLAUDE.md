@@ -7,6 +7,7 @@ sales_agent.yaml          Sales assistant with tools, RAG, guardrails, tracing
 customer_service.yaml     Customer service agent
 cs_confidence_handover.yaml  Confidence-aware CS with handover (A1-A3 + B1/B1.5 + B4; the confidence ladder demo)
 coding_agent.yaml         Code-focused agent with filesystem/shell/git tools
+coding_autonomy_full.yaml The full Wave 0-4 coding stack in one config: all coding tools + restricted sandbox (egress allowlist) + budget ceiling + journal.checkpoint + self_healing + GitHub PR tooling + background shell; drives examples/40 ("invisible engineering" -- unattended fix/build/migrate with a live trust panel)
 reasoning_model.yaml      OpenAI o-series reasoning model (max_completion_tokens + reasoning_effort; documents all forward-as-is llm: params)
 sandbox_restricted.yaml   Restricted sandbox + SQLite journal/resume demo (P0b + P2-A)
 rag_agent.yaml            RAG with document Q&A

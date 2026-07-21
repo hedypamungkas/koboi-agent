@@ -67,8 +67,8 @@ koboi/              Main package (260 .py files)
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/, workspace (coding harness: per-case repo materialization + test_suite exit-code scorer)
   tui/              Terminal UI (Textual): app, screens/ (11), widgets/ (12)
 tests/              339 .py files (309 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
-configs/            39 YAML agent configs
-examples/           39 numbered example scripts (01-39, incl. 39_aegis_ops_full_demo -- nearly all 32 KoboiConfig sections in one DAG scenario) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), a2a_fanout (cross-instance A2A demo), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
+configs/            40 YAML agent configs
+examples/           40 numbered example scripts (01-40, incl. 39_aegis_ops_full_demo -- nearly all 32 KoboiConfig sections in one DAG scenario; 40_coding_autonomy_full_demo -- the full Wave 0-4 coding stack A-Z unattended, w/ a live trust panel + independent per-phase verification) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), a2a_fanout (cross-instance A2A demo), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
 skills/             4 skill definitions: code_review, customer_service, hotel_receptionist, search_and_summarize
 mcp_servers/        1 MCP server example: todo_server.py
