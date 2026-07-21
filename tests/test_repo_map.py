@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from koboi.modes import is_read_only_tool
 from koboi.tools.builtin.repo_map import repo_map
 
@@ -101,3 +103,57 @@ class TestSandboxContainment:
 class TestModeAllowlist:
     def test_repo_map_is_read_only(self):
         assert is_read_only_tool("repo_map") is True
+
+
+class TestEdgeCases:
+    def test_within_base_blocks_symlink_escape(self, tmp_path):
+        # inside.py symlinks OUTSIDE the walked root -> _python_symbols is skipped
+        # (realpath escapes base_real), so the file is listed but gets no outline.
+        os.symlink("/etc/passwd", tmp_path / "inside.py")
+        result = repo_map(str(tmp_path))
+        assert "inside.py" in result
+        inside_line = next(line for line in result.splitlines() if "inside.py" in line)
+        assert "symbols:" not in inside_line
+
+    def test_format_args_posonly_kwonly_vararg(self, tmp_path):
+        _write(
+            tmp_path / "mod.py",
+            "def f(a, b, /, c, d=1, *args, e=2, **kw): pass\n",
+        )
+        result = repo_map(str(tmp_path), include_symbols=True)
+        sym_line = next(line for line in result.splitlines() if "symbols:" in line)
+        assert "a" in sym_line
+        assert "b" in sym_line
+        assert "*args" in sym_line
+        assert "**kw" in sym_line
+
+    def test_format_args_no_args(self, tmp_path):
+        _write(tmp_path / "mod.py", "def f(): pass\n")
+        result = repo_map(str(tmp_path))
+        assert "f()" in result
+
+    def test_repo_map_max_depth_zero(self, tmp_path):
+        # depth-0 empties the root's dirnames before os.walk descends -> the subdir
+        # itself is never yielded as a child entry, so only the header renders.
+        _write(tmp_path / "sub" / "deep.txt", "x")
+        result = repo_map(str(tmp_path), max_depth=0)
+        assert result.strip() == f"{tmp_path.name}/"
+
+    def test_repo_map_path_is_a_file_errors(self, tmp_path):
+        f = tmp_path / "a.txt"
+        f.write_text("x")
+        result = repo_map(str(f))
+        assert "is not a directory" in result
+
+    def test_repo_map_include_symbols_false_skips_outline(self, tmp_path):
+        _write(tmp_path / "mod.py", "def foo(): pass\nclass Bar: pass\n")
+        result = repo_map(str(tmp_path), include_symbols=False)
+        assert "symbols:" not in result
+
+    def test_repo_map_corrupt_python_file_listed_no_crash(self, tmp_path):
+        # Null byte in source -> ast.parse raises ValueError (caught) -> no symbols,
+        # but the file is still listed and the walk does not crash.
+        _write(tmp_path / "bad.py", "def f(\x00null byte here\n")
+        result = repo_map(str(tmp_path))
+        assert "bad.py" in result
+        assert "Error" not in result

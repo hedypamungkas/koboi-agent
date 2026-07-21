@@ -131,27 +131,29 @@ class TestPathValidation:
         assert result == str(tmp_path)  # Returns resolved path
 
     def test_validate_path_with_sandbox(self, tmp_path, monkeypatch):
-        """Test _validate_path with sandbox enabled."""
-        # Set sandbox directory
+        """Test _validate_path with sandbox enabled genuinely asserts containment."""
+        import os
+
+        import koboi.tools.builtin.filesystem as fs
+
+        # _SANDBOX_DIR is captured at module import time, so setenv alone is
+        # insufficient -- mirror the module global too, the way the other fs
+        # tests in this file do (otherwise the test would always pass).
         monkeypatch.setenv("KOBOI_SANDBOX_DIR", str(tmp_path))
+        monkeypatch.setattr(fs, "_SANDBOX_DIR", str(tmp_path))
 
-        # Should allow paths within sandbox
-        result = _validate_path(str(tmp_path / "test.txt"))
-        # Result should be resolved path within sandbox
-        assert str(tmp_path) in result or "private" in result  # macOS resolves to /private
+        # A path inside the sandbox resolves to itself (modulo realpath).
+        inside = tmp_path / "inside.txt"
+        result = _validate_path(str(inside))
+        assert result == os.path.realpath(str(inside))
+        assert str(tmp_path) in result
 
-        # Should raise PermissionError for paths outside sandbox
-        # Note: On macOS, /etc resolves to /private/etc which may not match tmp_path
-        try:
-            # Use a clearly different path
-            result = _validate_path("/var/tmp/test")
-            # If it doesn't raise, at least check it's not our sandbox
-            if str(tmp_path) not in result:
-                pass  # Expected - different path
-            else:
-                pytest.fail("Should have raised PermissionError or returned different path")
-        except PermissionError:
-            pass  # Expected
+        # Paths clearly outside the sandbox MUST raise -- the prior body's
+        # try/except swallowed this assertion, so containment was never verified.
+        with pytest.raises(PermissionError):
+            _validate_path("/etc/passwd")
+        with pytest.raises(PermissionError):
+            _validate_path("/var/tmp/koboi_outside_probe.txt")
 
 
 class TestToolConfig:
@@ -387,6 +389,25 @@ class TestReadFileRanged:
         assert "must be >= 1" in read_file(path=str(test_file), limit=0)
         assert "must be >= 1" in read_file(path=str(test_file), limit=-2)
 
+    def test_read_file_range_no_trailing_newline_last_line(self, tmp_path):
+        """A file without a trailing newline still surfaces the final line via offset."""
+        test_file = tmp_path / "noeol.txt"
+        test_file.write_text("a\nb")  # NO trailing newline on the last line
+        result = read_file(path=str(test_file), offset=2)
+        assert "(lines 2-2 of 2" in result
+        # The final line (no newline) must still be present in the body, not
+        # silently dropped by the line iterator's last partial line.
+        assert "b" in result.split("\n", 1)[1]
+
+    def test_read_file_range_returns_line_numbers(self, tmp_path):
+        """The ranged body uses cat -n style '     N\\t<line>' formatting."""
+        test_file = tmp_path / "numbered.txt"
+        test_file.write_text("alpha\nbeta\n")
+        result = read_file(path=str(test_file), offset=1, limit=2)
+        # 6-wide right-aligned line number, then a literal tab, then the content.
+        assert "     1\talpha" in result
+        assert "     2\tbeta" in result
+
 
 class TestEditFile:
     def test_edit_file_unique_replace(self, tmp_path):
@@ -506,6 +527,56 @@ class TestEditFile:
         assert "Error" in result
         assert "no access" in result
         assert outside.read_text() == "secret = 1\n"
+
+    def test_edit_file_replace_all_with_single_occurrence(self, tmp_path):
+        """replace_all=True with exactly 1 match still succeeds and reports 1."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2", replace_all=True)
+        assert "Successfully replaced 1 occurrence(s)" in result
+        assert test_file.read_text() == "a = 2\n"
+
+    def test_edit_file_empty_new_string_deletes_match(self, tmp_path):
+        """An empty new_string deletes the matched text (str.replace semantics)."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\n")
+
+        result = edit_file(path=str(test_file), old_string="b = 2\n", new_string="")
+        assert "Successfully replaced 1 occurrence(s)" in result
+        assert test_file.read_text() == "a = 1\n"
+
+    def test_edit_file_new_string_contains_old_no_recursion(self, tmp_path):
+        """str.replace does not recurse on its own output: 'abc'->'abcabc' stops at one."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("abc\n")
+
+        result = edit_file(path=str(test_file), old_string="abc", new_string="abcabc")
+        assert "Successfully replaced 1 occurrence(s)" in result
+        # Exactly one substitution -- the new substring containing the old must
+        # not be re-matched (a hand-rolled scan would loop forever here).
+        assert test_file.read_text() == "abcabc\n"
+
+    def test_edit_file_preserves_no_trailing_newline(self, tmp_path):
+        """Editing a file without a trailing newline keeps the no-newline ending."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1")  # NO trailing newline
+
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2")
+        assert "Successfully replaced 1 occurrence(s)" in result
+        # The atomic swap must not append a trailing newline the source did not have.
+        assert test_file.read_text() == "a = 2"
+
+    def test_edit_file_tempfile_cleaned_up_on_success(self, tmp_path):
+        """After a successful edit, no .edit_file_* temp file leaks in the dir."""
+        import os
+
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2")
+        leftover = [p for p in os.listdir(tmp_path) if p.startswith(".edit_file_")]
+        assert leftover == [], f"temp file leak after success: {leftover}"
 
 
 class TestApplyPatch:
@@ -655,13 +726,44 @@ class TestApplyPatch:
         assert outside.read_text() == "a = 1\n"
 
     def test_apply_patch_advisory_note_without_prior_read(self, tmp_path):
-        fs_read_paths = tmp_path / "code.py"
-        fs_read_paths.write_text("a = 1\n")
+        """Patching a never-read path emits the advisory AND actually mutates the file."""
         fs_mod = pytest.importorskip("koboi.tools.builtin.filesystem")
         fs_mod.reset_read_before_write()
         try:
+            test_file = tmp_path / "code.py"
+            test_file.write_text("a = 1\n")
+
             patch = "@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n"
-            result = apply_patch(path=str(fs_read_paths), patch=patch)
+            result = apply_patch(path=str(test_file), patch=patch)
+            # Advisory is present...
             assert "Note:" in result
+            # ...AND the patch actually wrote -- the old assertion hid a class of
+            # bugs where the tool reports success but never mutates the file.
+            assert test_file.read_text() == "a = 2\n"
         finally:
             fs_mod.reset_read_before_write()
+
+    def test_apply_patch_deletion_hunk(self, tmp_path):
+        """A hunk that only removes lines (no +) applies; surviving lines unchanged."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\nc = 3\n")
+        # old_count=2, new_count=1: one context line + one removed line.
+        patch = "@@ -1,2 +1,1 @@\n a = 1\n-b = 2\n"
+
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 1 hunk" in result
+        assert test_file.read_text() == "a = 1\nc = 3\n"
+
+    def test_apply_patch_all_noop_hunks_reports_no_change(self, tmp_path):
+        """A context-only hunk -> 'made no changes' message and file byte-identical."""
+        test_file = tmp_path / "code.py"
+        original = "a = 1\n"
+        test_file.write_text(original)
+        # Pure context: old_text == new_text -> apply_hunks skips it -> no-op.
+        patch = "@@ -1,1 +1,1 @@\n a = 1\n"
+
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "made no changes" in result
+        assert "no-op" in result
+        # File is untouched at the byte level.
+        assert test_file.read_text() == original

@@ -68,6 +68,45 @@ def fake_shell_ok() -> str:
     return "5 passed in 0.1s (0 errors)"
 
 
+# Edge-case tools exercising the [exit code: N] prefix lift contract:
+# the prefix token is authoritative regardless of which tool emitted it,
+# but only when anchored at start, and never when N == 0.
+@tool(
+    name="fake_exit_zero",
+    description="returns a zero-exit-code-prefixed string (success)",
+    parameters={"type": "object", "properties": {}, "required": []},
+)
+def fake_exit_zero() -> str:
+    return "[exit code: 0]\nall good"
+
+
+@tool(
+    name="fake_arbitrary_exit",
+    description="a non-shell tool whose output coincidentally carries the exit-code prefix",
+    parameters={"type": "object", "properties": {}, "required": []},
+)
+def fake_arbitrary_exit() -> str:
+    return "[exit code: 7]\nimproved docs"
+
+
+@tool(
+    name="fake_embedded_exit",
+    description="output mentions an exit code NOT anchored at the start",
+    parameters={"type": "object", "properties": {}, "required": []},
+)
+def fake_embedded_exit() -> str:
+    return "ran cmd [exit code: 3] ok"
+
+
+@tool(
+    name="fake_normal_result",
+    description="returns a normal success string with no exit-code prefix",
+    parameters={"type": "object", "properties": {}, "required": []},
+)
+def fake_normal_result() -> str:
+    return "updated 3 files"
+
+
 import sys  # noqa: E402
 
 _this_module = sys.modules[__name__]
@@ -91,6 +130,32 @@ class TestPipelineCommandFailed:
 
     async def test_success_output_not_errored(self):
         pr = await self._run("fake_shell_ok")
+        assert pr.errored is False
+        assert pr.error_kind is None
+
+    async def test_exit_code_zero_prefix_not_lifted(self):
+        # A leading "[exit code: 0]" is the success token -- not a failure.
+        pr = await self._run("fake_exit_zero")
+        assert pr.errored is False
+        assert pr.error_kind is None
+
+    async def test_arbitrary_tool_coincidental_exit_code_prefix_is_lifted(self):
+        # Pins the design: the prefix token is authoritative regardless of WHICH
+        # tool emitted it -- the lift is not gated on tool name == run_shell.
+        pr = await self._run("fake_arbitrary_exit")
+        assert pr.errored is True
+        assert pr.error_kind == "command_failed"
+
+    async def test_embedded_exit_code_not_lifted(self):
+        # Prefix NOT anchored at start -> parse_exit_code returns None -> no lift.
+        pr = await self._run("fake_embedded_exit")
+        assert pr.errored is False
+        assert pr.error_kind is None
+
+    async def test_error_kind_initialized_for_normal_result(self):
+        # Defends against any UnboundLocalError regressions: referencing
+        # pr.error_kind on a normal result must just return None.
+        pr = await self._run("fake_normal_result")
         assert pr.errored is False
         assert pr.error_kind is None
 

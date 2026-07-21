@@ -359,6 +359,7 @@ class TestGitNotInstalled:
 from pathlib import Path  # noqa: E402
 
 from koboi.tools.builtin.git import git_add, git_checkout, git_commit, git_push  # noqa: E402
+from koboi.types import RiskLevel  # noqa: E402
 
 
 @pytest.fixture
@@ -416,6 +417,23 @@ class TestGitAdd:
         ).stdout
         assert "A  from_empty.txt" in status
 
+    def test_git_add_rejects_exec_option(self, temp_git_repo):
+        # `--exec=evil` looks like git's `core.hooksPath`-family option; the
+        # leading-dash guard refuses it before git ever sees it (defense-in-depth
+        # on top of the `--` separator that already makes option parsing impossible).
+        result = git_add(paths=["--exec=evil"], repo_path=temp_git_repo)
+        assert "option injection" in result
+
+    def test_git_add_path_traversal_blocked_by_git(self, temp_git_repo):
+        # git_add deliberately doesn't apply SAFE_TARGET_RE to path args ("../" is
+        # a legitimate in-repo relative path). Instead git's own worktree boundary
+        # refuses to stage a file that resolves outside the repo. Pin that
+        # defense-in-depth property so a regression in either layer is caught.
+        secret = Path(temp_git_repo).parent / "secret.txt"
+        secret.write_text("secret")
+        result = git_add(paths=["../secret.txt"], repo_path=temp_git_repo)
+        assert result.startswith("Error")
+
 
 class TestGitCommit:
     def test_commits_staged_changes(self, temp_git_repo):
@@ -467,6 +485,22 @@ class TestGitCommit:
         result = git_commit(message="x", repo_path=temp_git_repo)
         assert "No staged changes" in result
 
+    def test_git_commit_multi_line_message_preserved(self, temp_git_repo):
+        # A multi-line message passed via the argv list (no shell) must round-trip
+        # verbatim -- git stores newlines, `--format=%B` echoes them back exactly.
+        message = "Subject line\n\nBody paragraph one\nBody paragraph two"
+        (Path(temp_git_repo) / "ml.txt").write_text("x")
+        git_add(paths=["ml.txt"], repo_path=temp_git_repo)
+        result = git_commit(message=message, repo_path=temp_git_repo)
+        assert not result.startswith("Error"), result
+        show = subprocess.run(
+            ["git", "log", "-1", "--format=%B"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert show.rstrip() == message
+
 
 class TestGitCheckout:
     def test_create_and_switch_branch(self, temp_git_repo):
@@ -480,6 +514,13 @@ class TestGitCheckout:
     def test_rejects_injection(self, temp_git_repo):
         assert "option injection" in git_checkout(target="--orphan", repo_path=temp_git_repo)
         assert "disallowed characters" in git_checkout(target="a;b", repo_path=temp_git_repo)
+
+    def test_git_checkout_head_ancestor_ref_rejected(self, temp_git_repo):
+        # `HEAD~1` is a legitimate git rev, but `~` is outside SAFE_TARGET_RE's
+        # charset on purpose: ancestor refs are a footgun for an autonomous agent
+        # (detached HEAD), so the charset guard refuses them at the tool layer.
+        result = git_checkout(target="HEAD~1", repo_path=temp_git_repo)
+        assert "disallowed characters" in result
 
 
 class TestGitPush:
@@ -510,6 +551,23 @@ class TestGitPush:
         assert "disallowed characters" in git_push(branch="+main", repo_path=temp_git_repo)
         assert "disallowed characters" in git_push(branch="HEAD:evil", repo_path=temp_git_repo)
         assert "option injection" in git_push(remote="--upload-pack=/tmp/x", repo_path=temp_git_repo)
+
+
+class TestWriteToolsMetadata:
+    def test_git_commit_idempotent_flag(self):
+        # Commits are non-idempotent: crash-resume must not silently replay a
+        # commit (would create a duplicate), and the Wave-2 checkpointer keys its
+        # per-call shadow commits on idempotent=False.
+        assert git_commit._tool_def.idempotent is False
+        # Push is also non-idempotent: a replayed push can retrigger CI/webhooks
+        # and, on a force-push bug, mangle remote history.
+        assert git_push._tool_def.idempotent is False
+
+    def test_git_push_destructive_flag(self):
+        # Push mutates remote state irreversibly for collaborators; it must stay
+        # DESTRUCTIVE so autonomous jobs never auto-approve it the way MODERATE
+        # tools are (Trust-DB / explicit intent required).
+        assert git_push._tool_def.risk_level == RiskLevel.DESTRUCTIVE
 
 
 class TestWriteToolsSandboxWired:

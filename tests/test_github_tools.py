@@ -280,3 +280,60 @@ class TestGithubHardening:
         with patch("koboi.tools.builtin.github.httpx.AsyncClient", return_value=mock_client):
             await GithubClient(token="t").update_pr("o", "r", 1, title="")
         assert mock_client.patch.call_args.kwargs["json"] == {"title": ""}
+
+
+class TestGithubClientEdgeCases:
+    async def test_list_prs_per_page_capped_at_100(self):
+        # per_page=500 must be clamped to GitHub's hard max (100) so a misconfigured
+        # or hostile caller can't request a single mega-page that DoSes the API.
+        mock_client = _mock_async_client(_response(json_payload=[]))
+        with patch("koboi.tools.builtin.github.httpx.AsyncClient", return_value=mock_client):
+            await GithubClient(token="t").list_prs("o", "r", per_page=500)
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["per_page"] == 100
+
+    async def test_custom_api_base_respected(self):
+        # Enterprise/GHES deployments point at a different host; the POST URL must
+        # honor the configured api_base, not the hardcoded api.github.com default.
+        mock_client = _mock_async_client(_response(json_payload={"number": 1}))
+        with patch("koboi.tools.builtin.github.httpx.AsyncClient", return_value=mock_client):
+            await GithubClient(token="t", api_base="https://gh.enterprise.local/api/v3").create_pr(
+                "o", "r", "h", "main", "T"
+            )
+        args, _ = mock_client.post.call_args
+        assert args[0].startswith("https://gh.enterprise.local/api/v3")
+
+    async def test_create_pr_default_body_is_empty_string(self):
+        # Omitting `body` must serialize as "" (not None / not omitted) so GitHub
+        # stores an empty description rather than null, matching the documented default.
+        mock_client = _mock_async_client(_response(json_payload={"number": 1}))
+        with patch("koboi.tools.builtin.github.httpx.AsyncClient", return_value=mock_client):
+            await GithubClient(token="t").create_pr("o", "r", "h", "main", "T")
+        _, kwargs = mock_client.post.call_args
+        assert kwargs["json"]["body"] == ""
+
+    async def test_get_pr_missing_body_renders_empty(self):
+        # A PR dict with no "body" key must render as an empty string, never the
+        # literal "None" (which would confuse the agent into filing a PR titled None).
+        client = AsyncMock()
+        client.get_pr = AsyncMock(
+            return_value={
+                "number": 9,
+                "title": "Add feature",
+                "state": "open",
+                "head": {"ref": "feat"},
+                "base": {"ref": "main"},
+                "html_url": "u9",
+                # "body" intentionally omitted
+            }
+        )
+        result = await github_get_pr("o", "r", 9, _deps={"github_client": client})
+        assert "None" not in result
+
+    async def test_list_prs_empty_message_for_state(self):
+        # The empty-result message must echo the requested state so the agent can
+        # distinguish "no open PRs" from "no closed PRs" without a separate query.
+        client = AsyncMock()
+        client.list_prs = AsyncMock(return_value=[])
+        result = await github_list_prs("o", "r", state="closed", _deps={"github_client": client})
+        assert "closed" in result

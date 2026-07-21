@@ -43,6 +43,9 @@ def _registry(tracker: _Tracker) -> ToolRegistry:
     def write_thing() -> str:
         return "WROTE"
 
+    def moderate_thing() -> str:
+        return "MODERATE-WROTE"
+
     empty = {"type": "object", "properties": {}, "required": []}
     registry.register(name="read_slow", description="slow read", parameters=empty, fn=read_slow)
     registry.register(name="read_fast", description="fast read", parameters=empty, fn=read_fast)
@@ -53,6 +56,14 @@ def _registry(tracker: _Tracker) -> ToolRegistry:
         fn=write_thing,
         risk_level=RiskLevel.SAFE,  # SAFE but non-idempotent -> ineligible
         idempotent=False,
+    )
+    registry.register(
+        name="moderate_thing",
+        description="a moderate-risk tool",
+        parameters=empty,
+        fn=moderate_thing,
+        risk_level=RiskLevel.MODERATE,  # idempotent but MODERATE -> still ineligible
+        idempotent=True,
     )
     return registry
 
@@ -205,6 +216,63 @@ class TestParallelExecution:
         result = await core.run("go")
         assert result.success is True
         assert _tool_rows(core.memory)[0][1] == "FAST-RESULT"
+
+    async def test_slowest_completes_first_order_preserved(self):
+        # Dispatch SLOW at call-index 0 and FAST at call-index 1: completion
+        # order is FAST then SLOW, but memory rows must land in ORIGINAL call
+        # order [t0, t1] (Anthropic tool_result pairing is positional).
+        tracker = _Tracker()
+        core = _core(
+            tracker,
+            [_batch_response(("read_slow", "t0"), ("read_fast", "t1")), make_mock_response("done")],
+        )
+        result = await core.run("go")
+        assert result.success is True
+        rows = _tool_rows(core.memory)
+        assert [r[0] for r in rows] == ["t0", "t1"]  # original call order, NOT completion
+        assert rows[0][1] == "SLOW-RESULT"
+        assert rows[1][1] == "FAST-RESULT"
+        assert tracker.max_in_flight >= 2  # genuinely overlapped
+
+    async def test_exception_in_one_tool_preserves_pairing(self, monkeypatch):
+        # 3-call read-only batch where the MIDDLE call raises: results land in
+        # original order [t0_ok, t1_error, t2_ok]; t2 still ran (sibling isolation).
+        tracker = _Tracker()
+        core = _core(
+            tracker,
+            [
+                _batch_response(("read_fast", "t0"), ("read_slow", "t1"), ("read_fast", "t2")),
+                make_mock_response("done"),
+            ],
+        )
+        real = core._pipeline.execute_tool_call
+
+        async def boom(tc, iteration, on_event=None, defer_record=False):
+            if tc.id == "t1":
+                raise RuntimeError("kaboom")
+            return await real(tc, iteration=iteration, on_event=on_event, defer_record=defer_record)
+
+        monkeypatch.setattr(core._pipeline, "execute_tool_call", boom)
+        result = await core.run("go")
+        assert result.success is True
+        rows = _tool_rows(core.memory)
+        assert [r[0] for r in rows] == ["t0", "t1", "t2"]  # pairing invariant holds
+        assert rows[0][1] == "FAST-RESULT"  # t0 ok
+        assert "Error executing 'read_slow'" in rows[1][1]  # t1 errored
+        assert rows[2][1] == "FAST-RESULT"  # t2 sibling unaffected
+        errored = [o for o in result.pipeline_outcomes if o["errored"]]
+        assert len(errored) == 1 and errored[0]["error_kind"] == "execution_error"
+
+    async def test_mixed_risk_batch_stays_sequential(self):
+        # A MODERATE tool in the batch disables concurrency for the WHOLE batch
+        # (all-or-nothing gate in _parallel_batch_eligible); max_in_flight stays at 1.
+        tracker = _Tracker()
+        core = _core(
+            tracker,
+            [_batch_response(("read_slow", "t0"), ("moderate_thing", "t1")), make_mock_response("done")],
+        )
+        await core.run("go")
+        assert tracker.max_in_flight <= 1  # MODERATE -> sequential fallback
 
 
 class TestConfigWiring:

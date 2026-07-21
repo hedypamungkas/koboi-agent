@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -24,6 +25,46 @@ async def _wait_until(predicate, timeout: float = 3.0, interval: float = 0.02) -
             return
         await asyncio.sleep(interval)
     raise AssertionError("condition not met before timeout")
+
+
+class TestPipeDrainNoDeadlock:
+    async def test_continuous_pipe_drain_no_deadlock(self):
+        """Regression: a child that writes FAR more than the kernel pipe buffer
+        (~64KB) must not deadlock the manager. ``communicate()`` would block
+        here forever -- the child fills the 64KB kernel pipe buffer, blocks on
+        its own write, and never exits; meanwhile the parent is stuck in
+        ``communicate()`` waiting for EOF. The continuous ``_drain`` reader is
+        precisely what prevents that. Uses ``yes`` (writes infinitely) with a
+        tiny ``output_buffer_chars`` so the ring buffer is exercised repeatedly.
+        """
+        manager = BackgroundShellManager(output_buffer_chars=4096)
+        job = await manager.start("yes hello", max_lifetime_seconds=10)
+        assert job.status == "running"  # start() returned -> did not hang
+
+        # The writer must fill + rotate the ring buffer many times. Under a
+        # communicate() regression the child would block on a full pipe before
+        # ever producing 1000 chars of drained output (the read side never
+        # consumes), so this wait_until would time out -- which we assert does
+        # NOT happen.
+        await _wait_until(
+            lambda: manager._jobs[job.job_id].output_chars >= 1000,
+            timeout=5.0,
+        )
+        # Let it keep writing so the cap is exercised many more times.
+        await asyncio.sleep(0.3)
+        capped = manager._jobs[job.job_id]
+        assert capped.status == "running"
+        # Buffer stays near the cap -- never grows unboundedly. Each "hello\n"
+        # line is 6 bytes so overshoot is bounded by one line.
+        assert capped.output_chars <= 4096 + 100, f"ring buffer cap not enforced: output_chars={capped.output_chars}"
+
+        # Force-kill must return promptly (no hang waiting on drain / grace).
+        t0 = time.monotonic()
+        killed = await manager.kill(job.job_id, force=True)
+        elapsed = time.monotonic() - t0
+        assert elapsed < 2.0, f"kill took {elapsed:.2f}s -- drain may have deadlocked"
+        assert killed.status == "killed"
+        assert killed.returncode == -9  # SIGKILL -> negative signal death
 
 
 class TestStartPollKill:
@@ -60,6 +101,17 @@ class TestStartPollKill:
         manager = BackgroundShellManager()
         assert await manager.poll("does-not-exist") is None
 
+    async def test_missing_binary_exits_127(self):
+        # POSIX sh returns 127 for "command not found"; the manager does not
+        # pre-validate the binary, so the failure surfaces as a completed job
+        # with returncode=127 (not an exception).
+        manager = BackgroundShellManager()
+        job = await manager.start("this-binary-does-not-exist-xyz-123")
+        await _wait_until(lambda: manager._jobs[job.job_id].status == "exited", timeout=5.0)
+        final = await manager.poll(job.job_id)
+        assert final.status == "exited"
+        assert final.returncode == 127
+
 
 class TestSigtermEscalation:
     async def test_sigterm_then_sigkill_for_stubborn_process(self):
@@ -71,6 +123,20 @@ class TestSigtermEscalation:
         assert killed.status == "killed"
         assert killed.returncode is not None
         assert killed.returncode != 0
+
+    async def test_force_kill_skips_sigterm(self):
+        # force=True goes straight to SIGKILL -- never sends SIGTERM, never
+        # waits the grace window. Even with a TERM-trap installed and a
+        # generous grace_seconds (which we MUST not pay), kill returns in ~1s.
+        manager = BackgroundShellManager(grace_seconds=5.0)
+        job = await manager.start("trap '' TERM; sleep 60")
+        await asyncio.sleep(0.1)  # let the trap install
+        t0 = time.monotonic()
+        killed = await manager.kill(job.job_id, force=True)
+        elapsed = time.monotonic() - t0
+        assert elapsed < 2.0, f"force-kill took {elapsed:.2f}s -- did not skip SIGTERM grace?"
+        assert killed.status == "killed"
+        assert killed.returncode == -9  # direct SIGKILL, no TERM escalation
 
 
 class TestMaxLifetime:
@@ -114,6 +180,15 @@ class TestPolicyGate:
         with pytest.raises(ValueError):
             await manager.start("rm -rf /")
         assert manager._jobs == {}  # never registered -- rejected before spawn
+
+    async def test_sensitive_path_rejected_before_spawn(self):
+        # Additional vector: the shared ``check_command_blocked`` gate also
+        # catches sensitive-path reads (``cat /etc/passwd``) before Popen --
+        # never registered, surface as ValueError with the sensitive-path msg.
+        manager = BackgroundShellManager()
+        with pytest.raises(ValueError, match="sensitive path"):
+            await manager.start("cat /etc/passwd")
+        assert manager._jobs == {}
 
 
 class TestKillAll:
