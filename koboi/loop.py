@@ -495,7 +495,20 @@ class AgentCore:
         self._handover_from_guardrail = None
         for grd in self.output_guardrails:
             out_result = await grd.check(output, context=retrieved_context)
-            self._audit("output_check", details=f"guardrail={type(grd).__name__} passed={out_result.passed}")
+            # I5: forensic detail -- record action/reason AND any per-guardrail
+            # verdict signal (ScopeGuardrail.last_verdict / GroundingGuardrail.
+            # last_coverage) so a fail-soft pass is distinguishable from a judge-
+            # confirmed pass when debugging a customer report ("the bot wrote code").
+            _verdict_signal = getattr(grd, "last_verdict", None)
+            if _verdict_signal is None:
+                _verdict_signal = getattr(grd, "last_coverage", None)
+            self._audit(
+                "output_check",
+                details=(
+                    f"guardrail={type(grd).__name__} passed={out_result.passed} "
+                    f"action={out_result.action} verdict={_verdict_signal} reason={out_result.reason}"
+                ),
+            )
             if not out_result.passed:
                 action = out_result.action if isinstance(out_result.action, str) else ""
                 if action.lower() in {"block", "deny", "abort"}:
@@ -510,6 +523,7 @@ class AgentCore:
                         "guardrail": type(grd).__name__,
                         "reason": out_result.reason,
                         "action": "abstain",
+                        "verdict": _verdict_signal,
                     }
                     output = out_result.sanitized_content or (
                         "I don't have enough grounded information to answer this confidently."
@@ -524,6 +538,7 @@ class AgentCore:
                         "guardrail": type(grd).__name__,
                         "reason": out_result.reason,
                         "action": "handover",
+                        "verdict": _verdict_signal,
                     }
                     output = out_result.sanitized_content or (
                         "I don't have enough grounded information to answer this confidently."
@@ -541,6 +556,7 @@ class AgentCore:
                     "guardrail": type(grd).__name__,
                     "reason": out_result.reason,
                     "action": "warn",
+                    "verdict": _verdict_signal,
                 }
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
@@ -1068,8 +1084,24 @@ class AgentCore:
                     # P1: streaming reflection is deferred (doc §risks); complete without
                     # retrying. The critique already ran; the run completes normally.
                     self._log("Reflection retry requested but streaming -- completing (P1 defers stream reflection)")
-                for d in delta_buffer:
-                    yield d
+                # G8b/C1: ``_process_output`` may have swapped ``output``. For
+                # ``abstain`` the original buffered tokens ARE the off-scope /
+                # injected content the guardrail suppressed -- flushing them
+                # verbatim would leak it on an append-style SSE consumer, so yield
+                # the swapped deflection as fresh TextDeltas instead. For ``warn``
+                # the original content is legit (a warning is merely prepended), so
+                # preserve the G8b behavior of flushing the buffered deltas.
+                # (``block`` raises inside ``_process_output``; ``handover`` raises
+                # there too -- so reaching here means abstain or warn only.)
+                _abstained = (
+                    self._last_output_guardrail is not None and self._last_output_guardrail.get("action") == "abstain"
+                )
+                if _abstained:
+                    if output:
+                        yield TextDeltaEvent(content=output)
+                else:
+                    for d in delta_buffer:
+                        yield d
                 self._journal_step(i, status="complete", response=final_response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 seen: set[str] = set()

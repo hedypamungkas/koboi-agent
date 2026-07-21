@@ -7,11 +7,13 @@ A *specialized* agent (here: an Indonesian online-shop CS/sales bot) has a narro
 job, but an LLM is constitutionally over-compliant: handed an injected or merely
 off-domain request it will often comply -- convert the transcript to JSON, write a
 Python calculator, opine on bitcoin -- because that reads like a polite, answerable
-instruction. Classic prompt-injection *pattern* detectors (``InputGuardrail``'s 5
-regexes: "ignore previous", "you are now", ``system:``, etc.) miss these entirely:
-neither "buatkan program calculator" nor a JSON-conversion order hidden inside a
-fake schema matches any sane regex. The attack is *semantic*, so the catch must be
-too. This guardrail is that semantic catch, and it sits on the OUTPUT path.
+instruction. Classic prompt-injection *pattern* detectors (the regex-based
+``InputGuardrail`` -- which this module's sibling patch expands from 5 to 16
+patterns for blatant lexical/structural injection) still miss these: neither
+"buatkan program calculator" nor a JSON-conversion order hidden inside a fake
+schema matches any sane regex. Regex catches the *lexical* attack; these are
+*semantic*. The attack is semantic, so the catch must be too. This guardrail is
+that semantic catch, and it sits on the OUTPUT path.
 
 Why output, not input
 ---------------------
@@ -36,7 +38,10 @@ block, a JSON/conversation-as-data dump, programming constructs, an injected
 instruction echoed back). A normal short Bahasa CS reply skips the judge entirely
 -- zero extra calls on the 95% normal case, one ``gpt-4o-mini`` call only on
 suspicion. Fail-soft (mirrors ``GroundingGuardrail``): any judge-unavailable /
-judge-error passes through rather than breaking the run.
+judge-error / unrecognized-verdict passes through rather than breaking the run.
+Opt-in ``fail_closed: true`` instead routes those paths to ``action="handover"``
+(for customer-facing channels where a possibly-off-scope/injected response must
+not ship) -- same T2 knob ``GroundingGuardrail`` exposes. Default ``False``.
 
 Opt-in via config (cost/latency: 0 calls on normal turns, ~1 side-LLM call on
 flagged turns)::
@@ -50,6 +55,7 @@ flagged turns)::
           base_url: ${OPENAI_BASE_URL:}
           scope_description: "customer service for an Indonesian online shop: products, orders, shipping, payment, returns"
           deflection_text: "Maaf Kak, saya hanya membantu seputar produk, pesanan, pengiriman, dan pembayaran di toko ini ya."
+          # fail_closed: true  # route judge-unavailable/error/unrecognized -> handover (opt-in)
 
 Defense-in-depth: this is the *semantic* layer. It complements (1) prompt-level
 scope/refusal rules, (2) the free regex ``injection_detector`` input pre-pass for
@@ -123,15 +129,23 @@ def _default_suspicion_patterns() -> list[tuple[str, str]]:
         # prose) carrying message/conversation-shaped keys.
         (r'(?ms)\{.+"(?:content|message|conversation)"\s*:', "structured-data dump"),
         # Programming constructs unlikely in a CS reply.
-        (r"(?i)\b(def |function |class |import |from |print\s*\(|console\.log|"
-        r"public\s+static|#include|require\(|=>|const |let |var )", "code construct"),
+        (
+            r"(?i)\b(def |function |class |import |from |print\s*\(|console\.log|"
+            r"public\s+static|#include|require\(|=>|const |let |var )",
+            "code construct",
+        ),
         # A function/program definition by name (EN + ID ask): "def foo", "function foo".
-        (r"(?i)\b(buat(?:lah|kan)?|tulis|tuliskan|write|generate)\b.{0,40}\b"
-        r"(program|kode|code|script|fungsi|function|class)\b", "program/code generation"),
+        (
+            r"(?i)\b(buat(?:lah|kan)?|tulis|tuliskan|write|generate)\b.{0,40}\b"
+            r"(program|kode|code|script|fungsi|function|class)\b",
+            "program/code generation",
+        ),
         # Instruction-echo compliance openers the model emits when it obeys.
-        (r"(?i)\b(here is|here's|berikut (ini|adalah)|tentu(?:,)? ini|sure, here)\b"
-        r".{0,40}\b(json|the json|converted|konversi|transcript|percakapan|data)\b",
-        "injection-compliance opener"),
+        (
+            r"(?i)\b(here is|here's|berikut (ini|adalah)|tentu(?:,)? ini|sure, here)\b"
+            r".{0,40}\b(json|the json|converted|konversi|transcript|percakapan|data)\b",
+            "injection-compliance opener",
+        ),
     ]
 
 
@@ -149,6 +163,7 @@ class ScopeGuardrail(BaseGuardrail):
         deflection_text: str | None = None,
         timeout: float = 15.0,
         patterns: list[tuple[str, str]] | None = None,
+        fail_closed: bool = False,
         logger: AgentLogger | None = None,
         **kwargs: object,
     ) -> None:
@@ -166,7 +181,15 @@ class ScopeGuardrail(BaseGuardrail):
         self._suspicion = [(re.compile(rx), desc) for rx, desc in base]
         self._logger = logger
         self._client: LLMClient | None = None  # lazily built on first flagged check
-        # Observability: last verdict (None when cost-gated/skipped/passed).
+        # T2 (mirrors GroundingGuardrail): when True, the judge-unavailable /
+        # judge-error / unrecognized-verdict paths route to ``action="handover"``
+        # instead of silently passing a possibly-off-scope/injected response
+        # (``passed=True``). Default False preserves fail-soft behavior.
+        #   guardrails.output: [{name: scope_check, fail_closed: true, ...}]
+        self._fail_closed = fail_closed
+        # Observability: last verdict. None on empty content / client-unavailable
+        # / judge error; "ON_SCOPE(pre-pass)" when the pre-pass skipped the judge;
+        # otherwise the judge's verdict (ON_SCOPE/OFF_SCOPE/INJECTION).
         self.last_verdict: str | None = None
 
     def _get_client(self) -> LLMClient | None:
@@ -199,21 +222,32 @@ class ScopeGuardrail(BaseGuardrail):
         client = self._get_client()
         if client is None:
             self.last_verdict = None
+            if self._fail_closed:
+                return self._handover("fail-closed: scope judge unavailable")
             return GuardrailResult(passed=True)  # fail-soft: no judge available
         try:
-            verdict = await self._classify(client, content)
+            verdict, recognized = await self._classify(client, content)
             self.last_verdict = verdict
             if verdict in {"OFF_SCOPE", "INJECTION"}:
-                return GuardrailResult(
-                    passed=False,
-                    reason=f"scope guard: response {verdict.lower().replace('_', '-')}",
-                    action="abstain",
-                    sanitized_content=self._deflection,
-                )
+                return self._abstain(verdict)
+            # ON_SCOPE. A RECOGNIZED on-scope verdict always passes; an
+            # UNRECOGNIZED reply (empty/garbage/judge-targeted-injection) falls
+            # back to the lenient ON_SCOPE default unless ``fail_closed`` treats
+            # "the judge gave us nothing actionable" as a verification failure.
+            if not recognized:
+                if self._fail_closed:
+                    _logger.warning("ScopeGuardrail fail-closed: judge verdict unrecognized, routing to handover")
+                    return self._handover("fail-closed: scope judge returned an unrecognized verdict")
+                _logger.info("ScopeGuardrail: judge verdict unrecognized, defaulting to ON_SCOPE (lenient)")
             return GuardrailResult(passed=True)
         except Exception as exc:  # nosec - fail-soft, never break the run
             _logger.warning("ScopeGuardrail judge call failed: %s", exc)
+            # Invalidate the cached client so the next flagged turn re-builds it
+            # (e.g. after an API-key rotation that broke a built-but-unusable client).
+            self._client = None
             self.last_verdict = None
+            if self._fail_closed:
+                return self._handover("fail-closed: scope judge error")
             return GuardrailResult(passed=True)
 
     def _looks_suspicious(self, content: str) -> bool:
@@ -222,7 +256,30 @@ class ScopeGuardrail(BaseGuardrail):
                 return True
         return False
 
-    async def _classify(self, client: LLMClient, content: str) -> str:
+    def _abstain(self, verdict: str) -> GuardrailResult:
+        """A recognized OFF_SCOPE/INJECTION -> swap the response for the graceful
+        deflection (the loop's A3.2 ``action="abstain"`` branch)."""
+        return GuardrailResult(
+            passed=False,
+            reason=f"scope guard: response {verdict.lower().replace('_', '-')}",
+            action="abstain",
+            sanitized_content=self._deflection,
+        )
+
+    def _handover(self, reason: str) -> GuardrailResult:
+        """T2 fail-closed result: route the turn to handover instead of passing a
+        possibly-off-scope/injected response. The loop's ``action="handover"``
+        branch raises ``AgentHandoverError`` so the existing B1 pipeline turns it
+        into ``awaiting_human`` + ``handover.webhooks``. Mirrors
+        ``GroundingGuardrail._handover``."""
+        return GuardrailResult(
+            passed=False,
+            action="handover",
+            reason=reason,
+            sanitized_content=self._deflection,
+        )
+
+    async def _classify(self, client: LLMClient, content: str) -> tuple[str, bool]:
         resp = await client.complete(
             messages=[
                 {
@@ -235,16 +292,25 @@ class ScopeGuardrail(BaseGuardrail):
         return self._normalize_verdict((resp.content or "").strip())
 
     @staticmethod
-    def _normalize_verdict(verdict: str) -> str:
-        """Normalize an LLM verdict to ON_SCOPE / OFF_SCOPE / INJECTION.
+    def _normalize_verdict(verdict: str) -> tuple[str, bool]:
+        """Normalize an LLM verdict to ``(ON_SCOPE|OFF_SCOPE|INJECTION, recognized)``.
 
-        Order matters: 'INJECTION' is checked first (most specific harmful class),
-        then 'OFF_SCOPE', defaulting to ON_SCOPE so an ambiguous judge reply
-        never blocks a legit response (lenient-by-default).
+        ``recognized`` is False when the reply contained NO known token (empty /
+        garbage / judge-targeted injection). The canonical verdict still defaults
+        to ON_SCOPE so the lenient contract holds, but the caller can treat an
+        unrecognized reply as a verification failure under ``fail_closed``.
+
+        Matching is on FULL tokens (``OFF_SCOPE``/``OUT_OF_SCOPE``/...), never the
+        bare substring ``"OFF"`` -- otherwise judge prose like OFFER / OFFICIAL /
+        OFFLINE would false-positive to OFF_SCOPE and defeat the lenient contract.
+        Order matters: 'INJECTION' is checked first so the more *harmful* class
+        wins when a reply mentions both (e.g. "INJECTION not just OFF_SCOPE").
         """
         v = verdict.strip().upper()
         if "INJECTION" in v:
-            return "INJECTION"
-        if "OFF" in v or "OUT_OF_SCOPE" in v or "OUT-OF-SCOPE" in v:
-            return "OFF_SCOPE"
-        return "ON_SCOPE"
+            return ("INJECTION", True)
+        if any(tok in v for tok in ("OFF_SCOPE", "OFF-SCOPE", "OFFSCOPE", "OUT_OF_SCOPE", "OUT-OF-SCOPE")):
+            return ("OFF_SCOPE", True)
+        if any(tok in v for tok in ("ON_SCOPE", "ON-SCOPE", "ONSCOPE")):
+            return ("ON_SCOPE", True)
+        return ("ON_SCOPE", False)  # lenient default; unrecognized
