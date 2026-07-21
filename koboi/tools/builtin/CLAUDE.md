@@ -14,7 +14,7 @@ shell.py        run_shell                                DESTRUCTIVE execute she
 web.py          web_search / web_fetch                   SAFE        web search + fetch (backends in koboi/websearch/)
 memory.py       memory_store / memory_recall             SAFE        persistent KV memory
 search.py       grep_search / glob_find                  SAFE        regex/glob search in files
-git.py          git_status / git_log / git_diff (SAFE, read-only) + git_add / git_commit / git_checkout (MODERATE) + git_push (DESTRUCTIVE)   git ops; commit is idempotent=False w/ -c identity fallback (koboi-agent <agent@koboi.local>) when the repo has none; push takes no force flag; ref args guarded by SAFE_TARGET_RE + leading-dash rejection
+git.py          git_status / git_log / git_diff (SAFE, read-only) + git_add / git_commit / git_checkout (MODERATE) + git_push (DESTRUCTIVE)   git ops; commit is idempotent=False w/ -c identity fallback (koboi-agent <agent@koboi.local>) when the repo has none, and returns a clear "No staged changes" message instead of git's success-looking "nothing to commit"; git_add([""]) falls back to add-all; push takes no force flag (ref/remote args reject --force/-f/--force-with-lease/+ref/ref:ref); ref args guarded by SAFE_TARGET_RE + leading-dash rejection
 subagent.py     delegate_tasks                           MODERATE    parallel sub-agent delegation
 task.py         task_create / task_list / task_get / task_update / task_add_dependency   SAFE   structured task management
 ingest.py       ingest_url                               MODERATE    fetch a URL + chunk into the live corpus (W3; needs rag.live + a fetch provider)

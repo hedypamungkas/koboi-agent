@@ -35,8 +35,11 @@ __init__.py    Re-exports register_sandbox, build_sandbox, BaseSandbox; calls re
     under plain `deny` they fetch from anywhere.
   - *Soft allowlist* (Wave 3, `network: allowlist` + `network_allowlist: [host globs]`):
     scanned binaries (the deny set PLUS `pip`/`pip3`/`npm`/`pnpm`/`yarn`/`git`) may only
-    reference allowlisted hosts (`scheme://host` URLs + `git@host:` SSH forms); violations
-    return rc 126. **Intent-limiting, NOT enforcement**: it constrains hosts WRITTEN in the
+    reference allowlisted hosts (`scheme://host` URLs + `user@host` SSH/scp forms); violations
+    return rc 126. Host extraction is userinfo-aware: `https://github.com@evil.com` checks
+    `evil.com` (the real host after the last `@`), NOT the `github.com` userinfo decoy, so an
+    allowlisted host cannot be abused as a username to smuggle traffic elsewhere; bare
+    `ssh user@host` (no `:path`) is scanned too; matching is case-insensitive (DNS). **Intent-limiting, NOT enforcement**: it constrains hosts WRITTEN in the
     command (`--index-url http://evil`, `git clone https://evil`) -- a command with no host
     tokens passes (default-index fetches are unscannable), and interpreters still bypass it.
     Realistic host set for a coding job: `pypi.org`, `files.pythonhosted.org`,
