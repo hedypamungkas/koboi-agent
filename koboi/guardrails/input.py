@@ -15,11 +15,40 @@ class InputGuardrail(PatternGuardrail):
     """Validate and sanitize user input before entering agent loop."""
 
     PATTERNS: list[tuple[str, str]] = [
+        # --- Instruction-override commands (English) ---
         (r"(?i)ignore\s+.*instructions?", "Possible prompt injection: ignore instructions"),
         (r"(?i)forget\s+(everything|all|previous)", "Possible prompt injection: forget"),
+        (
+            r"(?i)disregard\s+(all|any|previous|the).{0,30}(instruction|prompt|rule)",
+            "Possible prompt injection: disregard instructions",
+        ),
+        (r"(?i)\bnew\s+(instructions?|rules?|prompt)\s*:", "Possible prompt injection: new instructions override"),
+        (
+            r"(?i)override\s+(your|the|all).{0,20}(instruction|prompt|rule|directive)",
+            "Possible prompt injection: override instructions",
+        ),
         (r"(?i)you\s+are\s+now\s+", "Possible prompt injection: persona override"),
+        # --- Instruction-override commands (Bahasa Indonesia) ---
+        (
+            r"(?i)abaikan\s+.*(instruksi|prompt|aturan|perintah|pesan\s+(di\s+)?atas)",
+            "Possible prompt injection: abaikan instruksi (ID)",
+        ),
+        (r"(?i)lupakan\s+(semua|sebelumnya|instruksi|prompt|aturan)", "Possible prompt injection: lupakan (ID)"),
+        (
+            r"(?i)(sekarang|mulai\s+sekarang)\s+(kamu|anda|kau)\s+(adalah|jadi)",
+            "Possible prompt injection: persona override (ID)",
+        ),
+        (r"(?i)jangan\s+ikuti\s+(instruksi|aturan|prompt)", "Possible prompt injection: jangan ikuti instruksi (ID)"),
+        # --- Role / system spoofing (both languages) ---
         (r"(?i)system\s*:\s*", "Possible prompt injection: system role spoofing"),
+        (r"(?i)\b(asistant|assistant|user|developer|tool)\s*:\s*", "Possible prompt injection: chat-role spoofing"),
+        # --- Structural tag / delimiter injection ---
         (r"<\s*/?\s*(system|instruction|prompt)\s*>", "Possible prompt injection: tag injection"),
+        (r"(?i)\[\s*/?\s*inst(ruct)?\s*\]", "Possible prompt injection: [INST] delimiter"),
+        (r"(?i)<<\s*/?\s*sys\s*>>", "Possible prompt injection: <<SYS>> delimiter"),
+        # Inline (?m) so '^' matches at the start of ANY line, not just the whole
+        # string -- a mid-transcript "# System\n..." must trip it too.
+        (r"(?im)^#{1,3}\s*(system|instructions?|prompt|rules?)\b", "Possible prompt injection: markdown role header"),
     ]
     DEFAULT_ACTION = "block"
     MAX_INPUT_LENGTH = 10000
@@ -28,6 +57,7 @@ class InputGuardrail(PatternGuardrail):
         self,
         max_length: int | None = None,
         custom_patterns: list[tuple[str, str]] | None = None,
+        deflection_text: str | None = None,
         logger: AgentLogger | None = None,
         **kwargs: object,
     ):
@@ -38,6 +68,18 @@ class InputGuardrail(PatternGuardrail):
             logger=logger,
         )
         self.max_length = max_length or self.MAX_INPUT_LENGTH
+        # When set, an injection-pattern block carries this as sanitized_content so the
+        # engine surfaces a graceful in-character reply instead of a hard block ->
+        # generic fallback. None (default) preserves the raise-as-before behavior.
+        # Empty/length blocks never deflect (no meaningful deflection for those).
+        # Normalize blank/whitespace -> None so the type and the engine's truthiness
+        # gate agree that ``deflection_text is not None`` ⟹ deflection fires (a stray
+        # " " / "\n" -- a plausible YAML typo or an empty ``${VAR:}`` interpolation --
+        # would otherwise yield a blank "successful" reply).
+        if deflection_text is not None:
+            self.deflection_text = deflection_text.strip() or None
+        else:
+            self.deflection_text = None
 
     async def check(self, user_input: str, context: list[str] | None = None) -> GuardrailResult:
         if not user_input or not user_input.strip():
@@ -52,7 +94,12 @@ class InputGuardrail(PatternGuardrail):
 
         pattern_result = await self.check_patterns(user_input)
         if pattern_result is not None:
-            return pattern_result
+            return GuardrailResult(
+                passed=False,
+                reason=pattern_result.reason,
+                action="block",
+                sanitized_content=self.deflection_text,
+            )
 
         sanitized = user_input.strip()
         return GuardrailResult(passed=True, sanitized_content=sanitized)

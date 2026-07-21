@@ -10,7 +10,15 @@ This is the ONLY primitive that catches a confidently-retrieved-but-wrong answer
 the loop (empty retrieval is handled by the A2 abstention marker; low-relevance is
 a future method-aware gate). It is a probabilistic LLM-judge catch, NOT a
 deterministic guarantee -- fail-soft: any judge error passes-through (never breaks
-the run, mirroring ``ProactiveMemory.extract_and_store``).
+the run, mirroring ``ProactiveMemory.extract_and_store``). Opt-in ``fail_closed: true``
+(T2) instead routes the judge-unavailable / judge-error / no-claims AND empty-
+retrieval (``context == []`` -- retrieval ran but returned nothing) paths to
+``action="handover"`` -- for customer-facing channels where an unverified answer
+must not ship; a turn with NO retrieval attempted (``context is None`` -- no
+augmentation configured, or a conversational/OOS turn) always passes, so
+greetings/smalltalk on a fail_closed channel don't spuriously hand over. The loop
+then raises ``AgentHandoverError`` (-> awaiting_human
++ ``handover.webhooks``). Default ``False`` is byte-identical to v0.18.3.
 
 Opt-in via config (cost/latency: 2 side-LLM calls per terminal answer — 1
 claim-decompose + 1 batch-NLI over all claims)::
@@ -83,6 +91,7 @@ class GroundingGuardrail(BaseGuardrail):
         refusal_text: str | None = None,
         timeout: float = 60.0,
         logger: AgentLogger | None = None,
+        fail_closed: bool = False,
         **kwargs: object,
     ) -> None:
         self._provider = provider
@@ -93,6 +102,16 @@ class GroundingGuardrail(BaseGuardrail):
         self._refusal_text = refusal_text or DEFAULT_REFUSAL
         self._timeout = float(timeout)
         self._logger = logger
+        # T2: when True, the judge-unavailable / judge-error / no-claims AND
+        # empty-retrieval (``context == []`` -- retrieval ran but returned
+        # nothing) paths route to ``action="handover"`` instead of silently
+        # passing the unverified answer (``passed=True``). A turn with no answer
+        # text (``not content``) or no retrieval attempted (``context is None``
+        # -- no augmentation / conversational/OOS turn) always passes, so
+        # greetings/smalltalk don't spuriously hand over. Default False preserves
+        # v0.18.3 fail-soft behavior byte-for-byte. Opt-in per deployment via YAML:
+        #   guardrails.output: [{name: grounding_check, fail_closed: true, ...}]
+        self._fail_closed = fail_closed
         self._client: LLMClient | None = None  # lazily built on first check
         # Observability: last computed coverage (None when cost-gated/skipped).
         self.last_coverage: float | None = None
@@ -115,19 +134,41 @@ class GroundingGuardrail(BaseGuardrail):
         return self._client
 
     async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
-        # Cost-gate: no retrieved context -> A2 already cued abstention; no point
-        # judging an answer with nothing to ground against.
-        if not content or not context:
+        # No answer text -> nothing to ground (e.g. the model returned ""). Not a
+        # verification failure; pass regardless of fail_closed and skip the judge.
+        if not content:
             self.last_coverage = None
+            return GuardrailResult(passed=True)
+        # ``context is None`` -> the loop signalled NO retrieval was attempted this
+        # turn (no augmentation configured, or a conversational/OOS turn). Nothing
+        # to ground against AND nothing broke -> pass regardless of fail_closed, so
+        # greetings/smalltalk on a fail_closed channel don't spuriously hand over.
+        if context is None:
+            self.last_coverage = None
+            return GuardrailResult(passed=True)
+        # ``context == []`` -> retrieval WAS attempted but returned nothing
+        # (broken/empty corpus, tokenizer/embedding failure, off-domain query). The
+        # agent may answer from parametric knowledge with no evidence. Under
+        # fail_closed, honor the operator's contract and hand over; otherwise
+        # fail-soft pass (default, byte-identical to v0.18.3). Consistent with the
+        # no-claims path below -- both mean "nothing to verify against".
+        if not context:
+            self.last_coverage = None
+            if self._fail_closed:
+                return self._handover("fail-closed: retrieval returned no context to ground against")
             return GuardrailResult(passed=True)
         client = self._get_client()
         if client is None:
             self.last_coverage = None
+            if self._fail_closed:
+                return self._handover("fail-closed: grounding judge unavailable")
             return GuardrailResult(passed=True)  # fail-soft: no judge available
         try:
             claims = await self._decompose(client, content)
             if not claims:
                 self.last_coverage = None
+                if self._fail_closed:
+                    return self._handover("fail-closed: judge produced no claims to verify")
                 return GuardrailResult(passed=True)
             ctx_text = "\n---\n".join(context)
             verdicts = await self._batch_nli(client, ctx_text, claims)
@@ -145,7 +186,23 @@ class GroundingGuardrail(BaseGuardrail):
         except Exception as exc:  # nosec - fail-soft, never break the run
             _logger.warning("GroundingGuardrail judge call failed: %s", exc)
             self.last_coverage = None
+            if self._fail_closed:
+                return self._handover("fail-closed: grounding judge error")
             return GuardrailResult(passed=True)
+
+    def _handover(self, reason: str) -> GuardrailResult:
+        """T2 fail-closed result: route the turn to handover instead of passing an
+        unverified answer. ``last_coverage`` stays None (the judge never produced a
+        number); the loop's ``action="handover"`` branch raises
+        ``AgentHandoverError`` so the existing B1 pipeline turns it into
+        ``awaiting_human`` + ``handover.webhooks``.
+        """
+        return GuardrailResult(
+            passed=False,
+            action="handover",
+            reason=reason,
+            sanitized_content=self._refusal_text,
+        )
 
     async def _decompose(self, client: LLMClient, answer: str) -> list[str]:
         resp = await client.complete(

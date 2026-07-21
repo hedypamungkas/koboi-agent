@@ -177,6 +177,7 @@ class AgentCore:
         if output_guardrail is not None and output_guardrail not in self.output_guardrails:
             self.output_guardrails.insert(0, output_guardrail)
         self._last_output_guardrail: dict | None = None  # R2: warn outcome -> RunResult.metadata
+        self._handover_from_guardrail: tuple[str, str] | None = None  # T2: guardrail handover pending raise
         # Self-healing P1: reflection-retry state. Stashed by _process_output from a
         # ReflectionHook's POST_OUTPUT flag; honored by _run_loop. None when no hook.
         self._reflection_retry_requested: dict | None = None
@@ -381,7 +382,11 @@ class AgentCore:
             self._audit("input_check", details=f"guardrail={type(grd).__name__} passed={result.passed}")
             if not result.passed:
                 self._log(f"Input blocked by {type(grd).__name__}: {result.reason}")
-                raise AgentGuardrailError(result.reason, direction="input")
+                raise AgentGuardrailError(
+                    result.reason,
+                    direction="input",
+                    sanitized_content=result.sanitized_content,
+                )
 
         ctx = await self._emit(HookEvent.PRE_INPUT, messages=self.memory.get_messages(), user_message=text_part)
         if ctx.abort:
@@ -389,6 +394,56 @@ class AgentCore:
         _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
         if _hr:
             raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
+
+    async def _graceful_input_deflection(self, exc: AgentGuardrailError, start: float) -> RunResult:
+        """Turn an input guardrail block into a graceful in-character deflection --
+        the guardrail's ``sanitized_content`` becomes the user-facing reply (saved to
+        memory, success=True) instead of a hard ``AgentGuardrailError`` surfacing as a
+        generic fallback. Achieves input-side parity with the output ``abstain`` path's
+        graceful refusal (same user-visible outcome: a reply, not an error).
+
+        Only reached when ``exc.is_graceful_deflection`` is true (a deflecting input
+        guardrail supplied a non-empty ``sanitized_content``); empty/length blocks
+        (``sanitized_content`` None/blank) still raise. Treated as a completed turn --
+        terminal journal step + SESSION_END + standard run metadata + trace_id -- so a
+        deflected turn is observable like any other (it is no longer an unbalanced
+        SESSION_START the way the pre-PR raise was).
+        """
+        content = exc.sanitized_content or ""
+        # Coherent transcript: record the blocked user turn + the deflection. Unlike the
+        # output abstain path (where _prepare_run already added the user message before
+        # the loop ran), an input block raises inside _validate_input BEFORE _prepare_run's
+        # add_user_message -- so the user turn must be recorded explicitly here.
+        # Fail-soft: a transient memory-backend error must NOT downgrade the customer to a
+        # generic fallback -- the graceful reply is this feature's whole contract. (The
+        # normal loop path lets memory errors propagate; this terminal path is deliberately
+        # more robust -- see test_run_graceful_survives_memory_error.)
+        try:
+            if getattr(self, "_last_user_message", None):
+                self.memory.add_user_message(self._last_user_message)
+            self.memory.add_assistant_message(content)
+        except Exception as mem_exc:  # noqa: BLE001 (fail-soft: never lose the graceful reply)
+            self._log(f"input deflection: memory write failed (reply still delivered): {mem_exc}")
+        self._audit("input_deflected", direction=exc.direction, reason=exc.reason)
+        # Lifecycle parity with _run_loop's success branch: a terminal step + SESSION_END
+        # so journal/resume diagnostics, telemetry, Langfuse finalization, and proactive-
+        # memory hooks see this turn.
+        self._journal_step(0, status="input_deflected", is_terminal=True)
+        await self._emit(HookEvent.SESSION_END, iteration=0)
+        _meta = self._run_metadata(resumed=False, last_step=0)
+        _meta["trace_id"] = _langfuse_trace_id(self.hooks)
+        _meta["input_guardrail_deflection"] = {
+            "direction": exc.direction,
+            "reason": exc.reason,
+            "action": "deflect",
+        }
+        return RunResult(
+            content=content,
+            iterations_used=0,
+            success=True,
+            elapsed_seconds=_time.monotonic() - start,
+            metadata=_meta,
+        )
 
     def _is_empty_terminal(self, response: AgentResponse) -> bool:
         """A complete response with no usable content (self-healing P0-C).
@@ -435,16 +490,26 @@ class AgentCore:
         return "I was unable to complete the task within the allowed steps."
 
     async def _process_graceful_output(self, output: str) -> str:
-        """Run output guardrails on the graceful-degrade summary + persist it (fail-soft).
+        """Run output guardrails on the graceful-degrade summary + persist it.
 
         Routes the summary through ``_process_output`` (the single guardrail + persist
-        gate) so it gets the same treatment as any terminal answer. A guardrail block
-        / handover / abort on the degrade falls back to the generic notice (preserve
-        the graceful "never raise" contract). Self-healing P3.
+        gate) so it gets the same treatment as any terminal answer. A ``block`` /
+        ``abort`` on the degrade falls back to the generic notice -- the summary is
+        task-progress meta-commentary, not a must-ship factual answer, so degrading it
+        preserves the graceful "no hard failure" contract. Self-healing P3.
+
+        A ``handover`` action (T2: a fail-closed GroundingGuardrail whose judge errors
+        on the summary, or a POST_OUTPUT handover hook) PROPAGATES rather than
+        degrading. A fail-closed deployment opted into "never ship an unverified
+        answer"; swallowing the handover at max_iter would silently defeat that.
+        Handover is a controlled yield (-> awaiting_human / HandoverEvent +
+        handover.webhooks), not a hard error, so P3's "no hard failure" spirit holds.
+        ``_process_output`` has already saved the refusal to memory before raising, so
+        the generic-notice fallback below does not double-write on the handover path.
         """
         try:
             return await self._process_output(output, AgentResponse(content=output), self.max_iterations - 1)
-        except (AgentGuardrailError, AgentHandoverError, AgentAbortedError):
+        except (AgentGuardrailError, AgentAbortedError):
             output = "I was unable to complete the task within the allowed steps."
             self.memory.add_assistant_message(output)
             return output
@@ -508,13 +573,33 @@ class AgentCore:
         """
         # A3: thread retrieved context to output guardrails so a grounding
         # guardrail can judge faithfulness against the retrieved evidence.
-        retrieved_context: list[str] = []
+        # ``None`` = no retrieval attempted (no augmentation / conversational/OOS
+        # turn) -> the grounding guardrail passes instead of handing over under
+        # fail_closed. A list (incl. ``[]``) = retrieval ran; ``[]`` means it
+        # returned nothing, which fail_closed treats as an unverified answer.
+        retrieved_context: list[str] | None = None
         if self.augmentation is not None:
             _results = getattr(self.augmentation, "last_results", None) or []
             retrieved_context = [r.chunk.content for r in _results]
+        # T2: clear any stale guardrail-handover flag from a prior interrupted call
+        # so a non-handover run cannot trip a spurious AgentHandoverError.
+        self._handover_from_guardrail = None
         for grd in self.output_guardrails:
             out_result = await grd.check(output, context=retrieved_context)
-            self._audit("output_check", details=f"guardrail={type(grd).__name__} passed={out_result.passed}")
+            # I5: forensic detail -- record action/reason AND any per-guardrail
+            # verdict signal (ScopeGuardrail.last_verdict / GroundingGuardrail.
+            # last_coverage) so a fail-soft pass is distinguishable from a judge-
+            # confirmed pass when debugging a customer report ("the bot wrote code").
+            _verdict_signal = getattr(grd, "last_verdict", None)
+            if _verdict_signal is None:
+                _verdict_signal = getattr(grd, "last_coverage", None)
+            self._audit(
+                "output_check",
+                details=(
+                    f"guardrail={type(grd).__name__} passed={out_result.passed} "
+                    f"action={out_result.action} verdict={_verdict_signal} reason={out_result.reason}"
+                ),
+            )
             if not out_result.passed:
                 action = out_result.action if isinstance(out_result.action, str) else ""
                 if action.lower() in {"block", "deny", "abort"}:
@@ -529,15 +614,40 @@ class AgentCore:
                         "guardrail": type(grd).__name__,
                         "reason": out_result.reason,
                         "action": "abstain",
+                        "verdict": _verdict_signal,
                     }
                     output = out_result.sanitized_content or (
                         "I don't have enough grounded information to answer this confidently."
                     )
                     break
+                if action.lower() == "handover":
+                    # T2: a guardrail (e.g. fail-closed GroundingGuardrail) requested
+                    # handover. Swap the output for the refusal, then raise
+                    # AgentHandoverError after the memory write below so the B1
+                    # pipeline turns it into awaiting_human + handover.webhooks.
+                    self._last_output_guardrail = {
+                        "guardrail": type(grd).__name__,
+                        "reason": out_result.reason,
+                        "action": "handover",
+                        "verdict": _verdict_signal,
+                    }
+                    output = out_result.sanitized_content or (
+                        "I don't have enough grounded information to answer this confidently."
+                    )
+                    # Summary is intentionally "" -- the refusal (sanitized_content)
+                    # is already saved to memory below as the user-facing output, so
+                    # the operator still sees it via B2 replay. Passing the refusal as
+                    # the handover ``summary`` would (a) mislabel user copy as the
+                    # operator digest and (b) suppress the B4 warm-handoff digest
+                    # branch in server/app.py (``if not _summary and handoff_digest``).
+                    # Empty lets B4 generate a real summary (or B2 replay serves it).
+                    self._handover_from_guardrail = (out_result.reason or "handover requested", "")
+                    break
                 self._last_output_guardrail = {
                     "guardrail": type(grd).__name__,
                     "reason": out_result.reason,
                     "action": "warn",
+                    "verdict": _verdict_signal,
                 }
                 output = f"[GUARDRAIL WARNING ({type(grd).__name__}): {out_result.reason}]\n\n{output}"
                 break
@@ -557,6 +667,13 @@ class AgentCore:
         if _hr:
             raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
         self.memory.add_assistant_message(output)
+        # T2: honor a guardrail-requested handover AFTER saving the refusal to
+        # memory. Reuses the B1 pipeline (AgentHandoverError -> awaiting_human /
+        # HandoverEvent + handover.webhooks).
+        _hg = self._handover_from_guardrail
+        if _hg is not None:
+            self._handover_from_guardrail = None
+            raise AgentHandoverError(_hg[0], _hg[1])
         return output
 
     def _activate_skill(self, content: str) -> tuple[str, str] | None:
@@ -1144,7 +1261,15 @@ class AgentCore:
         raise AgentMaxIterationsError(self.max_iterations)
 
     async def run(self, user_message: str | list) -> RunResult:
-        user_message, tool_defs, _start = await self._prepare_run(user_message)
+        _run_start = _time.monotonic()
+        try:
+            user_message, tool_defs, _start = await self._prepare_run(user_message)
+        except AgentGuardrailError as exc:
+            # Graceful input deflection: a guardrail that supplied sanitized_content
+            # becomes the reply instead of a hard block -> generic fallback.
+            if exc.is_graceful_deflection:
+                return await self._graceful_input_deflection(exc, _run_start)
+            raise
         return await self._run_loop(tool_defs, _start, resumed=False)
 
     async def resume(self) -> RunResult:
@@ -1175,9 +1300,26 @@ class AgentCore:
 
     async def run_stream(self, user_message: str | list) -> AsyncGenerator:
         """Stream agent execution as a sequence of StreamEvents."""
+        _run_start = _time.monotonic()
         try:
             user_message, tool_defs, _start = await self._prepare_run(user_message)
         except (AgentGuardrailError, AgentAbortedError) as exc:
+            # Graceful input deflection: stream the guardrail's sanitized_content as
+            # text + a normal Complete (not an ErrorEvent) so the customer gets a
+            # graceful reply instead of a generic fallback.
+            if isinstance(exc, AgentGuardrailError) and exc.is_graceful_deflection:
+                result = await self._graceful_input_deflection(exc, _run_start)
+                yield TextDeltaEvent(content=exc.sanitized_content)
+                yield CompleteEvent(
+                    response=AgentResponse(content=exc.sanitized_content),
+                    content=exc.sanitized_content,
+                    elapsed_seconds=result.elapsed_seconds,
+                    iterations_used=0,
+                    tools_used=[],
+                    trace_id=result.metadata.get("trace_id", ""),
+                    metadata=result.metadata,
+                )
+                return
             yield ErrorEvent(error=exc)
             return
 
@@ -1283,8 +1425,24 @@ class AgentCore:
                     # P1: streaming reflection is deferred (doc §risks); complete without
                     # retrying. The critique already ran; the run completes normally.
                     self._log("Reflection retry requested but streaming -- completing (P1 defers stream reflection)")
-                for d in delta_buffer:
-                    yield d
+                # G8b/C1: ``_process_output`` may have swapped ``output``. For
+                # ``abstain`` the original buffered tokens ARE the off-scope /
+                # injected content the guardrail suppressed -- flushing them
+                # verbatim would leak it on an append-style SSE consumer, so yield
+                # the swapped deflection as fresh TextDeltas instead. For ``warn``
+                # the original content is legit (a warning is merely prepended), so
+                # preserve the G8b behavior of flushing the buffered deltas.
+                # (``block`` raises inside ``_process_output``; ``handover`` raises
+                # there too -- so reaching here means abstain or warn only.)
+                _abstained = (
+                    self._last_output_guardrail is not None and self._last_output_guardrail.get("action") == "abstain"
+                )
+                if _abstained:
+                    if output:
+                        yield TextDeltaEvent(content=output)
+                else:
+                    for d in delta_buffer:
+                        yield d
                 self._journal_step(i, status="complete", response=final_response, is_terminal=True)
                 await self._emit(HookEvent.SESSION_END, iteration=i)
                 seen: set[str] = set()

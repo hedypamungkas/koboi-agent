@@ -656,7 +656,7 @@ async def run_job(
     from koboi.exceptions import AgentHandoverError  # noqa: PLC0415 (lazy; jobs.py keeps koboi imports function-local)
 
     try:
-        final_content = await asyncio.wait_for(
+        final_content, needs_clarification = await asyncio.wait_for(
             _execute_job(
                 job_id,
                 pool,
@@ -673,7 +673,11 @@ async def run_job(
             ),
             timeout=timeout,
         )
-        result_json = json.dumps({"content": final_content}) if final_content else None
+        result_json = (
+            json.dumps({"content": final_content, "needs_clarification": needs_clarification})
+            if final_content
+            else None
+        )
         store.update_status(job_id, "completed", result_json=result_json)
         registry.set_terminal(job_id, "completed")
         _emit_job_webhooks(webhooks, store, job_id, "completed")
@@ -883,17 +887,20 @@ async def _execute_job(
     workflow_store: Any | None = None,
     replay_mode: str | None = None,
     shell_allowlist: list[str] | None = None,
-) -> str | None:
+) -> tuple[str | None, bool]:
     """Inner execution: agent setup + run_stream → event buffer.
 
-    Returns the final content (from ``CompleteEvent``) for ``result_json``
-    persistence so completed jobs survive restart. When ``workflow_ref`` is set,
+    Returns ``(content, needs_clarification)``: content is the final answer (from
+    ``CompleteEvent``) for ``result_json`` persistence so completed jobs survive
+    restart; ``needs_clarification`` is only ever true for a deep_research job whose
+    ``OrchestrationCompleteEvent.metadata`` says so (see orchestrator.py's clarify
+    branch) -- every other path always returns false. When ``workflow_ref`` is set,
     execution is delegated to :func:`_execute_workflow_job` (builds the agent from
     the stored bundle instead of the pooled server-level agent).
     """
     record = registry.get(job_id)
     if workflow_ref:
-        return await _execute_workflow_job(
+        content = await _execute_workflow_job(
             job_id,
             registry,
             store,
@@ -905,11 +912,12 @@ async def _execute_job(
             replay_mode=replay_mode,
             shell_allowlist=shell_allowlist,
         )
+        return content, False
     if replay_mode in ("cache", "replay"):
         # v3 #4-a: a plain (non-workflow_ref) cache/replay job builds a fresh
         # per-job agent (the pooled agent shares one client and can't isolate
         # this run's cache). Restricted sandbox + AutonomousApprovalHandler apply.
-        return await _execute_plain_cache_job(
+        content = await _execute_plain_cache_job(
             job_id,
             pool,
             registry,
@@ -921,6 +929,7 @@ async def _execute_job(
             replay_mode,
             shell_allowlist=shell_allowlist,
         )
+        return content, False
 
     from koboi.events import CompleteEvent, OrchestrationCompleteEvent
 
@@ -950,6 +959,7 @@ async def _execute_job(
             )
         store.update_status(job_id, "running")
         orchestrated_content: str | None = None
+        needs_clarification = False
         async with pool.session_lock(record.session_id):
             if resume:
                 result = await agent.resume()
@@ -963,7 +973,8 @@ async def _execute_job(
                         # deep_research/dynamic/dag emit OrchestrationCompleteEvent
                         # (NOT CompleteEvent); the cited report is in final_answer.
                         orchestrated_content = event.final_answer
-        return orchestrated_content
+                        needs_clarification = event.needs_clarification
+        return orchestrated_content, needs_clarification
 
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network
     # isolation, so refuse it -- raise before running; run_job marks the job failed.
@@ -1037,7 +1048,7 @@ async def _execute_job(
                 agent._core._tool_pipeline = prior_pipeline
             agent._core.mode_manager.switch_mode(prior_mode)
             agent._core.max_iterations = prior_max_iter
-    return final_content
+    return final_content, False
 
 
 async def resume_on_startup(

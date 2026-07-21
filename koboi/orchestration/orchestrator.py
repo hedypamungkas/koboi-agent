@@ -66,21 +66,56 @@ class _AgentCompletedEvent:
     agent_result: AgentResult
 
 
-def _verify_citations(text: str, ctx: ResearchContext) -> tuple[str, list[int]]:
-    """A1: drop ``[n]`` markers that don't resolve to a SourceStore source.
+# Closing bracket -> its opener, for balanced-paren URL cleanup in _extract_source_url.
+_URL_CLOSERS_TO_OPENERS = {")": "(", "]": "[", "}": "{", ">": "<"}
 
-    Returns the cleaned text + the sorted list of referenced (resolvable) citation ids.
-    Hallucinated markers (e.g. ``[99]`` with no matching source) are stripped, so the final
-    report only ever cites real findings.
+
+def _extract_source_url(text: str) -> str | None:
+    """Extract the first ``http(s)://`` URL from ``text``, trimming trailing sentence/markup
+    punctuation and any unbalanced wrapping brackets. Returns ``None`` when no URL is present.
+
+    Shared by :func:`_verify_citations` and :meth:`Orchestrator._sources_footer` so the body
+    markers and the Sources footer agree on what counts as a citable source: a finding whose
+    text yields no URL is dropped from BOTH (never just the footer), which is what keeps body
+    ``[n]`` markers from dangling over a footer that omits them.
+
+    Trailing cleanup: strips chars that never legitimately end a URL (``. , ; : ! ? " ' ` *``),
+    then strips a trailing closing bracket ONLY when it doesn't balance an opener inside the URL
+    — so ``https://en.wikipedia.org/wiki/Foo_(bar)`` is preserved while ``(https://x.com)`` and
+    ``https://x.com).`` clean up to ``https://x.com``.
+    """
+    m = re.search(r"https?://[^\s]+", text or "")
+    if not m:
+        return None
+    url = m.group(0).rstrip(".,;:!?\"'`*")
+    while url and url[-1] in _URL_CLOSERS_TO_OPENERS:
+        if _URL_CLOSERS_TO_OPENERS[url[-1]] in url:
+            break  # the closer balances an opener -> it's part of the URL, keep it
+        url = url[:-1]
+    return url or None
+
+
+def _verify_citations(text: str, ctx: ResearchContext) -> tuple[str, list[int]]:
+    """Drop ``[n]`` markers that don't resolve to a citable SourceStore source.
+
+    A marker is kept only when its citation id resolves to a stored finding whose text contains
+    an extractable URL (:func:`_extract_source_url`). Hallucinated markers (e.g. ``[99]`` with no
+    matching source) AND markers pointing at URL-less findings are both stripped, so the final
+    report only ever cites sources the Sources footer can actually render — body and footer can
+    never diverge. Returns the cleaned text + the sorted list of referenced citation ids.
     """
     referenced: set[int] = set()
 
     def _replace(match: re.Match[str]) -> str:
         n = int(match.group(1))
-        if ctx.source_store.resolve(n) is not None:
-            referenced.add(n)
-            return match.group(0)
-        return ""  # unresolvable -> drop the marker
+        source_text = ctx.source_store.resolve(n)
+        if source_text is None:
+            return ""  # unresolvable -> drop the marker
+        if _extract_source_url(source_text) is None:
+            logger.info("_verify_citations: dropping [n=%d] marker (finding has no citable URL)", n)
+            return ""  # no URL -> drop so the body never promises a source the footer omits
+        referenced.add(n)
+        return match.group(0)
 
     cleaned = re.sub(r"\[(\d+)\]", _replace, text)
     return cleaned, sorted(referenced)
@@ -198,6 +233,10 @@ class Orchestrator:
         # W7: session_id tags persisted research_context rows so GET /v1/sessions/{id}
         # can map a session to its deep-research run. None for non-server callers.
         session_id: str | None = None,
+        # Fix: the agent's configured system_prompt (tone/language/output-format
+        # instructions) previously never reached deep_research's final synthesis
+        # call -- only chat/act/auto modes honored it. See _synthesize_research.
+        system_prompt: str | None = None,
     ):
         self.client = client
         self.router = router
@@ -230,6 +269,9 @@ class Orchestrator:
         self._media_backend = media_backend
         self._resume_ctx_json: str | None = None
         self._session_id = session_id
+        # ``.strip()`` so empty AND whitespace-only prompts coalesce to "unset"
+        # (byte-identical single-user-message synthesis), not a whitespace system msg.
+        self._system_prompt = (system_prompt or "").strip() or None
         # F9: reentrancy guard. The Orchestrator holds per-run mutable state (_agents_map,
         # _dynamic_blueprints) that is rebuilt each round, so it is NOT safe to drive two
         # concurrent runs on one instance. Today every caller (server pool = one Orchestrator
@@ -1110,10 +1152,47 @@ class Orchestrator:
         await self._emit_research_hook(
             HookEvent.PRE_LLM_CALL, iteration=ctx.depth, messages=[{"role": "user", "content": query}]
         )
-        plan = await plan_research(self.client, query)
+        plan = await plan_research(self.client, query, system_prompt=self._system_prompt)
         await self._emit_research_hook(
             HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=plan.reason or "research plan"
         )
+        if plan.needs_clarification and plan.clarifying_question:
+            # The request is ambiguous/under-scoped enough that research would likely
+            # target the wrong thing -- ask ONE question instead of committing to a
+            # multi-minute run. Ends the turn here, same shape as a normal completion
+            # (status="completed"); the caller decides whether/how to bridge the
+            # user's reply back into a follow-up query (deep_research has no
+            # cross-turn memory of its own).
+            yield RoutingDecisionEvent(
+                agents=["clarify"],
+                confidence=1.0,
+                method="dynamic",
+                reasoning="needs_clarification",
+                domain_label=None,
+            )
+            yield TextDeltaEvent(content=plan.clarifying_question)
+            await self._emit_research_hook(HookEvent.SESSION_END)
+            yield OrchestrationCompleteEvent(
+                final_answer=plan.clarifying_question,
+                elapsed_seconds=time.time() - start,
+                agent_results=[],
+                execution_mode="deep_research",
+                routing_agents=[],
+                routing_confidence=1.0,
+                needs_clarification=True,
+                metadata={
+                    "research_sources": [],
+                    "coverage": 0.0,
+                    "depth": 0,
+                    "run_id": run_id,
+                    "needs_clarification": True,
+                    "plan_nodes": 0,
+                    "used_searches": 0,
+                    "used_fetches": 0,
+                    "nodes_failed": 0,
+                },
+            )
+            return
         if not plan.needs_workflow or not plan.steps:
             # A7: simple request -> one direct node stamped deep_research (do NOT delegate to
             # _run_dynamic, which re-triages via plan_or_skip + mislabels execution_mode).
@@ -1201,10 +1280,20 @@ class Orchestrator:
             await self._emit_research_hook(
                 HookEvent.PRE_LLM_CALL, iteration=ctx.depth, messages=[{"role": "user", "content": drill_query}]
             )
-            plan = await plan_research(self.client, drill_query)
+            plan = await plan_research(self.client, drill_query, system_prompt=self._system_prompt)
             await self._emit_research_hook(
                 HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=plan.reason or "re-plan"
             )
+            if plan.needs_clarification:
+                # An in-progress run must not stop to ask -- but log it so a deployment
+                # debugging "shallow reports" has a trace that the planner flagged
+                # ambiguity mid-run (the clarifying_question is intentionally unread).
+                logger.info(
+                    "deep_research drill re-plan returned needs_clarification=true at depth=%d; "
+                    "ignored (in-progress run). question was: %r",
+                    ctx.depth,
+                    plan.clarifying_question,
+                )
             if not plan.needs_workflow or not plan.steps:
                 break
             remaining = max(1, budget.max_searches - budget.used_searches)
@@ -1362,9 +1451,13 @@ class Orchestrator:
         from koboi.orchestration.research import build_research_synthesis_prompt
 
         prompt = build_research_synthesis_prompt(query, ctx)
+        messages = []
+        if self._system_prompt:
+            messages.append({"role": "system", "content": self._system_prompt})
+        messages.append({"role": "user", "content": prompt})
         report: str | None = None
         try:
-            resp = await self.client.complete(messages=[{"role": "user", "content": prompt}], tools=None)
+            resp = await self.client.complete(messages=messages, tools=None)
             if resp.content and resp.content.strip():
                 report = resp.content
         except Exception as e:  # noqa: BLE001 - synthesis is best-effort
@@ -1418,11 +1511,28 @@ class Orchestrator:
 
     @staticmethod
     def _sources_footer(ctx: ResearchContext, referenced: list[int]) -> str:
-        """A1: build the Sources footer from referenced citation ids only (not all stored)."""
+        """Build the Sources footer from referenced citation ids, extracting the first URL from
+        each finding's text via :func:`_extract_source_url`. Returns the empty string when
+        ``referenced`` is empty or no referenced source yields a URL. Findings without a URL are
+        omitted (rendering the step name would fabricate a citation); :func:`_verify_citations`
+        drops their body markers too, so body and footer stay consistent."""
         if not referenced:
             return ""
-        by_id = {s["citation_id"]: s["node_id"] for s in ctx.source_store.sources_list()}
-        lines = [f"[{cid}] {by_id.get(cid, '?')}" for cid in referenced]
+        by_id = {s["citation_id"]: s for s in ctx.source_store.sources_with_text()}
+        lines: list[str] = []
+        for cid in referenced:
+            s = by_id.get(cid)
+            if not s:
+                logger.warning("_sources_footer: cid %s in referenced but missing from sources", cid)
+                continue
+            url = _extract_source_url(s["text"])
+            if not url:
+                # Defensive backstop: _verify_citations should already have dropped these.
+                logger.info("_sources_footer: dropping cid %s (node_id=%s) — no citable URL", cid, s.get("node_id"))
+                continue
+            lines.append(f"[{cid}] {url}")
+        if not lines:
+            return ""
         return "\n\n## Sources\n" + "\n".join(lines)
 
     async def _execute_pipeline(

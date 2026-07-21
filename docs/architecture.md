@@ -597,9 +597,10 @@ The safety model has four layers: guardrails, policy engine, approval handler, a
 
 `BaseGuardrail` defines the interface: `check(content) -> GuardrailResult`. `PatternGuardrail` adds regex-based pattern matching. Built-in guardrails:
 
-- `InputGuardrail` -- injection detection, length limits
+- `InputGuardrail` -- injection detection (16 patterns, incl. Bahasa Indonesia), length limits
 - `OutputGuardrail` -- content filtering, sensitive data detection
 - `GroundingGuardrail` -- runtime faithfulness (claim-decomposition + NLI; abstains when ungrounded; A3; opt-in via the `grounding_check` factory)
+- `ScopeGuardrail` -- keeps a specialized agent on-task: a free relevance pre-pass gates an optional side-LLM judge (`ON_SCOPE`/`OFF_SCOPE`/`INJECTION`) that deflects off-topic or injected replies (opt-in via the `scope_check` factory)
 
 Guardrails are composed via `GuardrailRegistry` and configured in YAML:
 
@@ -742,7 +743,9 @@ Coverage-gated, cited web research (GPT-Researcher shape). `Orchestrator._run_de
   `max_depth`/budget; a deterministic safety net generates generic follow-ups if the judge returns
   none on low coverage (prevents premature shallow-report stops).
 - **Synthesize + verify** — `_synthesize_research` writes a cited report; `_verify_citations`
-  strips unresolvable `[n]` markers; a Sources footer is appended.
+  strips `[n]` markers whose finding has no extractable real URL; the Sources footer cites each
+  finding's actual fetched URL (`[n] <url>`, not an internal step/node name) via the same
+  `_extract_source_url()` predicate, so body citations and the footer never disagree.
 - **`ResearchBudget`** — hard caps (`max_searches`/`max_fetches`/`max_tokens`).
 - **Persistence** — `ResearchContext` (query, sources, coverage, `final_report`) is journaled to
   the `research_context` SQLite table, session-tagged, so `GET /v1/sessions/{id}` surfaces the
