@@ -534,16 +534,18 @@ def _demo_checkpoint_rollback() -> str:
 
 
 def _install_mock_github(monkeypatched: list, created_prs: list) -> None:
-    """Repoint GithubClient's httpx.AsyncClient at an in-process handler so
-    github_create_pr returns a realistic PR object with no network. Records
-    each PR into ``created_prs`` so the demo can assert it really fired.
+    """Stub GithubClient's own coroutines so github_create_pr returns a
+    realistic PR object with no network. Records each PR into ``created_prs``
+    so the demo can assert it really fired.
 
     IMPORTANT: patch the GithubClient METHODS, not ``httpx.AsyncClient``. The
     github module imports the shared global ``httpx``; monkeypatching
     ``httpx.AsyncClient`` there hijacks EVERY httpx user in-process -- including
-    koboi's own LLM transport -- so a --live run's first completion would come
-    back as the mock PR JSON (no ``choices``) and blow up. Scoping the mock to
-    GithubClient's own coroutines keeps the real LLM transport untouched."""
+    koboi's own LLM transport -- so a --live run's first completion comes back
+    as the mock PR JSON (no ``choices``) and blows up. That was a real bug this
+    example hit; ``_assert_llm_transport_not_hijacked`` below is the guard that
+    catches any regression of it. Scoping the mock to GithubClient's own
+    coroutines keeps the real LLM transport untouched."""
     import koboi.tools.builtin.github as gh_mod
 
     async def _create_pr(self, owner, repo, head, base, title, body=""):
@@ -567,6 +569,43 @@ def _install_mock_github(monkeypatched: list, created_prs: list) -> None:
             setattr(gh_mod.GithubClient, name, fn)
 
     monkeypatched.append(_restore)
+
+
+def _assert_llm_transport_not_hijacked(agent) -> None:
+    """Fail LOUDLY if a demo mock has hijacked the LLM path.
+
+    This guards the exact regression class this example already hit once: a
+    mock that patches the shared ``httpx.AsyncClient`` (or otherwise swaps the
+    agent's real client) silently redirects koboi's LLM completions to the mock
+    -- in --live the first completion came back as mock PR JSON (no ``choices``)
+    and every run died. Cheap structural checks, run BEFORE any LLM call, so the
+    failure names the cause instead of surfacing as a cryptic 'choices' KeyError
+    15 lines deep in the adapter.
+    """
+    import httpx
+
+    from koboi.llm.http_transport import HttpTransport
+
+    # 1. The global httpx.AsyncClient must still be the genuine class -- not a
+    #    mock factory/transport wrapper that would intercept LLM POSTs too.
+    real = getattr(httpx.AsyncClient, "__module__", "") == "httpx" or "httpx" in getattr(
+        httpx.AsyncClient, "__module__", ""
+    )
+    assert real, (
+        "httpx.AsyncClient has been monkeypatched globally -- this hijacks koboi's "
+        "own LLM transport. Scope demo mocks to the specific client's methods "
+        "(see _install_mock_github), never httpx.AsyncClient."
+    )
+    # 2. The agent's LLM client must reach a real HttpTransport (live path). In
+    #    --mock the client is the scripted stub by design, so only assert this
+    #    when a real client is wired.
+    impl = getattr(agent._core.client, "_impl", None) or agent._core.client
+    transport = getattr(impl, "_transport", None)
+    if transport is not None:
+        assert isinstance(transport, HttpTransport), (
+            f"agent LLM transport is {type(transport).__name__}, not the real HttpTransport -- "
+            "something swapped the completion path."
+        )
 
 
 def _install_mock_side_llm(monkeypatched: list) -> None:
@@ -829,6 +868,11 @@ def main(live: bool, keep: bool):
         client = _ScriptedCodingClient(str(repo)) if mock else None
         if mock:
             agent._core.client = client
+
+        # Guard the exact regression this example already hit: a demo mock must
+        # not hijack the LLM path. Runs before any completion so a failure names
+        # the cause instead of dying as a 'choices' KeyError deep in the adapter.
+        _assert_llm_transport_not_hijacked(agent)
 
         all_ok = asyncio.run(run_all(agent, client, mock, str(repo), prs))
 
