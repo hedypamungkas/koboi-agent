@@ -482,7 +482,11 @@ class AgentCore:
         """
         # A3: thread retrieved context to output guardrails so a grounding
         # guardrail can judge faithfulness against the retrieved evidence.
-        retrieved_context: list[str] = []
+        # ``None`` = no retrieval attempted (no augmentation / conversational/OOS
+        # turn) -> the grounding guardrail passes instead of handing over under
+        # fail_closed. A list (incl. ``[]``) = retrieval ran; ``[]`` means it
+        # returned nothing, which fail_closed treats as an unverified answer.
+        retrieved_context: list[str] | None = None
         if self.augmentation is not None:
             _results = getattr(self.augmentation, "last_results", None) or []
             retrieved_context = [r.chunk.content for r in _results]

@@ -401,6 +401,26 @@ class TestFacadeOrchestration:
         assert result.content
         assert result.metadata["routing_method"] == "keyword"
 
+    def test_deep_research_mode_wires_system_prompt_into_orchestrator(self, tmp_path):
+        """Fix: agent.system_prompt now reaches the Orchestrator for deep_research
+        mode (facade.py previously dropped it entirely for this exec_mode)."""
+        from koboi.facade import KoboiAgent
+
+        config_data = {
+            "agent": {"name": "insights", "system_prompt": "Balas ringkas dalam Bahasa Indonesia."},
+            "llm": {"model": "gpt-4o-mini", "api_key": "test-key", "base_url": "http://localhost:8080/v1"},
+            "orchestration": {
+                "enabled": True,
+                "router": {"type": "keyword"},
+                "execution": {"mode": "deep_research"},
+            },
+        }
+        path = _write_config(tmp_path, config_data)
+        agent = KoboiAgent.from_config(path)
+
+        assert agent.orchestrator is not None
+        assert agent.orchestrator._system_prompt == "Balas ringkas dalam Bahasa Indonesia."
+
     def test_no_orchestration_when_not_enabled(self, tmp_path):
         from koboi.facade import KoboiAgent
 

@@ -2139,6 +2139,9 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
         media_conf=media_conf,
         media_backend=media_backend,
         session_id=config.get("memory", "session_id", default=None),
+        # Fix: previously dropped here -- deep_research's final synthesis never
+        # saw the agent's persona/tone/language instructions (chat/act/auto did).
+        system_prompt=config.system_prompt or None,
     )
 
     return KoboiAgent(

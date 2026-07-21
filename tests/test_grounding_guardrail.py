@@ -143,11 +143,34 @@ class TestGroundingGuardrail:
         assert result.passed is False
         assert result.action == "handover"
 
-    async def test_fail_closed_on_no_context_hands_over(self):
+    async def test_fail_closed_no_retrieval_context_none_passes(self):
+        # context=None means "no retrieval attempted" (no augmentation configured,
+        # or a conversational/OOS turn) -- NOT a verification failure. Even under
+        # fail_closed it passes, so greetings/smalltalk don't spuriously hand over.
+        g = _guard(_ScriptedJudge(["should not be called"]), fail_closed=True)
+        result = await g.check("answer", context=None)
+        assert result.passed is True
+        assert g.last_coverage is None
+
+    async def test_fail_closed_empty_context_hands_over(self):
+        # context=[] means retrieval WAS attempted but returned nothing (broken/
+        # empty corpus, tokenizer/embedding failure, off-domain query) -> the
+        # answer is ungrounded. fail_closed honors the operator's contract and
+        # hands over (NOT pass-through). Consistent with the no-claims path: both
+        # mean "nothing to verify against".
         g = _guard(_ScriptedJudge(["should not be called"]), fail_closed=True)
         result = await g.check("answer", context=[])
         assert result.passed is False
         assert result.action == "handover"
+        assert "fail-closed" in result.reason
+
+    async def test_fail_closed_empty_content_passes(self):
+        # No answer text -> nothing to ground (the model returned ""). Not a
+        # verification failure; passes regardless of fail_closed and skip the judge.
+        g = _guard(_ScriptedJudge(["should not be called"]), fail_closed=True)
+        result = await g.check("", context=["ctx"])
+        assert result.passed is True
+        assert g.last_coverage is None
 
     async def test_fail_closed_on_no_claims_hands_over(self):
         # judge returns an empty claim array -> fail_closed hands over.

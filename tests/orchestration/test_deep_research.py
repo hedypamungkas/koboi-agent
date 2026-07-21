@@ -944,3 +944,54 @@ class TestRunGuard:
         with pytest.raises(RuntimeError, match="boom"):
             await orch.run("q")
         assert orch._run_in_progress is False  # finally cleared despite the raise
+
+
+class TestSystemPromptReachesSynthesis:
+    """Fix: the agent's configured system_prompt now reaches the final research
+    synthesis call -- previously silently dropped for deep_research/dynamic
+    modes (bare user-role prompt only), so tone/language/output-format
+    instructions had no effect on the rendered report."""
+
+    async def test_system_prompt_becomes_leading_system_message(self):
+        captured = {}
+
+        class _CapturingClient(_FakeClient):
+            async def complete(self, messages, tools=None, response_format=None):
+                text = " ".join(m.get("content", "") for m in messages)
+                if "synthesizing a cited research report" in text:
+                    captured["messages"] = messages
+                return await super().complete(messages, tools, response_format)
+
+        orch = Orchestrator(
+            client=_CapturingClient(),
+            router=KeywordRouter(),
+            system_prompt="Balas ringkas dalam Bahasa Indonesia.",
+        )
+        ctx = ResearchContext()
+        ctx.add_findings("node_a", "some finding")
+        await orch._synthesize_research("Tell me about X", ctx)
+
+        msgs = captured["messages"]
+        assert msgs[0] == {"role": "system", "content": "Balas ringkas dalam Bahasa Indonesia."}
+        assert msgs[-1]["role"] == "user"
+
+    async def test_no_system_prompt_keeps_single_user_message(self):
+        # Backward compat: unset system_prompt -> exactly one user message, byte-identical
+        # to pre-fix behavior.
+        captured = {}
+
+        class _CapturingClient(_FakeClient):
+            async def complete(self, messages, tools=None, response_format=None):
+                text = " ".join(m.get("content", "") for m in messages)
+                if "synthesizing a cited research report" in text:
+                    captured["messages"] = messages
+                return await super().complete(messages, tools, response_format)
+
+        orch = Orchestrator(client=_CapturingClient(), router=KeywordRouter())  # no system_prompt
+        ctx = ResearchContext()
+        ctx.add_findings("node_a", "some finding")
+        await orch._synthesize_research("Tell me about X", ctx)
+
+        msgs = captured["messages"]
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "user"
