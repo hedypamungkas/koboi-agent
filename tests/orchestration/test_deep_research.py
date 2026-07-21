@@ -307,6 +307,18 @@ class TestClarifyingQuestion:
         assert complete
         assert complete[0].metadata.get("needs_clarification") in (None, False)
 
+    async def test_clarify_path_survives_non_streaming_run(self, tmp_path):
+        # The RoutingDecisionEvent emit in the clarify branch is load-bearing for the
+        # non-streaming run() path: _run_impl falls back to RoutingDecision(agents=[])
+        # when no RoutingDecisionEvent is seen, and __post_init__ raises ValueError on
+        # empty agents. Driving only _run_deep_research (as above) does NOT exercise
+        # run(); this does, and proves it completes + carries the question/metadata.
+        client = _FakeClient(needs_clarification=True, clarifying_question="Untuk pasar mana?")
+        orch = _orch(client, {"max_depth": 1, "coverage_threshold": 0.7}, tmp_path)
+        result = await orch.run("riset tren sneakers untuk gen z", mode="deep_research")
+        assert result.final_answer == "Untuk pasar mana?"
+        assert result.metadata.get("needs_clarification") is True
+
 
 class TestRunDeepResearch:
     async def test_iterates_to_max_depth_then_synthesizes(self, tmp_path):

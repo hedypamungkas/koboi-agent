@@ -40,6 +40,17 @@ class PlanResult:
     needs_clarification: bool = False
     clarifying_question: str = ""
 
+    def __post_init__(self) -> None:
+        # Enforce the invariants the JSON schema only *describes* (producers -- and
+        # tests/REPL -- can't be trusted to obey them). Matches the RoutingDecision /
+        # EvalScore __post_init__ convention in koboi/types.py.
+        if self.needs_clarification and not self.clarifying_question.strip():
+            raise ValueError("PlanResult: clarifying_question is required when needs_clarification=True")
+        if self.needs_clarification and self.needs_workflow:
+            raise ValueError("PlanResult: needs_clarification is mutually exclusive with needs_workflow=True")
+        if self.clarifying_question and not self.needs_clarification:
+            raise ValueError("PlanResult: clarifying_question set but needs_clarification=False")
+
     @property
     def deps(self) -> dict[str, list[str]]:
         return {s.id: list(s.depends_on) for s in self.steps}
@@ -102,8 +113,10 @@ RESEARCH_PLAN_SCHEMA: dict = {
         },
         "clarifying_question": {
             "type": "string",
-            "description": "one short, specific question to ask before planning research. "
-            "Required when needs_clarification=true, otherwise empty",
+            "maxLength": 200,
+            "description": "ONE short, specific question to ask before planning research. "
+            "Required when needs_clarification=true, otherwise empty. Mutually exclusive "
+            "with needs_workflow=true.",
         },
         "reason": {"type": "string"},
         "steps": {
@@ -258,13 +271,33 @@ async def plan_research(
         return PlanResult(needs_workflow=False, reason="malformed research plan (not an object)")
 
     needs_clarification = bool(data.get("needs_clarification", False))
-    clarifying_question = str(data.get("clarifying_question", "")).strip()
+    cq_raw = data.get("clarifying_question", "")
+    if not isinstance(cq_raw, str):
+        # Malformed (null/number/object) -- never ship str(value) (e.g. literal "None")
+        # as a user-facing question. Treat as absent and fall through.
+        logger.warning(
+            "research planner returned non-string clarifying_question=%r for '%s'; ignoring",
+            cq_raw,
+            instruction[:80],
+        )
+        clarifying_question = ""
+    else:
+        clarifying_question = cq_raw.strip()
     if needs_clarification and clarifying_question:
         return PlanResult(
             needs_workflow=False,
             reason=str(data.get("reason", "ambiguous request")),
             needs_clarification=True,
             clarifying_question=clarifying_question,
+        )
+    if needs_clarification:
+        # The planner asked to clarify but gave no usable question -- don't silently
+        # ship an empty/garbage turn (or answer the query it just flagged ambiguous).
+        # Fall through to normal planning; the warn gives operators a trace.
+        logger.warning(
+            "research planner set needs_clarification=true but gave no usable "
+            "clarifying_question for '%s'; falling through to normal planning",
+            instruction[:80],
         )
 
     needs = bool(data.get("needs_workflow", False))

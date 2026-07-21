@@ -956,7 +956,7 @@ async def _execute_job(
                         # deep_research/dynamic/dag emit OrchestrationCompleteEvent
                         # (NOT CompleteEvent); the cited report is in final_answer.
                         orchestrated_content = event.final_answer
-                        needs_clarification = bool(event.metadata.get("needs_clarification", False))
+                        needs_clarification = event.needs_clarification
         return orchestrated_content, needs_clarification
 
     # C3: autonomous jobs must run contained. 'passthrough' has no fs/network

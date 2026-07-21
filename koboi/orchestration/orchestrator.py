@@ -1144,6 +1144,7 @@ class Orchestrator:
                 execution_mode="deep_research",
                 routing_agents=[],
                 routing_confidence=1.0,
+                needs_clarification=True,
                 metadata={
                     "research_sources": [],
                     "coverage": 0.0,
@@ -1248,6 +1249,16 @@ class Orchestrator:
             await self._emit_research_hook(
                 HookEvent.POST_LLM_CALL, iteration=ctx.depth, llm_response=plan.reason or "re-plan"
             )
+            if plan.needs_clarification:
+                # An in-progress run must not stop to ask -- but log it so a deployment
+                # debugging "shallow reports" has a trace that the planner flagged
+                # ambiguity mid-run (the clarifying_question is intentionally unread).
+                logger.info(
+                    "deep_research drill re-plan returned needs_clarification=true at depth=%d; "
+                    "ignored (in-progress run). question was: %r",
+                    ctx.depth,
+                    plan.clarifying_question,
+                )
             if not plan.needs_workflow or not plan.steps:
                 break
             remaining = max(1, budget.max_searches - budget.used_searches)
