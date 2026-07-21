@@ -97,7 +97,7 @@ class DispatchingClient(LLMClient):
 
 def deep_research_dispatch(
     *,
-    node_answer: str = "Found: the topic is X and Y.",
+    node_answer: str = "Found: the topic is X and Y. Source: https://example.com/topic",
     coverage_score: float = 0.95,
     synthesis: str = "## Report\nThe topic is X [1] and Y [1].",
 ) -> Callable[[list[dict]], AgentResponse]:
