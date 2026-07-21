@@ -60,7 +60,15 @@ agent:
 
 llm:
   provider: "openai"
-  model: "${OPENAI_MODEL:gpt-4o}"
+  # Model choice MATTERS for an autonomous coding agent: it plans multi-step
+  # tool sequences, reads diffs, and recovers from its own failing test runs.
+  # Prefer a FLAGSHIP model (gpt-5.5 / gpt-5.4 / gpt-5.x-codex, or Claude
+  # opus-4.8 / sonnet-5) -- a `-mini`/`-nano` tier will pass the toy scenarios
+  # here but is a poor stand-in for real repo work. The default below is a
+  # capable flagship; ${OPENAI_MODEL} still overrides it, so set that env var
+  # deliberately (don't let a leftover `-mini` in .env silently downgrade the
+  # agent -- exactly the trap this example hit).
+  model: "${OPENAI_MODEL:gpt-5.5}"
   api_key: "${OPENAI_API_KEY}"
   base_url: "${OPENAI_BASE_URL:}"
   temperature: 0.2          # low for deterministic code generation
