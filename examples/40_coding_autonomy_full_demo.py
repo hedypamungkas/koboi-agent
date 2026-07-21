@@ -25,18 +25,31 @@ they are the "invisible engineering" story: the agent that just... ships):
   C. MIGRATE -- a mechanical refactor across several files: grep for the
              deprecated call, patch each site, verify the whole suite.
 
+Every phase is INDEPENDENTLY verified (new commit landed + working tree clean +
+pytest actually green + PR request observed) -- NOT taken on the agent's word.
+The script exits non-zero if any check fails, in either mode, so it doubles as
+a CI smoke test (see tests/test_example40_coding_autonomy_smoke.py).
+
 Two modes:
   --mock (default): fully offline, $0, deterministic. A scripted LLM client
           issues the exact tool-call sequence a capable model would, so the
           coding tools genuinely run against the temp repo (files really get
           patched, ruff really runs, pytest really goes green) without any API
-          key or network. The GitHub PR call hits an in-process mock server.
-  --live: real LLM calls. Needs OPENAI_API_KEY. The model decides the tool
-          sequence itself; the repo, sandbox, and safety layers are identical.
+          key or network.
+  --live: real LLM calls. Loads creds from .env (worktree root, else the parent
+          project root). The model decides the tool sequence itself; the repo,
+          sandbox, and safety layers are identical. Verified end-to-end against
+          a real gpt-class model: it solved all 3 tasks unattended, recovering
+          from its own failing test runs, all phases verified GREEN.
+
+The GitHub PR API is mocked in BOTH modes (acme/textkit is fictional): the mock
+scopes to GithubClient's own coroutines, NOT httpx.AsyncClient -- patching the
+shared httpx would hijack koboi's LLM transport too (a bug this example hit and
+fixed: --live's first completion came back as the mock PR JSON).
 
 Run:
-    python examples/40_coding_autonomy_full_demo.py --mock
-    OPENAI_API_KEY=... python examples/40_coding_autonomy_full_demo.py --live
+    python examples/40_coding_autonomy_full_demo.py           # --mock (default)
+    python examples/40_coding_autonomy_full_demo.py --live    # real LLM (.env)
 """
 
 from __future__ import annotations
@@ -523,29 +536,37 @@ def _demo_checkpoint_rollback() -> str:
 def _install_mock_github(monkeypatched: list, created_prs: list) -> None:
     """Repoint GithubClient's httpx.AsyncClient at an in-process handler so
     github_create_pr returns a realistic PR object with no network. Records
-    each PR request into ``created_prs`` so the demo can assert it really fired."""
-    import httpx
+    each PR into ``created_prs`` so the demo can assert it really fired.
 
+    IMPORTANT: patch the GithubClient METHODS, not ``httpx.AsyncClient``. The
+    github module imports the shared global ``httpx``; monkeypatching
+    ``httpx.AsyncClient`` there hijacks EVERY httpx user in-process -- including
+    koboi's own LLM transport -- so a --live run's first completion would come
+    back as the mock PR JSON (no ``choices``) and blow up. Scoping the mock to
+    GithubClient's own coroutines keeps the real LLM transport untouched."""
     import koboi.tools.builtin.github as gh_mod
 
-    def _handler(request: httpx.Request) -> httpx.Response:
-        # POST /repos/{owner}/{repo}/pulls -> a created PR
-        created_prs.append(str(request.url))
-        return httpx.Response(
-            201,
-            json={"number": 42, "state": "open", "html_url": "https://github.mock/acme/textkit/pull/42"},
-            request=request,
-        )
+    async def _create_pr(self, owner, repo, head, base, title, body=""):
+        created_prs.append(f"{owner}/{repo}:{head}->{base}")
+        return {"number": 42, "state": "open", "html_url": f"https://github.mock/{owner}/{repo}/pull/42"}
 
-    transport = httpx.MockTransport(_handler)
-    real_client = httpx.AsyncClient
+    async def _list_prs(self, owner, repo, state="open", per_page=30):
+        return []
 
-    def _factory(*args, **kwargs):
-        kwargs["transport"] = transport
-        return real_client(*args, **kwargs)
+    async def _get_pr(self, owner, repo, number):
+        return {"number": number, "state": "open", "title": "(mock)", "html_url": f"https://github.mock/{owner}/{repo}/pull/{number}",
+                "head": {"ref": "feat"}, "base": {"ref": "main"}, "body": ""}
 
-    gh_mod.httpx.AsyncClient = _factory  # type: ignore[assignment]
-    monkeypatched.append(lambda: setattr(gh_mod.httpx, "AsyncClient", real_client))
+    originals = {name: getattr(gh_mod.GithubClient, name) for name in ("create_pr", "list_prs", "get_pr")}
+    gh_mod.GithubClient.create_pr = _create_pr  # type: ignore[assignment]
+    gh_mod.GithubClient.list_prs = _list_prs  # type: ignore[assignment]
+    gh_mod.GithubClient.get_pr = _get_pr  # type: ignore[assignment]
+
+    def _restore():
+        for name, fn in originals.items():
+            setattr(gh_mod.GithubClient, name, fn)
+
+    monkeypatched.append(_restore)
 
 
 def _install_mock_side_llm(monkeypatched: list) -> None:
@@ -733,7 +754,15 @@ def main(live: bool, keep: bool):
     try:
         from dotenv import load_dotenv
 
+        # Load .env from the worktree root; fall back to the parent project root
+        # (a git worktree typically has no .env of its own -- the creds live in
+        # the primary checkout's .env). First match wins (override=False).
         load_dotenv(PROJECT_ROOT / ".env", override=False)
+        for up in (PROJECT_ROOT.parent, PROJECT_ROOT.parent.parent, PROJECT_ROOT.parent.parent.parent):
+            candidate = up / ".env"
+            if candidate.is_file():
+                load_dotenv(candidate, override=False)
+                break
     except ImportError:
         pass
 
@@ -761,8 +790,11 @@ def main(live: bool, keep: bool):
     os.environ["KOBOI_SWE_WORKDIR"] = str(repo)
     os.environ["KOBOI_SWE_DB"] = str(workdir / "koboi_swe.db")
     os.environ["KOBOI_SWE_TOOLCHAIN_BIN"] = str(Path(sys.executable).parent)
-    # No real GitHub token in mock mode -> point at a mock host + patch httpx.
-    os.environ.setdefault("GITHUB_TOKEN", "mock-token" if mock else os.environ.get("GITHUB_TOKEN", ""))
+    # GitHub is mocked in both modes (see _install_mock_github), but the tool
+    # still needs a non-empty token to build its client -- inject a placeholder
+    # so github_create_pr reaches the (mock) transport instead of returning
+    # "not configured". No real token is ever used.
+    os.environ["GITHUB_TOKEN"] = "mock-token"
 
     undo: list = []
     try:
@@ -785,8 +817,12 @@ def main(live: bool, keep: bool):
         from koboi.facade import KoboiAgent
 
         prs: list = []
+        # The GitHub PR API is mocked in BOTH modes: acme/textkit is a fictional
+        # repo, so a real create_pr would 404. What --live actually tests is
+        # whether the model *chooses* to open a PR -- the API is stubbed so the
+        # demo never spams (or depends on) real GitHub.
+        _install_mock_github(undo, prs)
         if mock:
-            _install_mock_github(undo, prs)
             _install_mock_side_llm(undo)
         agent = KoboiAgent.from_config(str(CONFIG_PATH))
 
@@ -817,8 +853,10 @@ def main(live: bool, keep: bool):
                 border_style="green" if all_ok else "red",
             )
         )
-        if not all_ok and not mock:
-            # In live mode a failed verification is a real signal; surface it as exit code.
+        # A failed verification is a real signal in BOTH modes -- surface it as a
+        # non-zero exit so the demo can double as a CI smoke test (mock) and a
+        # live gate. (Previously mock always exited 0, so a broken run looked green.)
+        if not all_ok:
             sys.exit(1)
     finally:
         for fn in undo:
