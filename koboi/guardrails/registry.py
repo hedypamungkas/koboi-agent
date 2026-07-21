@@ -82,3 +82,12 @@ def register_builtin_guardrails() -> None:
         "grounding_check",
         lambda **kw: GroundingGuardrail(**kw),
     )
+    # Output scope guardrail (opt-in via config; relevance-gated side-LLM judge).
+    # Keeps a specialized agent on-task: deflects prompt-injection / task-hijack /
+    # off-domain compliance by swapping the response for a graceful deflection.
+    from koboi.guardrails.scope import ScopeGuardrail
+
+    GuardrailRegistry.register(
+        "scope_check",
+        lambda **kw: ScopeGuardrail(**kw),
+    )
