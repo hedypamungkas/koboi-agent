@@ -597,7 +597,11 @@ The safety model has four layers: guardrails, policy engine, approval handler, a
 
 `BaseGuardrail` defines the interface: `check(content) -> GuardrailResult`. `PatternGuardrail` adds regex-based pattern matching. Built-in guardrails:
 
-- `InputGuardrail` -- injection detection (16 patterns, incl. Bahasa Indonesia), length limits
+- `InputGuardrail` -- injection detection (16 patterns, incl. Bahasa Indonesia), length limits.
+  A block normally raises `AgentGuardrailError`; opt-in `deflection_text` makes an
+  injection-pattern block instead surface as a graceful in-character reply (the input-side
+  counterpart to the output-side `action="abstain"` swap below) -- empty/length blocks
+  never deflect.
 - `OutputGuardrail` -- content filtering, sensitive data detection
 - `GroundingGuardrail` -- runtime faithfulness (claim-decomposition + NLI; abstains when ungrounded; A3; opt-in via the `grounding_check` factory)
 - `ScopeGuardrail` -- keeps a specialized agent on-task: a free relevance pre-pass gates an optional side-LLM judge (`ON_SCOPE`/`OFF_SCOPE`/`INJECTION`) that deflects off-topic or injected replies (opt-in via the `scope_check` factory)
