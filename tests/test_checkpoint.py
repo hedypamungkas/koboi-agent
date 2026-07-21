@@ -52,6 +52,20 @@ class TestEnsure:
         assert cp.ensure() is True
         assert cp.head() is not None  # --allow-empty covers the empty tree
 
+    def test_corrupt_head_does_not_rebaseline(self, workdir):
+        # P1 data-loss: if the shadow HEAD goes missing AFTER a baseline
+        # succeeded, ensure() must DISABLE for the run rather than freeze the
+        # current (possibly crash-partial) tree as the restore target.
+        cp = WorkdirCheckpointer(str(workdir))
+        assert cp.ensure() is True
+        assert cp.head() is not None
+        # A baseline sidecar was written -- corrupt the HEAD so rev-parse fails.
+        head_file = workdir / CHECKPOINT_DIR / "git" / "HEAD"
+        assert head_file.exists()
+        head_file.unlink()
+        assert cp.head() is None
+        assert cp.ensure() is False  # refuses to re-baseline (data-loss guard)
+
 
 class TestCommitRestore:
     def test_commit_returns_new_sha(self, workdir):

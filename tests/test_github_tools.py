@@ -222,9 +222,61 @@ class TestOrchestrationWiring:
 
 class TestRedactionSpotCheck:
     async def test_token_never_appears_in_error_string(self):
-        client = AsyncMock()
-        resp = httpx.Response(401, text="bad credentials", request=httpx.Request("GET", "https://api.github.com"))
-        client.create_pr = AsyncMock(side_effect=httpx.HTTPStatusError("x", request=resp.request, response=resp))
+        # Meaningful redaction check: route the REAL token through GithubClient
+        # (BearerAuth sets the Authorization header) and force a 401. The token is
+        # genuinely sent, so the assertion "token not in result" only holds if the
+        # tool's error path does not leak it (the body is "Bad credentials", no
+        # token). The previous version never routed the token and so asserted nothing.
         secret_token = "ghp_supersecrettoken1234567890"
-        result = await github_create_pr("o", "r", "h", "main", "t", _deps={"github_client": client})
+        resp = httpx.Response(
+            401,
+            text="Bad credentials",
+            request=httpx.Request("POST", "https://api.github.com/repos/o/r/pulls"),
+        )
+        mock_client = _mock_async_client(resp)
+        with patch("koboi.tools.builtin.github.httpx.AsyncClient", return_value=mock_client):
+            result = await github_create_pr(
+                "o", "r", "h", "main", "t", body="", _deps={"github_client": GithubClient(token=secret_token)}
+            )
         assert secret_token not in result
+        # Sanity: the token really was on the request, so a leak would be the tool's fault.
+        assert mock_client.post.call_args.kwargs["headers"]["Authorization"] == f"Bearer {secret_token}"
+
+
+class TestGithubHardening:
+    async def test_list_prs_non_list_response_returns_error(self):
+        client = AsyncMock()
+        client.list_prs = AsyncMock(side_effect=ValueError("expected list, got dict"))
+        assert (await github_list_prs("o", "r", _deps={"github_client": client})).startswith("Error:")
+
+    async def test_get_pr_non_dict_response_returns_error(self):
+        client = AsyncMock()
+        client.get_pr = AsyncMock(side_effect=ValueError("expected object, got list"))
+        assert (await github_get_pr("o", "r", 1, _deps={"github_client": client})).startswith("Error:")
+
+    async def test_update_pr_rejects_invalid_state(self):
+        client = AsyncMock()
+        client.update_pr = AsyncMock(return_value={"number": 1, "state": "open", "html_url": "u"})
+        result = await github_update_pr("o", "r", 1, state="merged", _deps={"github_client": client})
+        assert result.startswith("Error:")
+        client.update_pr.assert_not_awaited()  # validation happens before the call
+
+    async def test_list_prs_rejects_invalid_state(self):
+        client = AsyncMock()
+        result = await github_list_prs("o", "r", state="bogus", _deps={"github_client": client})
+        assert result.startswith("Error:")
+
+    async def test_client_rejects_owner_with_path_separator(self):
+        # owner/repo validated against [A-Za-z0-9._-] -- rejects path/query/fragment
+        # injection (owner='foo?bar' would retarget the request).
+        with pytest.raises(ValueError):
+            await GithubClient(token="t").list_prs("foo?bar", "r")
+        with pytest.raises(ValueError):
+            await GithubClient(token="t").list_prs("a/b", "r")
+
+    async def test_update_pr_clears_title_to_empty(self):
+        # Empty-string title is a legitimate clear (survives `if v is not None`).
+        mock_client = _mock_async_client(_response(json_payload={"number": 1, "state": "open"}))
+        with patch("koboi.tools.builtin.github.httpx.AsyncClient", return_value=mock_client):
+            await GithubClient(token="t").update_pr("o", "r", 1, title="")
+        assert mock_client.patch.call_args.kwargs["json"] == {"title": ""}

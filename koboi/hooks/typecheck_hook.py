@@ -85,10 +85,17 @@ def _parse(result: str) -> list[dict]:
         if m is None:
             continue
         d = m.groupdict()
+        sev = (d.get("sev") or "").lower()
+        if not sev:
+            # ruff emits a rule CODE but no severity. Derive one so a warnings-only
+            # run (W291/W503 pycodestyle warnings) does NOT trip typecheck_failed:
+            # ``W*`` -> warning, everything else (E/F/B/UP/...) -> error.
+            code = (d.get("code") or "").upper()
+            sev = "warning" if code.startswith("W") else "error"
         diag: dict = {
             "file": d.get("file"),
             "line": int(d["line"]) if d.get("line") else None,
-            "severity": (d.get("sev") or "error").lower(),
+            "severity": sev,
             "message": (d.get("msg") or "").strip(),
         }
         if d.get("col"):

@@ -10,13 +10,24 @@ each mutating tool call, so:
 - unattended runs get a reviewable per-step diff trail
   (``git --git-dir=<workdir>/.koboi-checkpoint/git log --stat``).
 
-The shadow never touches the user's own repo: commits go to a separate object
-store, the workdir's ``/.git/`` is excluded from the shadow index, and
-``/.koboi-checkpoint/`` is excluded from the user's repo. Scope boundaries
-(documented, accepted): the shadow honors in-tree ``.gitignore`` files
-(ignored dirs like ``node_modules`` are neither committed nor cleaned -- no
+The shadow never COMMITS to the user's own repo: commits go to a separate object
+store (``<workdir>/.koboi-checkpoint/git``), the workdir's ``/.git/`` is excluded
+from the shadow index, and ``/.koboi-checkpoint/`` is idempotently appended to
+the user's ``.git/info/exclude`` (when the workdir IS a git repo) so the shadow
+directory stays out of ``git status``. That ``.git/info/exclude`` append is the
+only mutation of the user's repo metadata -- it is additive and reversible.
+
+NEVER re-baselines: a baseline sidecar (``<workdir>/.koboi-checkpoint/baseline``)
+records that a baseline succeeded; if the shadow HEAD later goes missing (disk
+corruption, manual edit), the checkpointer DISABLES itself for the run rather
+than freeze the current (possibly crash-partial) tree as the restore target.
+
+Scope boundaries (documented, accepted): the shadow honors in-tree ``.gitignore``
+files (ignored dirs like ``node_modules`` are neither committed nor cleaned -- no
 rollback fidelity there), nested repos are recorded as gitlinks (contents
-never rolled back), and out-of-workdir side effects are not rolled back.
+never rolled back), and out-of-workdir side effects are not rolled back. The
+shadow dir is shared across sessions that hardcode the SAME ``sandbox.workdir``
+-- use a per-session workdir (the server default) when checkpointing is on.
 
 Fail-safe philosophy (mirrors ``pool._git_init_workdir``): every method
 catches subprocess/OS errors, logs, and returns ``None``/``False`` -- a
@@ -37,6 +48,12 @@ CHECKPOINT_DIR = ".koboi-checkpoint"
 
 _EXCLUDES = "/.koboi-checkpoint/\n/.git/\n"
 
+# Workdirs with a live WorkdirCheckpointer in THIS process. Two checkpointers on
+# the same workdir share one linear shadow history (last-writer-wins HEAD) -- the
+# server uses per-session workdirs, but an operator who hardcodes a shared
+# sandbox.workdir gets a warning rather than silent history collapse.
+_ACTIVE_WORKDIRS: set[str] = set()
+
 
 class WorkdirCheckpointer:
     def __init__(self, workdir: str, *, git_timeout: float = 60.0):
@@ -44,6 +61,14 @@ class WorkdirCheckpointer:
         self._git_dir = os.path.join(self._workdir, CHECKPOINT_DIR, "git")
         self._git_timeout = git_timeout
         self._warned_unavailable = False
+        if self._workdir in _ACTIVE_WORKDIRS:
+            _logger.warning(
+                "two WorkdirCheckpointpers anchored to the same workdir (%s) in one "
+                "process -- the shadow history is shared (last-writer-wins HEAD). Use "
+                "a per-session sandbox.workdir when journal.checkpoint is on.",
+                self._workdir,
+            )
+        _ACTIVE_WORKDIRS.add(self._workdir)
 
     @property
     def workdir(self) -> str:
@@ -98,14 +123,30 @@ class WorkdirCheckpointer:
             return None
         return res.stdout.strip() or None
 
+    @property
+    def _baseline_marker(self) -> str:
+        # Lives OUTSIDE the shadow git dir (so git never manages it) and is
+        # excluded from the shadow index (/.koboi-checkpoint/). Survives a crash.
+        return os.path.join(self._workdir, CHECKPOINT_DIR, "baseline")
+
     def ensure(self) -> bool:
         """Init the shadow repo + baseline commit. Idempotent; NEVER re-baselines.
 
         Re-baselining on resume would freeze the crashed partial tree as the
-        restore target -- an existing HEAD is always kept.
+        restore target -- an existing HEAD is always kept. If HEAD is missing
+        AFTER a baseline succeeded (disk corruption / a manual edit of the shadow
+        git dir), the checkpointer DISABLES itself for the run rather than freeze
+        the current tree as the restore target (data-loss guard).
         """
         if self.head() is not None:
             return True
+        if os.path.exists(self._baseline_marker):
+            _logger.error(
+                "checkpoint shadow HEAD missing after baseline (%s) -- refusing to "
+                "re-baseline; checkpoints disabled for this run",
+                self._git_dir,
+            )
+            return False
         try:
             os.makedirs(self._git_dir, exist_ok=True)
         except OSError as exc:
@@ -140,6 +181,14 @@ class WorkdirCheckpointer:
                 "checkpoint baseline commit failed: %s",
                 (commit.stderr or commit.stdout)[-200:] if commit else "git unavailable",
             )
+            return ok
+        # Record that a baseline succeeded so a later-missing HEAD is treated as
+        # corruption (disable) rather than a first-run (re-baseline).
+        try:
+            with open(self._baseline_marker, "w") as f:
+                f.write(self.head() or "")
+        except OSError:
+            pass  # marker is best-effort; the baseline itself succeeded
         return ok
 
     def _exclude_from_real_repo(self) -> None:

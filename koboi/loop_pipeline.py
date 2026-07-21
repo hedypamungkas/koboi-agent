@@ -419,7 +419,9 @@ class ToolExecutionPipeline:
             # (e.g. TypecheckHook rewrites command_failed -> typecheck_failed and
             # attaches structured diagnostics). Read it back so pipeline_outcomes
             # / ToolPipelineResult carry the refined value, not the pre-hook one.
-            error_kind = post_ctx.metadata.get("tool_error_kind", error_kind)
+            # ``or`` (not a default-arg): a hook that explicitly writes None must
+            # NOT clear a real signal the pipeline already lifted (command_failed).
+            error_kind = post_ctx.metadata.get("tool_error_kind") or error_kind
             _record_injects(post_ctx.inject_messages)
             # Honor a hook's modified_tool_result (e.g. a CommandHook rewriting the
             # tool output). Without this, the local `tool_result` below would ignore

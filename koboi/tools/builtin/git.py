@@ -266,7 +266,9 @@ def git_add(
     _tool_config: dict | None = None,
     _deps: dict | None = None,
 ) -> str:
-    paths = [p for p in (paths or ["."]) if p]
+    # Filter empties (``[""]`` used to collapse to ``[]`` -> ``git add --`` no-op);
+    # fall back to the documented default ``['.']`` when nothing remains.
+    paths = [p for p in (paths or ["."]) if p] or ["."]
     for p in paths:
         if p.startswith("-"):
             return "Error: paths cannot start with '-' (option injection guard)"
@@ -309,7 +311,15 @@ def git_commit(
         return "Error: commit message must not be empty"
     sandbox = (_deps or {}).get("sandbox")
     identity = _identity_args(repo_path, _tool_config, sandbox)
-    return _run_git(identity + ["commit", "-m", message], repo_path, _tool_config, sandbox=sandbox)
+    result = _run_git(identity + ["commit", "-m", message], repo_path, _tool_config, sandbox=sandbox)
+    # git prints "nothing to commit" (clean tree), "no changes added to commit"
+    # (unstaged modifications), or "nothing added to commit but untracked files
+    # present" (untracked only) -- all mean NO commit was created, but the clean
+    # case lands on stdout and reads as success. Surface a clear signal instead.
+    low = result.lower()
+    if "nothing to commit" in low or "added to commit" in low:
+        return "No staged changes to commit (stage changes with git_add first)"
+    return result
 
 
 @tool(

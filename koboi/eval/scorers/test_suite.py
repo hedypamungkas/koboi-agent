@@ -68,7 +68,11 @@ class TestSuiteScorer(BaseScorer):
         if getattr(res, "timed_out", False):
             return EvalScore("test_suite", 0.0, f"timed out after {self.timeout}s: {cmd!r}")
         tail = f"{res.stdout}\n{res.stderr}".strip()[-self.tail_chars :]
-        if res.returncode == 126:
+        # 126 is ALSO a normal POSIX exit code ("not executable"). Only attribute
+        # it to a sandbox-escape when the SANDBOX emitted it (empty stdout + a
+        # sandbox message in stderr) -- otherwise a test command's own exit 126
+        # must read as a plain failure, not "cwd escaped sandbox workdir".
+        if res.returncode == 126 and not (res.stdout or "").strip() and "sandbox" in (res.stderr or "").lower():
             return EvalScore("test_suite", 0.0, f"exit=126 (cwd escaped sandbox workdir) {tail}")
         value = 1.0 if res.returncode == 0 else 0.0
         return EvalScore("test_suite", value, f"exit={res.returncode} {tail}".strip())

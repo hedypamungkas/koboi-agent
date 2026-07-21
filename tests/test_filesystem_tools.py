@@ -360,6 +360,24 @@ class TestReadFileRanged:
 
         assert read_file(path=str(test_file)) == "Hello, world!"
 
+    def test_read_file_range_streams_large_file(self, tmp_path):
+        # Streaming: a huge file with a small requested range must not load the
+        # whole file into memory (the old readlines() did -- OOM on large inputs).
+        import tracemalloc
+
+        big = tmp_path / "big.txt"
+        with big.open("w") as f:
+            for i in range(50_000):
+                f.write(f"line-{i:06d}\n")
+        tracemalloc.start()
+        result = read_file(path=str(big), offset=25_000, limit=3)
+        _cur, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        assert "(lines 25000-25002 of 50000" in result
+        # File is ~450KB; the old readlines() materialized all of it. Peak heap
+        # during a streamed 3-line window must stay well under the file size.
+        assert peak < 4_000_000, f"streaming regressed: peak={peak}"
+
 
 class TestEditFile:
     def test_edit_file_unique_replace(self, tmp_path):
@@ -370,6 +388,22 @@ class TestEditFile:
         result = edit_file(path=str(test_file), old_string="b = 2", new_string="b = 20")
         assert "Successfully replaced 1 occurrence(s)" in result
         assert test_file.read_text() == "a = 1\nb = 20\nc = 3\n"
+
+    def test_edit_file_oserror_returns_error_string(self, tmp_path, monkeypatch):
+        # ENOSPC/EIO during the atomic swap must return "Error:" (the tool
+        # contract is -> str), not raise out of the tool. Temp file is cleaned up.
+        import os
+
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        def boom(*_a, **_k):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr("os.replace", boom)
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2")
+        assert result.startswith("Error:")
+        assert not any(p.startswith(".edit_file_") for p in os.listdir(tmp_path))
 
     def test_edit_file_no_match_errors_and_leaves_file_unchanged(self, tmp_path):
         """0 matches -> error, file untouched."""
@@ -468,36 +502,37 @@ class TestEditFile:
 class TestApplyPatch:
     def _patch(self, old, new, context_before="", context_after=""):
         """Build a minimal single-hunk unified diff replacing ``old`` with ``new``."""
-        return (
-            "@@ -1,3 +1,3 @@\n"
-            f"{context_before}"
-            f"-{old}\n"
-            f"+{new}\n"
-            f"{context_after}"
-        )
+        return f"@@ -1,3 +1,3 @@\n{context_before}-{old}\n+{new}\n{context_after}"
 
     def test_apply_patch_single_hunk(self, tmp_path):
         test_file = tmp_path / "code.py"
         test_file.write_text("def add(a, b):\n    return a - b\n\ndef sub(a, b):\n    return a - b\n")
-        patch = (
-            "@@ -1,2 +1,2 @@\n"
-            " def add(a, b):\n"
-            "-    return a - b\n"
-            "+    return a + b\n"
-        )
+        patch = "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
         result = apply_patch(path=str(test_file), patch=patch)
         assert "Successfully applied 1 hunk" in result
         assert "return a + b" in test_file.read_text()
         # untouched hunk survives
         assert "def sub(a, b):\n    return a - b" in test_file.read_text()
 
+    def test_apply_patch_oserror_returns_error_string(self, tmp_path, monkeypatch):
+        # OSError during the atomic swap -> "Error:" string, not a raise.
+        import os
+
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        def boom(*_a, **_k):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr("os.replace", boom)
+        result = apply_patch(path=str(test_file), patch="@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n")
+        assert result.startswith("Error:")
+        assert not any(p.startswith(".apply_patch_") for p in os.listdir(tmp_path))
+
     def test_apply_patch_multi_hunk_atomic(self, tmp_path):
         test_file = tmp_path / "code.py"
         test_file.write_text("a = 1\nb = 2\nc = 3\n")
-        patch = (
-            "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n"
-            "@@ -3,1 +3,1 @@\n-c = 3\n+c = 30\n"
-        )
+        patch = "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n@@ -3,1 +3,1 @@\n-c = 3\n+c = 30\n"
         result = apply_patch(path=str(test_file), patch=patch)
         assert "Successfully applied 2 hunk" in result
         assert test_file.read_text() == "a = 10\nb = 2\nc = 30\n"
@@ -507,10 +542,7 @@ class TestApplyPatch:
         test_file = tmp_path / "code.py"
         original = "a = 1\nb = 2\n"
         test_file.write_text(original)
-        patch = (
-            "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n"
-            "@@ -2,1 +2,1 @@\n-NOT PRESENT\n+x\n"
-        )
+        patch = "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n@@ -2,1 +2,1 @@\n-NOT PRESENT\n+x\n"
         result = apply_patch(path=str(test_file), patch=patch)
         assert "Error" in result
         assert "hunk #2" in result
@@ -541,12 +573,7 @@ class TestApplyPatch:
         test_file = tmp_path / "code.py"
         test_file.write_text("# header\n# more\n\ndef add(a, b):\n    return a - b\n")
         # Hunk header claims -1 but the real content is at line 4; tolerated.
-        patch = (
-            "@@ -1,2 +1,2 @@\n"
-            " def add(a, b):\n"
-            "-    return a - b\n"
-            "+    return a + b\n"
-        )
+        patch = "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
         result = apply_patch(path=str(test_file), patch=patch)
         assert "Successfully applied" in result
         assert "return a + b" in test_file.read_text()
@@ -557,13 +584,7 @@ class TestApplyPatch:
         test_file.write_text("x = 1")  # NO trailing newline
         # The `\ No newline` marker follows BOTH the - and + lines, so the
         # result also has no trailing newline.
-        patch = (
-            "@@ -1,1 +1,1 @@\n"
-            "-x = 1\n"
-            "\\ No newline at end of file\n"
-            "+x = 2\n"
-            "\\ No newline at end of file\n"
-        )
+        patch = "@@ -1,1 +1,1 @@\n-x = 1\n\\ No newline at end of file\n+x = 2\n\\ No newline at end of file\n"
         result = apply_patch(path=str(test_file), patch=patch)
         assert "Successfully applied" in result
         assert test_file.read_text() == "x = 2"
@@ -575,12 +596,7 @@ class TestApplyPatch:
         test_file = tmp_path / "script.py"
         test_file.write_text("def add(a, b):\n    return a - b\n")
         os.chmod(test_file, 0o755)
-        patch = (
-            "@@ -1,2 +1,2 @@\n"
-            " def add(a, b):\n"
-            "-    return a - b\n"
-            "+    return a + b\n"
-        )
+        patch = "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
         apply_patch(path=str(test_file), patch=patch)
         assert stat.S_IMODE(os.stat(test_file).st_mode) == 0o755
 
@@ -595,11 +611,7 @@ class TestApplyPatch:
         """A --- / +++ header pair (single file) is tolerated and ignored."""
         test_file = tmp_path / "code.py"
         test_file.write_text("a = 1\n")
-        patch = (
-            "--- a/code.py\n"
-            "+++ b/code.py\n"
-            "@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n"
-        )
+        patch = "--- a/code.py\n+++ b/code.py\n@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n"
         result = apply_patch(path=str(test_file), patch=patch)
         assert "Successfully applied" in result
         assert test_file.read_text() == "a = 2\n"
@@ -634,4 +646,3 @@ class TestApplyPatch:
             assert "Note:" in result
         finally:
             fs_mod.reset_read_before_write()
-

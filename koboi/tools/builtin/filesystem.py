@@ -166,15 +166,25 @@ def read_file(
 
 
 def _read_file_range(path: str, offset: int | None, limit: int | None, max_read_size: int) -> str:
-    """Return a numbered line range of ``path`` (1-based ``offset``, ``limit`` lines)."""
+    """Return a numbered line range of ``path`` (1-based ``offset``, ``limit`` lines).
+
+    Streams the file (one line at a time via the file iterator) so a huge file
+    with a small requested range does not load the whole file into memory -- only
+    the selected range is materialized (the old ``readlines()`` loaded the entire
+    file, OOM-ing on large inputs and defeating the offset/limit purpose).
+    """
     start = max(1, offset or 1)
+    want_end = start + max(1, limit) - 1 if limit is not None else None
+    selected: list[str] = []
+    total = 0
     with open(path) as f:
-        lines = f.readlines()
-    total = len(lines)
+        for idx, line in enumerate(f, start=1):  # streams: one line resident at a time
+            total = idx
+            if idx >= start and (want_end is None or idx <= want_end):
+                selected.append(line)
     if start > total:
         return f"Error: offset {start} is beyond end of file '{path}' ({total} lines)"
-    end = total if limit is None else min(total, start + max(1, limit) - 1)
-    selected = lines[start - 1 : end]
+    end = total if want_end is None else min(total, want_end)
     body = "".join(f"{i:>6}\t{line}" for i, line in enumerate(selected, start=start))
     if len(body) > max_read_size:
         body = body[:max_read_size] + f"\n... (truncated at {max_read_size} chars -- narrow the range)"
@@ -309,6 +319,11 @@ def edit_file(
         return f"Error: no access to '{path}'"
     except IsADirectoryError:
         return f"Error: '{path}' is a directory, not a file"
+    except OSError as e:
+        # ENOSPC/EIO/EROFS/EBUSY during the atomic swap -- honor the str-return
+        # contract (every other failure path returns "Error: ...") instead of
+        # raising out of the tool.
+        return f"Error: {e.strerror or e} ('{path}')"
 
 
 @tool(
@@ -380,6 +395,10 @@ def apply_patch(path: str, patch: str, _deps: dict | None = None) -> str:
         return f"Error: no access to '{path}'"
     except IsADirectoryError:
         return f"Error: '{path}' is a directory, not a file"
+    except OSError as e:
+        # ENOSPC/EIO/EROFS/EBUSY during the atomic swap -- honor the str-return
+        # contract instead of raising out of the tool.
+        return f"Error: {e.strerror or e} ('{path}')"
 
 
 @tool(

@@ -88,7 +88,14 @@ def _langfuse_trace_id(hooks: HookChain | None) -> str:
 # Wave 2 budget: default per-1k-token prices for the cost ceiling. Same
 # constants as eval CostScorer (the only pricing in the codebase); override
 # per config via agent.token_prices.
-_DEFAULT_TOKEN_PRICES = {"input_per_1k": 0.005, "output_per_1k": 0.015}
+_DEFAULT_TOKEN_PRICES = {
+    "input_per_1k": 0.005,
+    "output_per_1k": 0.015,
+    # Reasoning/thinking tokens (o1-style, Anthropic thinking) are typically
+    # completion-priced -- default to the output rate so the cost ceiling does
+    # not silently under-count reasoning-heavy runs.
+    "reasoning_per_1k": 0.015,
+}
 
 
 class AgentCore:
@@ -602,9 +609,11 @@ class AgentCore:
         if total_usage is None or (self.max_total_tokens is None and self.max_cost_usd is None):
             return None
         spent_tokens = total_usage.total_tokens
+        reasoning_per_1k = self.token_prices.get("reasoning_per_1k", self.token_prices["output_per_1k"])
         spent_usd = (
             total_usage.prompt_tokens * self.token_prices["input_per_1k"]
             + total_usage.completion_tokens * self.token_prices["output_per_1k"]
+            + total_usage.reasoning_tokens * reasoning_per_1k
         ) / 1000.0
         limit = None
         if self.max_total_tokens is not None and spent_tokens >= self.max_total_tokens:
@@ -622,6 +631,24 @@ class AgentCore:
     def _update_usage(self, response: AgentResponse, total_usage: TokenUsage | None) -> TokenUsage | None:
         """Update token usage from response. Returns updated total_usage."""
         if not response.usage:
+            # Provider returned no usage (some streaming providers / proxies). If a
+            # budget ceiling is configured, fall back to a content-length estimate
+            # so the ceiling still trips -- a silently-disabled ceiling is worse
+            # than an imprecise estimate. Runs without a budget are unaffected.
+            if self.max_total_tokens is not None or self.max_cost_usd is not None:
+                from koboi.tokens import estimate_tokens
+
+                content = response.content
+                if isinstance(content, list):
+                    content = " ".join(c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
+                est = estimate_tokens([{"role": "assistant", "content": content or ""}])
+                if total_usage is None:
+                    total_usage = TokenUsage()
+                total_usage.completion_tokens += est
+                _log.warning(
+                    "budget ceiling configured but provider returned no usage; using estimate of %d tokens",
+                    est,
+                )
             return total_usage
         self._last_prompt_tokens = response.usage.prompt_tokens
         if self.context_manager:

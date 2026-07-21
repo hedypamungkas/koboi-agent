@@ -91,3 +91,22 @@ class TestTestSuiteScorer:
         scorer = TestSuiteScorer(test_command=f"{sys.executable} -c 'raise SystemExit(9)'")
         s = await scorer.score(_case(test_command=_PASS_CMD), "", {"workspace": str(ws)})
         assert s.value == 1.0  # case.test_command took precedence
+
+    async def test_exit_126_command_not_attributed_to_sandbox(self, tmp_path):
+        # P1: a real ``exit 126`` from the test command (a normal POSIX code) must
+        # NOT be mislabeled "cwd escaped sandbox workdir" -- only a SANDBOX-emitted
+        # 126 (empty stdout + sandbox message) gets that framing.
+        ws = _project(tmp_path, passing=True)
+        scorer = TestSuiteScorer()
+        s = await scorer.score(_case(test_command="exit 126"), "", {"workspace": str(ws)})
+        assert s.value == 0.0
+        assert "exit=126" in s.reason
+        assert "sandbox workdir" not in s.reason
+
+    async def test_signal_exit_codes_score_zero(self, tmp_path):
+        ws = _project(tmp_path, passing=True)
+        scorer = TestSuiteScorer()
+        for code in (137, 139):  # 128+SIGKILL / 128+SIGSEGV
+            s = await scorer.score(_case(test_command=f"exit {code}"), "", {"workspace": str(ws)})
+            assert s.value == 0.0
+            assert f"exit={code}" in s.reason

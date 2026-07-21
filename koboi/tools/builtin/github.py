@@ -14,6 +14,7 @@ config-level (operator-set ``github.api_base``), not the subprocess network scan
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 
@@ -22,6 +23,20 @@ from koboi.tools.registry import tool
 from koboi.types import RiskLevel
 
 _logger = logging.getLogger(__name__)
+
+# GitHub owner/repo names are URL-safe ([A-Za-z0-9._-]); validating against this
+# charset rejects path/query/fragment injection (``owner='foo?bar'`` would retarget
+# the request to the repo-metadata endpoint, not /pulls). The charset is fully
+# unreserved, so no further URL-quoting is needed.
+_OWNER_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_VALID_PR_STATES = ("open", "closed")
+
+
+def _seg(value: str, label: str) -> str:
+    v = (value or "").strip()
+    if not _OWNER_REPO_RE.match(v):
+        raise ValueError(f"invalid GitHub {label}: {value!r}")
+    return v
 
 
 class GithubClient:
@@ -37,6 +52,7 @@ class GithubClient:
         return self._auth.apply({"Accept": "application/vnd.github+json"})
 
     async def create_pr(self, owner: str, repo: str, head: str, base: str, title: str, body: str = "") -> dict:
+        owner, repo = _seg(owner, "owner"), _seg(repo, "repo")
         url = f"{self._api_base}/repos/{owner}/{repo}/pulls"
         payload = {"title": title, "head": head, "base": base, "body": body}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -53,6 +69,7 @@ class GithubClient:
         body: str | None = None,
         state: str | None = None,
     ) -> dict:
+        owner, repo = _seg(owner, "owner"), _seg(repo, "repo")
         url = f"{self._api_base}/repos/{owner}/{repo}/pulls/{number}"
         payload = {k: v for k, v in {"title": title, "body": body, "state": state}.items() if v is not None}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -61,19 +78,27 @@ class GithubClient:
         return resp.json()
 
     async def list_prs(self, owner: str, repo: str, state: str = "open", per_page: int = 30) -> list[dict]:
+        owner, repo = _seg(owner, "owner"), _seg(repo, "repo")
         url = f"{self._api_base}/repos/{owner}/{repo}/pulls"
         params: dict[str, str | int] = {"state": state, "per_page": min(per_page, 100)}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.get(url, params=params, headers=self._headers())
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        if not isinstance(data, list):
+            raise ValueError(f"unexpected GitHub response (expected list, got {type(data).__name__})")
+        return data
 
     async def get_pr(self, owner: str, repo: str, number: int) -> dict:
+        owner, repo = _seg(owner, "owner"), _seg(repo, "repo")
         url = f"{self._api_base}/repos/{owner}/{repo}/pulls/{number}"
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.get(url, headers=self._headers())
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise ValueError(f"unexpected GitHub response (expected object, got {type(data).__name__})")
+        return data
 
 
 def _client_or_error(_deps: dict | None) -> tuple[GithubClient | None, str | None]:
@@ -120,6 +145,8 @@ async def github_create_pr(
         return f"Error: GitHub API returned {e.response.status_code}: {e.response.text[:300]}"
     except httpx.HTTPError as e:
         return f"Error: GitHub request failed: {e}"
+    except ValueError as e:
+        return f"Error: {e}"
     return f"Created PR #{pr.get('number')}: {pr.get('html_url', '')}"
 
 
@@ -134,7 +161,11 @@ async def github_create_pr(
             "number": {"type": "integer", "description": "Pull request number."},
             "title": {"type": "string", "description": "New title. Omit to leave unchanged."},
             "body": {"type": "string", "description": "New description. Omit to leave unchanged."},
-            "state": {"type": "string", "description": "New state: 'open' or 'closed'. Omit to leave unchanged."},
+            "state": {
+                "type": "string",
+                "enum": ["open", "closed"],
+                "description": "New state: 'open' or 'closed'. Omit to leave unchanged.",
+            },
         },
         "required": ["owner", "repo", "number"],
     },
@@ -154,12 +185,16 @@ async def github_update_pr(
     client, err = _client_or_error(_deps)
     if err:
         return err
+    if state is not None and state not in _VALID_PR_STATES:
+        return f"Error: state must be one of {_VALID_PR_STATES}, got {state!r}"
     try:
         pr = await client.update_pr(owner, repo, number, title=title, body=body, state=state)
     except httpx.HTTPStatusError as e:
         return f"Error: GitHub API returned {e.response.status_code}: {e.response.text[:300]}"
     except httpx.HTTPError as e:
         return f"Error: GitHub request failed: {e}"
+    except ValueError as e:
+        return f"Error: {e}"
     return f"Updated PR #{pr.get('number')}: state={pr.get('state')} {pr.get('html_url', '')}"
 
 
@@ -171,7 +206,11 @@ async def github_update_pr(
         "type": "object",
         "properties": {
             **_OWNER_REPO_PARAMS,
-            "state": {"type": "string", "description": "Filter by state: 'open' (default), 'closed', or 'all'."},
+            "state": {
+                "type": "string",
+                "enum": ["open", "closed", "all"],
+                "description": "Filter by state: 'open' (default), 'closed', or 'all'.",
+            },
         },
         "required": ["owner", "repo"],
     },
@@ -183,12 +222,16 @@ async def github_list_prs(owner: str, repo: str, state: str = "open", _deps: dic
     client, err = _client_or_error(_deps)
     if err:
         return err
+    if state not in ("open", "closed", "all"):
+        return f"Error: state must be one of ('open', 'closed', 'all'), got {state!r}"
     try:
         prs = await client.list_prs(owner, repo, state=state)
     except httpx.HTTPStatusError as e:
         return f"Error: GitHub API returned {e.response.status_code}: {e.response.text[:300]}"
     except httpx.HTTPError as e:
         return f"Error: GitHub request failed: {e}"
+    except ValueError as e:
+        return f"Error: {e}"
     if not prs:
         return f"No {state} pull requests in {owner}/{repo}."
     return "\n".join(
@@ -222,6 +265,8 @@ async def github_get_pr(owner: str, repo: str, number: int, _deps: dict | None =
         return f"Error: GitHub API returned {e.response.status_code}: {e.response.text[:300]}"
     except httpx.HTTPError as e:
         return f"Error: GitHub request failed: {e}"
+    except ValueError as e:
+        return f"Error: {e}"
     return (
         f"#{pr.get('number')} {pr.get('title')} ({pr.get('state')})\n"
         f"head={pr.get('head', {}).get('ref')} base={pr.get('base', {}).get('ref')}\n"

@@ -43,12 +43,30 @@ class Hunk:
 
 
 def _strip_trailing_newline(buf: list[str]) -> None:
-    """Strip exactly one trailing ``\\n`` from the last entry of ``buf`` (in place).
+    """Strip exactly one trailing line ending (``\\n`` or ``\\r\\n``) from the last
+    entry of ``buf`` (in place).
 
     Used to honor a ``\\ No newline at end of file`` marker on the preceding line.
+    Strips the full CRLF pair so a CRLF patch does not leave a stray ``\\r`` that
+    would then fail to match an LF file.
     """
     if buf and buf[-1].endswith("\n"):
         buf[-1] = buf[-1][:-1]
+        if buf[-1].endswith("\r"):
+            buf[-1] = buf[-1][:-1]
+
+
+def _patch_filename(header: str) -> str:
+    """Extract the filename from a ``--- ``/``+++ `` header line.
+
+    Strips the 4-char marker, an optional ``a/``/``b/`` VCS prefix, surrounding
+    quotes, and any tab-separated timestamp -- so ``+++ b/foo.py\\t2024-01-01``
+    yields ``foo.py``.
+    """
+    name = header[4:].rstrip("\r\n")
+    if name.startswith(("a/", "b/")):
+        name = name[2:]
+    return name.split("\t", 1)[0].strip().strip('"')
 
 
 def parse_unified_diff(patch: str) -> list[Hunk]:
@@ -58,12 +76,19 @@ def parse_unified_diff(patch: str) -> list[Hunk]:
     and ``diff --git``/``index`` prologue lines, all of which are skipped --
     ``apply_patch`` targets a single explicit ``path`` arg. Raises
     :class:`PatchError` on malformed input (empty patch, bad hunk header, unknown
-    line marker).
+    line marker, a multi-file patch, or a ``\\``-prefixed line that is not the
+    exact ``\\ No newline at end of file`` marker).
+
+    Hunk bodies are read COUNT-based (the ``@@ -o,oc +n,nc @@`` old/new counts)
+    so a content line that happens to start with ``--- ``/``+++ `` (a markdown
+    rule, a removed line whose content begins with ``-``) is NOT mistaken for a
+    file header -- the prior marker-scan terminated hunks early on such lines.
     """
     if not patch or not patch.strip():
         raise PatchError("patch is empty")
     lines = patch.splitlines(keepends=True)
     hunks: list[Hunk] = []
+    first_target: str | None = None
     i = 0
     n = len(lines)
     while i < n:
@@ -71,11 +96,29 @@ def parse_unified_diff(patch: str) -> list[Hunk]:
         if not line.strip():
             i += 1
             continue
-        # Tolerated (and ignored) prologue: git header lines and a --- / +++ pair.
-        if line.startswith(("diff --git", "index ", "--- ")):
-            if line.startswith("--- ") and not (i + 1 < n and lines[i + 1].startswith("+++ ")):
+        # Tolerated (and ignored) prologue: git header lines + --- / +++ pairs.
+        if line.startswith(("diff --git", "index ")):
+            i += 1
+            continue
+        if line.startswith("--- "):
+            if not (i + 1 < n and lines[i + 1].startswith("+++ ")):
                 raise PatchError(f"malformed patch: '---' header without '+++' at line {i + 1}")
-            i += 2 if line.startswith("--- ") else 1
+            target = _patch_filename(lines[i + 1])
+            if first_target is None:
+                first_target = target
+            elif target != first_target:
+                # apply_patch edits ONE explicit path; a multi-file patch would
+                # silently flatten the second file's hunks onto the first.
+                raise PatchError(
+                    f"malformed patch: apply_patch targets a single file, but this patch "
+                    f"also touches {target!r} (first file {first_target!r}). Apply one "
+                    "patch per file."
+                )
+            i += 2
+            continue
+        if line.startswith("+++ "):
+            # Bare +++ without a preceding --- (some emitters) -- tolerate as prologue.
+            i += 1
             continue
         m = _HUNK_HEADER_RE.match(line.rstrip("\r\n"))
         if not m:
@@ -83,21 +126,66 @@ def parse_unified_diff(patch: str) -> list[Hunk]:
                 f"malformed patch: expected '@@ ... @@' hunk header at line {i + 1}, got {line.rstrip()!r}"
             )
         old_start = int(m.group(1))
+        old_count = int(m.group(2)) if m.group(2) is not None else 1
         new_start = int(m.group(3))
+        new_count = int(m.group(4)) if m.group(4) is not None else 1
+        counts_explicit = m.group(2) is not None or m.group(4) is not None
         i += 1
         old_parts: list[str] = []
         new_parts: list[str] = []
         last_marker: str | None = None
+        old_left, new_left = old_count, new_count
         while i < n:
             body = lines[i]
-            if body.startswith("@@"):
-                break  # next hunk follows immediately
-            if body.startswith(("--- ", "diff --git", "index ")):
-                break  # prologue of a (tolerated) second file header ends this hunk
+            # Termination. With explicit counts, the hunk ends when both counts
+            # are satisfied (then drain trailing no-newline markers). With omitted
+            # counts (``diff`` drops the ,count only for true 1-line hunks, but a
+            # hand-crafted/model patch may be inconsistent) we fall back to a
+            # structural boundary -- so a content line starting with ``--- `` is
+            # only a terminator when it opens a real ``--- ``/``+++ `` file pair.
+            if counts_explicit and old_left <= 0 and new_left <= 0:
+                while i < n and lines[i].startswith("\\"):
+                    mk = lines[i]
+                    if mk.rstrip("\r\n") != "\\ No newline at end of file":
+                        raise PatchError(f"malformed patch: unexpected line marker {mk.rstrip()!r} at line {i + 1}")
+                    if last_marker == " ":
+                        _strip_trailing_newline(old_parts)
+                        _strip_trailing_newline(new_parts)
+                    elif last_marker == "-":
+                        _strip_trailing_newline(old_parts)
+                    elif last_marker == "+":
+                        _strip_trailing_newline(new_parts)
+                    else:
+                        raise PatchError(
+                            f"malformed patch: '\\ No newline' marker with no preceding content line at line {i + 1}"
+                        )
+                    i += 1
+                break
+            if not counts_explicit:
+                if body.startswith("@@") or body.startswith(("diff --git", "index ")):
+                    break
+                if body.startswith("--- ") and i + 1 < n and lines[i + 1].startswith("+++ "):
+                    break  # a genuine file-header pair opens a new file
+            elif body.startswith("@@"):
+                # Explicit counts claimed more lines than present.
+                raise PatchError(
+                    f"malformed patch: hunk header @@ -{old_start},{old_count} "
+                    f"+{new_start},{new_count} declared more lines than present "
+                    f"(hit next '@@' at line {i + 1})"
+                )
             marker = body[:1]
             if marker == "\\":
-                # ``\ No newline at end of file`` refers to the immediately preceding
-                # CONTENT line; strip its trailing newline from the side(s) it lived on.
+                # Only the EXACT ``\ No newline at end of file`` marker is valid;
+                # any other backslash-prefixed line is content the model wrote (a
+                # regex like ``\bword``) and must NOT be silently dropped.
+                if body.rstrip("\r\n") != "\\ No newline at end of file":
+                    raise PatchError(f"malformed patch: unexpected line marker {body.rstrip()!r} at line {i + 1}")
+                if last_marker is None:
+                    raise PatchError(
+                        f"malformed patch: '\\ No newline' marker with no preceding content line at line {i + 1}"
+                    )
+                # The marker refers to the immediately preceding CONTENT line; strip
+                # its trailing newline from the side(s) it lived on.
                 if last_marker == " ":
                     _strip_trailing_newline(old_parts)
                     _strip_trailing_newline(new_parts)
@@ -111,16 +199,21 @@ def parse_unified_diff(patch: str) -> list[Hunk]:
                 rest = body[1:]
                 old_parts.append(rest)
                 new_parts.append(rest)
+                old_left -= 1
+                new_left -= 1
             elif marker == "-":
                 old_parts.append(body[1:])
+                old_left -= 1
             elif marker == "+":
                 new_parts.append(body[1:])
+                new_left -= 1
             elif body in ("\n", "\r\n"):
                 # Recover a blank context line whose leading space got stripped to a
-                # bare newline (editors/transport stripping trailing whitespace) --
-                # treat it as an empty context line.
+                # bare newline (editors/transport stripping trailing whitespace).
                 old_parts.append(body)
                 new_parts.append(body)
+                old_left -= 1
+                new_left -= 1
                 last_marker = " "
                 i += 1
                 continue

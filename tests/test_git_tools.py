@@ -405,6 +405,17 @@ class TestGitAdd:
         result = git_add(paths=["--force"], repo_path=temp_git_repo)
         assert "option injection" in result
 
+    def test_empty_path_string_defaults_to_all(self, temp_git_repo):
+        # paths=[""] used to collapse to [] -> `git add --` no-op; now falls back
+        # to ['.'] (stage all), matching the documented default.
+        (Path(temp_git_repo) / "from_empty.txt").write_text("x")
+        result = git_add(paths=[""], repo_path=temp_git_repo)
+        assert not result.startswith("Error")
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=temp_git_repo, capture_output=True, text=True
+        ).stdout
+        assert "A  from_empty.txt" in status
+
 
 class TestGitCommit:
     def test_commits_staged_changes(self, temp_git_repo):
@@ -441,6 +452,21 @@ class TestGitCommit:
     def test_empty_message_rejected(self, temp_git_repo):
         assert git_commit(message="  ", repo_path=temp_git_repo).startswith("Error")
 
+    def test_nothing_staged_returns_clear_message(self, temp_git_repo):
+        # A clean tree: git exits 0 with "nothing to commit..." which used to read
+        # as success to an autonomous agent. Now surfaced as a clear signal.
+        result = git_commit(message="nothing here", repo_path=temp_git_repo)
+        assert "No staged changes" in result
+        # And no new commit was created.
+        log = subprocess.run(["git", "log", "--oneline"], cwd=temp_git_repo, capture_output=True, text=True).stdout
+        assert "nothing here" not in log
+
+    def test_unstaged_change_not_committed(self, temp_git_repo):
+        # Changes present but NOT staged -> also "no changes added to commit".
+        (Path(temp_git_repo) / "dirty.txt").write_text("x")  # unstaged
+        result = git_commit(message="x", repo_path=temp_git_repo)
+        assert "No staged changes" in result
+
 
 class TestGitCheckout:
     def test_create_and_switch_branch(self, temp_git_repo):
@@ -473,6 +499,17 @@ class TestGitPush:
     def test_rejects_injection(self, temp_git_repo):
         assert "option injection" in git_push(remote="--mirror", repo_path=temp_git_repo)
         assert "disallowed characters" in git_push(branch="x y", repo_path=temp_git_repo)
+
+    def test_force_push_is_impossible(self, temp_git_repo):
+        # The headline security property: force-push must be unreachable. Direct
+        # assertions on every force vector (leading-dash option, the force flag
+        # family, the +force refspec, and the colon refspec).
+        assert "option injection" in git_push(branch="--force", repo_path=temp_git_repo)
+        assert "option injection" in git_push(branch="-f", repo_path=temp_git_repo)
+        assert "option injection" in git_push(branch="--force-with-lease", repo_path=temp_git_repo)
+        assert "disallowed characters" in git_push(branch="+main", repo_path=temp_git_repo)
+        assert "disallowed characters" in git_push(branch="HEAD:evil", repo_path=temp_git_repo)
+        assert "option injection" in git_push(remote="--upload-pack=/tmp/x", repo_path=temp_git_repo)
 
 
 class TestWriteToolsSandboxWired:

@@ -32,8 +32,16 @@ class TestParse:
             }
         ]
 
+    def test_ruff_warning_code_is_warning(self):
+        # W* ruff codes (pycodestyle warnings like W291) -> severity "warning", not
+        # the old hardcoded "error" (so a warnings-only run does not trip
+        # typecheck_failed -- matching the module docstring).
+        diags = _parse("src/calc.py:7:1: W291 trailing whitespace\n")
+        assert diags[0]["severity"] == "warning"
+        assert diags[0]["code"] == "W291"
+
     def test_mypy_error_with_code(self):
-        diags = _parse('src/calc.py:42: error: Incompatible return  [return-value]\n')
+        diags = _parse("src/calc.py:42: error: Incompatible return  [return-value]\n")
         assert diags[0]["file"] == "src/calc.py"
         assert diags[0]["line"] == 42
         assert diags[0]["severity"] == "error"
@@ -52,11 +60,7 @@ class TestParse:
         assert diags[0]["severity"] == "error"
 
     def test_skips_exit_code_prefix_and_summaries(self):
-        result = (
-            "[exit code: 1]\n"
-            "src/calc.py:42:5: F841 unused\n"
-            "Found 1 error.\n"
-        )
+        result = "[exit code: 1]\nsrc/calc.py:42:5: F841 unused\nFound 1 error.\n"
         diags = _parse(result)
         assert len(diags) == 1  # the [exit code] + summary lines are ignored
 
@@ -89,6 +93,16 @@ class TestTypecheckHook:
         ctx = await hook.execute(ctx)
         # Diagnostics are attached (useful) but the kind stays command_failed --
         # a warnings-only run is not a typecheck FAILURE from recovery's view.
+        assert ctx.metadata["typecheck_diagnostics"][0]["severity"] == "warning"
+        assert ctx.metadata["tool_error_kind"] == "command_failed"
+
+    async def test_ruff_warnings_only_do_not_set_typecheck_failed(self):
+        # ruff W* codes map to severity "warning" -> no typecheck_failed (previously
+        # every ruff diag was hardcoded "error", contradicting the docstring).
+        hook = TypecheckHook()
+        ctx = _ctx("run_typecheck", "[exit code: 1]\nsrc/calc.py:7:1: W291 trailing whitespace\n")
+        ctx.metadata["tool_error_kind"] = "command_failed"
+        ctx = await hook.execute(ctx)
         assert ctx.metadata["typecheck_diagnostics"][0]["severity"] == "warning"
         assert ctx.metadata["tool_error_kind"] == "command_failed"
 

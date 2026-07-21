@@ -103,6 +103,29 @@ class TestBudgetMath:
         info = core._budget_exceeded_info(TokenUsage(prompt_tokens=10, completion_tokens=5))
         assert info["budget_limit"] == "max_total_tokens=10"
 
+    def test_cost_math_includes_reasoning_tokens(self):
+        # Reasoning tokens are priced (default = output rate) so a reasoning-heavy
+        # run trips the cost ceiling, not just prompt+completion.
+        core = _core(
+            [],
+            max_cost_usd=0.01,
+            token_prices={"input_per_1k": 1.0, "output_per_1k": 1.0, "reasoning_per_1k": 1.0},
+        )
+        # 20 reasoning tokens * 1.0/1k = 0.02 >= 0.01 ceiling -> exceeded.
+        info = core._budget_exceeded_info(TokenUsage(prompt_tokens=0, completion_tokens=0, reasoning_tokens=20))
+        assert info is not None
+        assert "max_cost_usd" in info["budget_limit"]
+
+    def test_usage_none_with_budget_falls_back_to_estimate(self):
+        # A provider returning usage=None must NOT silently disable a configured
+        # ceiling -- _update_usage estimates from the content.
+        core = _core([], max_total_tokens=5)
+        from koboi.types import AgentResponse
+
+        resp = AgentResponse(content="x" * 100, usage=None)
+        total = core._update_usage(resp, None)
+        assert total is not None and total.completion_tokens > 0
+
 
 class TestBudgetStream:
     async def test_stream_yields_budget_error(self):

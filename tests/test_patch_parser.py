@@ -20,11 +20,7 @@ class TestParseUnifiedDiff:
         assert h.old_start == 1 and h.new_start == 1
 
     def test_ignores_file_header_pair(self):
-        patch = (
-            "--- a/code.py\n"
-            "+++ b/code.py\n"
-            "@@ -1,1 +1,1 @@\n-old\n+new\n"
-        )
+        patch = "--- a/code.py\n+++ b/code.py\n@@ -1,1 +1,1 @@\n-old\n+new\n"
         hunks = parse_unified_diff(patch)
         assert len(hunks) == 1
         assert hunks[0].old_text == "old\n"
@@ -42,10 +38,7 @@ class TestParseUnifiedDiff:
         assert len(hunks) == 1
 
     def test_multiple_hunks(self):
-        patch = (
-            "@@ -1,1 +1,1 @@\n-a\n+x\n"
-            "@@ -10,1 +10,1 @@\n-b\n+y\n"
-        )
+        patch = "@@ -1,1 +1,1 @@\n-a\n+x\n@@ -10,1 +10,1 @@\n-b\n+y\n"
         hunks = parse_unified_diff(patch)
         assert len(hunks) == 2
         assert hunks[0].old_text == "a\n"
@@ -111,6 +104,44 @@ class TestParseUnifiedDiff:
     def test_unknown_marker_raises(self):
         with pytest.raises(PatchError, match="unexpected line marker"):
             parse_unified_diff("@@ -1,1 +1,1 @@\n~weird\n")
+
+    def test_backslash_content_line_rejected(self):
+        # A context/+/- line starting with '\' is NOT the no-newline marker --
+        # silently dropping it would lose content (a regex like \bword). Raise.
+        with pytest.raises(PatchError, match="unexpected line marker"):
+            parse_unified_diff("@@ -1,2 +1,2 @@\n ctx\n\\backslash content\n")
+
+    def test_crlf_patch_no_stray_cr(self):
+        h = parse_unified_diff(
+            "@@ -1,1 +1,1 @@\r\n-old\r\n\\ No newline at end of file\r\n+new\r\n\\ No newline at end of file\r\n"
+        )
+        assert h[0].old_text == "old"
+        assert h[0].new_text == "new"
+
+    def test_multi_file_patch_rejected(self):
+        with pytest.raises(PatchError, match="single file"):
+            parse_unified_diff(
+                "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n--- a/y.py\n+++ b/y.py\n@@ -1 +1 @@\n-c\n+d\n"
+            )
+
+    def test_same_file_two_hunks_accepted(self):
+        h = parse_unified_diff("--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n@@ -3 +3 @@\n-c\n+d\n")
+        assert len(h) == 2
+
+    def test_bare_plussplus_tolerated_as_prologue(self):
+        h = parse_unified_diff("+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n")
+        assert h[0].old_text == "a\n"
+
+    def test_orphan_no_newline_marker_raises(self):
+        with pytest.raises(PatchError, match="no preceding content"):
+            parse_unified_diff("@@ -1,1 +1,1 @@\n\\ No newline at end of file\n+new\n")
+
+    def test_removed_line_starting_with_dashes_is_content(self):
+        # A removed line whose content is '-- stray' encodes as '--- stray'; it
+        # must NOT be mistaken for a file header (count-based reading keeps it).
+        h = parse_unified_diff("@@ -1,3 +1,3 @@\n line1\n--- stray\n+++ stray\n line2\n")
+        assert "-- stray" in h[0].old_text
+        assert "++ stray" in h[0].new_text
 
 
 class TestApplyHunks:
