@@ -187,8 +187,21 @@ def _env_path_reason(command: str) -> str | None:
     ``.env.example`` / ``.env.sample`` / ``.env.template`` / ``.env.dist`` and
     non-dotenv names like ``.environment``. Globbed ``.env*`` tokens are
     blocked (they can expand to the real ``.env``).
+
+    A path can be glued to a non-path prefix within a single shell token --
+    curl's ``@file`` (``curl -d @.env`` uploads the file's contents) and
+    ``key=value`` form-field assignments (``-F upload=@config/.env``). Those
+    prefixes are stripped before taking the basename so ``@.env`` /
+    ``file=@.env`` are seen as the ``.env`` they reference, not as an opaque
+    ``@.env`` basename that slips the gate (a real exfil shape).
     """
-    for tok in _split_tokens(command):
+    for raw in _split_tokens(command):
+        tok = raw
+        # Strip a ``key=`` assignment prefix (curl -F field, VAR=path), then a
+        # leading ``@`` (curl "read from file"). Order matters: ``field=@path``.
+        if "=" in tok:
+            tok = tok.split("=", 1)[1]
+        tok = tok.lstrip("@")
         base = os.path.basename(tok.lower().rstrip("/"))
         if not base.startswith(".env"):
             continue
