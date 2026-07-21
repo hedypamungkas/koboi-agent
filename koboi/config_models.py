@@ -217,6 +217,22 @@ class InputGuardrailConfig(BaseModel):
     detect_injection: bool = False
     max_length: int | None = None
     custom_patterns: list | None = None
+    # When set, injection blocks surface this as a graceful in-character reply
+    # (sanitized_content) instead of a hard block -> generic fallback.
+    deflection_text: str | None = None
+
+    @field_validator("deflection_text", mode="after")
+    @classmethod
+    def _normalize_deflection_text(cls, v: str | None) -> str | None:
+        # Blank/whitespace == "not configured" -> None, and a real value is stripped,
+        # so a non-None value always means "deflection fires" (matches
+        # InputGuardrail.__init__'s normalization and the engine's truthiness gate;
+        # prevents a blank "successful" reply on a YAML typo or an empty ${VAR:}
+        # interpolation).
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
 
 
 class OutputGuardrailConfig(BaseModel):

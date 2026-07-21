@@ -14,10 +14,34 @@ class AgentMaxIterationsError(AgentError):
 
 
 class AgentGuardrailError(AgentError):
-    def __init__(self, reason: str, direction: str = "input"):
+    def __init__(
+        self,
+        reason: str,
+        direction: str = "input",
+        sanitized_content: str | None = None,
+    ):
         self.reason = reason
         self.direction = direction
+        # When set on an INPUT-direction block, the engine surfaces this as the graceful
+        # response instead of a hard block -> generic fallback (see loop.py
+        # `_graceful_input_deflection`). Only INPUT guardrails populate it -- today
+        # `injection_detector` with `deflection_text` (and a custom input guardrail that
+        # returns sanitized_content on a block); empty/length input blocks leave it None
+        # -> raise as before. NOTE: distinct from `GuardrailResult.sanitized_content`,
+        # which OUTPUT guardrails (Grounding/ScopeGuardrail) set on the `abstain`/
+        # `handover` *result* consumed by `_process_output` (a different type + path);
+        # output blocks (`direction="output"`) never set it here.
+        self.sanitized_content = sanitized_content
         super().__init__(f"Guardrail blocked ({direction}): {reason}")
+
+    @property
+    def is_graceful_deflection(self) -> bool:
+        """True when the engine should surface ``sanitized_content`` as a graceful
+        in-character reply instead of raising -> generic fallback. Centralizes the
+        gate so the two call sites in ``run``/``run_stream`` stay in sync: input
+        direction + a non-empty (after strip) deflection payload. None / "" / "  "
+        all fall through to "raise as before"."""
+        return self.direction == "input" and bool(self.sanitized_content and self.sanitized_content.strip())
 
 
 class AgentToolError(AgentError):

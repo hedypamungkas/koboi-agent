@@ -345,7 +345,11 @@ class AgentCore:
             self._audit("input_check", details=f"guardrail={type(grd).__name__} passed={result.passed}")
             if not result.passed:
                 self._log(f"Input blocked by {type(grd).__name__}: {result.reason}")
-                raise AgentGuardrailError(result.reason, direction="input")
+                raise AgentGuardrailError(
+                    result.reason,
+                    direction="input",
+                    sanitized_content=result.sanitized_content,
+                )
 
         ctx = await self._emit(HookEvent.PRE_INPUT, messages=self.memory.get_messages(), user_message=text_part)
         if ctx.abort:
@@ -353,6 +357,56 @@ class AgentCore:
         _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
         if _hr:
             raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
+
+    async def _graceful_input_deflection(self, exc: AgentGuardrailError, start: float) -> RunResult:
+        """Turn an input guardrail block into a graceful in-character deflection --
+        the guardrail's ``sanitized_content`` becomes the user-facing reply (saved to
+        memory, success=True) instead of a hard ``AgentGuardrailError`` surfacing as a
+        generic fallback. Achieves input-side parity with the output ``abstain`` path's
+        graceful refusal (same user-visible outcome: a reply, not an error).
+
+        Only reached when ``exc.is_graceful_deflection`` is true (a deflecting input
+        guardrail supplied a non-empty ``sanitized_content``); empty/length blocks
+        (``sanitized_content`` None/blank) still raise. Treated as a completed turn --
+        terminal journal step + SESSION_END + standard run metadata + trace_id -- so a
+        deflected turn is observable like any other (it is no longer an unbalanced
+        SESSION_START the way the pre-PR raise was).
+        """
+        content = exc.sanitized_content or ""
+        # Coherent transcript: record the blocked user turn + the deflection. Unlike the
+        # output abstain path (where _prepare_run already added the user message before
+        # the loop ran), an input block raises inside _validate_input BEFORE _prepare_run's
+        # add_user_message -- so the user turn must be recorded explicitly here.
+        # Fail-soft: a transient memory-backend error must NOT downgrade the customer to a
+        # generic fallback -- the graceful reply is this feature's whole contract. (The
+        # normal loop path lets memory errors propagate; this terminal path is deliberately
+        # more robust -- see test_run_graceful_survives_memory_error.)
+        try:
+            if getattr(self, "_last_user_message", None):
+                self.memory.add_user_message(self._last_user_message)
+            self.memory.add_assistant_message(content)
+        except Exception as mem_exc:  # noqa: BLE001 (fail-soft: never lose the graceful reply)
+            self._log(f"input deflection: memory write failed (reply still delivered): {mem_exc}")
+        self._audit("input_deflected", direction=exc.direction, reason=exc.reason)
+        # Lifecycle parity with _run_loop's success branch: a terminal step + SESSION_END
+        # so journal/resume diagnostics, telemetry, Langfuse finalization, and proactive-
+        # memory hooks see this turn.
+        self._journal_step(0, status="input_deflected", is_terminal=True)
+        await self._emit(HookEvent.SESSION_END, iteration=0)
+        _meta = self._run_metadata(resumed=False, last_step=0)
+        _meta["trace_id"] = _langfuse_trace_id(self.hooks)
+        _meta["input_guardrail_deflection"] = {
+            "direction": exc.direction,
+            "reason": exc.reason,
+            "action": "deflect",
+        }
+        return RunResult(
+            content=content,
+            iterations_used=0,
+            success=True,
+            elapsed_seconds=_time.monotonic() - start,
+            metadata=_meta,
+        )
 
     def _is_empty_terminal(self, response: AgentResponse) -> bool:
         """A complete response with no usable content (self-healing P0-C).
@@ -972,7 +1026,15 @@ class AgentCore:
         raise AgentMaxIterationsError(self.max_iterations)
 
     async def run(self, user_message: str | list) -> RunResult:
-        user_message, tool_defs, _start = await self._prepare_run(user_message)
+        _run_start = _time.monotonic()
+        try:
+            user_message, tool_defs, _start = await self._prepare_run(user_message)
+        except AgentGuardrailError as exc:
+            # Graceful input deflection: a guardrail that supplied sanitized_content
+            # becomes the reply instead of a hard block -> generic fallback.
+            if exc.is_graceful_deflection:
+                return await self._graceful_input_deflection(exc, _run_start)
+            raise
         return await self._run_loop(tool_defs, _start, resumed=False)
 
     async def resume(self) -> RunResult:
@@ -998,9 +1060,26 @@ class AgentCore:
 
     async def run_stream(self, user_message: str | list) -> AsyncGenerator:
         """Stream agent execution as a sequence of StreamEvents."""
+        _run_start = _time.monotonic()
         try:
             user_message, tool_defs, _start = await self._prepare_run(user_message)
         except (AgentGuardrailError, AgentAbortedError) as exc:
+            # Graceful input deflection: stream the guardrail's sanitized_content as
+            # text + a normal Complete (not an ErrorEvent) so the customer gets a
+            # graceful reply instead of a generic fallback.
+            if isinstance(exc, AgentGuardrailError) and exc.is_graceful_deflection:
+                result = await self._graceful_input_deflection(exc, _run_start)
+                yield TextDeltaEvent(content=exc.sanitized_content)
+                yield CompleteEvent(
+                    response=AgentResponse(content=exc.sanitized_content),
+                    content=exc.sanitized_content,
+                    elapsed_seconds=result.elapsed_seconds,
+                    iterations_used=0,
+                    tools_used=[],
+                    trace_id=result.metadata.get("trace_id", ""),
+                    metadata=result.metadata,
+                )
+                return
             yield ErrorEvent(error=exc)
             return
 

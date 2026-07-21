@@ -57,6 +57,7 @@ class InputGuardrail(PatternGuardrail):
         self,
         max_length: int | None = None,
         custom_patterns: list[tuple[str, str]] | None = None,
+        deflection_text: str | None = None,
         logger: AgentLogger | None = None,
         **kwargs: object,
     ):
@@ -67,6 +68,18 @@ class InputGuardrail(PatternGuardrail):
             logger=logger,
         )
         self.max_length = max_length or self.MAX_INPUT_LENGTH
+        # When set, an injection-pattern block carries this as sanitized_content so the
+        # engine surfaces a graceful in-character reply instead of a hard block ->
+        # generic fallback. None (default) preserves the raise-as-before behavior.
+        # Empty/length blocks never deflect (no meaningful deflection for those).
+        # Normalize blank/whitespace -> None so the type and the engine's truthiness
+        # gate agree that ``deflection_text is not None`` ⟹ deflection fires (a stray
+        # " " / "\n" -- a plausible YAML typo or an empty ``${VAR:}`` interpolation --
+        # would otherwise yield a blank "successful" reply).
+        if deflection_text is not None:
+            self.deflection_text = deflection_text.strip() or None
+        else:
+            self.deflection_text = None
 
     async def check(self, user_input: str, context: list[str] | None = None) -> GuardrailResult:
         if not user_input or not user_input.strip():
@@ -81,7 +94,12 @@ class InputGuardrail(PatternGuardrail):
 
         pattern_result = await self.check_patterns(user_input)
         if pattern_result is not None:
-            return pattern_result
+            return GuardrailResult(
+                passed=False,
+                reason=pattern_result.reason,
+                action="block",
+                sanitized_content=self.deflection_text,
+            )
 
         sanitized = user_input.strip()
         return GuardrailResult(passed=True, sanitized_content=sanitized)
