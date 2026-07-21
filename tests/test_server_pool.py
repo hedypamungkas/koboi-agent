@@ -202,7 +202,7 @@ class TestDeepResearchMessages:
                     return AgentResponse(content=self.synthesis, tool_calls=[])
                 # node turn -> an answer (becomes finding [1])
                 if any(m.get("role") == "tool" for m in messages):
-                    return AgentResponse(content="Found: sulfide electrolytes.", tool_calls=[])
+                    return AgentResponse(content="Found: sulfide electrolytes. Source: https://example.com/sulfide", tool_calls=[])
                 return AgentResponse(
                     content="",
                     tool_calls=[ToolCall(id="tc1", name="web_search", arguments=json.dumps({"query": "x"}))],

@@ -36,7 +36,7 @@ class _FakeClient:
 
     def __init__(
         self,
-        node_answer: str = "Found: the topic is X and Y.",
+        node_answer: str = "Found: the topic is X and Y. Source: https://example.com/topic",
         coverage_score: float = 0.4,
         follow_ups: list[str] | None = None,
         plan_needs_workflow: bool = True,
@@ -393,11 +393,7 @@ class TestRunDeepResearch:
         # and recoverable via load_research_context_for_session.
         db_path = str(tmp_path / "r.db")
         orch = Orchestrator(
-            client=_FakeClient(
-                coverage_score=0.95,
-                node_answer="X per https://example.com/x",
-                synthesis="## Report\nX [1].",
-            ),
+            client=_FakeClient(coverage_score=0.95, synthesis="## Report\nX [1]."),
             router=KeywordRouter(),
             research={"max_depth": 1, "coverage_threshold": 0.7},
             dag_scheduler=DagScheduler(agents_map={}, deps={}, db_path=db_path),
@@ -694,11 +690,7 @@ class TestHigh3Resume:
         db_path = str(tmp_path / "resume.db")
         # Step 1: run deep_research once -> journals a ctx with findings.
         orch = _orch(
-            _FakeClient(
-                coverage_score=0.95,
-                node_answer="Found something per https://example.com/found",
-                synthesis="## Report\nFound [1] something.",
-            ),
+            _FakeClient(coverage_score=0.95, synthesis="## Report\nFound [1] something."),
             {"max_depth": 1, "coverage_threshold": 0.7},
             tmp_path,
         )
