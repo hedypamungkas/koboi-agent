@@ -37,6 +37,7 @@ def _manager_or_error(_deps: dict | None):
             "cwd": {"type": "string", "description": "Working directory. Default: current directory."},
             "max_lifetime_seconds": {
                 "type": "integer",
+                "minimum": 1,
                 "description": "Hard cap on how long the process may run before it is auto-killed. Default: 1800.",
             },
         },

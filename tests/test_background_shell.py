@@ -81,6 +81,15 @@ class TestMaxLifetime:
         final = await manager.poll(job.job_id)
         assert final.status == "timeout"
 
+    async def test_zero_or_negative_lifetime_rejected(self):
+        # 0/negative scheduled a watchdog that fired instantly (mislabeled
+        # "timeout"); must be rejected at start instead.
+        manager = BackgroundShellManager()
+        for bad in (0, -1, -5):
+            with pytest.raises(ValueError, match="max_lifetime_seconds must be positive"):
+                await manager.start("sleep 30", max_lifetime_seconds=bad)
+        await manager.kill_all()
+
 
 class TestOutputBuffer:
     async def test_output_bounded_and_truncated(self):

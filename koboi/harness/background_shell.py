@@ -90,6 +90,10 @@ class BackgroundShellManager:
         blocked = check_command_blocked(command)
         if blocked:
             raise ValueError(blocked)
+        if max_lifetime_seconds is not None and max_lifetime_seconds <= 0:
+            # 0/negative scheduled a watchdog that fired instantly, killing the
+            # process at launch (mislabeled "timeout"). Require a positive cap.
+            raise ValueError("max_lifetime_seconds must be positive")
         if self._running_count() >= self._max_concurrent:
             raise ValueError(f"max_concurrent background shell jobs reached ({self._max_concurrent})")
 

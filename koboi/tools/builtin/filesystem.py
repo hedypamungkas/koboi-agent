@@ -173,8 +173,14 @@ def _read_file_range(path: str, offset: int | None, limit: int | None, max_read_
     the selected range is materialized (the old ``readlines()`` loaded the entire
     file, OOM-ing on large inputs and defeating the offset/limit purpose).
     """
-    start = max(1, offset or 1)
-    want_end = start + max(1, limit) - 1 if limit is not None else None
+    # Negative/zero offset/limit used to silently clamp (offset=-3 -> 1), masking
+    # model mistakes. Surface them as errors instead.
+    if offset is not None and offset < 1:
+        return f"Error: offset must be >= 1 (got {offset})"
+    if limit is not None and limit < 1:
+        return f"Error: limit must be >= 1 (got {limit})"
+    start = offset or 1
+    want_end = start + limit - 1 if limit is not None else None
     selected: list[str] = []
     total = 0
     with open(path) as f:
@@ -388,7 +394,10 @@ def apply_patch(path: str, patch: str, _deps: dict | None = None) -> str:
             except OSError:
                 pass
             raise
-        return f"Successfully applied {len(hunks)} hunk(s) to '{path}'{note}"
+        # Report EFFECTIVE hunks (no-op/context-only hunks don't change anything;
+        # reporting the total misled the model into thinking more changed than did).
+        applied = sum(1 for h in hunks if h.old_text != h.new_text)
+        return f"Successfully applied {applied} hunk(s) to '{path}'{note}"
     except FileNotFoundError:
         return f"Error: file '{path}' not found"
     except PermissionError:

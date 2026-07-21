@@ -378,6 +378,15 @@ class TestReadFileRanged:
         # during a streamed 3-line window must stay well under the file size.
         assert peak < 4_000_000, f"streaming regressed: peak={peak}"
 
+    def test_read_file_rejects_nonpositive_offset_and_limit(self, tmp_path):
+        # Negative/zero used to silently clamp (offset=-3 -> 1), masking mistakes.
+        test_file = tmp_path / "f.txt"
+        test_file.write_text("a\nb\nc\n")
+        assert "must be >= 1" in read_file(path=str(test_file), offset=0)
+        assert "must be >= 1" in read_file(path=str(test_file), offset=-3)
+        assert "must be >= 1" in read_file(path=str(test_file), limit=0)
+        assert "must be >= 1" in read_file(path=str(test_file), limit=-2)
+
 
 class TestEditFile:
     def test_edit_file_unique_replace(self, tmp_path):
@@ -528,6 +537,16 @@ class TestApplyPatch:
         result = apply_patch(path=str(test_file), patch="@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n")
         assert result.startswith("Error:")
         assert not any(p.startswith(".apply_patch_") for p in os.listdir(tmp_path))
+
+    def test_apply_patch_reports_effective_hunk_count(self, tmp_path):
+        # A context-only (no-op) hunk + a real hunk: the message reports EFFECTIVE
+        # hunks (1), not the total (2) -- otherwise the model thinks more changed.
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\nc = 3\n")
+        patch = "@@ -1,1 +1,1 @@\n a = 1\n@@ -3,1 +3,1 @@\n-c = 3\n+c = 30\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 1 hunk" in result
+        assert "c = 30" in test_file.read_text()
 
     def test_apply_patch_multi_hunk_atomic(self, tmp_path):
         test_file = tmp_path / "code.py"
