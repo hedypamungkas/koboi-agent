@@ -217,6 +217,9 @@ class InputGuardrailConfig(BaseModel):
     detect_injection: bool = False
     max_length: int | None = None
     custom_patterns: list | None = None
+    # When set, injection blocks surface this as a graceful in-character reply
+    # (sanitized_content) instead of a hard block -> generic fallback.
+    deflection_text: str | None = None
 
 
 class OutputGuardrailConfig(BaseModel):

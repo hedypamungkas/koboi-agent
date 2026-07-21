@@ -345,7 +345,11 @@ class AgentCore:
             self._audit("input_check", details=f"guardrail={type(grd).__name__} passed={result.passed}")
             if not result.passed:
                 self._log(f"Input blocked by {type(grd).__name__}: {result.reason}")
-                raise AgentGuardrailError(result.reason, direction="input")
+                raise AgentGuardrailError(
+                    result.reason,
+                    direction="input",
+                    sanitized_content=result.sanitized_content,
+                )
 
         ctx = await self._emit(HookEvent.PRE_INPUT, messages=self.memory.get_messages(), user_message=text_part)
         if ctx.abort:
@@ -353,6 +357,37 @@ class AgentCore:
         _hr = ctx.metadata.get("handover_requested")  # B1.5: structural handover detection
         if _hr:
             raise AgentHandoverError(_hr.get("reason", "handover requested"), _hr.get("summary", ""))
+
+    def _graceful_input_deflection(self, exc: AgentGuardrailError, start: float) -> RunResult:
+        """Turn an input guardrail block into a graceful in-character deflection --
+        the guardrail's ``sanitized_content`` becomes the user-facing reply (saved to
+        memory, success=True) instead of a hard ``AgentGuardrailError`` surfacing as a
+        generic fallback. Mirrors the output ``abstain`` path.
+
+        Only reached when the blocking guardrail supplied ``sanitized_content`` (e.g.
+        ``injection_detector`` with ``deflection_text``, or a deflecting custom
+        guardrail). Empty/length blocks (``sanitized_content is None``) still raise.
+        """
+        content = exc.sanitized_content or ""
+        # Coherent transcript (parity with the output abstain path, which keeps the
+        # user message + the refusal): record the blocked turn + the deflection.
+        if getattr(self, "_last_user_message", None):
+            self.memory.add_user_message(self._last_user_message)
+        self.memory.add_assistant_message(content)
+        self._audit("input_deflected", direction=exc.direction, reason=exc.reason)
+        return RunResult(
+            content=content,
+            iterations_used=0,
+            success=True,
+            elapsed_seconds=_time.monotonic() - start,
+            metadata={
+                "input_guardrail_deflection": {
+                    "direction": exc.direction,
+                    "reason": exc.reason,
+                    "action": "deflect",
+                }
+            },
+        )
 
     def _is_empty_terminal(self, response: AgentResponse) -> bool:
         """A complete response with no usable content (self-healing P0-C).
@@ -972,7 +1007,15 @@ class AgentCore:
         raise AgentMaxIterationsError(self.max_iterations)
 
     async def run(self, user_message: str | list) -> RunResult:
-        user_message, tool_defs, _start = await self._prepare_run(user_message)
+        _run_start = _time.monotonic()
+        try:
+            user_message, tool_defs, _start = await self._prepare_run(user_message)
+        except AgentGuardrailError as exc:
+            # Graceful input deflection: a guardrail that supplied sanitized_content
+            # becomes the reply instead of a hard block -> generic fallback.
+            if exc.direction == "input" and exc.sanitized_content:
+                return self._graceful_input_deflection(exc, _run_start)
+            raise
         return await self._run_loop(tool_defs, _start, resumed=False)
 
     async def resume(self) -> RunResult:
@@ -998,9 +1041,30 @@ class AgentCore:
 
     async def run_stream(self, user_message: str | list) -> AsyncGenerator:
         """Stream agent execution as a sequence of StreamEvents."""
+        _run_start = _time.monotonic()
         try:
             user_message, tool_defs, _start = await self._prepare_run(user_message)
         except (AgentGuardrailError, AgentAbortedError) as exc:
+            # Graceful input deflection: stream the guardrail's sanitized_content as
+            # text + a normal Complete (not an ErrorEvent) so the customer gets a
+            # graceful reply instead of a generic fallback.
+            if (
+                isinstance(exc, AgentGuardrailError)
+                and exc.direction == "input"
+                and exc.sanitized_content
+            ):
+                result = self._graceful_input_deflection(exc, _run_start)
+                yield TextDeltaEvent(content=exc.sanitized_content)
+                yield CompleteEvent(
+                    response=AgentResponse(content=exc.sanitized_content),
+                    content=exc.sanitized_content,
+                    elapsed_seconds=result.elapsed_seconds,
+                    iterations_used=0,
+                    tools_used=[],
+                    trace_id="",
+                    metadata=result.metadata,
+                )
+                return
             yield ErrorEvent(error=exc)
             return
 

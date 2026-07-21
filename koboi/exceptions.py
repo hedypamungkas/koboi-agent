@@ -14,9 +14,20 @@ class AgentMaxIterationsError(AgentError):
 
 
 class AgentGuardrailError(AgentError):
-    def __init__(self, reason: str, direction: str = "input"):
+    def __init__(
+        self,
+        reason: str,
+        direction: str = "input",
+        sanitized_content: str | None = None,
+    ):
         self.reason = reason
         self.direction = direction
+        # When set, the engine surfaces this as the graceful response instead of a
+        # hard block -> generic fallback (see loop.py `_graceful_input_deflection` /
+        # the output `abstain` path). Opt-in per guardrail -- only guardrails that
+        # supply a deflection (e.g. injection_detector with deflection_text, or
+        # ScopeGuardrail) set it; empty/length blocks leave it None -> raise as before.
+        self.sanitized_content = sanitized_content
         super().__init__(f"Guardrail blocked ({direction}): {reason}")
 
 
