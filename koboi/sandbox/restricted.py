@@ -74,9 +74,17 @@ ALLOWLIST_EXTRA_BINARIES: tuple[str, ...] = (
     "git",
 )
 
-# scheme://host[:port]/..., and scp-like git@host:path forms.
-_URL_HOST_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://([^/\s:@]+(?::\d+)?)")
-_SSH_HOST_RE = re.compile(r"^[A-Za-z0-9._-]+@([A-Za-z0-9._-]+):")
+# scheme://[userinfo@]host[:port]/... -- capture the FULL authority so a
+# userinfo decoy cannot defeat the allowlist: in ``https://github.com@evil.com``
+# ``github.com`` is the userinfo (allowlisted) and ``evil.com`` is the real host
+# that git/curl/pip actually contact. The host is the segment after the LAST
+# '@' (RFC 3986 authority), port stripped afterwards.
+_URL_AUTHORITY_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://([^\s/]+)")
+# user@host -- scp form (``git@host:path``) AND bare ``ssh user@host`` (the
+# ``:path`` is optional so a plain-ssh exfil target is not invisible to the
+# allowlist; migrating ``network: deny`` -> ``allowlist`` must not silently
+# unlock outbound ssh).
+_SSH_HOST_RE = re.compile(r"^[A-Za-z0-9._-]+@([A-Za-z0-9._-]+):?")
 
 # Env vars stripped on top of the secret block-list when network is denied:
 # proxy settings and per-tool netrc/credential files.
@@ -352,12 +360,22 @@ class RestrictedProcessBackend(BaseSandbox):
             return None
         hosts: list[str] = []
         for tok in tokens:
-            hosts += [m.split(":")[0] for m in _URL_HOST_RE.findall(tok)]
+            for authority in _URL_AUTHORITY_RE.findall(tok):
+                # Host = last segment after '@' (drops a ``user@``/``user:pass@``
+                # decoy), then strip ``:port``. IPv6 ``[::1]`` extracts ``[`` --
+                # never matches an allowlist, so it over-blocks (fail-safe), never
+                # a bypass.
+                host = authority.rsplit("@", 1)[-1].split(":", 1)[0]
+                if host:
+                    hosts.append(host)
             ssh = _SSH_HOST_RE.match(tok)
             if ssh:
                 hosts.append(ssh.group(1))
         for host in hosts:
-            if not any(fnmatch(host, pattern) for pattern in self._network_allowlist):
+            # DNS hosts are case-insensitive -- lowercase both sides so
+            # ``GITHUB.COM`` allowlist entries match ``github.com`` commands
+            # (and vice-versa).
+            if not any(fnmatch(host.lower(), pattern.lower()) for pattern in self._network_allowlist):
                 return f"blocked: host '{host}' (via '{binary}') is not in the sandbox network allowlist"
         return None
 

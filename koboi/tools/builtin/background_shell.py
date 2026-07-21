@@ -67,6 +67,14 @@ async def submit_background_shell(
     except PermissionError as e:
         return f"Error: {e}"
     env = sandbox.build_env(cfg) if sandbox is not None else None
+    # Gate the LAUNCH command through the sandbox's network policy. The live
+    # process then runs outside the per-call approval/policy/audit pipeline for
+    # its whole lifetime, so this is the single place the egress tiers
+    # (deny/allowlist) are enforced for a background job -- mirrors the gate
+    # inside RestrictedProcessBackend.run().
+    network_allowed = getattr(sandbox, "network_allowed", None)
+    if callable(network_allowed) and not network_allowed(command):
+        return "Error: command blocked by sandbox network policy"
     try:
         job = await manager.start(command, cwd=resolved_cwd, env=env, max_lifetime_seconds=max_lifetime_seconds)
     except ValueError as e:

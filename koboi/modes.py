@@ -127,6 +127,14 @@ def is_read_only_tool(tool_name: str) -> bool:
     snake_case builtin (``read_file``, ``grep_search``) tool names. Without the
     ``_`` separator no builtin ever matched, so CHAT/PLAN blocked even
     ``read_file`` -- contradicting the documented behavior.
+
+    The ``prefix + "_"`` rule is intentionally permissive (the short bases
+    ``read``/``list``/``grep``/``glob``/``find`` are what qualify the snake_case
+    builtins), so a HYPOTHETICAL destructive tool whose name starts with a
+    read-only base (``git_diff_apply``) would also match. No such tool is
+    registered today, and ``tests/test_modes.py`` has a registry-snapshot test
+    that fails at CI if any DESTRUCTIVE/MODERATE builtin ever collides -- that
+    test is the durable guard, not this function.
     """
     name_lower = tool_name.lower()
     if name_lower in _READ_ONLY_TOOLS:

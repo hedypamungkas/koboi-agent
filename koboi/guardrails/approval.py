@@ -245,6 +245,47 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
         return response.approved
 
 
+def _has_shell_control_operator(command: str) -> bool:
+    """True if ``command`` contains an unquoted shell control / substitution operator.
+
+    Scans for ``;``, ``|``, ``&`` (command separators) only when OUTSIDE a quoted
+    span, so a literal ``;`` inside ``git commit -m "a; b"`` is NOT flagged.
+    Command substitution (``$(...)`` and backticks) is flagged EVEN inside double
+    quotes -- bash executes it there, and this gate is for the single-command job
+    allowlist where conservative denial is safe (cost of a false positive = one
+    auto-approve withheld; cost of a false negative = exfil past the glob).
+    """
+    i = 0
+    n = len(command)
+    quote: str | None = None
+    while i < n:
+        ch = command[i]
+        # Substitution works even inside double quotes -- check before quote skip.
+        if ch == "`":
+            return True
+        if ch == "$" and command[i : i + 2] == "$(":
+            return True
+        if quote is not None:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if ch in (";", "|", "&"):
+            return True
+        i += 1
+    return False
+
+
 class AutonomousApprovalHandler(ApprovalHandler):
     """Autonomous-mode handler (M4): safe/moderate auto-approve; destructive → Trust DB or deny.
 
@@ -298,6 +339,12 @@ class AutonomousApprovalHandler(ApprovalHandler):
         if blocked:
             # Hardcoded safety wins even over a matching pattern.
             return False, f"denied (job shell allowlist: {blocked})"
+        if _has_shell_control_operator(command):
+            # The allowlist auto-approves a SINGLE command. A control operator
+            # signals a compound command that could smuggle a non-matching
+            # command past the glob (``git commit*`` would match
+            # ``git commit -m x; curl evil``). Deny rather than risk exfil.
+            return False, "denied (job shell allowlist: compound command)"
         for pattern in self._shell_allowlist:
             if fnmatch(command, pattern):
                 return True, f"auto-approve (job shell allowlist: {pattern})"

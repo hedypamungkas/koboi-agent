@@ -72,7 +72,10 @@ COMMAND_DENY_PATTERNS = [
     re.compile(r"wget\b.*\|\s*bash"),
     re.compile(r"wget\b.*\|\s*sh"),
     re.compile(r":\(\)\{.*\}"),  # fork bomb
-    re.compile(r"chmod\s+-R\s+777\s+/"),
+    # ``_command_deny_reason`` lowercases the command first, so match a lowercased
+    # recursive flag: ``-r``, ``-R``->``-r``, ``-rf``/``-fr``/``-Rf``->``-rf``, and
+    # ``--recursive`` (the old ``-R`` pattern never matched the lowercased ``-r``).
+    re.compile(r"chmod\s+(?:-[a-z]*r[a-z]*\s+|--recursive\s+)777\s+/"),
     re.compile(r"shutdown\b"),
     re.compile(r"reboot\b"),
     # C2: exfil-evasion vectors (defense-in-depth). /dev/tcp is bash net-exfil;
@@ -130,16 +133,35 @@ _STDIN_REDIRECTS = {"<<<", "<<", "<<-", "<"}
 _ROOTISH = {"/", "/*", "/.", ".", ".*"}
 
 
+# Command-substitution bodies: ``$( ... )`` and `` ` ... ` ``. shlex does not
+# expand these (that is a shell feature), so ``wget $(cat .env)`` would tokenize
+# as ``.env)`` and slip past the basename-aware ``.env`` gate. We surface the
+# inner payload as extra tokens so the sensitive-path / interpreter / rm checks
+# see nested exfil. Simple (non-recursive) -- covers the common exfil shapes.
+_SUBST_DOLLAR_RE = re.compile(r"\$\(([^)]*)\)")
+_SUBST_BACKTICK_RE = re.compile(r"`([^`]*)`")
+
+
+def _shlex_split(text: str) -> list[str]:
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.replace(";", " ").replace("|", " ").split()
+
+
 def _split_tokens(command: str) -> list[str]:
     """Tokenize with shlex (which also concatenates ``pass''wd`` -> ``passwd``).
 
-    Falls back to a naive whitespace split on unbalanced quotes -- the same
-    pattern as ``koboi/sandbox/restricted.py:_first_network_binary``.
+    Command substitutions are expanded: the inner payload of ``$(...)`` and
+    backticks is tokenized too, so ``$(cat .env)`` / ``$(rm -rf /)`` cannot hide
+    from the sensitive-path / interpreter / rm checks. Falls back to a naive
+    whitespace split on unbalanced quotes -- the same pattern as
+    ``koboi/sandbox/restricted.py:_first_network_binary``.
     """
-    try:
-        return shlex.split(command)
-    except ValueError:
-        return command.replace(";", " ").replace("|", " ").split()
+    tokens = _shlex_split(command)
+    for inner in _SUBST_DOLLAR_RE.findall(command) + _SUBST_BACKTICK_RE.findall(command):
+        tokens.extend(_shlex_split(inner))
+    return tokens
 
 
 def _interp_kind(base: str) -> str | None:

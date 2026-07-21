@@ -164,18 +164,70 @@ class TestReadOnlyToolMatcher:
     def test_mutating_tools_are_not_read_only(self):
         from koboi.modes import is_read_only_tool
 
+        # Comprehensive: every shipped mutating tool must be gated in CHAT/PLAN.
         for name in [
             "write_file",
             "edit_file",
+            "apply_patch",
             "delete_file",
             "run_shell",
+            "git_add",
             "git_commit",
+            "git_checkout",
             "git_push",
+            "github_create_pr",
+            "github_update_pr",
+            "submit_background_shell",
+            "kill_background_shell",
+            "generate_image",
+            "generate_video",
+            "generate_music",
+            "generate_speech",
             "memory_store",
             "ingest_url",
             "task_create",
+            "task_update",
+            "transfer_to_human",
         ]:
             assert not is_read_only_tool(name), f"{name} must NOT be read-only"
+
+    def test_wave3_wave4_read_only_additions(self):
+        from koboi.modes import is_read_only_tool
+
+        for name in ["repo_map", "github_list_prs", "github_get_pr", "run_typecheck"]:
+            assert is_read_only_tool(name), f"{name} should be read-only"
+
+    def test_registry_snapshot_no_mutating_tool_is_read_only(self):
+        """Durable guard for the ``prefix_`` footgun: ``is_read_only_tool``
+        matches ``prefix + "_"`` for every read-only base, so a hypothetical
+        future tool named ``git_diff_apply`` would inherit read-only status via
+        the ``git_diff`` prefix and bypass CHAT/PLAN approval.
+
+        This snapshot iterates the REAL registered tool inventory and fails at
+        CI the moment any destructive tool (or any moderate tool that is
+        read-only ONLY via the prefix rule, not by exact intent) collides.
+        """
+        from koboi.modes import _READ_ONLY_TOOLS, is_read_only_tool
+        from koboi.tools.builtin import register_all
+        from koboi.tools.registry import ToolRegistry
+        from koboi.types import RiskLevel
+
+        reg = ToolRegistry()
+        register_all(reg)
+        offenders: list[str] = []
+        for name, td in reg.list_tools().items():
+            ro = is_read_only_tool(name)
+            if td.risk_level == RiskLevel.DESTRUCTIVE and ro:
+                offenders.append(name)  # a destructive tool must NEVER be read-only
+            elif (
+                td.risk_level == RiskLevel.MODERATE
+                and ro
+                and name.lower() not in _READ_ONLY_TOOLS  # exact members (web_fetch, delegate_tasks) are intentional
+            ):
+                offenders.append(name)  # read-only only via the prefix footgun
+        assert offenders == [], (
+            f"mutating tools wrongly classified read-only (CHAT/PLAN would bypass approval): {offenders}"
+        )
 
     def test_mode_manager_gates_edit_file_by_mode(self):
         mgr = ModeManager(AgentMode.CHAT)

