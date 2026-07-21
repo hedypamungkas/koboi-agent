@@ -193,7 +193,7 @@ class TestRunJobIntegration:
         spy = MagicMock()
 
         async def _ok(*a, **kw):
-            return "done"
+            return "done", False
 
         with patch.object(jobs, "_execute_job", _ok), patch.object(jobs, "_emit_job_webhooks", spy):
             await run_job("job_1", None, registry, store, "hi", timeout=10, webhooks=[{"url": "http://x/h"}])

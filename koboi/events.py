@@ -125,6 +125,12 @@ class OrchestrationCompleteEvent:
     execution_mode: str
     routing_agents: list[str]
     routing_confidence: float
+    # deep_research: True when the run ended by asking a clarifying question instead of
+    # producing a report (the question text is in final_answer). Promoted from a metadata
+    # dict key (PR #89) so the one runtime-deciding flag is typed, not stringly-keyed --
+    # a typo in a dict key can no longer silently disable the feature. The metadata dict
+    # below stays for the telemetry-only keys (research_sources/coverage/depth/...).
+    needs_clarification: bool = False
     # W2: deep-research stamps research_sources / coverage / depth here; merged into
     # OrchestratorResult.metadata by run(). Other modes leave it empty.
     metadata: dict = field(default_factory=dict)
