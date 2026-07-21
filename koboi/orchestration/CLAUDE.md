@@ -43,7 +43,7 @@ Coverage-gated, cited web research (GPT-Researcher shape). `Orchestrator._run_de
 3. `CoverageEvaluator` — one LLM judge/round → `(score, follow_ups, coverage_map)`. Iterates
    (re-plans on gaps) until `coverage_threshold` or `max_depth`/budget. Deterministic safety net:
    generates generic follow-ups if the judge returns none on low coverage (prevents shallow stops).
-4. `_synthesize_research` → cited report; `_verify_citations` strips unresolvable `[n]`; Sources footer.
+4. `_synthesize_research` → cited report; `_verify_citations` strips `[n]` markers lacking a real URL; Sources footer cites each finding's actual fetched URL (`_extract_source_url()`, not the internal node name).
 5. Persistence — `ResearchContext` (query + sources + coverage + `final_report`) journaled to the
    `research_context` SQLite table (session-tagged) → `GET /v1/sessions/{id}` + `koboi run --resume`.
 

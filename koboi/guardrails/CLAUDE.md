@@ -10,9 +10,10 @@ wired by the facade and the server.
 ## Key files
 ```
 base.py           BaseGuardrail ABC (async check) + PatternGuardrail (regex-driven base)
-input.py          InputGuardrail -- prompt-injection + length check (action "block")
+input.py          InputGuardrail -- prompt-injection (16 patterns, incl. Bahasa Indonesia) + length check (action "block")
 output.py         OutputGuardrail -- secret/PII leak screen (action "warn")
 grounding.py       GroundingGuardrail -- runtime faithfulness (claim-decompose + NLI vs retrieved context; action "abstain"; A3; fail-soft)
+scope.py          ScopeGuardrail -- output scope guard (relevance-gated LLM judge keeps a specialized agent on-task; action "abstain"; fail-soft)
 rate_limiter.py   RateLimiter -- per-session/per-tool/per-minute caps (RateLimitConfig)
 audit.py          AuditTrail (in-memory) + SQLiteAuditTrail (WAL-persistent)
 approval.py       ApprovalHandler base + CLI/Callback/AsyncCallback/Autonomous handlers
@@ -33,8 +34,8 @@ __init__.py       Re-exports public surface; calls register_builtin_guardrails()
   `GuardrailRegistry.from_config([{"name": ..., ...}])`.
 - Built-in factories (registered at import): `injection_detector` (InputGuardrail),
   `content_filter` (OutputGuardrail), `grounding_check` (GroundingGuardrail — opt-in runtime
-  faithfulness, Wave 2 A3). `RateLimiter`/`AuditTrail` are NOT registered --
-  they are constructed directly by the facade.
+  faithfulness, Wave 2 A3), `scope_check` (ScopeGuardrail — opt-in output scope guard).
+  `RateLimiter`/`AuditTrail` are NOT registered -- they are constructed directly by the facade.
 
 ## Conventions
 - `check()` is async on guardrails; `should_approve()` may be sync (`bool`) OR async
@@ -58,6 +59,13 @@ __init__.py       Re-exports public surface; calls register_builtin_guardrails()
   (passthrough refused at execution).
 - **Output screening buffers streamed tokens** -- when any output guardrail is
   configured, `run_stream` holds TextDeltas until `_process_output` passes (loop.py).
+- **`ScopeGuardrail` is relevance-gated, not always-on**: a free deterministic pre-pass
+  (`_looks_suspicious`) decides whether to spend an LLM judge call at all -- normal replies
+  cost 0 extra calls; only flagged replies get classified `ON_SCOPE`/`OFF_SCOPE`/`INJECTION`.
+  `OFF_SCOPE`/`INJECTION` swaps the reply for `deflection_text` (same `action="abstain"` swap
+  `GroundingGuardrail` uses). Opt-in `fail_closed: true` routes judge-unavailable/error to
+  `action="handover"` instead of fail-soft pass. `last_verdict` feeds the audit trail and
+  `RunResult.metadata["verdict"]`.
 - **Input `reason` is surfaced in the raised error**; output `reason` is logged
   server-side only (the error carries just the guardrail name) so a leaky reason cannot
   re-leak via the error frame.
