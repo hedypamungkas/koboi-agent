@@ -25,10 +25,16 @@ import os
 import signal
 import uuid
 from dataclasses import dataclass, field
+from typing import Literal
 
 _logger = logging.getLogger(__name__)
 
 _GRACE_SECONDS = 5.0
+
+# Closed state set for BackgroundShellJob.status -- a Literal (not a bare str)
+# makes a typo'd transition (e.g. "exit" vs "exited") a static error instead of
+# silently breaking admission accounting (_running_count) and kill idempotency.
+BgShellStatus = Literal["running", "exited", "killed", "timeout"]
 
 
 @dataclass
@@ -37,7 +43,7 @@ class BackgroundShellJob:
     command: str
     cwd: str
     pid: int
-    status: str = "running"  # running | exited | killed | timeout
+    status: BgShellStatus = "running"
     returncode: int | None = None
     output: list[str] = field(default_factory=list)
     output_chars: int = 0
@@ -45,7 +51,7 @@ class BackgroundShellJob:
     # _drain(), the coroutine that actually awaits proc.wait()) records the
     # INTENDED outcome ("killed"/"timeout") instead of racing _terminate's own
     # concurrent proc.wait() to plain "exited".
-    pending_status: str | None = None
+    pending_status: BgShellStatus | None = None
 
 
 class BackgroundShellManager:

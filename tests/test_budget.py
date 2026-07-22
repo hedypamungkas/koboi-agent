@@ -126,6 +126,19 @@ class TestBudgetMath:
         total = core._update_usage(resp, None)
         assert total is not None and total.completion_tokens > 0
 
+    def test_usage_none_estimates_prompt_tokens_too(self):
+        # I-2: counting completion-only left the ceiling ~10x too high for
+        # usage-omitting providers (prompt dominates a coding turn). The caller
+        # passes the current message-list estimate; _update_usage must count it.
+        core = _core([], max_total_tokens=5)
+        from koboi.types import AgentResponse
+
+        resp = AgentResponse(content="x" * 100, usage=None)
+        total = core._update_usage(resp, None, estimated_prompt_tokens=2000)
+        assert total is not None
+        assert total.prompt_tokens == 2000  # the dominant cost side is now counted
+        assert total.completion_tokens > 0
+
 
 class TestBudgetStream:
     async def test_stream_yields_budget_error(self):

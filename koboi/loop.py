@@ -745,26 +745,41 @@ class AgentCore:
             "budget_spent_usd": round(spent_usd, 6),
         }
 
-    def _update_usage(self, response: AgentResponse, total_usage: TokenUsage | None) -> TokenUsage | None:
+    def _update_usage(
+        self,
+        response: AgentResponse,
+        total_usage: TokenUsage | None,
+        *,
+        estimated_prompt_tokens: int | None = None,
+    ) -> TokenUsage | None:
         """Update token usage from response. Returns updated total_usage."""
         if not response.usage:
             # Provider returned no usage (some streaming providers / proxies). If a
             # budget ceiling is configured, fall back to a content-length estimate
             # so the ceiling still trips -- a silently-disabled ceiling is worse
             # than an imprecise estimate. Runs without a budget are unaffected.
+            # Prompt (input) tokens dominate a coding turn's cost, so estimate BOTH
+            # sides: completion from the response content, prompt from the current
+            # message list passed by the caller (I-2 -- counting completion-only left
+            # the ceiling ~10x too high for usage-omitting providers).
             if self.max_total_tokens is not None or self.max_cost_usd is not None:
                 from koboi.tokens import estimate_tokens
 
                 content = response.content
                 if isinstance(content, list):
                     content = " ".join(c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
-                est = estimate_tokens([{"role": "assistant", "content": content or ""}])
+                est_completion = estimate_tokens([{"role": "assistant", "content": content or ""}])
+                est_prompt = int(estimated_prompt_tokens or self._last_prompt_tokens or 0)
                 if total_usage is None:
                     total_usage = TokenUsage()
-                total_usage.completion_tokens += est
+                total_usage.completion_tokens += est_completion
+                total_usage.prompt_tokens += est_prompt
                 _log.warning(
-                    "budget ceiling configured but provider returned no usage; using estimate of %d tokens",
-                    est,
+                    "budget ceiling configured but provider returned no usage; using estimate of "
+                    "%d prompt + %d completion tokens (imprecise -- do not rely on the ceiling for "
+                    "usage-omitting providers)",
+                    est_prompt,
+                    est_completion,
                 )
             return total_usage
         self._last_prompt_tokens = response.usage.prompt_tokens
@@ -829,26 +844,40 @@ class AgentCore:
     async def _execute_tool_batch(self, tool_calls: list[ToolCall], iteration: int) -> list:
         """Execute a tool-call batch; concurrently when eligible (Wave 3).
 
-        Concurrent path: semaphore-bounded gather with defer_record=True, then
-        ORDERED recording -- all tool results in original call order, then all
-        hook inject_messages (completion-order memory writes would break
-        Anthropic tool_result pairing and replay determinism). Any raised
-        Exception is synthesized into an errored result (an unanswered
-        tool_call_id would 400 the next LLM call); non-Exception
-        BaseExceptions re-raise after the writes.
+        Both paths collect each call's outcome (result or captured exception)
+        BEFORE any checkpoint/recording, so a failure on a LATER call can never
+        discard an EARLIER mutating call's shadow commit (I-1). ORDERED recording:
+        all tool results in original call order, then all hook inject_messages
+        (completion-order memory writes would break Anthropic tool_result pairing
+        and replay determinism). Any raised Exception is synthesized into an
+        errored result (an unanswered tool_call_id would 400 the next LLM call);
+        non-Exception BaseExceptions / AgentHandoverError re-raise AFTER the
+        writes and per-call checkpoints, so earlier state is still persisted.
         """
-        if not self._parallel_batch_eligible(tool_calls):
-            return [await self._pipeline.execute_tool_call(tc, iteration=iteration) for tc in tool_calls]
-
         from koboi.loop_pipeline import ToolPipelineResult
 
-        sem = asyncio.Semaphore(self._parallel_max_concurrency)
+        if self._parallel_batch_eligible(tool_calls):
+            sem = asyncio.Semaphore(self._parallel_max_concurrency)
 
-        async def _one(tc: ToolCall):
-            async with sem:
-                return await self._pipeline.execute_tool_call(tc, iteration=iteration, defer_record=True)
+            async def _one(tc: ToolCall):
+                async with sem:
+                    return await self._pipeline.execute_tool_call(tc, iteration=iteration, defer_record=True)
 
-        raw = await asyncio.gather(*(_one(tc) for tc in tool_calls), return_exceptions=True)
+            raw = await asyncio.gather(*(_one(tc) for tc in tool_calls), return_exceptions=True)
+        else:
+            # Sequential path: collect per-call so a raise on call N can't abort
+            # the comprehension and skip checkpoints for calls 0..N-1 (I-1).
+            # defer_record=True unifies recording with the concurrent path (no
+            # completion-order reordering risk since calls run one-at-a-time).
+            raw = []
+            for tc in tool_calls:
+                try:
+                    raw.append(await self._pipeline.execute_tool_call(tc, iteration=iteration, defer_record=True))
+                except AgentHandoverError as exc:
+                    raw.append(exc)
+                except Exception as exc:  # synthesized below; never aborts the batch
+                    raw.append(exc)
+
         results: list[ToolPipelineResult] = []
         pending_raise: BaseException | None = None
         for tc, r in zip(tool_calls, raw, strict=True):
@@ -873,6 +902,12 @@ class AgentCore:
         for pr in results:  # ...then hook injects, grouped in original call order
             for msg in pr.injected_context:
                 self.memory.add_context_message(msg, label="hook_inject")
+        # Checkpoint each completed call BEFORE any re-raise, so a handover/abort
+        # triggered by a later call still persists earlier mutating calls' state.
+        # _checkpoint_after_call is a no-op for skipped/idempotent results, so
+        # parallel-eligible (idempotent) batches still never hit the checkpointer.
+        for tc, pr in zip(tool_calls, results, strict=True):
+            await self._checkpoint_after_call(tc, pr, iteration)
         if pending_raise is not None:
             raise pending_raise
         return results
@@ -889,7 +924,13 @@ class AgentCore:
         if self.checkpointer is None or pr.skipped or pr.idempotent:
             return
         label = f"koboi: turn {self._turn_index} step {step_index} {tc.name} ({tc.id})"
-        sha = await asyncio.to_thread(self.checkpointer.commit, label)
+        try:
+            sha = await asyncio.to_thread(self.checkpointer.commit, label)
+        except Exception:
+            # The checkpointer's contract is "a failure must never break the loop";
+            # honor it defensively even for exception types _run() doesn't catch.
+            _log.warning("checkpoint commit raised unexpectedly (ignored)", exc_info=True)
+            sha = None
         if sha and self.journal:
             self.journal.stamp_checkpoint(self._turn_index, step_index, sha)
 
@@ -1043,7 +1084,12 @@ class AgentCore:
         # crash) -> restore_to_head() is False -> tree untouched, legacy message.
         restored_sha: str | None = None
         if self.checkpointer is not None and any(_is_non_idempotent(tc) for tc in missing):
-            if await asyncio.to_thread(self.checkpointer.restore_to_head):
+            try:
+                restored = await asyncio.to_thread(self.checkpointer.restore_to_head)
+            except Exception:
+                _log.warning("checkpoint restore_to_head raised unexpectedly (ignored)", exc_info=True)
+                restored = False
+            if restored:
                 restored_sha = self.checkpointer.head()
                 self._log(f"Resume: workspace rolled back to checkpoint {restored_sha}")
 
@@ -1148,7 +1194,7 @@ class AgentCore:
             # after the N-sample swap, since the canonical carries the summed usage).
             _sc_applies = self._self_consistency_applies(_rf)
             if not _sc_applies:
-                total_usage = self._update_usage(response, total_usage)
+                total_usage = self._update_usage(response, total_usage, estimated_prompt_tokens=tokens)
 
             if response.content and self.skills and self._activate_skill(response.content):
                 self._journal_step(i, status="skill", response=response)
@@ -1178,7 +1224,9 @@ class AgentCore:
                 # fan out N samples + pick the majority (before guardrails/reflection).
                 if _sc_applies:
                     response, sc_agreement = await self._self_consistent_sample(messages, tool_defs, _rf, response)
-                    total_usage = self._update_usage(response, total_usage)  # count the summed canonical once
+                    total_usage = self._update_usage(
+                        response, total_usage, estimated_prompt_tokens=tokens
+                    )  # count the summed canonical once
                     self._last_self_consistency = {
                         "n": int(self.self_consistency_config.get("n_samples", 3)),
                         "agreement": round(sc_agreement, 4),
@@ -1226,7 +1274,9 @@ class AgentCore:
                     # tool_calls_made (and the derived tools_used) -- eval false positive.
                     if not pr.skipped:
                         tool_calls_made.append(tc)
-                    await self._checkpoint_after_call(tc, pr, i)
+                    # Per-call checkpointing happens inside _execute_tool_batch
+                    # (before any re-raise) so a failure on a later call can't
+                    # discard an earlier mutating call's shadow commit (I-1).
                     pipeline_outcomes.append(
                         {
                             "tool_call_id": tc.id,
@@ -1387,7 +1437,7 @@ class AgentCore:
             if final_response is not None:
                 # Also accumulates total_usage for the budget ceiling (Wave 2);
                 # keeps the _last_prompt_tokens / context-manager side effects.
-                total_usage = self._update_usage(final_response, total_usage)
+                total_usage = self._update_usage(final_response, total_usage, estimated_prompt_tokens=tokens)
 
             if final_response is None:
                 for d in delta_buffer:

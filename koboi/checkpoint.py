@@ -187,8 +187,16 @@ class WorkdirCheckpointer:
         try:
             with open(self._baseline_marker, "w") as f:
                 f.write(self.head() or "")
-        except OSError:
-            pass  # marker is best-effort; the baseline itself succeeded
+        except OSError as exc:
+            # The marker IS the data-loss guard (see module docstring): if it can't
+            # be written, a later corrupted HEAD would silently re-baseline and
+            # freeze a crash-partial tree as the restore target. Surface it loudly
+            # rather than swallow -- an operator must know the guard is compromised.
+            _logger.warning(
+                "checkpoint baseline marker could not be written (%s); "
+                "the missing-HEAD data-loss guard is NOT enforced for this run",
+                exc,
+            )
         return ok
 
     def _exclude_from_real_repo(self) -> None:

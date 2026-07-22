@@ -17,6 +17,45 @@ def _warn_unknown_keys(data: dict, model: type[BaseModel], path: str = "") -> No
             _logger.warning("Unknown config key '%s' will be ignored (typo?)", dotted)
 
 
+def _reject_unknown_keys(model: type[BaseModel], data: object, hints: dict[str, str] | None = None) -> None:
+    """Fail-closed on unknown config keys (issue #79).
+
+    ``extra='ignore'`` silently drops unrecognized keys, so a typo like
+    ``github.tokin`` or ``max_lifetime_secnds`` would let the feature fail
+    opaquely at runtime (e.g. an empty GitHub token) with no load-time hint.
+    Raising here matches ``SandboxConfig._warn_unknown_sandbox_keys``: a typo'd
+    key is a config error the operator should fix immediately, not a silent no-op.
+    """
+    if not isinstance(data, dict):
+        return
+    known = set(model.model_fields.keys())
+    unknown = set(data.keys()) - known
+    if not unknown:
+        return
+    err_msg = f"Unknown {model.__name__} config key(s) {sorted(unknown)} (typo?). Known keys: {sorted(known)}."
+    if hints:
+        for typo, suggestion in hints.items():
+            if typo in unknown:
+                err_msg += f" Did you mean {suggestion!r}?"
+    raise ValueError(err_msg)
+
+
+class _ParallelToolsShape(BaseModel):
+    """Field-name shape for ``agent.parallel_tools`` (used only for typo checking)."""
+
+    model_config = {"extra": "ignore"}
+    enabled: bool = False
+    max_concurrency: int = 4
+
+
+class _TokenPricesShape(BaseModel):
+    """Field-name shape for ``agent.token_prices`` (used only for typo checking)."""
+
+    model_config = {"extra": "ignore"}
+    input_per_1k: float = 0.0
+    output_per_1k: float = 0.0
+
+
 class BackgroundShellConfig(BaseModel):
     """Opt-in background shell processes (Wave 4; default off).
 
@@ -32,6 +71,18 @@ class BackgroundShellConfig(BaseModel):
     max_lifetime_seconds: float = Field(default=1800.0, gt=0)
     max_concurrent: int = Field(default=4, ge=1)
     output_buffer_chars: int = Field(default=20000, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unknown_keys_(cls, data: object) -> object:
+        # Issue #79 parity with SandboxConfig: typo'd keys raise instead of being
+        # silently dropped by extra='ignore'.
+        _reject_unknown_keys(
+            cls,
+            data,
+            hints={"max_lifetime_secnds": "max_lifetime_seconds", "max_concurent": "max_concurrent"},
+        )
+        return data
 
 
 class AgentConfig(BaseModel):
@@ -66,6 +117,18 @@ class AgentConfig(BaseModel):
         if not v:
             raise ValueError("agent.name is required")
         return v
+
+    @model_validator(mode="after")
+    def _reject_unknown_dict_keys(self):
+        # The dict-shaped knobs (parallel_tools, token_prices) are read by the
+        # runtime via raw-dict .get(), so a typo'd inner key (max_concurency,
+        # imput_per_1k) would silently fall back to the default with no hint.
+        # Surface them at load (issue #79 parity for dict-valued fields).
+        if isinstance(self.parallel_tools, dict):
+            _reject_unknown_keys(_ParallelToolsShape, self.parallel_tools, hints={"max_concurency": "max_concurrency"})
+        if isinstance(self.token_prices, dict):
+            _reject_unknown_keys(_TokenPricesShape, self.token_prices)
+        return self
 
 
 class ModeConfig(BaseModel):
@@ -533,7 +596,15 @@ class GithubConfig(BaseModel):
     enabled: bool = False
     token: str = ""
     api_base: str = "https://api.github.com"
-    timeout: int = 15
+    timeout: int = Field(default=15, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unknown_keys_(cls, data: object) -> object:
+        # Issue #79 parity: a misspelled token key (``tokin``) would otherwise
+        # leave the token empty and fail opaquely at runtime with no load-time hint.
+        _reject_unknown_keys(cls, data, hints={"tokin": "token", "api_url": "api_base"})
+        return data
 
 
 class RlimitsConfig(BaseModel):
@@ -638,6 +709,13 @@ class JournalCheckpointConfig(BaseModel):
 
     enabled: bool = True
     git_timeout: float = Field(default=60.0, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unknown_keys_(cls, data: object) -> object:
+        # Issue #79 parity: ``git_timout`` would silently fall back to the 60s default.
+        _reject_unknown_keys(cls, data, hints={"git_timout": "git_timeout"})
+        return data
 
 
 class JournalConfig(BaseModel):

@@ -111,6 +111,32 @@ class TestPrepareWorkspace:
         with pytest.raises(WorkspaceSetupError, match="does not exist"):
             prepare_workspace(case, root=tmp_path)
 
+
+class TestEvalCaseCrossFieldValidation:
+    """Coding-harness fields that depend on `repo` must fail loud at construction
+    (a case with base_commit/setup_commands but no repo would silently prepare NO
+    workspace and score N/A=1.0, masking a misconfigured case as a pass)."""
+
+    def test_base_commit_without_repo_rejected(self):
+        with pytest.raises(ValueError, match="base_commit requires repo"):
+            EvalCase(name="c", user_message="m", base_commit="abc123")
+
+    def test_setup_commands_without_repo_rejected(self):
+        with pytest.raises(ValueError, match="setup_commands require repo"):
+            EvalCase(name="c", user_message="m", setup_commands=["pip install -e ."])
+
+    def test_test_command_without_repo_allowed(self):
+        # test_command is intentionally NOT gated -- a scorer can run it against an
+        # externally-provided workspace with no repo.
+        case = EvalCase(name="c", user_message="m", test_command="pytest")
+        assert case.test_command == "pytest"
+
+    def test_full_coding_case_with_repo_accepted(self):
+        case = EvalCase(
+            name="c", user_message="m", repo="r", base_commit="abc", setup_commands=["x"], test_command="pytest"
+        )
+        assert case.repo == "r"
+
     def test_bogus_base_commit_errors_and_removes_partial_workspace(self, fixture_repo, tmp_path):
         repo, _ = fixture_repo
         ws_root = tmp_path / "ws_root"

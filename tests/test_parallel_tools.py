@@ -171,6 +171,50 @@ class TestParallelExecution:
         await core.run("go")
         assert spy.commits == 0  # eligible batches are idempotent-only
 
+    async def test_sequential_batch_checkpoints_earlier_call_when_later_raises(self, monkeypatch):
+        # I-1: a non-parallel-eligible batch (write_thing is SAFE but
+        # non-idempotent) runs SEQUENTIALLY. If a later call raises, the earlier
+        # mutating call's shadow commit must still fire -- the old bare
+        # list-comprehension aborted on the raise and skipped it, so crash-resume
+        # would roll back the earlier (successful) edit and skip its re-execution.
+        tracker = _Tracker()
+
+        class SpyCheckpointer:
+            def __init__(self):
+                self.commits = 0
+                self.workdir = "."
+
+            def ensure(self):
+                return True
+
+            def commit(self, label):
+                self.commits += 1
+                return f"sha-{self.commits}"
+
+        spy = SpyCheckpointer()
+        # Two non-idempotent calls -> batch is NOT parallel-eligible -> sequential.
+        core = _core(
+            tracker,
+            [_batch_response(("write_thing", "t1"), ("write_thing", "t2")), make_mock_response("d")],
+            checkpointer=spy,
+        )
+        real = core._pipeline.execute_tool_call
+
+        async def boom(tc, iteration, on_event=None, defer_record=False):
+            if tc.id == "t2":
+                raise RuntimeError("kaboom")
+            return await real(tc, iteration=iteration, on_event=on_event, defer_record=defer_record)
+
+        monkeypatch.setattr(core._pipeline, "execute_tool_call", boom)
+        result = await core.run("go")
+        assert result.success is True
+        # t1 (successful, non-idempotent) MUST have been checkpointed despite t2 raising.
+        assert spy.commits >= 1
+        # Both tool_call_ids are answered (the batch never aborted).
+        rows = _tool_rows(core.memory)
+        assert {r[0] for r in rows} == {"t1", "t2"}
+        assert "WROTE" in [r[1] for r in rows if r[0] == "t1"][0]
+
     async def test_hook_injects_land_after_results(self):
         tracker = _Tracker()
 

@@ -6,12 +6,13 @@ import json
 
 from koboi.harness.doom_loop import DoomLoopConfig, DoomLoopDetector
 from koboi.harness.utils import is_tool_error, parse_exit_code
+from koboi.hooks.doom_loop_hook import DoomLoopHook
 from koboi.hooks.failure_classifier_hook import FailureClassifierHook
 from koboi.hooks.chain import HookContext, HookEvent
 from koboi.loop_pipeline import ToolExecutionPipeline
 from koboi.memory import ConversationMemory
 from koboi.tools.registry import ToolRegistry, tool, register_decorated
-from koboi.types import ToolCall
+from koboi.types import ToolCall, ToolExecOutcome
 
 
 class TestParseExitCode:
@@ -169,6 +170,26 @@ class TestFailureClassifierCommandFailed:
         assert result.metadata["failure_class"] == "transient"
 
 
+class TestToolExecOutcomeCoupling:
+    def test_errored_without_error_kind_rejected(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="error_kind"):
+            ToolExecOutcome("x", errored=True, error_kind=None)
+
+    def test_error_kind_without_errored_rejected(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="errored=False"):
+            ToolExecOutcome("x", errored=False, error_kind="timeout")
+
+    def test_consistent_constructions_accepted(self):
+        # defaults (success) and a fully-specified failure both construct fine.
+        assert ToolExecOutcome("ok").errored is False
+        bad = ToolExecOutcome("boom", errored=True, error_kind="execution_error")
+        assert bad.errored is True and bad.error_kind == "execution_error"
+
+
 class TestDoomLoopProgressFingerprint:
     def _detector(self, **kw):
         return DoomLoopDetector(DoomLoopConfig(**kw))
@@ -212,3 +233,36 @@ class TestDoomLoopProgressFingerprint:
         d.record("t", "{}", result_fingerprint="a")
         d.reset()
         assert len(d._fingerprints) == 0
+
+
+class TestDoomLoopHookFingerprintWiring:
+    """The detector-level tests pass result_fingerprint directly. These prove the
+    HOOK derives the fingerprint from ctx.tool_result (the Wave-2.3 wiring) so that
+    an edit->test loop with a SHRINKING failure list is not falsely flagged."""
+
+    def _hook(self):
+        return DoomLoopHook(config=DoomLoopConfig(error_retry_threshold=3, consecutive_identical_threshold=3))
+
+    async def test_changing_output_same_call_not_detected(self):
+        hook = self._hook()
+        for i in range(4):
+            ctx = HookContext(
+                event=HookEvent.POST_TOOL_USE,
+                tool_name="run_shell",
+                tool_arguments='{"command": "pytest"}',
+                tool_result=f"[exit code: 1]\n{4 - i} failed, {i} passed",  # changing output
+            )
+            await hook.execute(ctx)
+        assert hook.detector.check().detected is False
+
+    async def test_identical_output_same_call_detected(self):
+        hook = self._hook()
+        for _ in range(3):
+            ctx = HookContext(
+                event=HookEvent.POST_TOOL_USE,
+                tool_name="run_shell",
+                tool_arguments='{"command": "pytest"}',
+                tool_result="[exit code: 1]\n3 failed",  # identical output
+            )
+            await hook.execute(ctx)
+        assert hook.detector.check().detected is True
