@@ -181,7 +181,7 @@ class BackgroundShellManager:
         await self._terminate(job_id, force=force, mark_status="killed")
         return self._jobs[job_id]
 
-    async def _terminate(self, job_id: str, *, force: bool, mark_status: str) -> None:
+    async def _terminate(self, job_id: str, *, force: bool, mark_status: BgShellStatus) -> None:
         job = self._jobs.get(job_id)
         proc = self._procs.get(job_id)
         if job is None or proc is None or job.status != "running":
