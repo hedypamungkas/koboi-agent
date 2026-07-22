@@ -316,8 +316,11 @@ def git_commit(
     # (unstaged modifications), or "nothing added to commit but untracked files
     # present" (untracked only) -- all mean NO commit was created, but the clean
     # case lands on stdout and reads as success. Surface a clear signal instead.
+    # Match the SPECIFIC phrases: a bare "added to commit" substring would false-
+    # positive on a successful commit whose message contains those words (git
+    # echoes "[branch hash] <message>" on success).
     low = result.lower()
-    if "nothing to commit" in low or "added to commit" in low:
+    if "nothing to commit" in low or "no changes added to commit" in low or "nothing added to commit" in low:
         return "No staged changes to commit (stage changes with git_add first)"
     return result
 

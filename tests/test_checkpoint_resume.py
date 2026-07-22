@@ -42,6 +42,18 @@ def _registry(workdir) -> ToolRegistry:
         fn=mutate_file,
         idempotent=False,
     )
+
+    def idempotent_mark() -> str:
+        (workdir / "idem.txt").write_text("MARKED")
+        return "marked idem.txt"
+
+    registry.register(
+        name="idempotent_mark",
+        description="write idem.txt (idempotent)",
+        parameters={"type": "object", "properties": {}, "required": []},
+        fn=idempotent_mark,
+        idempotent=True,
+    )
     return registry
 
 
@@ -172,3 +184,60 @@ class TestCheckpointResume:
         core2, _, _ = _core(db, "S1", [make_mock_response("resumed done")], ws, WorkdirCheckpointer(str(ws)))
         await core2.resume()
         assert (ws / "target.txt").read_text() == "operator-edit"  # never reset
+
+    async def test_resume_idempotent_missing_call_re_executes_without_rollback(self, tmp_path):
+        """All-missing-tools-idempotent branch (with a checkpointer wired).
+
+        A shadow EXISTS (phase-1 mutated), but the interrupted call is idempotent,
+        so restore must NOT fire (gated on ``any non-idempotent in missing``) and
+        the idempotent tool must RE-EXECUTE (real tool_result), not be skipped.
+        Catches a regression to ``all(...)`` (restore never fires for the common
+        idempotent case when a non-idempotent sibling is also in flight) or an
+        unconditional restore (destroys operator edits on every idempotent resume).
+        """
+        db = str(tmp_path / "mem.db")
+        ws = tmp_path / "ws"
+        ws.mkdir()
+
+        # Phase 1: a non-idempotent call -> shadow checkpoint exists.
+        cp = WorkdirCheckpointer(str(ws))
+        core, mem, _ = _core(
+            db,
+            "S1",
+            [
+                make_mock_response(tool_calls=[make_mock_tool_call("mutate_file", {"content": "v1"})]),
+                make_mock_response("turn done"),
+            ],
+            ws,
+            cp,
+        )
+        await core.run("write v1")
+        assert (ws / "target.txt").read_text() == "v1"
+        assert cp.head() is not None  # shadow established
+
+        # Crash window: an IDEMPOTENT call is requested but never answered, and
+        # the operator hand-edits the tree.
+        mem.add_assistant_message(
+            None,
+            [
+                {
+                    "id": "tc_idem",
+                    "type": "function",
+                    "function": {"name": "idempotent_mark", "arguments": "{}"},
+                }
+            ],
+        )
+        (ws / "target.txt").write_text("operator-edit")
+
+        core2, mem2, _ = _core(db, "S1", [make_mock_response("resumed done")], ws, WorkdirCheckpointer(str(ws)))
+        result2 = await core2.resume()
+        assert result2.success is True
+        # Restore did NOT fire (missing call is idempotent) -> operator edit survives.
+        assert (ws / "target.txt").read_text() == "operator-edit"
+        # The idempotent tool RE-EXECUTED -> its real side effect + a real tool_result.
+        assert (ws / "idem.txt").read_text() == "MARKED"
+        tool_msgs = [m for m in mem2.get_messages() if m.get("role") == "tool"]
+        idem_results = [m for m in tool_msgs if m.get("tool_call_id") == "tc_idem"]
+        assert idem_results
+        assert "marked idem.txt" in idem_results[-1]["content"]  # real output, not synthetic
+        assert "skipped on resume" not in idem_results[-1]["content"]

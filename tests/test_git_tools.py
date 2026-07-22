@@ -475,6 +475,17 @@ class TestGitCommit:
         # as success to an autonomous agent. Now surfaced as a clear signal.
         result = git_commit(message="nothing here", repo_path=temp_git_repo)
         assert "No staged changes" in result
+
+    def test_commit_message_containing_added_to_commit_not_false_positive(self, temp_git_repo):
+        # A successful commit whose message contains the phrase "added to commit"
+        # must NOT be misreported as "No staged changes" (the old bare-substring
+        # check fired because git echoes "[branch hash] <message>" on success).
+        (Path(temp_git_repo) / "e.txt").write_text("e")
+        git_add(repo_path=temp_git_repo)
+        result = git_commit(message="files added to commit history feature", repo_path=temp_git_repo)
+        assert "No staged changes" not in result
+        log = subprocess.run(["git", "log", "--oneline"], cwd=temp_git_repo, capture_output=True, text=True).stdout
+        assert "added to commit history" in log  # the commit really happened
         # And no new commit was created.
         log = subprocess.run(["git", "log", "--oneline"], cwd=temp_git_repo, capture_output=True, text=True).stdout
         assert "nothing here" not in log

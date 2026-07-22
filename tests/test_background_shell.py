@@ -220,6 +220,29 @@ class TestToolsIntegration:
         assert (await check_background_shell("x", _deps=None)).startswith("Error:")
         assert (await kill_background_shell("x", _deps=None)).startswith("Error:")
 
+    async def test_submit_rejects_cwd_outside_sandbox(self):
+        # The spawned process's cwd is the ONLY containment gate for its working
+        # directory (the launch command may be benign). A sandbox that rejects the
+        # path must stop the spawn -- never register the job.
+        manager = BackgroundShellManager()
+
+        class _RejectingSandbox:
+            def validate_path(self, path):
+                if path.startswith("/etc"):
+                    raise PermissionError("path is outside the sandbox directory")
+                return path
+
+            def build_env(self, cfg=None):
+                return {}
+
+            def network_allowed(self, command):
+                return True
+
+        deps = {"background_shell_manager": manager, "sandbox": _RejectingSandbox()}
+        result = await submit_background_shell("echo hi", cwd="/etc", _deps=deps)
+        assert result.startswith("Error:")
+        assert manager._jobs == {}  # never started
+
     async def test_check_unknown_job_id(self):
         manager = BackgroundShellManager()
         result = await check_background_shell("nope", _deps={"background_shell_manager": manager})
