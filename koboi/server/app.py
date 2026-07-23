@@ -294,6 +294,9 @@ def create_app(
     # C1: honor server.auth_required (default true). When true and no keys are
     # configured, the auth middleware fails closed (401) instead of serving open.
     auth_required = config.get("server", "auth_required", default=True)
+    # Wave-1b: opt-in external suspend/snapshot (e.g. koboi-range). Off by default; when
+    # unset the /v1/sessions/{id}/suspend route self-disables (404) -- byte-identical.
+    suspend_enabled = config.get("server", "suspend_enabled", default=False)
 
     # M3: session ownership + M4: job store. Control-plane state persists to a file
     # so ``resume_on_startup`` works; see ``_sidecar_db_path`` for the resolution rules.
@@ -588,6 +591,7 @@ def create_app(
         peer_registry,
         peer_rate_limiter,
         job_shell_allowlist=job_shell_allowlist,
+        suspend_enabled=suspend_enabled,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -736,6 +740,7 @@ def _register_routes(
     peer_registry: Any | None = None,
     peer_rate_limiter: Any | None = None,
     job_shell_allowlist: list[str] | None = None,
+    suspend_enabled: bool = False,
 ) -> None:
     # Issue #52: ownership gate (fail-closed for unowned-with-history).
     # Closes the IDOR where a pre-existing/CLI-created session (full history, no
@@ -1204,6 +1209,73 @@ def _register_routes(
             )
         except Exception as exc:
             return _error_response(500, "resume_failed", str(exc), request)
+
+    @app.post("/v1/sessions/{session_id}/suspend")
+    async def suspend_session(session_id: str, request: Request) -> Response:
+        """Produce a consistent DB snapshot for an external suspend/snapshot step.
+
+        Opt-in via ``server.suspend_enabled`` (404 when unset). Drains the session's
+        in-flight run (``existing_session_lock`` -- no agent materialization) to a clean
+        turn boundary, runs a best-effort WAL checkpoint, then writes a self-consistent
+        standalone backup via the SQLite Online Backup API -- concurrency-safe regardless
+        of other writers, so it does NOT depend on the snapshot mechanism's cross-file
+        atomicity. The caller snapshots ``/workspace`` (capturing the returned file) and,
+        on resume, restores it as the DB path before the server boots; resume_on_startup
+        (jobs) or /chat/stream (interactive) then rehydrates. No new /resume endpoint.
+        """
+        if not suspend_enabled:
+            raise HTTPException(status_code=404, detail="not found")
+        if not is_safe_session_id(session_id):
+            return _error_response(400, "bad_request", "invalid session_id", request)
+        err = _check_owner(ownership, session_id, request)
+        if err:
+            return err
+        if memory_backend != "sqlite":
+            return _error_response(409, "not_persisted", "suspend requires memory.backend=sqlite", request)
+        if pool.get(session_id) is None and not ownership.get_owner(session_id):
+            raise HTTPException(status_code=404, detail="session not found")
+        from koboi.memory_sqlite import SQLiteMemory, WalCheckpointResult
+
+        # Session-scoped snapshot path: the route is per-session, and the destination must
+        # not collide across sessions that share one DB. Without the session_id in the
+        # path, two concurrent /suspend calls on different sessions sharing a DB resolve to
+        # an identical file and clobber each other (corrupt snapshot / wrong file returned).
+        # NOTE: consistent_backup still copies the WHOLE shared DB (all sessions/tenants) --
+        # this only prevents the file race, it does NOT partition the data. Suspend is
+        # intended for single-session-per-DB deploys (e.g. a per-session container);
+        # enabling it on a shared multi-tenant DB exposes every tenant's rows in the file.
+        snapshot_path = f"{shared_db}.{session_id}.suspend.db"
+        try:
+            # existing_session_lock (parity with DELETE): no materialize; waits for any
+            # in-flight /chat/stream or job on this session so the snapshot lands at a
+            # clean turn boundary (yields immediately if the session isn't pooled). The
+            # checkpoint below is best-effort and ISOLATED from the backup -- if it raises
+            # under contention, the backup (the real guarantee) still runs.
+            async with pool.existing_session_lock(session_id):
+                try:
+                    checkpoint = SQLiteMemory.wal_checkpoint(shared_db)  # best-effort size
+                except Exception as exc:
+                    _logger.warning(
+                        "suspend wal_checkpoint failed (session=%s, non-fatal); backup proceeds: %s",
+                        session_id,
+                        exc,
+                    )
+                    checkpoint = WalCheckpointResult(busy=1, log=0, checkpointed=0, error=str(exc))
+                snapshot_bytes = SQLiteMemory.consistent_backup(shared_db, snapshot_path)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "session_id": session_id,
+                    "snapshot_path": snapshot_path,
+                    "snapshot_bytes": snapshot_bytes,
+                    "checkpoint": checkpoint.as_dict(),
+                },
+            )
+        except Exception:
+            _logger.exception("suspend failed (session=%s)", session_id)
+            # Don't echo the exception text to the caller -- it can carry the server
+            # filesystem path; the full detail is logged above.
+            return _error_response(500, "suspend_failed", "snapshot write failed; see server logs", request)
 
     # ---- M2: /chat/stream with queue-bridged HITL + /approve ----
 
