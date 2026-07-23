@@ -116,6 +116,21 @@ POST   /v1/media/jobs                 Async media job (202; video/music); poll G
   re-insert orphaned unowned rows. `list_sessions`/`delete_session`/`fork_session` all
   self-heal schema via `_ensure_schema_on` (safe on older DBs). Fork rolls back its
   committed DB+owner rows on any `get_or_create` failure.
+- **`POST /v1/sessions/{id}/suspend`** (opt-in `server.suspend_enabled`, default 404-off):
+  writes a consistent snapshot via `SQLiteMemory.consistent_backup` (Online Backup API →
+  self-consistent standalone file). Whole-DB semantics: it backs up the **entire shared DB
+  (all sessions/tenants)**, NOT just `{id}` -- so it is intended for **single-session-per-DB
+  deploys** (e.g. a per-session container). Enabling it on a shared multi-tenant DB exposes
+  every tenant's rows in the snapshot file. The snapshot **path is session-scoped**
+  (`{shared_db}.{session_id}.suspend.db`) so concurrent suspends on different sessions can't
+  clobber each other, but that does NOT partition the data. Atomicity: written to `.tmp` +
+  `os.replace` (a reader never sees a 0-byte/partial file; a 0-byte SQLite file passes
+  `integrity_check` and the resume-side coordinator restores by file existence, so a leftover
+  would silently wipe history). `wal_checkpoint` is **best-effort and isolated** -- if it
+  raises under contention the backup (the guarantee) still runs; the response surfaces
+  `checkpoint.ok=false` + `checkpoint.error`. Suspend is sqlite-only (409 `not_persisted`
+  otherwise) and 404s a non-existent session (parity with DELETE/fork/resume). No `/resume`
+  endpoint -- remount is `resume_on_startup` (jobs) or `/chat/stream` lazy rebuild.
 - **Per-session sandbox workdir** (`workdir_for(session_id)` = `{workspace_root}/{id}`);
   `session_id` validated at the route boundary AND in `workdir_for` (defense-in-depth).
   Eagerly `mkdir`-ed; GC'd at `server.workdir_ttl_seconds`.

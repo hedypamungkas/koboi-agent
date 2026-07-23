@@ -1232,16 +1232,35 @@ def _register_routes(
             return err
         if memory_backend != "sqlite":
             return _error_response(409, "not_persisted", "suspend requires memory.backend=sqlite", request)
-        from koboi.memory_sqlite import SQLiteMemory
+        if pool.get(session_id) is None and not ownership.get_owner(session_id):
+            raise HTTPException(status_code=404, detail="session not found")
+        from koboi.memory_sqlite import SQLiteMemory, WalCheckpointResult
 
-        snapshot_path = f"{shared_db}.suspend.db"
+        # Session-scoped snapshot path: the route is per-session, and the destination must
+        # not collide across sessions that share one DB. Without the session_id in the
+        # path, two concurrent /suspend calls on different sessions sharing a DB resolve to
+        # an identical file and clobber each other (corrupt snapshot / wrong file returned).
+        # NOTE: consistent_backup still copies the WHOLE shared DB (all sessions/tenants) --
+        # this only prevents the file race, it does NOT partition the data. Suspend is
+        # intended for single-session-per-DB deploys (e.g. a per-session container);
+        # enabling it on a shared multi-tenant DB exposes every tenant's rows in the file.
+        snapshot_path = f"{shared_db}.{session_id}.suspend.db"
         try:
             # existing_session_lock (parity with DELETE): no materialize; waits for any
             # in-flight /chat/stream or job on this session so the snapshot lands at a
-            # clean turn boundary. Unbounded like DELETE -- suspend targets idle sessions;
-            # the caller enforces its own HTTP timeout and retries on timeout.
+            # clean turn boundary (yields immediately if the session isn't pooled). The
+            # checkpoint below is best-effort and ISOLATED from the backup -- if it raises
+            # under contention, the backup (the real guarantee) still runs.
             async with pool.existing_session_lock(session_id):
-                checkpoint = SQLiteMemory.wal_checkpoint(shared_db)  # best-effort size
+                try:
+                    checkpoint = SQLiteMemory.wal_checkpoint(shared_db)  # best-effort size
+                except Exception as exc:
+                    _logger.warning(
+                        "suspend wal_checkpoint failed (session=%s, non-fatal); backup proceeds: %s",
+                        session_id,
+                        exc,
+                    )
+                    checkpoint = WalCheckpointResult(busy=1, log=0, checkpointed=0, error=str(exc))
                 snapshot_bytes = SQLiteMemory.consistent_backup(shared_db, snapshot_path)
             return JSONResponse(
                 status_code=200,
@@ -1249,11 +1268,14 @@ def _register_routes(
                     "session_id": session_id,
                     "snapshot_path": snapshot_path,
                     "snapshot_bytes": snapshot_bytes,
-                    "checkpoint": checkpoint,
+                    "checkpoint": checkpoint.as_dict(),
                 },
             )
-        except Exception as exc:
-            return _error_response(500, "suspend_failed", str(exc), request)
+        except Exception:
+            _logger.exception("suspend failed (session=%s)", session_id)
+            # Don't echo the exception text to the caller -- it can carry the server
+            # filesystem path; the full detail is logged above.
+            return _error_response(500, "suspend_failed", "snapshot write failed; see server logs", request)
 
     # ---- M2: /chat/stream with queue-bridged HITL + /approve ----
 

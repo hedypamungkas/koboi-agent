@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args
 from uuid import uuid4
 
 from koboi.memory import ConversationMemory
@@ -136,6 +138,51 @@ def _migrate_research_depth(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+CheckpointMode = Literal["PASSIVE", "FULL", "RESTART", "TRUNCATE"]
+"""Closed set of valid SQLite WAL checkpoint modes (validated fail-closed at runtime)."""
+
+_CHECKPOINT_MODES: frozenset[str] = frozenset(get_args(CheckpointMode))
+"""Runtime mirror of :data:`CheckpointMode` (derived, so it can never drift from the type)."""
+
+
+@dataclass
+class WalCheckpointResult:
+    """Structured result of a best-effort WAL checkpoint (:meth:`SQLiteMemory.wal_checkpoint`).
+
+    ``ok`` is *derived* (not stored) so the coupling ``ok == (no error and busy == 0 and
+    checkpointed >= 0)`` cannot drift. ``checkpointed >= 0`` distinguishes a real WAL-mode
+    checkpoint from a non-WAL/empty DB, which returns ``(0, -1, -1)``. Use :meth:`as_dict`
+    for JSON serialization.
+    """
+
+    busy: int
+    log: int
+    checkpointed: int
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and self.busy == 0 and self.checkpointed >= 0
+
+    def as_dict(self) -> dict:
+        d: dict = {
+            "ok": self.ok,
+            "busy": self.busy,
+            "log": self.log,
+            "checkpointed": self.checkpointed,
+        }
+        if self.error is not None:
+            d["error"] = self.error
+        return d
+
+    def __post_init__(self) -> None:
+        for _name in ("busy", "log", "checkpointed"):
+            _v = getattr(self, _name)
+            # bool is a subclass of int -- reject it so True/False can't pose as counts
+            if isinstance(_v, bool) or not isinstance(_v, int):
+                raise ValueError(f"{_name} must be int, got {type(_v).__name__}")
+
+
 class SQLiteMemory(ConversationMemory):
     """ConversationMemory backed by SQLite. Persists sessions across restarts.
 
@@ -186,28 +233,34 @@ class SQLiteMemory(ConversationMemory):
     # ---- suspend/resume primitives (atomicity-independent) ----
     # `consistent_backup` is THE guarantee: sqlite3's Online Backup API yields a
     # self-consistent single file EVEN WHILE other connections read/write the live WAL
-    # DB, so an external snapshotter (e.g. koboi-range's createBackup-to-R2) never
-    # depends on the snapshot mechanism's cross-file atomicity. `wal_checkpoint` is a
-    # best-effort size optimization only -- its "busy" result is a *returned row*, not an
-    # exception, so it is surfaced (not swallowed); busy is non-fatal (backup is the guarantee).
-
-    _CHECKPOINT_MODES = frozenset({"PASSIVE", "FULL", "RESTART", "TRUNCATE"})
+    # DB, so an external snapshotter never depends on the snapshot mechanism's cross-file
+    # atomicity. `wal_checkpoint` is a best-effort size optimization only -- its "busy"
+    # result is a *returned row*, not an exception, so it is surfaced (not swallowed);
+    # busy is non-fatal (backup is the guarantee).
 
     @staticmethod
-    def wal_checkpoint(db_path: str, mode: str = "TRUNCATE") -> dict:
+    def wal_checkpoint(db_path: str, mode: CheckpointMode = "TRUNCATE") -> WalCheckpointResult:
         """Best-effort WAL checkpoint on a fresh short-lived connection.
 
-        Returns ``{"ok": busy == 0, "busy", "log", "checkpointed"}``. ``busy != 0``
-        means a reader/writer blocked truncation -- this is a *returned row*, not an
-        exception, so it is surfaced rather than swallowed. Non-fatal: ``consistent_backup``
-        is the real correctness guarantee.
+        Returns a :class:`WalCheckpointResult` (``.ok``/``.busy``/``.log``/
+        ``.checkpointed``; use ``.as_dict()`` for JSON). ``busy != 0`` means a
+        reader/writer blocked truncation -- a *returned row*, not an exception, so it is
+        surfaced rather than swallowed. Non-fatal: :meth:`consistent_backup` is the real
+        correctness guarantee.
+
+        ``mode`` is a closed set (PASSIVE/FULL/RESTART/TRUNCATE) and is **fail-closed**:
+        an unknown mode raises ``ValueError`` rather than silently degrading the snapshot
+        path (fail-soft belongs on the ``busy`` concurrency result, not on mode parsing).
         """
-        safe_mode = mode if mode in SQLiteMemory._CHECKPOINT_MODES else "TRUNCATE"
+        if mode not in _CHECKPOINT_MODES:
+            raise ValueError(f"invalid wal_checkpoint mode: {mode!r}")
         conn = SQLiteMemory._open_conn(db_path)
         try:
-            row = conn.execute(f"PRAGMA wal_checkpoint({safe_mode})").fetchone()
-            busy, log, checkpointed = row or (1, 0, 0)
-            return {"ok": busy == 0, "busy": int(busy), "log": int(log), "checkpointed": int(checkpointed)}
+            row = conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+            if row is None:  # pragma: no cover - anomalous SQLite state; never mask as "busy"
+                raise sqlite3.DatabaseError(f"wal_checkpoint returned no row for {db_path}")
+            busy, log, checkpointed = row
+            return WalCheckpointResult(busy=busy, log=log, checkpointed=checkpointed)
         finally:
             conn.close()
 
@@ -217,26 +270,55 @@ class SQLiteMemory(ConversationMemory):
 
         Uses the SQLite Online Backup API (``Connection.backup``), which acquires its
         own read lock and yields a consistent file even while other connections
-        read/write the live WAL DB. The destination is a single self-contained file (no
-        ``-wal``/``-shm`` dependency) -- safe for an external snapshotter to copy
-        regardless of cross-file atomicity. Returns bytes written.
+        read/write the live WAL DB. Returns bytes written.
+
+        Destination atomicity: the backup is written to ``<dest>.tmp`` and published via
+        :func:`os.replace`, so a reader/snapshotter NEVER observes a partial or 0-byte
+        file. A 0-byte SQLite file passes ``PRAGMA integrity_check`` (it is a valid empty
+        DB with no schema), and the resume-side coordinator restores ``*.suspend.db`` by
+        file existence -- so a half-written destination would silently wipe history on
+        resume. On any failure the temp file is removed and any prior good snapshot is
+        left intact. The destination connection is opened in the DEFAULT (rollback)
+        journal mode, NOT WAL: that is what prevents a ``-wal`` sidecar and keeps the file
+        self-contained (no ``-wal``/``-shm`` dependency); switching it to WAL would emit
+        sidecars and silently break the standalone guarantee.
         """
         dest = Path(dest_path)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.unlink(missing_ok=True)  # stale destination
+        tmp = dest.with_name(dest.name + ".tmp")
+        success = False
         src = SQLiteMemory._open_conn(db_path)
         try:
-            dst = sqlite3.connect(str(dest))
+            dst = sqlite3.connect(str(tmp))  # plain (rollback) mode -> no -wal sidecar
             try:
                 src.backup(dst)  # copies src "main" -> dst "main"
             finally:
-                dst.close()
-            return dest.stat().st_size
+                try:
+                    dst.close()
+                except Exception:
+                    pass  # pragma: no cover - nosec B110: suppress close error so the real exception propagates
+            os.replace(str(tmp), str(dest))  # atomic publish (overwrites any stale dest)
+            size = dest.stat().st_size
+            success = True
+            return size
         finally:
-            src.close()
+            if not success:
+                try:
+                    tmp.unlink(missing_ok=True)  # never leave a corrupt/partial artifact
+                except OSError:
+                    pass  # pragma: no cover - best-effort cleanup of the temp file
+            try:
+                src.close()
+            except Exception:
+                pass  # pragma: no cover - nosec B110: suppress close error so the real exception propagates
 
-    def quiesce(self, mode: str = "TRUNCATE") -> dict:
-        """Instance wrapper for :meth:`wal_checkpoint` on this memory's DB."""
+    def quiesce(self, mode: CheckpointMode = "TRUNCATE") -> WalCheckpointResult:
+        """Best-effort WAL checkpoint on this memory's DB.
+
+        Does NOT stop other writers -- it only runs a checkpoint; write-quiescing (a clean
+        turn boundary) is the caller's job (e.g. ``pool.existing_session_lock``). See
+        :meth:`consistent_backup` for the correctness guarantee.
+        """
         return SQLiteMemory.wal_checkpoint(self._db_path, mode)
 
     def backup_to(self, dest_path: str) -> int:
