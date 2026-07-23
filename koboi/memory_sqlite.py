@@ -183,6 +183,66 @@ class SQLiteMemory(ConversationMemory):
         conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
+    # ---- suspend/resume primitives (atomicity-independent) ----
+    # `consistent_backup` is THE guarantee: sqlite3's Online Backup API yields a
+    # self-consistent single file EVEN WHILE other connections read/write the live WAL
+    # DB, so an external snapshotter (e.g. koboi-range's createBackup-to-R2) never
+    # depends on the snapshot mechanism's cross-file atomicity. `wal_checkpoint` is a
+    # best-effort size optimization only -- its "busy" result is a *returned row*, not an
+    # exception, so it is surfaced (not swallowed); busy is non-fatal (backup is the guarantee).
+
+    _CHECKPOINT_MODES = frozenset({"PASSIVE", "FULL", "RESTART", "TRUNCATE"})
+
+    @staticmethod
+    def wal_checkpoint(db_path: str, mode: str = "TRUNCATE") -> dict:
+        """Best-effort WAL checkpoint on a fresh short-lived connection.
+
+        Returns ``{"ok": busy == 0, "busy", "log", "checkpointed"}``. ``busy != 0``
+        means a reader/writer blocked truncation -- this is a *returned row*, not an
+        exception, so it is surfaced rather than swallowed. Non-fatal: ``consistent_backup``
+        is the real correctness guarantee.
+        """
+        safe_mode = mode if mode in SQLiteMemory._CHECKPOINT_MODES else "TRUNCATE"
+        conn = SQLiteMemory._open_conn(db_path)
+        try:
+            row = conn.execute(f"PRAGMA wal_checkpoint({safe_mode})").fetchone()
+            busy, log, checkpointed = row or (1, 0, 0)
+            return {"ok": busy == 0, "busy": int(busy), "log": int(log), "checkpointed": int(checkpointed)}
+        finally:
+            conn.close()
+
+    @staticmethod
+    def consistent_backup(db_path: str, dest_path: str) -> int:
+        """Write a self-consistent standalone backup of the DB to ``dest_path``.
+
+        Uses the SQLite Online Backup API (``Connection.backup``), which acquires its
+        own read lock and yields a consistent file even while other connections
+        read/write the live WAL DB. The destination is a single self-contained file (no
+        ``-wal``/``-shm`` dependency) -- safe for an external snapshotter to copy
+        regardless of cross-file atomicity. Returns bytes written.
+        """
+        dest = Path(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.unlink(missing_ok=True)  # stale destination
+        src = SQLiteMemory._open_conn(db_path)
+        try:
+            dst = sqlite3.connect(str(dest))
+            try:
+                src.backup(dst)  # copies src "main" -> dst "main"
+            finally:
+                dst.close()
+            return dest.stat().st_size
+        finally:
+            src.close()
+
+    def quiesce(self, mode: str = "TRUNCATE") -> dict:
+        """Instance wrapper for :meth:`wal_checkpoint` on this memory's DB."""
+        return SQLiteMemory.wal_checkpoint(self._db_path, mode)
+
+    def backup_to(self, dest_path: str) -> int:
+        """Instance wrapper for :meth:`consistent_backup` on this memory's DB."""
+        return SQLiteMemory.consistent_backup(self._db_path, dest_path)
+
     def _init_db(self) -> None:
         conn = self._ensure_conn()
         conn.execute("""

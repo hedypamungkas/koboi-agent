@@ -52,6 +52,7 @@ GET    /v1/sessions/{id}              Messages (owner-checked)
 DELETE /v1/sessions/{id}              Evict from pool + clear DB rows (under existing_session_lock)
 POST   /v1/sessions/{id}/fork         Fork persisted messages into a new session (sqlite only)
 POST   /v1/sessions/{id}/resume       Resume interrupted session (journal rehydrate)
+POST   /v1/sessions/{id}/suspend      Opt-in consistent DB snapshot for an external suspend/snapshot step (server.suspend_enabled; sqlite only)
 GET    /v1/sessions/{id}/mcp/servers  List a session's attached MCP servers (in-process)
 POST   /v1/sessions/{id}/mcp/servers  Attach an MCP server to a session (in-process)
 DELETE /v1/sessions/{id}/mcp/servers/{sid}  Detach a session MCP server
