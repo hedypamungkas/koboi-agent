@@ -241,6 +241,11 @@ ToolExecutionPipeline.execute_tool_call(tc)
   8. Record result in memory + audit
 ```
 
+Background shell is the one structural exception: `submit_background_shell` (DESTRUCTIVE) is
+gated at start (step 3), but the spawned live process then runs **outside** steps 4-7 for its
+whole lifetime -- only `submit`/`check`/`kill` are gated, and `agent.background_shell.max_lifetime_seconds`
+(default 1800) caps it; `KoboiAgent.close()` kills survivors.`
+
 ### The `@tool()` decorator
 
 Tools are registered with `@tool()` from `koboi/tools/registry.py`:
@@ -287,11 +292,11 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (32)
+### Config sections (33)
 
 | Section | Controls |
 |---------|----------|
-| `agent` | Name, system prompt, max iterations, mode (chat/plan/act/auto/yolo) |
+| `agent` | Name, system prompt, max iterations, mode (chat/plan/act/auto/yolo), `background_shell` (opt-in), per-run budget ceiling (`max_total_tokens`/`max_cost_usd`/`token_prices`), `parallel_tools` |
 | `mode` | `read_only_tools` — extends the CHAT/PLAN read-only allowlist (distinct from `agent.mode`) |
 | `llm` | Provider, model, API key, base_url, timeout, retries, temperature |
 | `tools` | Builtin list, custom modules, per-tool overrides |
@@ -307,8 +312,9 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `orchestration` | Router type, agents, execution mode (`sequential`/`parallel`/`dag`/`conditional`/`dynamic`/`deep_research`); `determinism` (workflow + per-node merge), node `output_schema` (workflow export) |
 | `websearch` | Pluggable search/fetch providers for `web_search`/`web_fetch` (`search.provider` brave/firecrawl/ddg/mock, `fetch.provider` httpx/firecrawl) |
 | `research` | deep_research knobs: `max_depth`, `max_searches`/`max_fetches`, `coverage_threshold`, `citations`, `persist_findings` |
-| `sandbox` | Backend (passthrough/restricted), workdir, network, network_isolation (seccomp/seccomp_strict), git_init, rlimits -- fail-closed on invalid/typo'd keys |
-| `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume |
+| `sandbox` | Backend (passthrough/restricted), workdir, network (`soft`/`allowlist`+`network_allowlist` host-globs), network_isolation (seccomp/seccomp_strict), git_init, rlimits -- fail-closed on invalid/typo'd keys |
+| `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume; `checkpoint` (shadow-repo workdir checkpoints that roll back an interrupted non-idempotent tool call) |
+| `github` | GitHub PR tooling (`enabled`, `token`); in-process httpx; PR tools gated SAFE (list/get) / DESTRUCTIVE (create/update) — bypasses sandbox network tiers like `web_fetch` |
 | `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
 | `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup, `webhooks` (HMAC-signed terminal-status callbacks) |
 | `hooks` | Declarative external-command hooks: `allow_exec` gate, `on_event` entries (see `docs/custom-hooks.md`) |
@@ -353,6 +359,11 @@ containment, PATH allowlist, env hygiene, rlimits, network deny). Network deny i
   `python3-seccomp` (`apt install python3-seccomp`, NOT a PyPI extra); gated by `_HAS_SECCOMP`
   and degrades to soft with a one-time warning if unavailable. `server_deploy.yaml` and
   `e2e_full.yaml` enable seccomp by default. Autonomous jobs require `restricted` (C3).
+- **Allowlist** (`network: allowlist` + `network_allowlist` host-globs, Wave 3): the soft-tier
+  scan runs, but a scanned binary's command may only reference hosts matching the allowlist
+  globs (so `curl evil.com` is denied even though `curl` is otherwise a known-egress binary).
+  Host extraction is userinfo-aware and case-insensitive (`https://github.com@evil.com` →
+  `evil.com`; also covers `git@host:path` and bare `ssh user@host`).
 
 ---
 
@@ -1010,6 +1021,43 @@ full strategy and `docs/self-healing-strategy.md` for the design.
 Config: the `self_healing:` section (`enabled`, `max_turns`, `fail_soft`, `graceful_max_iter`,
 `triggers` (tool_error/low_grounding/tool_verification), `ladder`, `self_consistency`). Demo:
 `configs/self_healing_demo.yaml` + `examples/38_self_healing_demo.py`.
+
+---
+
+## Coding Autonomy (Wave 0-4, opt-in)
+
+A coding-oriented toolset + lifecycle that lets the agent fix/build/migrate a real repo
+unattended. All opt-in; the default agent is unaffected.
+
+- **Coding tools** (`koboi/tools/builtin/`): `repo_map` (SAFE read-only directory tree +
+  best-effort `ast.parse` symbol outline); `edit_file`/`apply_patch`/`write_file`/`delete_file`
+  in `filesystem.py` (DESTRUCTIVE, `idempotent=False`) -- `edit_file` is exact-string replace
+  (unique match or `replace_all`), `apply_patch` parses a unified diff (single file, multi-hunk,
+  content-matched so `@@` line drift is tolerated) in `_patch.py` and writes **atomically only
+  on full success** (all-or-nothing temp + `os.replace`); `run_typecheck` (SAFE, fixed
+  ruff/mypy/pyright allowlist -- never a user command, so no injection surface unlike `run_shell`);
+  GitHub PR tooling `github_create_pr`/`update_pr` (DESTRUCTIVE) + `list_prs`/`get_pr` (SAFE) in
+  `github.py` via an in-process httpx client (`github:` config).
+- **`context.strategy: coding`** (`koboi/context/manager.py`): body-eviction strategy -- evicts
+  stale file/tool bodies from the context window while keeping summaries, so a long coding run
+  stays under budget.
+- **Checkpoint + resume** (`koboi/checkpoint.py`, `journal.checkpoint`): a shadow-repo workdir
+  snapshot lets an interrupted run roll back a *partial* non-idempotent tool call before
+  re-executing on resume (no silent double-apply of an edit/patch/shell).
+- **Per-run budget ceiling** (`agent.max_total_tokens` / `max_cost_usd` / `token_prices`):
+  raises `AgentBudgetExceededError` when a run would exceed its token/cost cap.
+- **Background shell** (`agent.background_shell`, `koboi/harness/background_shell.py`):
+  `submit_background_shell` spawns a long-running process; in-memory job registry (NOT durable
+  across a restart). Runs outside the approval/policy pipeline once started -- the lifetime cap
+  is the mitigating control (see Tool Pipeline exception above).
+- **`TypecheckHook`** (`koboi/hooks/typecheck_hook.py`, priority 4): parses `run_typecheck`
+  output into structured `{file,line,severity,message}` diagnostics, refines `error_kind` to
+  `typecheck_failed`, and feeds the first failing `file:line` to `ReflectionHook` (when
+  `self_healing.enabled`).
+
+Config reference: `configs/coding_autonomy_full.yaml`; end-to-end demo
+`examples/40_coding_autonomy_full_demo.py` (the full Wave 0-4 stack A-Z unattended, with a live
+trust panel + independent per-phase verification). See `koboi/tools/builtin/CLAUDE.md`.
 
 ---
 

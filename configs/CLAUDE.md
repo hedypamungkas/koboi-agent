@@ -57,7 +57,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `peers`, `media`, `self_healing`
+`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `peers`, `media`, `self_healing`, `github`, `replay`
 
 ### Notable sub-sections (recently added)
 - `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
@@ -78,4 +78,12 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 - `peers` — opt-in cross-instance agent-to-agent (A2A): `enabled`, `allow_private_network` (default false = strict SSRF; true permits same-org localhost/private-net peers), `inbound_tokens` (plaintext tokens accepted FROM peers, hashed at load), `peers[]` (`{name, url, token, agent_name, org, timeout}`). The `call_peer_agent` tool fans out to peers (`POST /v1/peer/invoke`); `orchestration.agents[].endpoint: <peer_name>` makes a node REMOTE (a `RemoteAgentProxy`). P3 self-observing org-claim: `org`/`org_secret` (shared HMAC across same-org instances)/`public_base_url` (advertised in the card); when `org_secret` is set, each peer's `GET /.well-known/agent-card` is fetched at startup + hourly and HMAC-verified — only verified peers are callable ("verified-only", replacing assume-same-org). See `configs/a2a_*.yaml`.
 - `media:` — opt-in multimodal generation (`MediaConfig`): `enabled`, per-modality `image`/`video`/`music`/`speech`/`transcription` (`{provider: surplus|mock, surplus: {api_key, base_url, model}}`), `budget` (`max_cost_usd`/`max_images`/`max_video_seconds`/`max_music_seconds`), `storage` (`backend: local|r2|s3`; r2/s3 need `[media-cloud]`), `profiles` (ModelProfile overrides), `custom_modules` (`@register_*` providers). Inert unless `enabled`.
 - `research.media` / `research.capabilities` — Deep Research auto-multimedia-briefing (tokens: image/video/music/speech).
+- **Coding autonomy (Wave 0-4)** knobs:
+  - `github:` — `{enabled, token}` (root-level; `${GITHUB_TOKEN:}`); in-process httpx for `github_*` PR tools; bypasses sandbox network tiers like `web_fetch`. Token never rides subprocess env.
+  - `agent.background_shell` — `{enabled, max_lifetime_seconds: 1800}`; `submit_background_shell` runs outside the approval/policy pipeline once started (the lifetime cap is the control); in-memory job registry, not durable across restart.
+  - `agent.max_total_tokens` / `max_cost_usd` / `token_prices` — per-run budget ceiling → `AgentBudgetExceededError`.
+  - `agent.parallel_tools` — run independent tool calls concurrently.
+  - `journal.checkpoint` — shadow-repo workdir checkpoints that roll back an interrupted non-idempotent tool call on resume.
+  - `context.strategy: coding` — body-eviction strategy for long coding runs.
+  - `sandbox.network: allowlist` + `sandbox.network_allowlist` (host-globs) — Wave 3 egress tier: scanned binaries may only reach allowlisted hosts (userinfo-aware host extraction). `policy.allow_interpreter_exec` governs interpreter egress.
 

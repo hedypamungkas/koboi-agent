@@ -145,7 +145,7 @@ koboi is an **autonomous-loop** framework (the Claude Code / AutoGPT family) wit
 | Area | What you get |
 |---|---|
 | **Models** | OpenAI, Anthropic, Cloudflare Workers AI; `ProviderPool` failover + named-providers resolver — switch models without rewriting agents |
-| **Tools** | 13 builtin modules (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media, peer) + custom tools via `@tool()`; sync or async, dependency-injected |
+| **Tools** | 17 builtin modules (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media, peer, repo_map, github, background_shell, typecheck) + custom tools via `@tool()`; sync or async, dependency-injected |
 | **Safety** | Input/output guardrails, policy engine, approval handlers, graduated trust DB, rate limiting, audit trail, secret redaction |
 | **Sandbox** | Passthrough (default) or restricted: per-session workdir, rlimits, PATH allowlist, secret-stripped env, SOFT token-scan or **HARD seccomp** syscall egress deny (Linux) |
 | **Memory** | In-memory or SQLite-WAL (hosts the step journal); opt-in **proactive long-term memory** (auto-extract facts → semantic recall each turn → always-in-context core block) |
@@ -155,6 +155,7 @@ koboi is an **autonomous-loop** framework (the Claude Code / AutoGPT family) wit
 | **Orchestration** | Keyword/LLM/hybrid routing; sequential, parallel, DAG, conditional, dynamic (LLM-planned); **deep_research** mode (plan → search → fetch → coverage-gate → cited report) |
 | **Confidence & handover** | Opt-in grounding guardrail (claim-decompose + NLI judge, abstains when ungrounded) + `transfer_to_human` tool + handover detection + warm-handoff digest |
 | **Self-healing** *(opt-in)* | Bounded verifier-grounded reflection → escalation ladder (retry → reflect → replan → handover) under a shared recovery budget → graceful degrade on `max_iterations`; optional CRITIC + self-consistency |
+| **Coding autonomy** *(opt-in)* | `repo_map` (tree+symbol outline), `apply_patch`/`edit_file` (atomic), `run_typecheck` tool+hook, GitHub PR tooling, `context.strategy: coding`, checkpoint+resume (shadow-repo rollback), per-run budget ceiling, background shell; restricted-sandbox egress allowlist |
 | **Multimodal** *(opt-in)* | image/video/music/speech + transcription via a pluggable gateway (Surplus; mock offline) — agent tools, sync+async REST, R2/S3 storage, budget caps |
 | **Cross-instance A2A** *(opt-in)* | `call_peer_agent` tool + `POST /v1/peer/invoke` inbound + signed agent-card discovery + W3C trace propagation; a remote peer as a first-class orchestration node |
 | **Determinism** *(opt-in)* | `koboi export`/`capture` freezes a run + optional response cache; `run --replay-mode replay` is byte-identical and **offline** |
@@ -247,7 +248,7 @@ flowchart LR
   subgraph LOOP["Autonomous loop (governed)"]
     AC["AgentCore<br/>+ tool pipeline"]
     HK["HookChain<br/>15 lifecycle events"]
-    TR["ToolRegistry<br/>13 builtin + custom"]
+    TR["ToolRegistry<br/>17 builtin + custom"]
     JN["StepJournal<br/>crash-resume · SQLite WAL"]
     SB["Sandbox<br/>passthrough → seccomp HARD"]
     TU["Trust · Approval<br/>deny-by-default"]

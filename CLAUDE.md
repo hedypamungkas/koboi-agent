@@ -21,7 +21,7 @@ Configurable AI agent framework. YAML-driven config, async Python 3.10+, multi-p
 
 ## Directory map
 ```
-koboi/              Main package (261 .py files)
+koboi/              Main package (271 .py files)
   config.py         Config + ConfigBuilder -- YAML loading, ${VAR:default} interpolation
   config_models.py  Pydantic v2 schema validation for config
   facade.py         KoboiAgent -- single entry point, assembles all subsystems
@@ -36,6 +36,7 @@ koboi/              Main package (261 .py files)
   memory.py         In-memory ConversationMemory + MemoryBackend protocol
   memory_sqlite.py  SQLite-backed memory backend (WAL mode); also hosts the `steps` journal table
   journal.py        StepJournal -- per-iteration step journal for crash/redeploy resume (P2-A)
+  checkpoint.py     Shadow-repo workdir checkpoints for `journal.checkpoint` (Wave 2) -- roll back an interrupted non-idempotent tool call's partial effects
   proactive_memory.py  ProactiveMemory -- opt-in proactive long-term memory (auto-extract D + semantic recall C + core-memory block B); `memory.proactive` config
   redact.py         Shared secret redaction (value-shape + key-name masking) used by journal/jobs/diagnostics/handover summary
   tokens.py         Token estimation helpers; optional tiktoken BPE via `[tokenizer]` extra (chars/3 fallback)
@@ -50,8 +51,8 @@ koboi/              Main package (261 .py files)
   _extensions_path.py  Adds `KOBOI_EXTENSIONS_DIR` to `sys.path` (container "mount an extensions dir" tier -- see README Container customization)
   tracing_context.py  W3C Trace Context propagation for cross-instance A2A (P4) -- contextvars.ContextVar carries the trace-id across the async fan-out (no signature threading)
   llm/              LLM providers: base ABC, OpenAI adapter, Anthropic adapter, factory, auth, registry, http_transport, pool (ProviderPool/failover), resolve (named-providers resolver), cache (ResponseCache/CachedClient -- replay/cache determinism)
-  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media, peer, repo_map, github, background_shell)
-  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 24 specialized hooks (incl. handover detection, self-healing reflection/failure-classification/ladder-routing)
+  tools/            Tool registry + builtin/ (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media, peer, repo_map, github, background_shell, typecheck)
+  hooks/            Hook system: chain.py (HookEvent enum, Hook ABC, HookChain) + registry.py + 25 specialized hooks (incl. handover detection, self-healing reflection/failure-classification/ladder-routing, typecheck)
   context/          Context window strategies: truncation, smart_truncation, key_facts, sliding_window
   rag/              RAG pipeline: chunker (fixed/sentence/paragraph/semantic), retriever (keyword/semantic/hybrid + BM25), cross-encoder rerank (jina/cohere/local -- rerank.py), augmentation, query-rewrite/HyDE, metadata filters, Indonesian stopwords/stemmer, registry, live (LiveCorpus/LiveRetriever), sources (file/http/s3/firecrawl)
   websearch/        Web search/fetch provider registries (@register_search_provider/@register_fetch_provider, Brave/Firecrawl/httpx/mock/ddg), types, base ABCs, providers/, counting (budget metering). "websearch" = external-web data I/O backends for the web_search/web_fetch tools -- NOT a web UI.
@@ -66,7 +67,7 @@ koboi/              Main package (261 .py files)
   skills/           Skill discovery and registry (agentskills.io standard) with budget, invocation control, dynamic context
   eval/             Evaluation: runner, config, registry, regression, loaders/, scorers/, t/, workspace (coding harness: per-case repo materialization + test_suite exit-code scorer)
   tui/              Terminal UI (Textual): app, screens/ (11), widgets/ (12)
-tests/              308 .py files (306 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
+tests/              358 .py files (328 test_*.py + conftest/fixtures), asyncio_mode="auto", shared conftest.py with MockClient
 configs/            40 YAML agent configs
 examples/           40 numbered example scripts (01-40, incl. 39_aegis_ops_full_demo -- nearly all 32 KoboiConfig sections in one DAG scenario; 40_coding_autonomy_full_demo -- the full Wave 0-4 coding stack A-Z unattended, w/ a live trust panel + independent per-phase verification) + server_built_in/server_customize, hitl_client, a command-hook forwarder (_command_hook_forwarder), a2a_fanout (cross-instance A2A demo), and workflow demos (dynamic_workflow_live, phase3_live_e2e, workflow_graph_demo); matching YAMLs
 evals/              Sample eve-style `t` eval files (*.eval.py) -- run via `koboi eval-test`
