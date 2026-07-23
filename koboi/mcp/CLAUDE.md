@@ -21,15 +21,15 @@ __init__.py    Re-exports BaseMCPClient, MCPClient, StreamableHTTPMCPClient, MCP
 ### Add a custom transport (client side)
 Subclass `BaseMCPClient` and implement the six abstract methods:
 ```python
-class BaseMCPClient(ABC):                 # koboi/mcp/base.py
+class BaseMCPClient(ABC):  # koboi/mcp/base.py
     def __init__(self, logger: AgentLogger | None = None): ...
     @abstractmethod
-    def connect(self) -> dict: ...                 # sync -- initialize handshake, return server info
+    def connect(self) -> dict: ...  # sync -- initialize handshake, return server info
     @abstractmethod
-    def discover_tools(self) -> list[MCPToolInfo]: # sync -- tools/list -> MCPToolInfo(name, description, input_schema)
+    def discover_tools(self) -> list[MCPToolInfo]:  # sync -- tools/list -> MCPToolInfo(name, description, input_schema)
         ...
     @abstractmethod
-    async def call_tool(self, name: str, arguments: dict) -> str: ...   # MUST be async
+    async def call_tool(self, name: str, arguments: dict) -> str: ...  # MUST be async
     @abstractmethod
     def close(self) -> None: ...
     @abstractmethod
@@ -45,13 +45,16 @@ decorator/registry for clients (unlike sandbox's ComponentRegistry).
 ### Build an MCP server (server.py)
 ```python
 from koboi.mcp.server import MCPServer
+
 server = MCPServer("my-server", version="1.0.0")
+
 
 @server.tool("add", description="Add numbers", input_schema={"type": "object", "properties": {...}})
 def add(a: int, b: int) -> int:
     return a + b
 
-server.run()   # stdio JSON-RPC loop; see mcp_servers/todo_server.py for a full example
+
+server.run()  # stdio JSON-RPC loop; see mcp_servers/todo_server.py for a full example
 ```
 
 ## How it's wired

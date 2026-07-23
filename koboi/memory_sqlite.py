@@ -296,7 +296,7 @@ class SQLiteMemory(ConversationMemory):
                 try:
                     dst.close()
                 except Exception:
-                    pass  # pragma: no cover - nosec B110: suppress close error so the real exception propagates
+                    pass  # nosec B110 - suppress close error so the real exception propagates
             os.replace(str(tmp), str(dest))  # atomic publish (overwrites any stale dest)
             size = dest.stat().st_size
             success = True
@@ -306,11 +306,11 @@ class SQLiteMemory(ConversationMemory):
                 try:
                     tmp.unlink(missing_ok=True)  # never leave a corrupt/partial artifact
                 except OSError:
-                    pass  # pragma: no cover - best-effort cleanup of the temp file
+                    pass  # best-effort cleanup of the temp file
             try:
                 src.close()
             except Exception:
-                pass  # pragma: no cover - nosec B110: suppress close error so the real exception propagates
+                pass  # nosec B110 - suppress close error so the real exception propagates
 
     def quiesce(self, mode: CheckpointMode = "TRUNCATE") -> WalCheckpointResult:
         """Best-effort WAL checkpoint on this memory's DB.

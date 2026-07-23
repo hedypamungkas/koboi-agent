@@ -35,13 +35,15 @@ __init__.py          Re-exports public surface; calls register_builtin_providers
 ```python
 class LLMClient(ABC):
     @property
-    def model(self) -> str: ...                                  # default ""
+    def model(self) -> str: ...  # default ""
     @abstractmethod
     async def complete(self, messages, tools=None) -> AgentResponse: ...
     @abstractmethod
     async def get_embeddings(self, text) -> list[float] | None: ...
-    async def complete_stream(self, messages, tools=None) -> AsyncIterator[StreamEvent]: ...  # default: fall back to complete()
-    async def close(self) -> None: ...                           # default no-op
+    async def complete_stream(
+        self, messages, tools=None
+    ) -> AsyncIterator[StreamEvent]: ...  # default: fall back to complete()
+    async def close(self) -> None: ...  # default no-op
 ```
 
 ## Conventions
