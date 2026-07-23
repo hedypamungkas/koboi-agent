@@ -76,6 +76,9 @@ MagicMock/
 
 # === Local analysis docs (not for commit) ===
 docs/eve-impact-effort-analysis.md
+# Strategic / secret-sauce docs (untracked — competitive positioning, never commit)
+docs/enterprise-feasibility-assessment.md
+docs/devin-outposts-feasibility.md
 
 # === Path B: real IR eval corpus (MS MARCO passages; research-use, built by scripts/build_ir_corpus.py) ===
 data/ir_corpus/
