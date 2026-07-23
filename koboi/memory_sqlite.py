@@ -39,6 +39,7 @@ def ensure_steps_table(conn: sqlite3.Connection) -> None:
             graph_run_id TEXT,
             node_id TEXT,
             trace_id TEXT,
+            checkpoint_sha TEXT,
             created_at REAL DEFAULT (julianday('now'))
         )
     """)
@@ -47,6 +48,7 @@ def ensure_steps_table(conn: sqlite3.Connection) -> None:
         "ALTER TABLE steps ADD COLUMN graph_run_id TEXT",
         "ALTER TABLE steps ADD COLUMN node_id TEXT",
         "ALTER TABLE steps ADD COLUMN trace_id TEXT",  # P4: W3C trace-id (cross-instance correlation)
+        "ALTER TABLE steps ADD COLUMN checkpoint_sha TEXT",  # Wave 2: shadow-repo checkpoint per step
     ):
         try:
             conn.execute(_stmt)

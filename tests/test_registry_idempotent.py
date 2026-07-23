@@ -31,7 +31,7 @@ class TestIdempotentForwarding:
         """PR #48 (main): DESTRUCTIVE/side-effecting builtins must not double-execute on resume."""
         r = ToolRegistry()
         register_all(r)
-        for name in ("run_shell", "write_file", "delete_file"):
+        for name in ("run_shell", "write_file", "edit_file", "apply_patch", "delete_file"):
             td = r.get_definition(name)
             assert td is not None, f"{name} missing"
             assert td.idempotent is False, f"{name} should be idempotent=False"

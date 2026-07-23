@@ -3,7 +3,7 @@
 ## What this is
 The tool layer. `ToolRegistry` holds tool definitions + handlers, exposes them to the
 LLM as OpenAI function specs, and executes calls (sync tools run in a thread via
-`asyncio.to_thread`; async tools awaited). 12 built-ins live in `builtin/` -- see
+`asyncio.to_thread`; async tools awaited). 17 built-in modules live in `builtin/` -- see
 `.claude/rules/builtin-tools.md` for those. THIS doc covers the registry, the `@tool()`
 decorator, `RiskLevel`, and dependency injection.
 
@@ -12,7 +12,7 @@ decorator, `RiskLevel`, and dependency injection.
 registry.py   ToolRegistry + @tool() decorator + register_decorated + apply_tool_selection + truncate_text
 state.py      ToolState -- per-session mutable state (read-before-write path set)
 __init__.py   Re-exports ToolRegistry, tool, register_decorated
-builtin/      13 built-in tools (calculator/filesystem/shell/web/memory/search/git/subagent/task/ingest/handover/peer/media) -- see builtin/CLAUDE.md
+builtin/      17 built-in tools (calculator/filesystem/shell/web/memory/search/git/subagent/task/ingest/handover/peer/media + repo_map/github/background_shell/typecheck) -- see builtin/CLAUDE.md
 ```
 
 ## Public surface (verified against registry.py / types.py)

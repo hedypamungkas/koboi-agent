@@ -177,3 +177,48 @@ class TestJournalLoopIntegration:
         await core2.run("second")
         rows2 = _steps_rows(db, "S1")
         assert any(r[0] == 2 for r in rows2)
+
+
+class TestCheckpointColumn:
+    """Wave 2: checkpoint_sha schema migration + stamp_checkpoint."""
+
+    def test_pre_existing_table_gains_checkpoint_column(self, tmp_path):
+        # Simulate an old DB: steps table WITHOUT checkpoint_sha.
+        db = str(tmp_path / "old.db")
+        conn = _connect(db)
+        conn.execute(
+            "CREATE TABLE steps (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, "
+            "turn_index INTEGER NOT NULL, step_index INTEGER NOT NULL, status TEXT NOT NULL, "
+            "llm_prompt_tokens INTEGER, llm_completion_tokens INTEGER, tool_call_count INTEGER DEFAULT 0, "
+            "tool_calls_json TEXT, is_terminal INTEGER DEFAULT 0, error TEXT, "
+            "created_at REAL DEFAULT (julianday('now')))"
+        )
+        conn.commit()
+        from koboi.memory_sqlite import ensure_steps_table
+
+        ensure_steps_table(conn)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(steps)").fetchall()}
+        assert "checkpoint_sha" in cols
+        conn.close()
+
+    def test_stamp_checkpoint_updates_row_and_survives_outcome_upsert(self, tmp_path):
+        db = str(tmp_path / "t.db")
+        mem = SQLiteMemory(db_path=db, session_id="S1")
+        j = StepJournal(mem._ensure_conn(), "S1")
+        j.advance_turn()
+        turn = j.turn_index
+        j.record_step(turn_index=turn, step_index=0, status="running")
+        j.stamp_checkpoint(turn, 0, "abc123def456")
+        # The later outcome upsert must NOT clobber the stamped sha.
+        j.record_step(turn_index=turn, step_index=0, status="tool_calls")
+        rows = j.list_steps(turn_index=turn)
+        assert rows[0]["checkpoint_sha"] == "abc123def456"
+        assert rows[0]["status"] == "tool_calls"
+        mem.close()
+
+    def test_stamp_checkpoint_missing_row_is_soft(self, tmp_path):
+        db = str(tmp_path / "t.db")
+        mem = SQLiteMemory(db_path=db, session_id="S1")
+        j = StepJournal(mem._ensure_conn(), "S1")
+        j.stamp_checkpoint(99, 99, "deadbeef")  # no row -> no-op, never raises
+        mem.close()

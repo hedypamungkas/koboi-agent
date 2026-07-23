@@ -260,7 +260,7 @@ class TestConfigBuilder:
             .sandbox(
                 backend="restricted",
                 workdir="/w",
-                network="soft",
+                network="deny",  # Wave 3: "soft" was an informal value that silently meant allow; network is now fail-closed
                 network_binaries=["curl"],
                 safe_path=["/tmp"],
                 env_passthrough=True,

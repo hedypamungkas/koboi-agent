@@ -1,0 +1,255 @@
+agent:
+  name: "koboi-swe"
+  description: "Autonomous software-engineering agent -- the full Wave 0-4 coding stack"
+  # act is REQUIRED: chat/plan mode blocks every mutating tool
+  # (write_file/edit_file/apply_patch/run_shell/git_add/...). A coding agent
+  # that can't write can't code.
+  mode: "act"
+  max_iterations: 60
+
+  # --- Wave 2: per-run budget ceiling (unattended cost guardrail) -----------
+  # The loop checks this at the top of every iteration; when spent tokens/cost
+  # cross the line it raises AgentBudgetExceededError (or, with
+  # self_healing.graceful_max_iter, degrades to a summary). This is what makes
+  # "leave it running overnight" safe -- a runaway loop stops at a hard $/token
+  # wall instead of burning the account.
+  max_total_tokens: 2000000
+  max_cost_usd: 5.00
+  token_prices:
+    input_per_1k: 0.00015
+    output_per_1k: 0.00060
+
+  # --- Wave 4: long-running background processes ----------------------------
+  # submit/check/kill a dev server, a file watcher, a slow build -- the agent
+  # gets the job id immediately and polls, instead of blocking a whole
+  # iteration on a process that never exits. Live process runs OUTSIDE the
+  # approval pipeline once started; max_lifetime_seconds is the mitigating cap.
+  background_shell:
+    enabled: true
+    max_concurrent: 2
+    max_lifetime_seconds: 300
+
+  # --- Wave 3: parallel read-only tool batches ------------------------------
+  # When the model asks for several read-only/idempotent tools in one turn
+  # (read three files, grep + list + repo_map), run them concurrently. Only
+  # all-SAFE/idempotent batches parallelize; anything mutating stays serial.
+  parallel_tools:
+    enabled: true
+    max_concurrency: 4
+
+  system_prompt: |
+    You are an autonomous software engineer. You work UNATTENDED: no human is
+    watching to approve each step, so be deliberate and verify your own work.
+
+    Workflow for any code task:
+      1. Orient. Use repo_map for a lay-of-the-land, then grep_search /
+         read_file (with offset/limit for big files) to find the exact code.
+      2. Reproduce first. For a bug, run the failing test with run_shell BEFORE
+         changing anything, so you know you fixed the right thing.
+      3. Edit surgically. Prefer apply_patch (unified diff) or edit_file (exact
+         string replace) over rewriting a whole file with write_file. Use
+         write_file only to create genuinely new files.
+      4. Verify. After every change run run_typecheck (ruff) for precise
+         file:line diagnostics, then run the project's tests with run_shell.
+         Iterate until both are clean.
+      5. Land it. Stage with git_add, commit with a clear message via
+         git_commit, and (when asked) open a PR with github_create_pr.
+
+    Never fabricate a passing test result -- run the tests. If you get stuck in
+    a loop, step back and re-read the code rather than retrying the same edit.
+
+llm:
+  provider: "openai"
+  # Model choice MATTERS for an autonomous coding agent: it plans multi-step
+  # tool sequences, reads diffs, and recovers from its own failing test runs.
+  # Prefer a FLAGSHIP model (gpt-5.5 / gpt-5.4 / gpt-5.x-codex, or Claude
+  # opus-4.8 / sonnet-5) -- a `-mini`/`-nano` tier will pass the toy scenarios
+  # here but is a poor stand-in for real repo work. The default below is a
+  # capable flagship; ${OPENAI_MODEL} still overrides it, so set that env var
+  # deliberately (don't let a leftover `-mini` in .env silently downgrade the
+  # agent -- exactly the trap this example hit).
+  model: "${OPENAI_MODEL:gpt-5.5}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+  temperature: 0.2          # low for deterministic code generation
+
+tools:
+  # The full Wave 0-4 coding tool-chain.
+  builtin:
+    # navigate + read (SAFE / read-only)
+    - repo_map
+    - list_files
+    - read_file
+    - grep_search
+    - glob_find
+    # edit (DESTRUCTIVE, idempotent=False)
+    - write_file
+    - edit_file
+    - apply_patch
+    - delete_file
+    # run / verify
+    - run_typecheck
+    - run_shell
+    # long-running
+    - submit_background_shell
+    - check_background_shell
+    - kill_background_shell
+    # git (SAFE read + MODERATE write + DESTRUCTIVE push)
+    - git_status
+    - git_log
+    - git_diff
+    - git_add
+    - git_commit
+    - git_checkout
+    # ship (GitHub PR tooling; needs github: config below)
+    - github_create_pr
+    - github_get_pr
+    - github_list_prs
+  defaults:
+    timeout: 60
+    max_output: 15000
+  overrides:
+    run_shell:
+      timeout: 300          # builds/test suites exceed the default
+      max_output: 30000
+    run_typecheck:
+      checker: "ruff"
+      timeout: 120
+      max_output: 20000
+    read_file:
+      max_read_size: 200000
+
+# Wave 3 "coding" context strategy: old tool-result BODIES (file reads, test
+# output) collapse to one-line stubs; the newest result per (tool, path) stays
+# verbatim; the recent window is untouched. This is what lets a long
+# edit->test->edit session fit in the window without losing the file you're
+# actively working on.
+context:
+  strategy: "coding"
+  max_context_tokens: 120000
+  keep_last: 40
+  safety_margin: 8000
+
+# --- SAFETY LAYER 1: restricted sandbox + egress allowlist ------------------
+# Every subprocess tool (run_shell, run_typecheck, git_*) is confined to the
+# workdir (path containment) with a scrubbed env (secrets stripped) and a
+# PATH restricted to safe_path. network: allowlist means a scanned binary
+# (curl/wget/pip/npm/git/ssh...) may ONLY reference allowlisted hosts -- a
+# `git clone https://github.com@evil.com` is caught because host extraction is
+# userinfo-aware (checks evil.com, the real host, not the github.com decoy).
+sandbox:
+  backend: "restricted"
+  workdir: "${KOBOI_SWE_WORKDIR:./.swe_workdir}"
+  network: "allowlist"
+  network_allowlist:
+    - "pypi.org"
+    - "files.pythonhosted.org"
+    - "registry.npmjs.org"
+    - "github.com"
+    - "codeload.github.com"
+    - "*.githubusercontent.com"
+  # PATH the sandbox exposes to subprocesses. Point this at the interpreter/
+  # toolchain the agent needs (python/pytest/ruff/git). The example injects the
+  # running venv's bin dir via ${KOBOI_SWE_TOOLCHAIN_BIN}.
+  safe_path:
+    - "${KOBOI_SWE_TOOLCHAIN_BIN:/usr/local/bin}"
+    - "/usr/local/bin"
+    - "/usr/bin"
+    - "/bin"
+    - "/opt/homebrew/bin"
+  rlimits:
+    cpu: 120                # seconds of CPU per subprocess
+    fsize_mb: 200           # max file size a subprocess can write
+    nofile: 256
+    # NOTE: as_mb (RLIMIT_AS address-space cap) is intentionally omitted here.
+    # It is a strong Linux control, but macOS/Darwin's setrlimit(RLIMIT_AS)
+    # commonly rejects it ("current limit exceeds maximum limit"), and the
+    # sandbox is FAIL-CLOSED -- a rejected rlimit aborts the subprocess rather
+    # than run it uncapped. On a Linux deployment, add e.g. `as_mb: 2048`.
+
+# --- SAFETY LAYER 2: durable journal + shadow-repo checkpoints --------------
+# Every loop iteration is journaled to SQLite (koboi run --resume rehydrates an
+# interrupted session). journal.checkpoint additionally commits the workdir to
+# a SHADOW git repo after each mutating tool call -- so a crash mid-edit rolls
+# back exactly the interrupted call's partial effects on resume, and you get a
+# reviewable per-step diff trail. The shadow NEVER commits to your own .git.
+memory:
+  backend: "sqlite"
+  db_path: "${KOBOI_SWE_DB:./.swe_workdir/koboi_swe.db}"
+
+journal:
+  enabled: true
+  record_tool_calls: true
+  checkpoint:
+    enabled: true
+
+# --- SAFETY LAYER 3: hardcoded + declarative policy denies ------------------
+# policy.rules are declarative; the hardcoded safety net (rm -rf /, curl|bash,
+# /dev/tcp, base64-into-shell, sensitive paths incl. .env, python -c exec) is
+# ALWAYS enforced and NON-overridable -- even in yolo mode, even with a
+# Trust-DB allow rule.
+policy:
+  rules:
+    - tool: "run_shell"
+      pattern: "rm -rf /"
+      action: "deny"
+    - tool: "run_shell"
+      pattern: "curl.*\\|.*bash"
+      action: "deny"
+    - tool: "git_push"
+      action: "confirm"     # a remote push is the one step worth a human nod
+    - tool: "delete_file"
+      action: "confirm"
+
+# --- SAFETY LAYER 4: self-healing (bounded recovery, not infinite retry) ----
+# graceful_max_iter: at the iteration/budget wall, return a best-effort summary
+# (success=True, metadata.budget_degraded) instead of erroring out.
+# enabled: turns on the reflection loop -- a failing run_typecheck is parsed
+# into file:line diagnostics and the reflection critique names the first
+# failing location (error_kind=typecheck_failed) instead of a generic "retry".
+#
+# EXPECTED build-time notices: with self_healing.enabled and NO grounding_check
+# output guardrail / handover.detection, the facade logs that the low-grounding
+# reflection rung and the handover escalation rung are inert. That is correct
+# for a coding agent -- its reflection signal is tool-error + typecheck_failed
+# (which DO fire here), not answer-grounding or human-handover (a CS/RAG
+# concern). Add grounding_check + handover.detection only if you also want
+# those rungs (see configs/self_healing_demo.yaml).
+self_healing:
+  enabled: true
+  graceful_max_iter: true
+  max_turns: 3
+  triggers:
+    tool_error:
+      repeat_threshold: 2
+
+# --- SAFETY LAYER 5: doom-loop detection + telemetry ------------------------
+harness:
+  doom_loop:
+    consecutive_identical_threshold: 4
+  telemetry: true
+  carryover: true
+
+# --- Ship: GitHub PR tooling ------------------------------------------------
+# In-process httpx (bypasses the sandbox network tiers, like web_fetch). The
+# token is read directly in Python and sent as an HTTP header -- it NEVER rides
+# a subprocess env (GITHUB_TOKEN/GH_TOKEN are in the SECRET_BLOCKLIST). Set
+# api_base to a mock server for offline demos.
+github:
+  enabled: true
+  token: "${GITHUB_TOKEN:}"
+  api_base: "${GITHUB_API_BASE:https://api.github.com}"
+
+guardrails:
+  input:
+    detect_injection: true
+    max_length: 40000
+  rate_limit:
+    max_calls_per_session: 2000
+    max_calls_per_minute: 120
+
+tracing:
+  provider: "langfuse"
+  public_key: "${LANGFUSE_PUBLIC_KEY:}"
+  secret_key: "${LANGFUSE_SECRET_KEY:}"
+  base_url: "${LANGFUSE_BASE_URL:}"

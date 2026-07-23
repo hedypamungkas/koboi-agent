@@ -96,6 +96,7 @@ koboi chat examples/01_simple_chat.yaml
 | 37 | [Workflow Cache + Replay](37_workflow_cache_capture_replay.py) | Capture response cache + offline `replay` (no API key) | `python examples/37_workflow_cache_capture_replay.py` |
 | 38 | [Self-Healing Demo](38_self_healing_demo.py) | Bounded reflection loop, escalation ladder, graceful degrade, CRITIC verification | `python examples/38_self_healing_demo.py --mock` |
 | 39 | [Aegis Ops -- Full Sample](39_aegis_ops_full_demo.py) | "Full sample": 29 of 32 `KoboiConfig` top-level sections in one DAG-orchestrated scenario (providers/pools, RAG+rerank, proactive memory, self_healing, handover, sandbox, MCP, media, peers, server/jobs, hooks, eval) -- also documents the orchestration-mode feature-coverage gaps it surfaced | `python examples/39_aegis_ops_full_demo.py` |
+| 40 | [Invisible Engineering -- Coding Autonomy](40_coding_autonomy_full_demo.py) | The full Wave 0-4 coding stack A-to-Z, UNATTENDED: fix a failing test → build a feature → migrate an API, against a REAL temp git repo with the REAL coding tools (repo_map/apply_patch/edit_file/run_typecheck/run_shell/git_*/github_*). Opens with a live TRUST PANEL (sandbox egress allowlist, policy denies, budget ceiling, checkpoint rollback, doom-loop) and INDEPENDENTLY verifies every phase (new commit + clean tree + green tests + PR) instead of trusting the agent's word. `--mock` runs offline/$0 with the tools genuinely executing | `python examples/40_coding_autonomy_full_demo.py` |
 
 ### Server
 
@@ -151,6 +152,7 @@ koboi chat examples/01_simple_chat.yaml
 | Workflow cache + capture + offline replay | 37 |
 | Self-healing (reflection, escalation ladder, graceful degrade, CRITIC) | 38 |
 | Full-sample config (29 of 32 KoboiConfig sections, DAG-orchestrated) | 39 |
+| Autonomous coding agent (Wave 0-4: fix/build/migrate, sandbox+policy+budget+checkpoint trust panel) | 40 |
 | HTTP/SSE server (built-in + code-customized) | server_built_in, server_customize |
 
 ## Notes

@@ -324,6 +324,9 @@ def create_app(
     job_ttl = config.get("jobs", "ttl_seconds", default=86400.0) or 86400.0  # G5c-a
     job_max_events = config.get("jobs", "event_buffer", "max_events", default=500) or 500
     job_webhooks = config.get("jobs", "webhooks", default=[]) or []
+    # Wave 2: job-scoped run_shell command globs auto-approved by the
+    # AutonomousApprovalHandler (operator-configured, never tenant-supplied).
+    job_shell_allowlist = config.get("jobs", "shell_allowlist", default=[]) or []
     # B5: chat-path handover webhooks (mid-conversation HandoverEvent notification).
     handover_webhooks = config.get("handover", "webhooks", default=[]) or []
     job_resume = config.get("jobs", "resume_on_startup", default=True)
@@ -422,7 +425,13 @@ def create_app(
         # M4: resume pending jobs on startup (simplified: running→failed).
         if job_resume:
             requeued = await resume_on_startup(
-                job_store, pool, job_registry, job_timeout, job_webhooks, workflow_store=workflow_store
+                job_store,
+                pool,
+                job_registry,
+                job_timeout,
+                job_webhooks,
+                workflow_store=workflow_store,
+                shell_allowlist=job_shell_allowlist,
             )
             if requeued:
                 _logger.info("Resumed %d pending job(s) on startup", requeued)
@@ -578,6 +587,7 @@ def create_app(
         handover_webhooks,
         peer_registry,
         peer_rate_limiter,
+        job_shell_allowlist=job_shell_allowlist,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -725,6 +735,7 @@ def _register_routes(
     handover_webhooks: list[dict] | None = None,
     peer_registry: Any | None = None,
     peer_rate_limiter: Any | None = None,
+    job_shell_allowlist: list[str] | None = None,
 ) -> None:
     # Issue #52: ownership gate (fail-closed for unowned-with-history).
     # Closes the IDOR where a pre-existing/CLI-created session (full history, no
@@ -1568,6 +1579,7 @@ def _register_routes(
                 workflow_ref=job.get("workflow_ref"),
                 workflow_store=workflow_store,
                 replay_mode=job.get("replay_mode"),
+                shell_allowlist=job_shell_allowlist,
             )
         )
         job_registry.set_running(job_id, task)

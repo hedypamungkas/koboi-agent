@@ -43,6 +43,18 @@ class TestServerJobsConfig:
         assert cfg.schema.jobs.max_concurrent == 16
         assert cfg.schema.jobs.ttl_seconds == 3600
 
+    def test_jobs_shell_allowlist_parses(self):
+        cfg = Config.from_dict(
+            {**_base(), "jobs": {"enabled": True, "shell_allowlist": ["pytest*", "git commit*"]}},
+            validate=True,
+        )
+        assert cfg.schema.jobs.shell_allowlist == ["pytest*", "git commit*"]
+        # Runtime read path (dotted-path over raw data) sees it too.
+        assert cfg.get("jobs", "shell_allowlist", default=[]) == ["pytest*", "git commit*"]
+        # Default: empty (deny-by-default preserved).
+        cfg2 = Config.from_dict({**_base(), "jobs": {"enabled": True}}, validate=True)
+        assert cfg2.schema.jobs.shell_allowlist == []
+
     def test_server_invalid_port_rejected(self):
         import pytest
 
@@ -60,13 +72,7 @@ class TestServerJobsConfig:
         assert cfg.server["enabled"] is True
 
     def test_builder_jobs(self):
-        cfg = (
-            Config.builder()
-            .agent(name="t")
-            .llm(model="m")
-            .jobs(max_concurrent=16, ttl_seconds=3600)
-            .build()
-        )
+        cfg = Config.builder().agent(name="t").llm(model="m").jobs(max_concurrent=16, ttl_seconds=3600).build()
         assert cfg.jobs["max_concurrent"] == 16
         assert cfg.jobs["ttl_seconds"] == 3600
         # default_dedicated_session was removed (dead -- dedicated is unconditional at app.py submit)
@@ -96,6 +102,58 @@ class TestServerJobsConfig:
 
         with pytest.raises(ValueError, match=r"(network_isolat|Unknown sandbox)"):
             Config.from_dict({**_base(), "sandbox": {"network_isolaton": "seccomp"}}, validate=True)
+
+    def test_background_shell_unknown_key_raises(self):
+        # I-3: issue #79 parity -- a typo'd bg-shell key must raise, not silently
+        # fall back to the default lifetime. (background_shell nests under agent:.)
+        import pytest
+
+        with pytest.raises(ValueError, match=r"(max_lifetime_secnds|Unknown BackgroundShellConfig)"):
+            Config.from_dict(
+                {**_base(), "agent": {"name": "t", "background_shell": {"max_lifetime_secnds": 60}}},
+                validate=True,
+            )
+
+    def test_github_unknown_key_raises(self):
+        # I-3: a misspelled token key (``tokin``) would leave the token empty and
+        # fail opaquely at runtime -- fail closed at load instead.
+        import pytest
+
+        with pytest.raises(ValueError, match=r"(tokin|Unknown GithubConfig)"):
+            Config.from_dict({**_base(), "github": {"tokin": "ghp_x"}}, validate=True)
+
+    def test_github_timeout_must_be_positive(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            Config.from_dict({**_base(), "github": {"timeout": 0}}, validate=True)
+
+    def test_journal_checkpoint_unknown_key_raises(self):
+        # I-3: nested journal.checkpoint typo must raise too.
+        import pytest
+
+        with pytest.raises(ValueError, match=r"(git_timout|Unknown JournalCheckpointConfig)"):
+            Config.from_dict({**_base(), "journal": {"checkpoint": {"git_timout": 30}}}, validate=True)
+
+    def test_parallel_tools_inner_typo_raises(self):
+        # agent.parallel_tools is a dict read via raw .get() at runtime, so a typo'd
+        # inner key (max_concurency) would silently fall back to default. Fail closed.
+        import pytest
+
+        with pytest.raises(ValueError, match=r"(max_concurency|Unknown _ParallelToolsShape)"):
+            Config.from_dict(
+                {**_base(), "agent": {"name": "t", "parallel_tools": {"enabled": True, "max_concurency": 8}}},
+                validate=True,
+            )
+
+    def test_token_prices_inner_typo_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match=r"(imput_per_1k|Unknown _TokenPricesShape)"):
+            Config.from_dict(
+                {**_base(), "agent": {"name": "t", "token_prices": {"imput_per_1k": 1.0}}},
+                validate=True,
+            )
 
     def test_no_unknown_key_warning_for_server_jobs(self, caplog):
         # server/jobs are now declared top-level keys -> no "Unknown config key" warning.

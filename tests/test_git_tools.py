@@ -351,3 +351,262 @@ class TestGitNotInstalled:
         # The result should indicate an error
         # (Either git not found or not a git repo)
         assert result is not None
+
+
+# --------------------------------------------------------------------------- #
+# Wave 3: write tools (git_add / git_commit / git_checkout / git_push)
+# --------------------------------------------------------------------------- #
+from pathlib import Path  # noqa: E402
+
+from koboi.tools.builtin.git import git_add, git_checkout, git_commit, git_push  # noqa: E402
+from koboi.types import RiskLevel  # noqa: E402
+
+
+@pytest.fixture
+def identityless_repo(tmp_path, monkeypatch):
+    """A git repo with NO user.name/email anywhere.
+
+    build_safe_env strips GIT_* vars but passes HOME through, so the
+    machine's ~/.gitconfig would leak identity into the tool subprocess --
+    redirect HOME/XDG to an empty dir to neutralize global config for both
+    the fixture's raw git calls and the tool path.
+    """
+    empty_home = tmp_path / "home"
+    empty_home.mkdir()
+    monkeypatch.setenv("HOME", str(empty_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(empty_home / ".config"))
+    repo = tmp_path / "noident"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=str(repo), check=True, capture_output=True)
+    (repo / "a.txt").write_text("hello")
+    return repo
+
+
+class TestGitAdd:
+    def test_stages_all_by_default(self, temp_git_repo):
+        (Path(temp_git_repo) / "new.txt").write_text("x")
+        result = git_add(repo_path=temp_git_repo)
+        assert not result.startswith("Error")
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=temp_git_repo, capture_output=True, text=True
+        ).stdout
+        assert "A  new.txt" in status
+
+    def test_stages_specific_paths(self, temp_git_repo):
+        (Path(temp_git_repo) / "one.txt").write_text("1")
+        (Path(temp_git_repo) / "two.txt").write_text("2")
+        git_add(paths=["one.txt"], repo_path=temp_git_repo)
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=temp_git_repo, capture_output=True, text=True
+        ).stdout
+        assert "A  one.txt" in status
+        assert "?? two.txt" in status
+
+    def test_rejects_option_injection(self, temp_git_repo):
+        result = git_add(paths=["--force"], repo_path=temp_git_repo)
+        assert "option injection" in result
+
+    def test_empty_path_string_defaults_to_all(self, temp_git_repo):
+        # paths=[""] used to collapse to [] -> `git add --` no-op; now falls back
+        # to ['.'] (stage all), matching the documented default.
+        (Path(temp_git_repo) / "from_empty.txt").write_text("x")
+        result = git_add(paths=[""], repo_path=temp_git_repo)
+        assert not result.startswith("Error")
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=temp_git_repo, capture_output=True, text=True
+        ).stdout
+        assert "A  from_empty.txt" in status
+
+    def test_git_add_rejects_exec_option(self, temp_git_repo):
+        # `--exec=evil` looks like git's `core.hooksPath`-family option; the
+        # leading-dash guard refuses it before git ever sees it (defense-in-depth
+        # on top of the `--` separator that already makes option parsing impossible).
+        result = git_add(paths=["--exec=evil"], repo_path=temp_git_repo)
+        assert "option injection" in result
+
+    def test_git_add_path_traversal_blocked_by_git(self, temp_git_repo):
+        # git_add deliberately doesn't apply SAFE_TARGET_RE to path args ("../" is
+        # a legitimate in-repo relative path). Instead git's own worktree boundary
+        # refuses to stage a file that resolves outside the repo. Pin that
+        # defense-in-depth property so a regression in either layer is caught.
+        secret = Path(temp_git_repo).parent / "secret.txt"
+        secret.write_text("secret")
+        result = git_add(paths=["../secret.txt"], repo_path=temp_git_repo)
+        assert result.startswith("Error")
+
+
+class TestGitCommit:
+    def test_commits_staged_changes(self, temp_git_repo):
+        (Path(temp_git_repo) / "c.txt").write_text("content")
+        git_add(repo_path=temp_git_repo)
+        result = git_commit(message="add c.txt", repo_path=temp_git_repo)
+        assert not result.startswith("Error")
+        log = subprocess.run(["git", "log", "--oneline"], cwd=temp_git_repo, capture_output=True, text=True).stdout
+        assert "add c.txt" in log
+
+    def test_identity_fallback_in_configless_repo(self, identityless_repo):
+        # No user.name/email anywhere -> _identity_args injects the fallback.
+        git_add(repo_path=str(identityless_repo))
+        result = git_commit(message="first", repo_path=str(identityless_repo))
+        assert not result.startswith("Error"), result
+        show = subprocess.run(
+            ["git", "log", "-1", "--format=%an <%ae>"],
+            cwd=str(identityless_repo),
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert show == "koboi-agent <agent@koboi.local>"
+
+    def test_existing_identity_not_overridden(self, temp_git_repo):
+        # temp_git_repo sets local identity; the fallback must not replace it.
+        (Path(temp_git_repo) / "d.txt").write_text("d")
+        git_add(repo_path=temp_git_repo)
+        git_commit(message="keep identity", repo_path=temp_git_repo)
+        author = subprocess.run(
+            ["git", "log", "-1", "--format=%ae"], cwd=temp_git_repo, capture_output=True, text=True
+        ).stdout.strip()
+        assert author != "agent@koboi.local"
+
+    def test_empty_message_rejected(self, temp_git_repo):
+        assert git_commit(message="  ", repo_path=temp_git_repo).startswith("Error")
+
+    def test_nothing_staged_returns_clear_message(self, temp_git_repo):
+        # A clean tree: git exits 0 with "nothing to commit..." which used to read
+        # as success to an autonomous agent. Now surfaced as a clear signal.
+        result = git_commit(message="nothing here", repo_path=temp_git_repo)
+        assert "No staged changes" in result
+
+    def test_commit_message_containing_added_to_commit_not_false_positive(self, temp_git_repo):
+        # A successful commit whose message contains the phrase "added to commit"
+        # must NOT be misreported as "No staged changes" (the old bare-substring
+        # check fired because git echoes "[branch hash] <message>" on success).
+        (Path(temp_git_repo) / "e.txt").write_text("e")
+        git_add(repo_path=temp_git_repo)
+        result = git_commit(message="files added to commit history feature", repo_path=temp_git_repo)
+        assert "No staged changes" not in result
+        log = subprocess.run(["git", "log", "--oneline"], cwd=temp_git_repo, capture_output=True, text=True).stdout
+        assert "added to commit history" in log  # the commit really happened
+        # And no new commit was created.
+        log = subprocess.run(["git", "log", "--oneline"], cwd=temp_git_repo, capture_output=True, text=True).stdout
+        assert "nothing here" not in log
+
+    def test_unstaged_change_not_committed(self, temp_git_repo):
+        # Changes present but NOT staged -> also "no changes added to commit".
+        (Path(temp_git_repo) / "dirty.txt").write_text("x")  # unstaged
+        result = git_commit(message="x", repo_path=temp_git_repo)
+        assert "No staged changes" in result
+
+    def test_git_commit_multi_line_message_preserved(self, temp_git_repo):
+        # A multi-line message passed via the argv list (no shell) must round-trip
+        # verbatim -- git stores newlines, `--format=%B` echoes them back exactly.
+        message = "Subject line\n\nBody paragraph one\nBody paragraph two"
+        (Path(temp_git_repo) / "ml.txt").write_text("x")
+        git_add(paths=["ml.txt"], repo_path=temp_git_repo)
+        result = git_commit(message=message, repo_path=temp_git_repo)
+        assert not result.startswith("Error"), result
+        show = subprocess.run(
+            ["git", "log", "-1", "--format=%B"],
+            cwd=temp_git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert show.rstrip() == message
+
+
+class TestGitCheckout:
+    def test_create_and_switch_branch(self, temp_git_repo):
+        result = git_checkout(target="feature/x", create=True, repo_path=temp_git_repo)
+        assert not result.startswith("Error"), result
+        head = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=temp_git_repo, capture_output=True, text=True
+        ).stdout.strip()
+        assert head == "feature/x"
+
+    def test_rejects_injection(self, temp_git_repo):
+        assert "option injection" in git_checkout(target="--orphan", repo_path=temp_git_repo)
+        assert "disallowed characters" in git_checkout(target="a;b", repo_path=temp_git_repo)
+
+    def test_git_checkout_head_ancestor_ref_rejected(self, temp_git_repo):
+        # `HEAD~1` is a legitimate git rev, but `~` is outside SAFE_TARGET_RE's
+        # charset on purpose: ancestor refs are a footgun for an autonomous agent
+        # (detached HEAD), so the charset guard refuses them at the tool layer.
+        result = git_checkout(target="HEAD~1", repo_path=temp_git_repo)
+        assert "disallowed characters" in result
+
+
+class TestGitPush:
+    def test_push_to_local_bare_remote(self, temp_git_repo, tmp_path):
+        bare = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(bare)], cwd=temp_git_repo, check=True, capture_output=True
+        )
+        result = git_push(repo_path=temp_git_repo)
+        assert not result.startswith("Error"), result
+        remote_log = subprocess.run(
+            ["git", "log", "--oneline", "--all"], cwd=str(bare), capture_output=True, text=True
+        ).stdout
+        assert "Initial commit" in remote_log
+
+    def test_rejects_injection(self, temp_git_repo):
+        assert "option injection" in git_push(remote="--mirror", repo_path=temp_git_repo)
+        assert "disallowed characters" in git_push(branch="x y", repo_path=temp_git_repo)
+
+    def test_force_push_is_impossible(self, temp_git_repo):
+        # The headline security property: force-push must be unreachable. Direct
+        # assertions on every force vector (leading-dash option, the force flag
+        # family, the +force refspec, and the colon refspec).
+        assert "option injection" in git_push(branch="--force", repo_path=temp_git_repo)
+        assert "option injection" in git_push(branch="-f", repo_path=temp_git_repo)
+        assert "option injection" in git_push(branch="--force-with-lease", repo_path=temp_git_repo)
+        assert "disallowed characters" in git_push(branch="+main", repo_path=temp_git_repo)
+        assert "disallowed characters" in git_push(branch="HEAD:evil", repo_path=temp_git_repo)
+        assert "option injection" in git_push(remote="--upload-pack=/tmp/x", repo_path=temp_git_repo)
+
+
+class TestWriteToolsMetadata:
+    def test_git_commit_idempotent_flag(self):
+        # Commits are non-idempotent: crash-resume must not silently replay a
+        # commit (would create a duplicate), and the Wave-2 checkpointer keys its
+        # per-call shadow commits on idempotent=False.
+        assert git_commit._tool_def.idempotent is False
+        # Push is also non-idempotent: a replayed push can retrigger CI/webhooks
+        # and, on a force-push bug, mangle remote history.
+        assert git_push._tool_def.idempotent is False
+
+    def test_git_push_destructive_flag(self):
+        # Push mutates remote state irreversibly for collaborators; it must stay
+        # DESTRUCTIVE so autonomous jobs never auto-approve it the way MODERATE
+        # tools are (Trust-DB / explicit intent required).
+        assert git_push._tool_def.risk_level == RiskLevel.DESTRUCTIVE
+
+
+class TestWriteToolsSandboxWired:
+    def test_commit_inside_restricted_sandbox(self, tmp_path):
+        """First sandbox-wired git test: the argv path through sandbox.run."""
+        from koboi.sandbox.restricted import RestrictedProcessBackend
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        subprocess.run(["git", "init"], cwd=str(ws), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "u@t"], cwd=str(ws), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "u"], cwd=str(ws), check=True, capture_output=True)
+        (ws / "f.txt").write_text("x")
+        sandbox = RestrictedProcessBackend(workdir=str(ws), network="deny")
+        deps = {"sandbox": sandbox}
+        assert not git_add(repo_path=str(ws), _deps=deps).startswith("Error")
+        result = git_commit(message="sandboxed commit", repo_path=str(ws), _deps=deps)
+        assert not result.startswith("Error"), result
+        log = subprocess.run(["git", "log", "--oneline"], cwd=str(ws), capture_output=True, text=True).stdout
+        assert "sandboxed commit" in log
+
+    def test_out_of_workdir_repo_blocked(self, tmp_path):
+        from koboi.sandbox.restricted import RestrictedProcessBackend
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        sandbox = RestrictedProcessBackend(workdir=str(ws), network="deny")
+        result = git_commit(message="x", repo_path=str(outside), _deps={"sandbox": sandbox})
+        assert result.startswith("Error")

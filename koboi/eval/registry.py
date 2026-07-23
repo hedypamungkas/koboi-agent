@@ -108,6 +108,12 @@ def register_default_scorers() -> None:
     ScorerRegistry.register("citation_grounding", lambda **kw: CitationGroundingScorer(**kw))
     ScorerRegistry.register("bootstrap_ci", lambda **kw: BootstrapCIScorer(**kw))
 
+    # Coding-harness ground truth: runs the case's real test suite in a
+    # sandbox, gates on exit code (stdlib + sandbox only; no optional dep).
+    from koboi.eval.scorers.test_suite import TestSuiteScorer
+
+    ScorerRegistry.register("test_suite", lambda **kw: TestSuiteScorer(**kw))
+
     # Skill-specific scorers
     try:
         from koboi.eval.scorers.skill_scorer import SkillTriggerAccuracyScorer

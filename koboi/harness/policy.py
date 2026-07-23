@@ -47,8 +47,9 @@ SENSITIVE_PATHS = [
     "/.ssh/",
     "/.aws/credentials",
     "/.gnupg/",
-    "/.env",
-    ".env",
+    # NOTE: ``.env`` is NOT in this substring list -- it gets basename-aware
+    # matching in _env_path_reason so ``.env.example``/``.env.sample`` (which a
+    # coding agent legitimately reads/writes) are not blocked by substring.
     "/credentials",
     "/credentials.json",
     "/etc/shadow",
@@ -56,6 +57,9 @@ SENSITIVE_PATHS = [
     "/id_rsa",
     "/id_ed25519",
 ]
+
+# dotenv template suffixes that carry no secrets -- safe to reference.
+_ENV_TEMPLATE_SUFFIXES = {"example", "sample", "template", "dist"}
 
 COMMAND_DENY_PATTERNS = [
     re.compile(r"rm\s+-rf\s+/"),
@@ -68,21 +72,51 @@ COMMAND_DENY_PATTERNS = [
     re.compile(r"wget\b.*\|\s*bash"),
     re.compile(r"wget\b.*\|\s*sh"),
     re.compile(r":\(\)\{.*\}"),  # fork bomb
-    re.compile(r"chmod\s+-R\s+777\s+/"),
+    # ``_command_deny_reason`` lowercases the command first, so match a lowercased
+    # recursive flag: ``-r``, ``-R``->``-r``, ``-rf``/``-fr``/``-Rf``->``-rf``, and
+    # ``--recursive`` (the old ``-R`` pattern never matched the lowercased ``-r``).
+    re.compile(r"chmod\s+(?:-[a-z]*r[a-z]*\s+|--recursive\s+)777\s+/"),
     re.compile(r"shutdown\b"),
     re.compile(r"reboot\b"),
-    # C2: interpreter-exec / exfil-evasion vectors (defense-in-depth). Inline
-    # interpreters bypass file-based arguments and are the primary prompt-injection
-    # exfil path (python3 -c, perl -e, bash -c, ...); /dev/tcp is bash net-exfil;
-    # base64-decode-into-shell hides payloads. Blocked even with a Trust rule.
+    # C2: exfil-evasion vectors (defense-in-depth). /dev/tcp is bash net-exfil;
+    # base64-decode-into-shell hides payloads. Blocked even with a Trust rule
+    # and NOT relaxable via policy.allow_interpreter_exec.
+    re.compile(r"/dev/tcp"),
+    re.compile(r"base64\b[^|]*\|\s*(?:bash|sh|python)"),
+]
+
+# C2: interpreter-exec vectors (python3 -c, perl -e, bash -c, ...). Inline
+# interpreters bypass file-based arguments and are the primary prompt-injection
+# exfil path -- blocked by default even with a Trust rule. Coding agents can
+# opt out via ``policy.allow_interpreter_exec: true`` (Makefiles/npm scripts
+# routinely spawn ``sh -c``/``python -c``); the other deny patterns above stay
+# unconditional.
+INTERPRETER_DENY_PATTERNS = [
     re.compile(r"\bpython[0-9.]*\s+-c\b"),
     re.compile(r"\bperl\s+-e\b"),
     re.compile(r"\b(?:bash|sh|dash|zsh)\s+-c\b"),
     re.compile(r"\bnode\s+-e\b"),
     re.compile(r"\bruby\s+-e\b"),
-    re.compile(r"/dev/tcp"),
-    re.compile(r"base64\b[^|]*\|\s*(?:bash|sh|python)"),
 ]
+
+# Module-level policy options (mirrors the _SANDBOX_DIR module-global pattern in
+# tools/builtin/filesystem.py): one knob shared by every check_command_blocked
+# call site -- the shell tool, PolicyEngine, and the skills !`cmd` path.
+_ALLOW_INTERPRETER_EXEC = False
+
+
+def set_policy_options(*, allow_interpreter_exec: bool | None = None) -> None:
+    """Configure module-level policy relaxations (called by the facade).
+
+    ``allow_interpreter_exec=True`` lifts ONLY the interpreter inline-code gate
+    (``python -c``/``bash -c``/``-e``/stdin-redirect); every other hardcoded
+    deny (rm -rf /, curl|bash, /dev/tcp, base64-into-shell, sensitive paths)
+    remains unconditional.
+    """
+    global _ALLOW_INTERPRETER_EXEC
+    if allow_interpreter_exec is not None:
+        _ALLOW_INTERPRETER_EXEC = bool(allow_interpreter_exec)
+
 
 # Interpreters that take an inline-code flag. ``-c`` for the first set, ``-e``
 # for the second (perl/ruby accept both). Version-suffixed python binaries
@@ -99,16 +133,35 @@ _STDIN_REDIRECTS = {"<<<", "<<", "<<-", "<"}
 _ROOTISH = {"/", "/*", "/.", ".", ".*"}
 
 
+# Command-substitution bodies: ``$( ... )`` and `` ` ... ` ``. shlex does not
+# expand these (that is a shell feature), so ``wget $(cat .env)`` would tokenize
+# as ``.env)`` and slip past the basename-aware ``.env`` gate. We surface the
+# inner payload as extra tokens so the sensitive-path / interpreter / rm checks
+# see nested exfil. Simple (non-recursive) -- covers the common exfil shapes.
+_SUBST_DOLLAR_RE = re.compile(r"\$\(([^)]*)\)")
+_SUBST_BACKTICK_RE = re.compile(r"`([^`]*)`")
+
+
+def _shlex_split(text: str) -> list[str]:
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.replace(";", " ").replace("|", " ").split()
+
+
 def _split_tokens(command: str) -> list[str]:
     """Tokenize with shlex (which also concatenates ``pass''wd`` -> ``passwd``).
 
-    Falls back to a naive whitespace split on unbalanced quotes -- the same
-    pattern as ``koboi/sandbox/restricted.py:_first_network_binary``.
+    Command substitutions are expanded: the inner payload of ``$(...)`` and
+    backticks is tokenized too, so ``$(cat .env)`` / ``$(rm -rf /)`` cannot hide
+    from the sensitive-path / interpreter / rm checks. Falls back to a naive
+    whitespace split on unbalanced quotes -- the same pattern as
+    ``koboi/sandbox/restricted.py:_first_network_binary``.
     """
-    try:
-        return shlex.split(command)
-    except ValueError:
-        return command.replace(";", " ").replace("|", " ").split()
+    tokens = _shlex_split(command)
+    for inner in _SUBST_DOLLAR_RE.findall(command) + _SUBST_BACKTICK_RE.findall(command):
+        tokens.extend(_shlex_split(inner))
+    return tokens
 
 
 def _interp_kind(base: str) -> str | None:
@@ -126,6 +179,43 @@ def _interp_kind(base: str) -> str | None:
     return None
 
 
+def _env_path_reason(command: str) -> str | None:
+    """Basename-aware ``.env`` gate: block secret dotenv files, allow templates.
+
+    Blocked: any token whose basename is exactly ``.env`` or ``.env.<suffix>``
+    with a non-template suffix (``.env.local``, ``.env.production``). Allowed:
+    ``.env.example`` / ``.env.sample`` / ``.env.template`` / ``.env.dist`` and
+    non-dotenv names like ``.environment``. Globbed ``.env*`` tokens are
+    blocked (they can expand to the real ``.env``).
+
+    A path can be glued to a non-path prefix within a single shell token --
+    curl's ``@file`` (``curl -d @.env`` uploads the file's contents) and
+    ``key=value`` form-field assignments (``-F upload=@config/.env``). Those
+    prefixes are stripped before taking the basename so ``@.env`` /
+    ``file=@.env`` are seen as the ``.env`` they reference, not as an opaque
+    ``@.env`` basename that slips the gate (a real exfil shape).
+    """
+    for raw in _split_tokens(command):
+        tok = raw
+        # Strip a ``key=`` assignment prefix (curl -F field, VAR=path), then a
+        # leading ``@`` (curl "read from file"). Order matters: ``field=@path``.
+        if "=" in tok:
+            tok = tok.split("=", 1)[1]
+        tok = tok.lstrip("@")
+        base = os.path.basename(tok.lower().rstrip("/"))
+        if not base.startswith(".env"):
+            continue
+        if any(ch in base for ch in "*?["):
+            return "Blocked: command references sensitive path (.env glob)"
+        if base == ".env":
+            return "Blocked: command references sensitive path (.env)"
+        if base.startswith(".env."):
+            suffix = base[len(".env.") :]
+            if suffix not in _ENV_TEMPLATE_SUFFIXES:
+                return f"Blocked: command references sensitive path ({base})"
+    return None
+
+
 def _sensitive_path_reason(command: str) -> str | None:
     """Reason string if ``command`` references a sensitive path, else None.
 
@@ -136,6 +226,9 @@ def _sensitive_path_reason(command: str) -> str | None:
     sensitive path -- only globs that name a sensitive directory (``/etc/*``,
     ``/etc/pass*``).
     """
+    reason = _env_path_reason(command)
+    if reason:
+        return reason
     cmd_lower = command.lower()
     for path in SENSITIVE_PATHS:
         if path.lower() in cmd_lower:
@@ -233,9 +326,14 @@ def _command_deny_reason(command: str) -> str | None:
         if match:
             return f"Blocked: command matches deny pattern ({match.group()[:50]})"
     tokens = _split_tokens(command)
-    reason = _interpreter_deny_reason(tokens)
-    if reason:
-        return reason
+    if not _ALLOW_INTERPRETER_EXEC:
+        for pattern in INTERPRETER_DENY_PATTERNS:
+            match = pattern.search(cmd_lower)
+            if match:
+                return f"Blocked: command matches deny pattern ({match.group()[:50]})"
+        reason = _interpreter_deny_reason(tokens)
+        if reason:
+            return reason
     return _rm_deny_reason(tokens)
 
 

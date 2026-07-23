@@ -56,6 +56,33 @@ class TestYAMLLoader:
         cases = await loader.load(yaml_dir)
         assert len(cases) == 2
 
+    async def test_coding_harness_fields_round_trip(self, tmp_path):
+        """Wave 1: repo/base_commit/setup_commands/test_command survive YAML loading."""
+        data = {
+            "cases": [
+                {
+                    "name": "coding",
+                    "user_message": "fix the bug",
+                    "repo": "/path/to/fixture",
+                    "base_commit": "abc123",
+                    "setup_commands": ["pip install -e ."],
+                    "test_command": "python3 -m unittest discover -q",
+                },
+                {"name": "plain", "user_message": "hello"},
+            ]
+        }
+        path = tmp_path / "coding_cases.yaml"
+        path.write_text(yaml.dump(data))
+        cases = await YAMLLoader().load(str(path))
+        assert cases[0].repo == "/path/to/fixture"
+        assert cases[0].base_commit == "abc123"
+        assert cases[0].setup_commands == ["pip install -e ."]
+        assert cases[0].test_command == "python3 -m unittest discover -q"
+        # plain cases default to inert values
+        assert cases[1].repo is None
+        assert cases[1].setup_commands == []
+        assert cases[1].test_command is None
+
     async def test_load_single_dict(self, tmp_path):
         data = {"name": "single", "user_message": "msg"}
         path = tmp_path / "single.yaml"

@@ -40,10 +40,22 @@ class DoomLoopDetector:
         self.config = config or DoomLoopConfig()
         self._history: deque[tuple[str, str]] = deque(maxlen=_MAX_HISTORY)
         self._error_flags: deque[bool] = deque(maxlen=_MAX_HISTORY)
+        # Wave 2 progress signal: a fingerprint (hash) of each call's OUTPUT.
+        # Identical calls whose outputs keep CHANGING are progress (a coding
+        # agent re-running a test suite while fixing failures), not a loop.
+        # None = caller provided no fingerprint -> legacy behavior.
+        self._fingerprints: deque[str | None] = deque(maxlen=_MAX_HISTORY)
 
-    def record(self, tool_name: str, arguments: str, is_error: bool = False) -> None:
+    def record(
+        self,
+        tool_name: str,
+        arguments: str,
+        is_error: bool = False,
+        result_fingerprint: str | None = None,
+    ) -> None:
         self._history.append((tool_name, arguments))
         self._error_flags.append(is_error)
+        self._fingerprints.append(result_fingerprint)
 
     def check(self) -> DoomLoopResult:
         threshold = self.get_effective_threshold()
@@ -67,6 +79,13 @@ class DoomLoopDetector:
     def reset(self) -> None:
         self._history.clear()
         self._error_flags.clear()
+        self._fingerprints.clear()
+
+    @staticmethod
+    def _shows_progress(fingerprints: list[str | None]) -> bool:
+        """True when the window's known output fingerprints are not all identical."""
+        known = [f for f in fingerprints if f is not None]
+        return len(set(known)) > 1
 
     @property
     def history(self) -> list[tuple[str, str]]:
@@ -100,6 +119,10 @@ class DoomLoopDetector:
         last_n = list(self._history)[-threshold:]
         first = last_n[0]
         if all(call == first for call in last_n[1:]):
+            # Identical calls with changing outputs = progress (e.g. a test
+            # suite whose failure count drops between runs), not a loop.
+            if self._shows_progress(list(self._fingerprints)[-threshold:]):
+                return None
             tool_name, arguments = first
             return DoomLoopResult(
                 detected=True,
@@ -157,14 +180,21 @@ class DoomLoopDetector:
         if len(self._history) < threshold:
             return None
 
-        # Count how many times each (tool, args) pair appears with errors
+        # Count how many times each (tool, args) pair appears with errors,
+        # tracking each pair's output fingerprints for the progress check.
         error_counts: dict[tuple[str, str], int] = {}
-        for _i, (call, is_err) in enumerate(zip(self._history, self._error_flags, strict=False)):
+        error_fps: dict[tuple[str, str], list[str | None]] = {}
+        for call, is_err, fp in zip(self._history, self._error_flags, self._fingerprints, strict=False):
             if is_err:
                 error_counts[call] = error_counts.get(call, 0) + 1
+                error_fps.setdefault(call, []).append(fp)
 
         for (tool_name, arguments), count in error_counts.items():
             if count >= threshold:
+                # Same call failing with CHANGING output = the agent is making
+                # progress between attempts (editing code, rerunning tests).
+                if self._shows_progress(error_fps.get((tool_name, arguments), [])):
+                    continue
                 return DoomLoopResult(
                     detected=True,
                     loop_type="error_retry",

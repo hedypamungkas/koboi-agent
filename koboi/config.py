@@ -825,6 +825,7 @@ class ConfigBuilder:
         resume_on_startup: bool | None = None,
         timeout_seconds: float | None = None,
         ttl_seconds: float | None = None,
+        shell_allowlist: list[str] | None = None,
     ) -> ConfigBuilder:
         section = self._data.setdefault("jobs", {})
         for key, val in {
@@ -836,6 +837,7 @@ class ConfigBuilder:
             "resume_on_startup": resume_on_startup,
             "timeout_seconds": timeout_seconds,
             "ttl_seconds": ttl_seconds,
+            "shell_allowlist": shell_allowlist,
         }.items():
             if val is not None:
                 section[key] = val

@@ -144,6 +144,11 @@ class SWEBenchLoader(DatasetLoader):
             expected_answer=str(patch) if patch else None,
             max_iterations=30,
             tags=["swe-bench", "coding"],
+            # Coding-harness fields: dataset `repo` is "owner/name"; per-instance
+            # test specs (test_command) are out of scope here. metadata keys are
+            # kept for back-compat with existing consumers.
+            repo=f"https://github.com/{repo}.git" if repo != "unknown" else None,
+            base_commit=base_commit or None,
             metadata={
                 "repo": repo,
                 "base_commit": base_commit,

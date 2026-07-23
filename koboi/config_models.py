@@ -17,6 +17,74 @@ def _warn_unknown_keys(data: dict, model: type[BaseModel], path: str = "") -> No
             _logger.warning("Unknown config key '%s' will be ignored (typo?)", dotted)
 
 
+def _reject_unknown_keys(model: type[BaseModel], data: object, hints: dict[str, str] | None = None) -> None:
+    """Fail-closed on unknown config keys (issue #79).
+
+    ``extra='ignore'`` silently drops unrecognized keys, so a typo like
+    ``github.tokin`` or ``max_lifetime_secnds`` would let the feature fail
+    opaquely at runtime (e.g. an empty GitHub token) with no load-time hint.
+    Raising here matches ``SandboxConfig._warn_unknown_sandbox_keys``: a typo'd
+    key is a config error the operator should fix immediately, not a silent no-op.
+    """
+    if not isinstance(data, dict):
+        return
+    known = set(model.model_fields.keys())
+    unknown = set(data.keys()) - known
+    if not unknown:
+        return
+    err_msg = f"Unknown {model.__name__} config key(s) {sorted(unknown)} (typo?). Known keys: {sorted(known)}."
+    if hints:
+        for typo, suggestion in hints.items():
+            if typo in unknown:
+                err_msg += f" Did you mean {suggestion!r}?"
+    raise ValueError(err_msg)
+
+
+class _ParallelToolsShape(BaseModel):
+    """Field-name shape for ``agent.parallel_tools`` (used only for typo checking)."""
+
+    model_config = {"extra": "ignore"}
+    enabled: bool = False
+    max_concurrency: int = 4
+
+
+class _TokenPricesShape(BaseModel):
+    """Field-name shape for ``agent.token_prices`` (used only for typo checking)."""
+
+    model_config = {"extra": "ignore"}
+    input_per_1k: float = 0.0
+    output_per_1k: float = 0.0
+
+
+class BackgroundShellConfig(BaseModel):
+    """Opt-in background shell processes (Wave 4; default off).
+
+    Unlike ``run_shell`` (one bounded, approval-gated invocation), a started
+    process runs OUTSIDE the tool-execution pipeline for its whole lifetime --
+    only submit/check/kill are gated. ``max_lifetime_seconds`` is the mitigating
+    cap. See koboi/harness/background_shell.py.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    max_lifetime_seconds: float = Field(default=1800.0, gt=0)
+    max_concurrent: int = Field(default=4, ge=1)
+    output_buffer_chars: int = Field(default=20000, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unknown_keys_(cls, data: object) -> object:
+        # Issue #79 parity with SandboxConfig: typo'd keys raise instead of being
+        # silently dropped by extra='ignore'.
+        _reject_unknown_keys(
+            cls,
+            data,
+            hints={"max_lifetime_secnds": "max_lifetime_seconds", "max_concurent": "max_concurrent"},
+        )
+        return data
+
+
 class AgentConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
@@ -24,6 +92,18 @@ class AgentConfig(BaseModel):
     description: str = ""
     system_prompt: str = ""
     max_iterations: int = Field(default=10, ge=1)
+    # Wave 2: per-run budget ceiling. None = unbounded (prior behavior). With
+    # self_healing.graceful_max_iter the run degrades to a summary instead of
+    # raising AgentBudgetExceededError. token_prices (per-1k USD) drives the
+    # max_cost_usd math; defaults mirror eval CostScorer.
+    max_total_tokens: int | None = Field(default=None, ge=1)
+    max_cost_usd: float | None = Field(default=None, gt=0)
+    token_prices: dict[str, float] | None = None
+    # Wave 3: opt-in concurrent execution of all-read-only tool batches
+    # ({enabled: bool, max_concurrency: int}); non-stream path only.
+    parallel_tools: dict | None = None
+    # Wave 4: opt-in submit/check/kill of long-running background shell processes.
+    background_shell: BackgroundShellConfig = Field(default_factory=BackgroundShellConfig)
     mode: str = "chat"
     theme: str = "koboi-dark"
     # JSON Schema dict; when set, the agent requests provider-enforced structured
@@ -37,6 +117,18 @@ class AgentConfig(BaseModel):
         if not v:
             raise ValueError("agent.name is required")
         return v
+
+    @model_validator(mode="after")
+    def _reject_unknown_dict_keys(self):
+        # The dict-shaped knobs (parallel_tools, token_prices) are read by the
+        # runtime via raw-dict .get(), so a typo'd inner key (max_concurency,
+        # imput_per_1k) would silently fall back to the default with no hint.
+        # Surface them at load (issue #79 parity for dict-valued fields).
+        if isinstance(self.parallel_tools, dict):
+            _reject_unknown_keys(_ParallelToolsShape, self.parallel_tools, hints={"max_concurency": "max_concurrency"})
+        if isinstance(self.token_prices, dict):
+            _reject_unknown_keys(_TokenPricesShape, self.token_prices)
+        return self
 
 
 class ModeConfig(BaseModel):
@@ -117,6 +209,11 @@ class ContextConfig(BaseModel):
     # response/tool result can't push an over-budget payload before the next
     # iteration trims. Default 0 preserves prior behavior.
     safety_margin: int = Field(default=0, ge=0)
+    # Wave 3 `strategy: coding` knobs -- tool-result body eviction: bodies
+    # under evict_min_chars are never stubbed; keep_newest_per_key results per
+    # (tool, path) identity stay verbatim.
+    evict_min_chars: int | None = Field(default=None, ge=0)
+    keep_newest_per_key: int | None = Field(default=None, ge=1)
 
 
 class RagConfig(BaseModel):
@@ -281,6 +378,11 @@ class PolicyConfig(BaseModel):
     model_config = {"extra": "ignore"}
 
     rules: list[PolicyRuleConfig] = Field(default_factory=list)
+    # Wave 2: lift ONLY the interpreter inline-code gate (python -c / bash -c /
+    # -e / stdin-redirect) for coding agents whose builds legitimately spawn
+    # them (Makefiles, npm scripts). All other hardcoded denies stay
+    # unconditional. Default off.
+    allow_interpreter_exec: bool = False
 
 
 class MemoryRetentionConfig(BaseModel):
@@ -309,6 +411,11 @@ class ProactiveMemoryConfig(BaseModel):
     top_k: int = Field(default=4, ge=1)  # facts injected per turn (C)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)  # cosine floor (C)
     max_facts: int = Field(default=200, ge=1)  # cap the embedded KV set (C)
+    # Wave 4: anchor the KV store to <sandbox workdir>/.koboi/memory.json (instead
+    # of the global default) and fold the core block into that same file so
+    # conventions survive across sessions on the same repo, not just within one
+    # session_id. Orthogonal to memory.owner (tenant tag) -- don't conflate them.
+    repo_scoped: bool = False
 
 
 class MemoryConfig(BaseModel):
@@ -476,6 +583,30 @@ class PeersConfig(BaseModel):
     )
 
 
+class GithubConfig(BaseModel):
+    """GitHub PR tooling configuration (opt-in; inert by default).
+
+    In-process httpx client (not a subprocess) -- see koboi/tools/builtin/github.py
+    for why the token must never ride subprocess env (GITHUB_TOKEN is stripped by
+    build_safe_env's secret blocklist).
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    token: str = ""
+    api_base: str = "https://api.github.com"
+    timeout: int = Field(default=15, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unknown_keys_(cls, data: object) -> object:
+        # Issue #79 parity: a misspelled token key (``tokin``) would otherwise
+        # leave the token empty and fail opaquely at runtime with no load-time hint.
+        _reject_unknown_keys(cls, data, hints={"tokin": "token", "api_url": "api_base"})
+        return data
+
+
 class RlimitsConfig(BaseModel):
     """POSIX resource limits applied to restricted sandbox subprocesses.
 
@@ -511,11 +642,26 @@ class SandboxConfig(BaseModel):
     # Per-session workdir is seeded as a git repo when true (read at pool.py:194).
     git_init: bool = False
     network_binaries: list[str] = Field(default_factory=list)
+    # Wave 3 ``network: allowlist`` tier: host globs a scanned network binary
+    # (deny set + pip/npm/git) may reference. SOFT/intent-limiting -- it
+    # constrains hosts written in the command, not what a tool resolves.
+    network_allowlist: list[str] = Field(default_factory=list)
     safe_path: list[str] = Field(default_factory=list)
     env_passthrough: bool = False
     rlimits: RlimitsConfig | None = None
     timeout: float = Field(default=30.0, gt=0)
     max_output: int = Field(default=10000, ge=1)
+
+    @field_validator("network")
+    @classmethod
+    def _validate_network(cls, v: str) -> str:
+        # Fail-closed (Wave 3): the backend treats any non-"deny" string as
+        # allow, so a typo like ``alowlist`` would silently open the network
+        # wide. Raise on unknown values instead.
+        allowed = {"allow", "deny", "allowlist"}
+        if v not in allowed:
+            raise ValueError(f"sandbox.network must be one of {sorted(allowed)}; got {v!r}")
+        return v
 
     @field_validator("network_isolation")
     @classmethod
@@ -550,6 +696,28 @@ class SandboxConfig(BaseModel):
         return data
 
 
+class JournalCheckpointConfig(BaseModel):
+    """``journal.checkpoint`` sub-section (Wave 2) -- shadow-repo tree checkpoints.
+
+    When enabled, every mutating (non-idempotent) tool call commits the sandbox
+    workdir into a shadow git repo (``<workdir>/.koboi-checkpoint/``) keyed to
+    the journal step, and crash resume rolls back the interrupted call's
+    partial effects. Requires the journal + a resolvable sandbox workdir.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = True
+    git_timeout: float = Field(default=60.0, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unknown_keys_(cls, data: object) -> object:
+        # Issue #79 parity: ``git_timout`` would silently fall back to the 60s default.
+        _reject_unknown_keys(cls, data, hints={"git_timout": "git_timeout"})
+        return data
+
+
 class JournalConfig(BaseModel):
     """Top-level ``journal:`` section -- step journal + resume (P2-A).
 
@@ -562,6 +730,10 @@ class JournalConfig(BaseModel):
 
     enabled: bool = True
     record_tool_calls: bool = True
+    # Wave 2: opt-in workdir checkpoints -- ``checkpoint: true`` or a
+    # ``{enabled, git_timeout}`` mapping. Default off (a baseline git commit of
+    # an arbitrary workdir is not a zero-cost surprise).
+    checkpoint: bool | JournalCheckpointConfig = False
 
 
 class ServerConfig(BaseModel):
@@ -638,6 +810,10 @@ class JobsConfig(BaseModel):
     timeout_seconds: float = Field(default=1800.0, gt=0)
     ttl_seconds: float = Field(default=86400.0, gt=0)
     webhooks: list[JobWebhookConfig] = Field(default_factory=list)
+    # Wave 2: command globs auto-approved for run_shell in autonomous jobs
+    # (e.g. ["pytest*", "npm test*", "git commit*"]). Operator-configured;
+    # hardcoded policy denies always win. Empty = prior deny-by-default.
+    shell_allowlist: list[str] = Field(default_factory=list)
 
 
 class CommandHookConfig(BaseModel):
@@ -746,6 +922,7 @@ class KoboiConfig(BaseModel):
     media: MediaConfig = Field(default_factory=MediaConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
+    github: GithubConfig = Field(default_factory=GithubConfig)
     self_healing: SelfHealingConfig = Field(default_factory=SelfHealingConfig)
     handover: dict = Field(default_factory=dict)  # handover.detection / handover.digest / handover.webhooks
     # Pass-through sections read at runtime via ``config.get(<key>, ...)`` but not

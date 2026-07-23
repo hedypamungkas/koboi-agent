@@ -1094,6 +1094,7 @@ class TestResumeOnStartupPending:
             workflow_ref=None,
             workflow_store=None,
             replay_mode=None,
+            shell_allowlist=None,
         ):
             calls.append((job_id, resume))
 

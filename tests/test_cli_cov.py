@@ -415,12 +415,14 @@ class TestEvalRun:
         assert row_type_name in captured.err
 
     def test_eval_factory_systemexit_propagates(self, tmp_path, capsys):
-        # Real EvalRunner drives the harness_factory; a failing from_config makes
-        # factory() print + raise SystemExit, which cmd_eval re-raises (314-318, 325).
+        # Real EvalRunner drives the harness_factory; a failing from_dict (Wave 1:
+        # the factory builds from a per-case config dict so it can anchor
+        # sandbox.workdir at the workspace) makes factory() print + raise
+        # SystemExit, which cmd_eval re-raises.
         cases_file = tmp_path / "cases.yaml"
         cases_file.write_text(yaml.dump({"cases": [{"name": "c1", "user_message": "hi"}]}))
         cfg = _write_cfg(tmp_path)
-        with patch("koboi.facade.KoboiAgent.from_config", side_effect=RuntimeError("no key")):
+        with patch("koboi.facade.KoboiAgent.from_dict", side_effect=RuntimeError("no key")):
             with pytest.raises(SystemExit):
                 cmd_eval(cfg, str(cases_file))
         assert "Error creating agent for eval" in capsys.readouterr().err

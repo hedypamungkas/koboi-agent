@@ -32,6 +32,15 @@ class BaseSandbox(ABC):
 
     name: str = "base"
 
+    @property
+    def workdir(self) -> str | None:
+        """The containment root, when the backend has one (Wave 2).
+
+        ``None`` for backends with no anchored directory (plain passthrough).
+        Used by the facade to anchor the workdir checkpointer.
+        """
+        return None
+
     @abstractmethod
     def run(
         self,

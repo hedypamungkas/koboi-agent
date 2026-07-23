@@ -18,6 +18,7 @@ from koboi.events import (
 )
 from koboi.exceptions import (
     AgentAbortedError,
+    AgentBudgetExceededError,
     AgentGuardrailError,
     AgentHandoverError,
     AgentMaxIterationsError,
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from koboi.journal import StepJournal
     from koboi.trust import TrustStore
     from koboi.proactive_memory import ProactiveMemory
+    from koboi.checkpoint import WorkdirCheckpointer
 
 _log = _logging.getLogger("koboi.loop")
 
@@ -83,6 +85,19 @@ def _langfuse_trace_id(hooks: HookChain | None) -> str:
     return (getattr(lf, "_trace_id", "") or "") if lf else ""
 
 
+# Wave 2 budget: default per-1k-token prices for the cost ceiling. Same
+# constants as eval CostScorer (the only pricing in the codebase); override
+# per config via agent.token_prices.
+_DEFAULT_TOKEN_PRICES = {
+    "input_per_1k": 0.005,
+    "output_per_1k": 0.015,
+    # Reasoning/thinking tokens (o1-style, Anthropic thinking) are typically
+    # completion-priced -- default to the output rate so the cost ceiling does
+    # not silently under-count reasoning-heavy runs.
+    "reasoning_per_1k": 0.015,
+}
+
+
 class AgentCore:
     """Core agent with async loop and built-in hook chain."""
 
@@ -92,6 +107,10 @@ class AgentCore:
         memory: ConversationMemory | None = None,
         tools: ToolRegistry | None = None,
         max_iterations: int = 10,
+        max_total_tokens: int | None = None,
+        max_cost_usd: float | None = None,
+        token_prices: dict | None = None,
+        parallel_tools_config: dict | None = None,
         empty_response_reask_limit: int = 1,
         graceful_max_iter: bool = False,
         self_consistency_config: dict | None = None,
@@ -110,6 +129,7 @@ class AgentCore:
         hook_chain: HookChain | None = None,
         mode_manager: ModeManager | None = None,
         journal: StepJournal | None = None,
+        checkpointer: WorkdirCheckpointer | None = None,
         trust_db: TrustStore | None = None,
         output_schema: dict | None = None,
         force_response_format_with_tools: bool = False,
@@ -123,6 +143,17 @@ class AgentCore:
         self.memory = memory if memory is not None else ConversationMemory(logger=logger, system_prompt=system_prompt)
         self.tools = tools if tools is not None else ToolRegistry()
         self.max_iterations = max_iterations
+        # Wave 2: per-run token/cost ceiling (None = unbounded, prior behavior).
+        # Checked at each iteration top -- stops STARTING new iterations once
+        # the accumulated usage crosses a limit; a completed answer still returns.
+        self.max_total_tokens = max_total_tokens
+        self.max_cost_usd = max_cost_usd
+        self.token_prices = {**_DEFAULT_TOKEN_PRICES, **(token_prices or {})}
+        # Wave 3: opt-in concurrent execution of all-read-only tool batches
+        # (agent.parallel_tools). Non-stream path only; default off.
+        _pt = parallel_tools_config or {}
+        self._parallel_enabled = bool(_pt.get("enabled", False))
+        self._parallel_max_concurrency = max(1, int(_pt.get("max_concurrency", 4)))
         # Self-healing P0-C: bounded re-ask budget for complete-but-empty responses
         # (default 1 = default-ON; 0 disables). An empty answer is never useful.
         self.empty_response_reask_limit = empty_response_reask_limit
@@ -158,6 +189,9 @@ class AgentCore:
         self.hooks = hook_chain or HookChain()
         self.mode_manager = mode_manager
         self.journal = journal
+        # Wave 2: WorkdirCheckpointer | None -- shadow-repo tree checkpoint per
+        # mutating tool call (journal.checkpoint); enables safe crash-resume.
+        self.checkpointer = checkpointer
         self.trust_db = trust_db
         # JSON Schema dict (provider-agnostic) for structured final output, or None.
         self.response_schema = output_schema
@@ -258,7 +292,10 @@ class AgentCore:
             # Authoritative compaction signal: did manage() actually trim?
             # Stamped onto POST_COMPACT metadata so persistence hooks (e.g.
             # ReadBeforeWriteResetHook) only act on a real trim, not every iter.
-            self._last_compacted = len(messages) < pre
+            # Wave 3: body-only eviction (coding strategy) keeps the COUNT
+            # constant -- OR in the manager's honest signal so POST_COMPACT
+            # hooks (ReadBeforeWriteResetHook) still fire on real compaction.
+            self._last_compacted = len(messages) < pre or getattr(self.context_manager, "last_modified", False)
 
         # C/B: proactive long-term memory — ephemerally append recalled facts
         # (and the core block) to the system message AFTER compaction so they
@@ -680,9 +717,70 @@ class AgentCore:
         messages = await self._augment_llm(messages)
         return messages
 
-    def _update_usage(self, response: AgentResponse, total_usage: TokenUsage | None) -> TokenUsage | None:
+    def _budget_exceeded_info(self, total_usage: TokenUsage | None) -> dict | None:
+        """Return budget metadata when the run crossed a token/cost ceiling, else None.
+
+        Spent cost = prompt*input_price + completion*output_price (per 1k),
+        using agent.token_prices (defaults mirror eval CostScorer).
+        """
+        if total_usage is None or (self.max_total_tokens is None and self.max_cost_usd is None):
+            return None
+        spent_tokens = total_usage.total_tokens
+        reasoning_per_1k = self.token_prices.get("reasoning_per_1k", self.token_prices["output_per_1k"])
+        spent_usd = (
+            total_usage.prompt_tokens * self.token_prices["input_per_1k"]
+            + total_usage.completion_tokens * self.token_prices["output_per_1k"]
+            + total_usage.reasoning_tokens * reasoning_per_1k
+        ) / 1000.0
+        limit = None
+        if self.max_total_tokens is not None and spent_tokens >= self.max_total_tokens:
+            limit = f"max_total_tokens={self.max_total_tokens}"
+        elif self.max_cost_usd is not None and spent_usd >= self.max_cost_usd:
+            limit = f"max_cost_usd={self.max_cost_usd}"
+        if limit is None:
+            return None
+        return {
+            "budget_limit": limit,
+            "budget_spent_tokens": spent_tokens,
+            "budget_spent_usd": round(spent_usd, 6),
+        }
+
+    def _update_usage(
+        self,
+        response: AgentResponse,
+        total_usage: TokenUsage | None,
+        *,
+        estimated_prompt_tokens: int | None = None,
+    ) -> TokenUsage | None:
         """Update token usage from response. Returns updated total_usage."""
         if not response.usage:
+            # Provider returned no usage (some streaming providers / proxies). If a
+            # budget ceiling is configured, fall back to a content-length estimate
+            # so the ceiling still trips -- a silently-disabled ceiling is worse
+            # than an imprecise estimate. Runs without a budget are unaffected.
+            # Prompt (input) tokens dominate a coding turn's cost, so estimate BOTH
+            # sides: completion from the response content, prompt from the current
+            # message list passed by the caller (I-2 -- counting completion-only left
+            # the ceiling ~10x too high for usage-omitting providers).
+            if self.max_total_tokens is not None or self.max_cost_usd is not None:
+                from koboi.tokens import estimate_tokens
+
+                content = response.content
+                if isinstance(content, list):
+                    content = " ".join(c.get("text", "") if isinstance(c, dict) else str(c) for c in content)
+                est_completion = estimate_tokens([{"role": "assistant", "content": content or ""}])
+                est_prompt = int(estimated_prompt_tokens or self._last_prompt_tokens or 0)
+                if total_usage is None:
+                    total_usage = TokenUsage()
+                total_usage.completion_tokens += est_completion
+                total_usage.prompt_tokens += est_prompt
+                _log.warning(
+                    "budget ceiling configured but provider returned no usage; using estimate of "
+                    "%d prompt + %d completion tokens (imprecise -- do not rely on the ceiling for "
+                    "usage-omitting providers)",
+                    est_prompt,
+                    est_completion,
+                )
             return total_usage
         self._last_prompt_tokens = response.usage.prompt_tokens
         if self.context_manager:
@@ -713,7 +811,128 @@ class AgentCore:
             user_message = await self._augment_memory(user_message)
         self.memory.add_user_message(user_message)
         tool_defs = self.tools.get_definitions() or None
+        # Wave 2: baseline the shadow checkpoint repo once per run (idempotent;
+        # never re-baselines an existing shadow). Off-thread: a first `git add -A`
+        # over a large tree must not block the event loop.
+        if self.checkpointer is not None:
+            await asyncio.to_thread(self.checkpointer.ensure)
         return user_message, tool_defs, _time.monotonic()
+
+    def _parallel_batch_eligible(self, tool_calls: list[ToolCall]) -> bool:
+        """All-or-nothing gate for concurrent execution (Wave 3).
+
+        Every call must be read-only + SAFE + idempotent -- these bypass
+        approval prompting under every shipped handler default, never
+        checkpoint, and have no ordering-dependent side effects beyond the
+        deferred memory writes. Mixed batches stay fully sequential.
+        """
+        if not self._parallel_enabled or len(tool_calls) < 2:
+            return False
+        from koboi.modes import is_read_only_tool
+        from koboi.types import RiskLevel
+
+        for tc in tool_calls:
+            td = self.tools.get_definition(tc.name)
+            if td is None or not td.idempotent:
+                return False
+            if (self.tools.get_risk_level(tc.name) or RiskLevel.SAFE) != RiskLevel.SAFE:
+                return False
+            if not is_read_only_tool(tc.name):
+                return False
+        return True
+
+    async def _execute_tool_batch(self, tool_calls: list[ToolCall], iteration: int) -> list:
+        """Execute a tool-call batch; concurrently when eligible (Wave 3).
+
+        Both paths collect each call's outcome (result or captured exception)
+        BEFORE any checkpoint/recording, so a failure on a LATER call can never
+        discard an EARLIER mutating call's shadow commit (I-1). ORDERED recording:
+        all tool results in original call order, then all hook inject_messages
+        (completion-order memory writes would break Anthropic tool_result pairing
+        and replay determinism). Any raised Exception is synthesized into an
+        errored result (an unanswered tool_call_id would 400 the next LLM call);
+        non-Exception BaseExceptions / AgentHandoverError re-raise AFTER the
+        writes and per-call checkpoints, so earlier state is still persisted.
+        """
+        from koboi.loop_pipeline import ToolPipelineResult
+
+        if self._parallel_batch_eligible(tool_calls):
+            sem = asyncio.Semaphore(self._parallel_max_concurrency)
+
+            async def _one(tc: ToolCall):
+                async with sem:
+                    return await self._pipeline.execute_tool_call(tc, iteration=iteration, defer_record=True)
+
+            raw = await asyncio.gather(*(_one(tc) for tc in tool_calls), return_exceptions=True)
+        else:
+            # Sequential path: collect per-call so a raise on call N can't abort
+            # the comprehension and skip checkpoints for calls 0..N-1 (I-1).
+            # defer_record=True unifies recording with the concurrent path (no
+            # completion-order reordering risk since calls run one-at-a-time).
+            raw = []
+            for tc in tool_calls:
+                try:
+                    raw.append(await self._pipeline.execute_tool_call(tc, iteration=iteration, defer_record=True))
+                except AgentHandoverError as exc:
+                    raw.append(exc)
+                except Exception as exc:  # synthesized below; never aborts the batch
+                    raw.append(exc)
+
+        results: list[ToolPipelineResult] = []
+        pending_raise: BaseException | None = None
+        for tc, r in zip(tool_calls, raw, strict=True):
+            if isinstance(r, ToolPipelineResult):
+                results.append(r)
+                continue
+            if isinstance(r, BaseException) and not isinstance(r, Exception):
+                pending_raise = pending_raise or r  # KeyboardInterrupt / SystemExit
+            elif isinstance(r, AgentHandoverError):
+                pending_raise = pending_raise or r  # unreachable via the predicate; fail correct
+            results.append(
+                ToolPipelineResult(
+                    tool_call_id=tc.id,
+                    tool_name=tc.name,
+                    result=f"Error executing '{tc.name}': {r}",
+                    errored=True,
+                    error_kind="execution_error",
+                )
+            )
+        for pr in results:  # ordered recording: results first...
+            self.memory.add_tool_result(pr.tool_call_id, pr.result)
+        for pr in results:  # ...then hook injects, grouped in original call order
+            for msg in pr.injected_context:
+                self.memory.add_context_message(msg, label="hook_inject")
+        # Checkpoint each completed call BEFORE any re-raise, so a handover/abort
+        # triggered by a later call still persists earlier mutating calls' state.
+        # _checkpoint_after_call is a no-op for skipped/idempotent results, so
+        # parallel-eligible (idempotent) batches still never hit the checkpointer.
+        for tc, pr in zip(tool_calls, results, strict=True):
+            await self._checkpoint_after_call(tc, pr, iteration)
+        if pending_raise is not None:
+            raise pending_raise
+        return results
+
+    async def _checkpoint_after_call(self, tc: ToolCall, pr, step_index: int) -> None:
+        """Commit the workdir after an executed mutating tool call (Wave 2).
+
+        Per-CALL (not per-iteration): resume repairs at tool-call granularity,
+        and shadow HEAD must always equal "state after the last call whose
+        result is persisted". Commits even on errored calls (the tool ran;
+        HEAD must reflect the post-call tree) but never on skipped ones
+        (denied/blocked = never executed). Fail-soft via the checkpointer.
+        """
+        if self.checkpointer is None or pr.skipped or pr.idempotent:
+            return
+        label = f"koboi: turn {self._turn_index} step {step_index} {tc.name} ({tc.id})"
+        try:
+            sha = await asyncio.to_thread(self.checkpointer.commit, label)
+        except Exception:
+            # The checkpointer's contract is "a failure must never break the loop";
+            # honor it defensively even for exception types _run() doesn't catch.
+            _log.warning("checkpoint commit raised unexpectedly (ignored)", exc_info=True)
+            sha = None
+        if sha and self.journal:
+            self.journal.stamp_checkpoint(self._turn_index, step_index, sha)
 
     def _store_tool_response_in_memory(self, response: AgentResponse) -> None:
         """Store assistant message with tool call details in conversation memory."""
@@ -845,6 +1064,35 @@ class AgentCore:
         if not missing:
             return
         self._log(f"Resume: re-executing {len(missing)} missing tool call(s)")
+
+        def _is_non_idempotent(tc_dict: dict) -> bool:
+            fn = tc_dict.get("function", {}) if isinstance(tc_dict, dict) else {}
+            name = fn.get("name", "") if isinstance(fn, dict) else ""
+            td = (
+                self._pipeline.tools.get_definition(name)
+                if getattr(self._pipeline, "tools", None) is not None
+                else None
+            )
+            return td is not None and not td.idempotent
+
+        # Wave 2: an interrupted MUTATING call may have left partial effects in
+        # the workdir. Every completed mutating call committed to the shadow
+        # repo, so shadow HEAD == state after the last persisted call --
+        # restoring removes exactly the interrupted call's partial effects.
+        # Gated on a missing non-idempotent call: an LLM-phase crash must never
+        # reset operator hand-edits. No shadow (feature enabled only after the
+        # crash) -> restore_to_head() is False -> tree untouched, legacy message.
+        restored_sha: str | None = None
+        if self.checkpointer is not None and any(_is_non_idempotent(tc) for tc in missing):
+            try:
+                restored = await asyncio.to_thread(self.checkpointer.restore_to_head)
+            except Exception:
+                _log.warning("checkpoint restore_to_head raised unexpectedly (ignored)", exc_info=True)
+                restored = False
+            if restored:
+                restored_sha = self.checkpointer.head()
+                self._log(f"Resume: workspace rolled back to checkpoint {restored_sha}")
+
         for tc_dict in missing:
             fn = tc_dict.get("function", {}) if isinstance(tc_dict, dict) else {}
             name = fn.get("name", "") if isinstance(fn, dict) else ""
@@ -868,10 +1116,15 @@ class AgentCore:
                     f"Resume: skipping non-idempotent tool '{name}' re-execution "
                     f"(marked idempotent=False); recording synthetic result"
                 )
-                self.memory.add_tool_result(
-                    tc.id,
-                    f"[skipped on resume: non-idempotent tool '{name}'; re-invoke explicitly if needed]",
-                )
+                if restored_sha:
+                    synthetic = (
+                        f"[skipped on resume: non-idempotent tool '{name}'; the workspace was "
+                        f"rolled back to checkpoint {restored_sha[:12]}, so partial effects of "
+                        f"this call were reverted; re-invoke explicitly if needed]"
+                    )
+                else:
+                    synthetic = f"[skipped on resume: non-idempotent tool '{name}'; re-invoke explicitly if needed]"
+                self.memory.add_tool_result(tc.id, synthetic)
                 continue
             await self._pipeline.execute_tool_call(tc, iteration=0)
 
@@ -895,6 +1148,33 @@ class AgentCore:
         self._last_self_consistency = None
 
         for i in range(self.max_iterations):
+            # Wave 2 budget: refuse to START another iteration once the run has
+            # crossed its token/cost ceiling (a completed answer still returns).
+            budget_info = self._budget_exceeded_info(total_usage)
+            if budget_info is not None:
+                self._log(f"Budget exceeded: {budget_info['budget_limit']}")
+                await self._emit(HookEvent.SESSION_END, iteration=i)
+                if self.graceful_max_iter:
+                    output = await self._graceful_max_iter_summary()
+                    output = await self._process_graceful_output(output)
+                    meta = self._run_metadata(resumed=resumed, last_step=i - 1)
+                    meta["budget_degraded"] = True
+                    meta.update(budget_info)
+                    return RunResult(
+                        content=output,
+                        iterations_used=i,
+                        tool_calls_made=tool_calls_made,
+                        pipeline_outcomes=pipeline_outcomes,
+                        token_usage=total_usage,
+                        success=True,
+                        elapsed_seconds=_time.monotonic() - _start,
+                        metadata=meta,
+                    )
+                raise AgentBudgetExceededError(
+                    spent_tokens=budget_info["budget_spent_tokens"],
+                    spent_usd=budget_info["budget_spent_usd"],
+                    limit=budget_info["budget_limit"],
+                )
             messages = await self._prepare_iteration(i)
             self._journal_step(i, status="running")
             tokens = estimate_tokens(messages)
@@ -914,7 +1194,7 @@ class AgentCore:
             # after the N-sample swap, since the canonical carries the summed usage).
             _sc_applies = self._self_consistency_applies(_rf)
             if not _sc_applies:
-                total_usage = self._update_usage(response, total_usage)
+                total_usage = self._update_usage(response, total_usage, estimated_prompt_tokens=tokens)
 
             if response.content and self.skills and self._activate_skill(response.content):
                 self._journal_step(i, status="skill", response=response)
@@ -944,7 +1224,9 @@ class AgentCore:
                 # fan out N samples + pick the majority (before guardrails/reflection).
                 if _sc_applies:
                     response, sc_agreement = await self._self_consistent_sample(messages, tool_defs, _rf, response)
-                    total_usage = self._update_usage(response, total_usage)  # count the summed canonical once
+                    total_usage = self._update_usage(
+                        response, total_usage, estimated_prompt_tokens=tokens
+                    )  # count the summed canonical once
                     self._last_self_consistency = {
                         "n": int(self.self_consistency_config.get("n_samples", 3)),
                         "agreement": round(sc_agreement, 4),
@@ -985,13 +1267,16 @@ class AgentCore:
             if response.tool_calls:
                 self._log(f"LLM requested {len(response.tool_calls)} tool call(s)")
                 self._store_tool_response_in_memory(response)
-                for tc in response.tool_calls:
-                    pr = await self._pipeline.execute_tool_call(tc, iteration=i)
+                prs = await self._execute_tool_batch(response.tool_calls, i)
+                for tc, pr in zip(response.tool_calls, prs, strict=True):
                     # Only count tools that actually executed -- skipped/denied/blocked
                     # tools (rate-limit, approval, policy, mode) must NOT pollute
                     # tool_calls_made (and the derived tools_used) -- eval false positive.
                     if not pr.skipped:
                         tool_calls_made.append(tc)
+                    # Per-call checkpointing happens inside _execute_tool_batch
+                    # (before any re-raise) so a failure on a later call can't
+                    # discard an earlier mutating call's shadow commit (I-1).
                     pipeline_outcomes.append(
                         {
                             "tool_call_id": tc.id,
@@ -1055,6 +1340,11 @@ class AgentCore:
                 self.journal.mark_interrupted(open_rows)
             self._turn_index = self.journal.turn_index
         await self._repair_interrupted_turn()
+        # Wave 2: (re)ensure the shadow baseline AFTER repair -- restore must
+        # see the pre-crash baseline, and a missing baseline must stay missing
+        # until the repair decision is made.
+        if self.checkpointer is not None:
+            await asyncio.to_thread(self.checkpointer.ensure)
         tool_defs = self.tools.get_definitions() or None
         return await self._run_loop(tool_defs, _time.monotonic(), resumed=True)
 
@@ -1097,8 +1387,30 @@ class AgentCore:
         # runs on the complete response, so a blocked output leaks. With no output
         # guardrail, stream live (current behavior; no latency cost).
         should_buffer = bool(self.output_guardrails)
+        total_usage: TokenUsage | None = None
 
         for i in range(self.max_iterations):
+            # Wave 2 budget: parity with the non-stream loop -- stop before
+            # starting an iteration once the token/cost ceiling is crossed.
+            budget_info = self._budget_exceeded_info(total_usage)
+            if budget_info is not None:
+                self._log(f"Budget exceeded: {budget_info['budget_limit']}")
+                await self._emit(HookEvent.SESSION_END, iteration=i)
+                if self.graceful_max_iter:
+                    output, ev = await self._graceful_stream_complete(
+                        _stream_tools_used, _start, i, {"budget_degraded": True, **budget_info}
+                    )
+                    yield TextDeltaEvent(content=output)
+                    yield ev
+                    return
+                yield ErrorEvent(
+                    error=AgentBudgetExceededError(
+                        spent_tokens=budget_info["budget_spent_tokens"],
+                        spent_usd=budget_info["budget_spent_usd"],
+                        limit=budget_info["budget_limit"],
+                    )
+                )
+                return
             messages = await self._prepare_iteration(i)
             self._journal_step(i, status="running")
             tokens = estimate_tokens(messages)
@@ -1122,10 +1434,10 @@ class AgentCore:
 
             await self._emit(HookEvent.POST_LLM_CALL, iteration=i, llm_response=final_response)
 
-            if final_response and final_response.usage:
-                self._last_prompt_tokens = final_response.usage.prompt_tokens
-                if self.context_manager:
-                    self.context_manager.last_actual_tokens = final_response.usage.prompt_tokens
+            if final_response is not None:
+                # Also accumulates total_usage for the budget ceiling (Wave 2);
+                # keeps the _last_prompt_tokens / context-manager side effects.
+                total_usage = self._update_usage(final_response, total_usage, estimated_prompt_tokens=tokens)
 
             if final_response is None:
                 for d in delta_buffer:
@@ -1211,6 +1523,7 @@ class AgentCore:
                     # Mirror the non-streaming path: a skipped tool is not "used".
                     if not pipeline_result.skipped:
                         _stream_tools_used.append(tc.name)
+                    await self._checkpoint_after_call(tc, pipeline_result, i)
                     yield ToolResultEvent(
                         tool_name=tc.name,
                         tool_call_id=tc.id,
@@ -1225,28 +1538,36 @@ class AgentCore:
         # Self-healing P3: graceful degrade in streaming -- summarize partial progress
         # instead of yielding an AgentMaxIterationsError ErrorEvent (opt-in).
         if self.graceful_max_iter:
-            output = await self._graceful_max_iter_summary()
-            output = await self._process_graceful_output(output)
-            unique_tools = list(dict.fromkeys(_stream_tools_used))
-            trace_id = ""
-            if self.hooks:
-                lf_hook = self.hooks.find_hook(lambda h: type(h).__name__ == "LangfuseTracingHook")
-                if lf_hook:
-                    trace_id = getattr(lf_hook, "_trace_id", "") or ""
-            meta = self._run_metadata(resumed=False, last_step=self.max_iterations - 1)
-            meta["max_iter_degraded"] = True
-            yield TextDeltaEvent(content=output)
-            yield CompleteEvent(
-                response=AgentResponse(content=output),
-                content=output,
-                elapsed_seconds=_time.monotonic() - _start,
-                iterations_used=self.max_iterations,
-                tools_used=unique_tools,
-                trace_id=trace_id,
-                metadata=meta,
+            output, ev = await self._graceful_stream_complete(
+                _stream_tools_used, _start, self.max_iterations, {"max_iter_degraded": True}
             )
+            yield TextDeltaEvent(content=output)
+            yield ev
             return
         yield ErrorEvent(error=AgentMaxIterationsError(self.max_iterations))
+
+    async def _graceful_stream_complete(
+        self, tools_used: list[str], _start: float, iterations_used: int, meta_extra: dict
+    ) -> tuple[str, CompleteEvent]:
+        """Build the degraded-summary output + CompleteEvent for graceful stream exits.
+
+        Shared by the max-iterations tail and the budget ceiling (Wave 2).
+        """
+        output = await self._graceful_max_iter_summary()
+        output = await self._process_graceful_output(output)
+        unique_tools = list(dict.fromkeys(tools_used))
+        trace_id = _langfuse_trace_id(self.hooks)
+        meta = self._run_metadata(resumed=False, last_step=max(iterations_used - 1, 0))
+        meta.update(meta_extra)
+        return output, CompleteEvent(
+            response=AgentResponse(content=output),
+            content=output,
+            elapsed_seconds=_time.monotonic() - _start,
+            iterations_used=iterations_used,
+            tools_used=unique_tools,
+            trace_id=trace_id,
+            metadata=meta,
+        )
 
     async def chat(self, user_message: str | list) -> RunResult:
         return await self.run(user_message)

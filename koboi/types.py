@@ -64,6 +64,17 @@ class ToolExecOutcome:
     errored: bool = False
     error_kind: str | None = None
 
+    def __post_init__(self) -> None:
+        # Coupling invariant: a failure needs a taxonomy label and vice-versa.
+        # The pipeline reads these two fields independently (loop_pipeline.py),
+        # so an inconsistent outcome (errored=True, error_kind=None) would
+        # propagate verbatim into ToolPipelineResult and downstream self-healing
+        # hooks (FailureClassifierHook). Make the broken state unrepresentable.
+        if self.errored and self.error_kind is None:
+            raise ValueError("ToolExecOutcome.errored=True requires error_kind to be set")
+        if not self.errored and self.error_kind is not None:
+            raise ValueError("ToolExecOutcome.error_kind set but errored=False")
+
 
 @dataclass
 class TokenUsage:
@@ -377,10 +388,29 @@ class EvalCase:
     tool_definitions: list[dict] = field(default_factory=list)
     expected_tool_calls: list[dict] = field(default_factory=list)
     file_attachments: list[str] = field(default_factory=list)
+    # Coding-harness fields (Wave 1): all optional -- None/[] means a plain
+    # (non-coding) case with zero behavior change. When `repo` is set the
+    # EvalRunner materializes a per-case workspace (clone/copy + checkout +
+    # setup) and TestSuiteScorer gates on `test_command`'s exit code.
+    repo: str | None = None
+    base_commit: str | None = None
+    setup_commands: list[str] = field(default_factory=list)
+    test_command: str | None = None
 
     def __post_init__(self):
         if self.max_iterations < 1:
             raise ValueError(f"EvalCase.max_iterations must be >= 1, got {self.max_iterations}")
+        # Cross-field coupling: workspace-materialization fields only apply when
+        # `repo` is set. A case with base_commit / setup_commands but no repo
+        # would silently prepare NO workspace and the TestSuiteScorer would return
+        # N/A=1.0, masking a misconfigured case as a pass. Fail loud instead.
+        # (test_command is intentionally NOT gated -- a scorer can run it against
+        # an externally-provided workspace with no repo.)
+        if self.repo is None:
+            if self.base_commit is not None:
+                raise ValueError("EvalCase.base_commit requires repo to be set")
+            if self.setup_commands:
+                raise ValueError("EvalCase.setup_commands require repo to be set")
 
 
 @dataclass

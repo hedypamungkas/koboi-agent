@@ -103,17 +103,22 @@ class _MemoryStore:
                 return f"Value for '{key}': {self._data[key]}"
             return f"Error: key '{key}' not found"
 
+        # Double-underscore keys are reserved for internal bookkeeping (e.g. the
+        # repo-scoped proactive-memory core block, koboi/proactive_memory.py) --
+        # never surface them through the general-purpose recall listing/search.
+        visible = {k: v for k, v in self._data.items() if not k.startswith("__")}
+
         if query:
             q = query.lower()
-            matches = {k: v for k, v in self._data.items() if q in k.lower() or q in v.lower()}
+            matches = {k: v for k, v in visible.items() if q in k.lower() or q in v.lower()}
             if not matches:
                 return f"No entry found matching '{query}'"
             lines = [f"  {k}: {v[:100]}" for k, v in matches.items()]
             return "\n".join(lines)
 
-        if not self._data:
+        if not visible:
             return "Memory is empty, no data saved yet"
-        lines = [f"  {k}: {v[:100]}" for k, v in list(self._data.items())[:200]]
+        lines = [f"  {k}: {v[:100]}" for k, v in list(visible.items())[:200]]
         return "\n".join(lines)
 
 

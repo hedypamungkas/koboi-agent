@@ -11,10 +11,15 @@ from koboi.tokens import make_tokenizer
 
 
 class TestMakeTokenizer:
-    def test_non_openai_returns_none(self):
-        # Anthropic/Cloudflare/unknown keep the heuristic (no offline encoding).
-        assert make_tokenizer("anthropic", "claude-3") is None
-        assert make_tokenizer("cloudflare", None) is None
+    def test_non_openai_returns_code_calibrated_heuristic(self):
+        # Wave 3: Anthropic/Cloudflare get a conservative chars/2.5 counter
+        # (code tokenizes denser than prose) instead of the old None.
+        for provider in ("anthropic", "cloudflare"):
+            tok = make_tokenizer(provider, "some-model")
+            assert callable(tok)
+            msgs = [{"role": "user", "content": "def add(a, b):\n    return a + b\n" * 20}]
+            assert tok(msgs) > estimate_tokens(msgs)  # conservative vs chars/3
+        # No provider at all -> None (bare chars/3 fallback preserved).
         assert make_tokenizer(None, None) is None
 
     def test_openai_returns_callable(self):
@@ -100,3 +105,33 @@ class TestSafetyMargin:
         mgr.safety_margin = 500
         out = await mgr.manage(msgs, max_tokens=0)
         assert len(out) < len(msgs)
+
+
+class TestDivisorParam:
+    def test_estimate_single_divisor(self):
+        from koboi.tokens import estimate_single
+
+        msg = {"role": "user", "content": "x" * 300}
+        assert estimate_single(msg) == estimate_single(msg, 3)
+        assert estimate_single(msg, 2.5) > estimate_single(msg, 3)
+
+    def test_estimate_tokens_divisor_backcompat(self):
+        msgs = [{"role": "user", "content": "hello world"}]
+        assert estimate_tokens(msgs) == estimate_tokens(msgs, 3)
+
+    async def test_heuristic_tokenizer_compacts_earlier(self):
+        from koboi.tokens import make_tokenizer
+
+        # A payload sized between chars/3 and chars/2.5 estimates: the
+        # code-calibrated tokenizer must trigger compaction, chars/3 must not.
+        body = "y" * 3000  # chars/3 = 1000; chars/2.5 + framing ~ 1220
+        msgs = [{"role": "system", "content": "s"}] + [{"role": "user", "content": body[:300]} for _ in range(10)]
+        budget = estimate_tokens(msgs) + 50  # just above the chars/3 estimate
+
+        mgr_default = TruncationManager(keep_last=2)
+        assert await mgr_default.manage(list(msgs), budget) == msgs  # passthrough
+
+        mgr_code = TruncationManager(keep_last=2)
+        mgr_code.tokenizer = make_tokenizer("anthropic", "claude-x")
+        result = await mgr_code.manage(list(msgs), budget)
+        assert len(result) < len(msgs)  # compacted

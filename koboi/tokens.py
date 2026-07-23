@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import json
 
+# Wave 3: chars-per-token divisor for the CODE-calibrated heuristic. Code
+# tokenizes denser than prose (symbols, indentation, camelCase), so the
+# non-OpenAI provider counter uses ~2.5 chars/token instead of 3 -- a
+# conservative over-estimate that keeps context budgeting safe for coding
+# agents on providers with no offline tokenizer.
+CODE_CHARS_PER_TOKEN = 2.5
 
-def estimate_single(msg: dict) -> int:
+
+def estimate_single(msg: dict, divisor: float = 3) -> int:
     total = 0
     for val in msg.values():
         if isinstance(val, str):
@@ -12,11 +19,11 @@ def estimate_single(msg: dict) -> int:
             total += len(json.dumps(val, ensure_ascii=False))
         elif val:
             total += len(str(val))
-    return max(total // 3, 1)
+    return max(int(total / divisor), 1)
 
 
-def estimate_tokens(messages: list[dict]) -> int:
-    return sum(estimate_single(m) for m in messages)
+def estimate_tokens(messages: list[dict], divisor: float = 3) -> int:
+    return sum(estimate_single(m, divisor) for m in messages)
 
 
 # ---------------------------------------------------------------------------
@@ -47,18 +54,35 @@ def _pick_encoding(model: str | None):
         return None
 
 
+def _heuristic_counter(divisor: float):
+    """A ``messages -> int`` counter using the chars/divisor heuristic + framing."""
+
+    def _count(messages: list[dict]) -> int:
+        total = sum(estimate_single(m, divisor) for m in messages)
+        total += 4 * len(messages)  # per-message framing (role tags / delimiters)
+        return max(total, 1)
+
+    return _count
+
+
 def make_tokenizer(provider: str | None = None, model: str | None = None):
-    """Return a ``messages -> int`` token counter using tiktoken BPE, or None.
+    """Return a ``messages -> int`` token counter for the provider.
 
-    Returns None (so callers fall back to the heuristic) when:
-      * tiktoken is not installed, or
-      * the provider is not OpenAI (no accurate offline encoding available).
+    OpenAI + tiktoken installed -> accurate BPE counter (unchanged).
+    Any OTHER known provider (Anthropic/Cloudflare/...) -> a code-calibrated
+    conservative heuristic (chars/2.5 + framing) instead of the old ``None``:
+    code tokenizes denser than prose, and chars/3 under-estimated non-OpenAI
+    prompts until the first real usage arrived (Wave 3 fidelity fix). The
+    returned counter feeds ``ContextManager._effective_tokens``; the real
+    ``last_actual_tokens`` from API usage still self-corrects after turn 1.
 
-    The returned counter adds a small per-message framing overhead (~4 tokens)
-    to better approximate real API prompt-token counts.
+    Returns None only when no provider is given (callers keep the bare
+    ``estimate_tokens`` chars/3 fallback).
     """
-    if not provider or str(provider).lower() != "openai":
+    if not provider:
         return None
+    if str(provider).lower() != "openai":
+        return _heuristic_counter(CODE_CHARS_PER_TOKEN)
     try:
         import tiktoken  # noqa: F401 -- imported to confirm availability
     except ImportError:

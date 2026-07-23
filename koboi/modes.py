@@ -108,19 +108,39 @@ _READ_ONLY_TOOLS: set[str] = {
     "web_fetch",
     "calculator",
     "delegate_tasks",
+    # Exact names, NOT a "git" prefix: a future git_commit/git_push must not
+    # inherit read-only status.
+    "git_status",
+    "git_log",
+    "git_diff",
+    "repo_map",
+    "github_list_prs",
+    "github_get_pr",
+    "run_typecheck",  # read-only diagnostic (ruff/mypy/pyright on a validated path)
 }
 
 
 def is_read_only_tool(tool_name: str) -> bool:
     """Check if a tool is read-only (safe for CHAT/PLAN modes).
 
-    Exact match, or prefix match for namespaced tools (e.g. ``filesystem.read``).
+    Exact match, or prefix match for namespaced (``filesystem.read``) and
+    snake_case builtin (``read_file``, ``grep_search``) tool names. Without the
+    ``_`` separator no builtin ever matched, so CHAT/PLAN blocked even
+    ``read_file`` -- contradicting the documented behavior.
+
+    The ``prefix + "_"`` rule is intentionally permissive (the short bases
+    ``read``/``list``/``grep``/``glob``/``find`` are what qualify the snake_case
+    builtins), so a HYPOTHETICAL destructive tool whose name starts with a
+    read-only base (``git_diff_apply``) would also match. No such tool is
+    registered today, and ``tests/test_modes.py`` has a registry-snapshot test
+    that fails at CI if any DESTRUCTIVE/MODERATE builtin ever collides -- that
+    test is the durable guard, not this function.
     """
     name_lower = tool_name.lower()
     if name_lower in _READ_ONLY_TOOLS:
         return True
     for prefix in _READ_ONLY_TOOLS:
-        if name_lower.startswith(prefix + "."):
+        if name_lower.startswith(prefix + ".") or name_lower.startswith(prefix + "_"):
             return True
     return False
 

@@ -29,6 +29,7 @@ from koboi.hooks.chain import HookEvent
 if TYPE_CHECKING:
     import threading
 
+    from koboi.checkpoint import WorkdirCheckpointer
     from koboi.context.manager import ContextManager
     from koboi.events import StreamEvent
     from koboi.guardrails.approval import ApprovalHandler
@@ -317,6 +318,15 @@ class KoboiAgent:
                     await _media_backend.close()
                 except Exception as e:  # nosec B110 - best-effort teardown
                     logging.getLogger(__name__).debug("Media backend close failed: %s", e, exc_info=True)
+            # Kill any still-running background shell processes -- these live
+            # entirely outside the tool-execution pipeline once started, so
+            # nothing else reaps them on close (Wave 4).
+            _bg_manager = _media_tools.get_dep("background_shell_manager") if _media_tools is not None else None
+            if _bg_manager is not None:
+                try:
+                    await _bg_manager.kill_all()
+                except Exception as e:  # nosec B110 - best-effort teardown
+                    logging.getLogger(__name__).debug("Background shell kill_all failed: %s", e, exc_info=True)
             await self._core.client.close()
         # Clean up logger
         if self._logger is not None:
@@ -853,6 +863,13 @@ def _build_context(config: Config, logger: AgentLogger, client: Client | None = 
     summarization_truncation = config.get("context", "summarization_truncation")
     if summarization_truncation is not None:
         kwargs["summarization_truncation"] = summarization_truncation
+    # Wave 3: coding-strategy knobs. Gated on the strategy name -- build_context
+    # passes kwargs unfiltered, so other strategies would TypeError on them.
+    if strategy == "coding":
+        for key in ("evict_min_chars", "keep_newest_per_key"):
+            val = config.get("context", key)
+            if val is not None:
+                kwargs[key] = val
 
     mgr = build_context(strategy, logger=logger, client=client, **kwargs)
     if mgr is not None:
@@ -1160,6 +1177,7 @@ class AgentAssembler:
         self.hook_chain: HookChain | None = None
         self.sandbox: BaseSandbox | None = None
         self.journal: StepJournal | None = None
+        self.checkpointer: WorkdirCheckpointer | None = None  # Wave 2: shadow-repo checkpoint (journal.checkpoint)
         # Wave2 #1: proactive_memory is only populated by ``build_proactive_memory()``,
         # but ``build_opt_in_hooks()`` (shared with the orchestration path) reads it
         # unconditionally -- default to None so the attribute always exists.
@@ -1233,6 +1251,49 @@ class AgentAssembler:
             record_tool_calls=record_tool_calls,
         )
         return self.journal
+
+    def _resolve_workdir(self) -> str | None:
+        """Resolve the sandbox workdir, or None if unresolvable.
+
+        Shared by ``build_checkpointer`` and ``build_proactive_memory`` (repo_scoped)
+        -- both need the same "what is the repo root" answer, and neither should
+        silently fall back to the process cwd.
+        """
+        return getattr(self.sandbox, "workdir", None) or self.config.get("sandbox", "workdir", default=None)
+
+    def build_checkpointer(self) -> object:
+        """Build the workdir checkpointer (Wave 2, ``journal.checkpoint``).
+
+        Opt-in. Requires the journal (the sha is stamped onto step rows) and a
+        resolvable sandbox workdir -- silently git-baselining the process cwd
+        would be a surprise, so no workdir means warn + disable. Called after
+        ``build_sandbox()``.
+        """
+        conf = self.config.get("journal", "checkpoint", default=False)
+        enabled = conf if isinstance(conf, bool) else bool((conf or {}).get("enabled", True))
+        if not enabled:
+            self.checkpointer = None
+            return None
+        if self.journal is None:
+            logging.getLogger(__name__).warning(
+                "journal.checkpoint enabled but the journal is unavailable "
+                "(disabled or non-sqlite memory) -- checkpoints disabled"
+            )
+            self.checkpointer = None
+            return None
+        workdir = self._resolve_workdir()
+        if not workdir:
+            logging.getLogger(__name__).warning(
+                "journal.checkpoint enabled but no sandbox workdir is configured -- "
+                "refusing to git-baseline the process cwd; checkpoints disabled"
+            )
+            self.checkpointer = None
+            return None
+        from koboi.checkpoint import WorkdirCheckpointer
+
+        git_timeout = 60.0 if isinstance(conf, bool) else float((conf or {}).get("git_timeout", 60.0))
+        self.checkpointer = WorkdirCheckpointer(str(workdir), git_timeout=git_timeout)
+        return self.checkpointer
 
     def build_tools(self) -> ToolRegistry:
         self.tools = _build_tools(self.config)
@@ -1339,6 +1400,14 @@ class AgentAssembler:
         Constructed only when ``memory.proactive.enabled`` is true. Reuses the
         KV ``_MemoryStore`` (creating one if the memory tool isn't registered)
         and the embedding client (dedicated if configured, else the chat client).
+
+        Wave 4 (``memory.proactive.repo_scoped``): when set, the KV store is
+        re-anchored to ``<workdir>/.koboi/memory.json`` (overwriting the
+        ``memory_store_ref`` dep too, so ``memory_store``/``memory_recall`` share
+        the same repo-scoped file) and the core-memory block is folded into that
+        same file instead of session-scoped ``session_meta`` -- see
+        ``ProactiveMemory``'s ``repo_scoped`` param. Unresolvable workdir -> warn +
+        disable, mirroring ``build_checkpointer``'s refusal posture.
         """
         cfg = self.config.get("memory", "proactive", default={}) or {}
         if not cfg.get("enabled"):
@@ -1347,8 +1416,25 @@ class AgentAssembler:
         from koboi.proactive_memory import ProactiveMemory
         from koboi.tools.builtin.memory import _MemoryStore
 
+        repo_scoped = bool(cfg.get("repo_scoped", False))
         store = self.tools.get_dep("memory_store_ref") if self.tools else None
-        if store is None:
+        if repo_scoped:
+            workdir = self._resolve_workdir()
+            if not workdir:
+                logging.getLogger(__name__).warning(
+                    "memory.proactive.repo_scoped enabled but no sandbox workdir is "
+                    "configured -- refusing to fall back to a global memory file; "
+                    "proactive memory disabled"
+                )
+                self.proactive_memory = None
+                return None
+            import os
+
+            scoped_path = os.path.join(os.path.realpath(str(workdir)), ".koboi", "memory.json")
+            store = _MemoryStore(filepath=scoped_path)
+            if self.tools is not None:
+                self.tools.set_dep("memory_store_ref", store)
+        elif store is None:
             store = _MemoryStore(filepath=self.config.get("tools", "memory_file", default=".agent_memory.json"))
         embedding_client = _build_embedding_client(self.config, self.logger) or self.client
         self.proactive_memory = ProactiveMemory(
@@ -1357,6 +1443,7 @@ class AgentAssembler:
             memory=self.memory,
             store=store,
             config=cfg,
+            repo_scoped=repo_scoped,
         )
         return self.proactive_memory
 
@@ -1502,6 +1589,14 @@ class AgentAssembler:
                     ladder=self.config.get("self_healing", "ladder", default=None) or None,
                 )
             )
+            # Wave 2.4: typecheck-signal enrichment (priority 4, before the
+            # classifier at 5). Parses run_typecheck output into structured
+            # diagnostics + refines error_kind to typecheck_failed so
+            # ReflectionHook can name the first failing file:line. Inert unless
+            # the agent actually calls run_typecheck; fail-soft on any hiccup.
+            from koboi.hooks.typecheck_hook import TypecheckHook
+
+            self.hook_chain.add(TypecheckHook())
 
     def build(self, peer_registry: PeerRegistry | None = None) -> KoboiAgent:
         """Run all build steps in dependency order and return assembled agent."""
@@ -1511,6 +1606,7 @@ class AgentAssembler:
         self.build_journal()
         self.build_tools()
         self.build_sandbox()
+        self.build_checkpointer()
         self.build_mcp()
         self.build_context()
         self.build_rag()
@@ -1531,6 +1627,8 @@ class AgentAssembler:
         _setup_subagent(self.tools, self.client, self.hook_chain, self.logger, memory=self.memory, config=self.config)
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
         _setup_peer_registry(self.tools, self.config, peer_registry=peer_registry)
+        _setup_github(self.tools, self.config)
+        _setup_background_shell(self.tools, self.config)
 
         # Add the opt-in hooks (skill/task persistence, proactive extraction,
         # handover, self-healing). Shared with _build_orchestration so orchestration
@@ -1552,6 +1650,10 @@ class AgentAssembler:
             memory=self.memory,
             tools=self.tools,
             max_iterations=self.config.max_iterations,
+            max_total_tokens=self.config.get("agent", "max_total_tokens", default=None),
+            max_cost_usd=self.config.get("agent", "max_cost_usd", default=None),
+            token_prices=self.config.get("agent", "token_prices", default=None),
+            parallel_tools_config=self.config.get("agent", "parallel_tools", default=None),
             graceful_max_iter=self.config.get("self_healing", "graceful_max_iter", default=False),
             self_consistency_config=self.config.get("self_healing", "self_consistency", default=None),
             empty_response_reask_limit=self.config.get("self_healing", "empty_response_reask_limit", default=1),
@@ -1570,6 +1672,7 @@ class AgentAssembler:
             hook_chain=self.hook_chain,
             mode_manager=self.mode_manager,
             journal=self.journal,
+            checkpointer=self.checkpointer,
             trust_db=self.trust_db,
             output_schema=self.config.get("agent", "output_schema", default=None),
             proactive_memory=self.proactive_memory,
@@ -1752,7 +1855,11 @@ def _build_policy(config: Config):
 
     Always returns an engine -- the hardcoded deny-list works without user rules.
     """
-    from koboi.harness.policy import PolicyEngine, PolicyRule, PolicyAction
+    from koboi.harness.policy import PolicyEngine, PolicyRule, PolicyAction, set_policy_options
+
+    # Module-level option so the shell tool and skills !`cmd` gate (which call
+    # check_command_blocked directly, without an engine) honor it too.
+    set_policy_options(allow_interpreter_exec=config.get("policy", "allow_interpreter_exec", default=False))
 
     engine = PolicyEngine()
     rules_conf = config.get("policy", "rules", default=[])
@@ -2070,6 +2177,10 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
 
         media_backend = build_media(media_conf)
 
+    # W4: same client-construction path as the single-agent _setup_github, so
+    # orchestration sub-agents get github_* tools too (issue #81's fix pattern).
+    github_client = _build_github_client(config.get("github", default={}) or {})
+
     if agent_defs:
         agents_map = AgentFactory.create_all_configured(
             agent_defs,
@@ -2085,6 +2196,7 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
             search_provider=shared_search_provider,
             fetch_provider=shared_fetch_provider,
             media_provider=media_backend,
+            github_client=github_client,
         )
     else:
         agents_map = {}
@@ -2204,6 +2316,75 @@ def _setup_peer_registry(tools: ToolRegistry, config: Config, peer_registry: Pee
 
         register_decorated(tools, _peer_tool)
     tools.set_dep("peer_registry", registry)
+
+
+def _build_github_client(github_conf: dict) -> object | None:
+    """Build a GithubClient from ``github:`` config, or None if not usable.
+
+    Shared by the single-agent facade path and ``_build_orchestration`` so both
+    wire the same client construction/validation.
+    """
+    if not github_conf or not github_conf.get("enabled"):
+        return None
+    token = github_conf.get("token") or ""
+    if not token:
+        logging.getLogger(__name__).warning(
+            "github.enabled is true but github.token is empty -- github_* tools will "
+            "return an error string until a token is configured."
+        )
+        return None
+    from koboi.tools.builtin.github import GithubClient
+
+    return GithubClient(
+        token=token,
+        api_base=github_conf.get("api_base", "https://api.github.com"),
+        timeout=github_conf.get("timeout", 15),
+    )
+
+
+def _setup_github(tools: ToolRegistry, config: Config) -> None:
+    """Inject the GitHub PR-tooling client (front door: github_create_pr/update_pr/list_prs/get_pr).
+
+    Mirrors ``_setup_peer_registry``: the github tools are already registered by
+    ``register_all()`` (so ``tools.builtin`` allowlisting can name them), but a
+    missing/disabled ``github_client`` dep makes each tool return a graceful error
+    string rather than crash.
+    """
+    client = _build_github_client(config.get("github", default={}) or {})
+    if client is None:
+        return
+    tools.set_dep("github_client", client)
+
+
+def _build_background_shell_manager(agent_conf: dict) -> object | None:
+    """Build a BackgroundShellManager from ``agent.background_shell:`` config, or None.
+
+    Same construction seam as ``_build_github_client`` -- kept as a standalone
+    function so tests can exercise it without a full facade build.
+    """
+    bg_conf = (agent_conf or {}).get("background_shell") or {}
+    if not bg_conf.get("enabled"):
+        return None
+    from koboi.harness.background_shell import BackgroundShellManager
+
+    return BackgroundShellManager(
+        max_concurrent=bg_conf.get("max_concurrent", 4),
+        output_buffer_chars=bg_conf.get("output_buffer_chars", 20000),
+        default_max_lifetime=bg_conf.get("max_lifetime_seconds", 1800.0),
+    )
+
+
+def _setup_background_shell(tools: ToolRegistry, config: Config) -> None:
+    """Inject the background-shell manager dep (submit/check/kill_background_shell).
+
+    Opt-in via ``agent.background_shell.enabled`` (default off) -- the tools are
+    already registered by ``register_all()`` like any other builtin tool; a
+    missing dep makes each tool return a graceful error string.
+    """
+    manager = _build_background_shell_manager(config.get("agent", default={}) or {})
+    if manager is None:
+        return
+    tools.set_dep("background_shell_manager", manager)
 
 
 def _setup_tasks(tools: ToolRegistry, config: Config, hook_chain: object | None = None) -> None:

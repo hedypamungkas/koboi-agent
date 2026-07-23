@@ -39,7 +39,10 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-_CORE_META_KEY = "core_memory"
+_CORE_META_KEY = "core_memory"  # session_meta key (non-repo-scoped path, unchanged)
+# KV-store reserved key (repo_scoped path) -- double-underscore so it can never
+# collide with an LLM-generated snake_case fact key.
+_CORE_STORE_KEY = "__core_memory__"
 _CORE_MAX_CHARS = 2000
 
 
@@ -59,6 +62,7 @@ class ProactiveMemory:
         memory: ConversationMemory,
         store: _MemoryStore,
         config: dict[str, Any] | None = None,
+        repo_scoped: bool = False,
     ) -> None:
         self._client = client  # chat client -> complete() for extraction
         self._embedding_client = embedding_client or client  # -> get_embeddings() for recall
@@ -71,6 +75,10 @@ class ProactiveMemory:
         self._top_k = int(cfg.get("top_k", 4))
         self._min_score = float(cfg.get("min_score", 0.0))
         self._max_facts = int(cfg.get("max_facts", 200))
+        # Wave 4: when True, the core-memory block lives in ``self._store`` under a
+        # reserved key (survives across sessions -- the file is anchored to the repo
+        # workdir) instead of session-scoped ``session_meta``.
+        self._repo_scoped = repo_scoped
         # In-process state (rebuilt lazily per process; KV is small).
         self._embeddings: dict[str, list[float]] = {}  # KV key -> vector
         self._recall_cache: dict[str, str | None] = {}  # query hash -> result
@@ -230,11 +238,15 @@ class ProactiveMemory:
         return block
 
     async def _ensure_embeddings(self) -> None:
-        """Embed any KV facts not yet in the in-process map (capped to max_facts)."""
+        """Embed any KV facts not yet in the in-process map (capped to max_facts).
+
+        Double-underscore keys are reserved (e.g. the repo-scoped core-memory
+        block) and must never be embedded/surfaced as if they were a recalled fact.
+        """
         if self._embedding_client is None:
             return
         data = self._store._data
-        keys = list(data.keys())[: self._max_facts]
+        keys = [k for k in data if not k.startswith("__")][: self._max_facts]
         missing = [k for k in keys if k not in self._embeddings]
         for k in missing:
             try:
@@ -249,15 +261,15 @@ class ProactiveMemory:
     def get_core_block(self) -> str | None:
         """Render the always-in-context core-memory block, or None if empty.
 
-        Stored as a JSON ``{key: value}`` map in ``session_meta`` (SQLiteMemory).
-        No-op (returns None) when the memory backend has no ``get_meta``.
+        Repo-scoped (``self._repo_scoped``): read from ``self._store`` under the
+        reserved key -- survives across sessions since that file is anchored to
+        the repo workdir, not the session id. Otherwise: JSON ``{key: value}`` map
+        in ``session_meta`` (SQLiteMemory), unchanged from pre-Wave-4 behavior.
+        No-op (returns None) when empty/unavailable/corrupt.
         """
-        get_meta = getattr(self._memory, "get_meta", None)
-        if get_meta is None:
-            return None
         try:
-            raw = get_meta(_CORE_META_KEY)
-        except Exception:  # nosec - best-effort read
+            raw = self._read_core_raw()
+        except Exception:  # nosec - best-effort read, display only
             return None
         if not raw:
             return None
@@ -269,32 +281,45 @@ class ProactiveMemory:
             return None
         return "Core memory:\n" + "\n".join(f"- {k}: {v}" for k, v in data.items())
 
+    def _read_core_raw(self) -> str | None:
+        """Read the raw core-block JSON string, or None if absent.
+
+        Does NOT swallow errors -- callers decide (``get_core_block`` treats a
+        read error as "nothing to show"; ``_merge_core_block`` must instead SKIP
+        the merge entirely on a read error, never treat it as "empty").
+        """
+        if self._repo_scoped:
+            return self._store._data.get(_CORE_STORE_KEY)
+        get_meta = getattr(self._memory, "get_meta", None)
+        if get_meta is None:
+            return None
+        return get_meta(_CORE_META_KEY)
+
     def _merge_core_block(self, new_facts: dict[str, str]) -> None:
         """Merge newly extracted facts into the core block (dedup by key, bounded).
 
         Never wipes the existing block on a read/parse error -- a single corrupt
-        ``session_meta`` value must not destroy all accumulated facts. On error it
-        logs and skips the merge (existing block left untouched).
+        stored value must not destroy all accumulated facts. On error it logs and
+        skips the merge (existing block left untouched).
         """
-        set_meta = getattr(self._memory, "set_meta", None)
-        if set_meta is None:
-            return
-        get_meta = getattr(self._memory, "get_meta", None)
-        existing: dict[str, str] = {}
-        if get_meta is not None:
-            try:
-                raw = get_meta(_CORE_META_KEY)
-            except Exception as exc:  # nosec - keep existing on read error
-                _logger.warning("Proactive core block read failed; merge skipped: %s", exc)
+        if not self._repo_scoped:
+            set_meta = getattr(self._memory, "set_meta", None)
+            if set_meta is None:
                 return
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                except (json.JSONDecodeError, ValueError) as exc:
-                    _logger.warning("Proactive core block corrupt; keeping existing, merge skipped: %s", exc)
-                    return
-                if isinstance(parsed, dict):
-                    existing = {str(k): str(v) for k, v in parsed.items()}
+        existing: dict[str, str] = {}
+        try:
+            raw = self._read_core_raw()
+        except Exception as exc:  # nosec - keep existing on read error
+            _logger.warning("Proactive core block read failed; merge skipped: %s", exc)
+            return
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, ValueError) as exc:
+                _logger.warning("Proactive core block corrupt; keeping existing, merge skipped: %s", exc)
+                return
+            if isinstance(parsed, dict):
+                existing = {str(k): str(v) for k, v in parsed.items()}
         existing.update(new_facts)
         items = list(existing.items())[-self._max_facts :]
         rendered = json.dumps(dict(items))
@@ -302,6 +327,9 @@ class ProactiveMemory:
             items.pop(0)
             rendered = json.dumps(dict(items))
         try:
-            set_meta(_CORE_META_KEY, rendered)
+            if self._repo_scoped:
+                self._store.store(_CORE_STORE_KEY, rendered)
+            else:
+                set_meta(_CORE_META_KEY, rendered)  # set_meta resolved via getattr at merge entry
         except Exception as exc:  # nosec - best-effort persist
             _logger.warning("Proactive core block persist failed: %s", exc)

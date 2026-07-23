@@ -188,3 +188,22 @@ class TestToolSelection:
         registry = self._registry_with(("a", None))
         apply_tool_selection(registry, {})
         assert "a" in registry
+
+
+class TestBuiltinRegistration:
+    """Guard against a builtin tool module being added but NOT registered.
+
+    Regression for run_typecheck (Wave 2.4): the module existed and the tool
+    carried @tool metadata, but was missing from register_all() -> the tool was
+    dead in production (never in the LLM spec, never executable). apply_patch
+    is covered too (it lives in filesystem.py which IS registered, but assert
+    both to be safe).
+    """
+
+    def test_apply_patch_and_run_typecheck_register(self):
+        from koboi.tools.builtin import register_all
+
+        registry = ToolRegistry()
+        register_all(registry)
+        for name in ("apply_patch", "run_typecheck"):
+            assert name in registry, f"{name} not registered by register_all()"

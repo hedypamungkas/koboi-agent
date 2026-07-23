@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shlex
 import signal
 import subprocess
 import sys
+from fnmatch import fnmatch
 
 from koboi.sandbox.base import BaseSandbox, SandboxResult
 from koboi.tools.registry import truncate_text
@@ -58,6 +60,31 @@ DEFAULT_NETWORK_BINARIES: tuple[str, ...] = (
     "ftp",
     "ftpget",
 )
+
+# Wave 3 ``network: allowlist`` tier: package managers/git ADDED to the scanned
+# set (they are deliberately absent from DEFAULT_NETWORK_BINARIES, so plain
+# ``deny`` lets them fetch from anywhere). Under allowlist, a scanned binary's
+# command may only reference hosts matching ``network_allowlist`` globs.
+ALLOWLIST_EXTRA_BINARIES: tuple[str, ...] = (
+    "pip",
+    "pip3",
+    "npm",
+    "pnpm",
+    "yarn",
+    "git",
+)
+
+# scheme://[userinfo@]host[:port]/... -- capture the FULL authority so a
+# userinfo decoy cannot defeat the allowlist: in ``https://github.com@evil.com``
+# ``github.com`` is the userinfo (allowlisted) and ``evil.com`` is the real host
+# that git/curl/pip actually contact. The host is the segment after the LAST
+# '@' (RFC 3986 authority), port stripped afterwards.
+_URL_AUTHORITY_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://([^\s/]+)")
+# user@host -- scp form (``git@host:path``) AND bare ``ssh user@host`` (the
+# ``:path`` is optional so a plain-ssh exfil target is not invisible to the
+# allowlist; migrating ``network: deny`` -> ``allowlist`` must not silently
+# unlock outbound ssh).
+_SSH_HOST_RE = re.compile(r"^[A-Za-z0-9._-]+@([A-Za-z0-9._-]+):?")
 
 # Env vars stripped on top of the secret block-list when network is denied:
 # proxy settings and per-tool netrc/credential files.
@@ -183,6 +210,7 @@ class RestrictedProcessBackend(BaseSandbox):
         workdir: str = ".",
         network: str = "deny",
         network_binaries: list[str] | None = None,
+        network_allowlist: list[str] | None = None,
         network_isolation: str | None = None,
         safe_path: list[str] | None = None,
         env_passthrough: bool = False,
@@ -211,6 +239,10 @@ class RestrictedProcessBackend(BaseSandbox):
                 "python3-seccomp system package, or use the Docker backend (P0c)."
             )
         self._network_binaries = set(network_binaries) if network_binaries else set(DEFAULT_NETWORK_BINARIES)
+        # Wave 3 allowlist tier: host globs a scanned binary may reference.
+        # SOFT / intent-limiting (same class as the deny token-scan): it
+        # constrains hosts WRITTEN in the command, not what a tool resolves.
+        self._network_allowlist = list(network_allowlist or ())
         self._safe_path = list(safe_path) if safe_path else list(DEFAULT_SAFE_PATH_DIRS)
         self._env_passthrough = env_passthrough
         self._rlimits = dict(rlimits) if rlimits else {}
@@ -218,6 +250,11 @@ class RestrictedProcessBackend(BaseSandbox):
         self._max_output = max_output
 
     # -- public API --------------------------------------------------------
+
+    @property
+    def workdir(self) -> str:
+        """The containment root (Wave 2: anchors the workdir checkpointer)."""
+        return self._workdir
 
     def run(self, command, *, cwd=None, env=None, timeout=None, shell=False, input=None) -> SandboxResult:
         effective_timeout = timeout if timeout is not None else self._timeout
@@ -240,6 +277,10 @@ class RestrictedProcessBackend(BaseSandbox):
                 stderr=f"blocked: network binary '{blocked}' is not permitted in the restricted sandbox",
                 timed_out=False,
             )
+        if self._network == "allowlist":
+            violation = self._allowlist_violation(str(command))
+            if violation:
+                return SandboxResult(returncode=126, stdout="", stderr=violation, timed_out=False)
 
         return self._run_subprocess(command, resolved_cwd, run_env, effective_timeout, shell, input)
 
@@ -263,7 +304,7 @@ class RestrictedProcessBackend(BaseSandbox):
         cfg.setdefault("env_passthrough", self._env_passthrough)
         env = build_safe_env(cfg)
 
-        if self._network == "deny":
+        if self._network in ("deny", "allowlist"):
             for k in NETWORK_ENV_BLOCKLIST:
                 env.pop(k, None)
         # Restrict PATH to the safe-bin allowlist (best-effort lookup isolation).
@@ -271,25 +312,71 @@ class RestrictedProcessBackend(BaseSandbox):
         return env
 
     def network_allowed(self, command: str) -> bool:
+        if self._network == "allowlist":
+            return self._allowlist_violation(command) is None
         if self._network != "deny" or not self._network_binaries:
             return True
         return self._first_network_binary(command) is None
 
     # -- internals ---------------------------------------------------------
 
-    def _first_network_binary(self, command) -> str | None:
+    @staticmethod
+    def _split_command_tokens(command) -> list[str]:
         if isinstance(command, str):
             try:
-                tokens = shlex.split(command)
+                return shlex.split(command)
             except ValueError:
                 # Unbalanced quotes: fall back to a naive split on separators.
-                tokens = command.replace(";", " ").replace("|", " ").split()
-        else:
-            tokens = list(command)
-        for tok in tokens:
+                return command.replace(";", " ").replace("|", " ").split()
+        return list(command)
+
+    def _first_network_binary(self, command) -> str | None:
+        for tok in self._split_command_tokens(command):
             base = os.path.basename(tok)
             if base in self._network_binaries:
                 return base
+        return None
+
+    def _allowlist_violation(self, command) -> str | None:
+        """Wave 3 ``network: allowlist`` gate. Returns a block reason, else None.
+
+        When a scanned network binary (the deny set + package managers/git)
+        appears in the command, every host WRITTEN in the command
+        (``scheme://host`` URLs, ``git@host:`` SSH forms) must match a
+        ``network_allowlist`` glob. A command with no host tokens passes --
+        default-index pip/npm fetches are unscannable; this tier constrains
+        explicit destinations (``--index-url http://evil``,
+        ``git clone https://evil``), not what a tool resolves internally.
+        """
+        tokens = self._split_command_tokens(command)
+        scanned = self._network_binaries | set(ALLOWLIST_EXTRA_BINARIES)
+        binary = None
+        for tok in tokens:
+            base = os.path.basename(tok)
+            if base in scanned:
+                binary = base
+                break
+        if binary is None:
+            return None
+        hosts: list[str] = []
+        for tok in tokens:
+            for authority in _URL_AUTHORITY_RE.findall(tok):
+                # Host = last segment after '@' (drops a ``user@``/``user:pass@``
+                # decoy), then strip ``:port``. IPv6 ``[::1]`` extracts ``[`` --
+                # never matches an allowlist, so it over-blocks (fail-safe), never
+                # a bypass.
+                host = authority.rsplit("@", 1)[-1].split(":", 1)[0]
+                if host:
+                    hosts.append(host)
+            ssh = _SSH_HOST_RE.match(tok)
+            if ssh:
+                hosts.append(ssh.group(1))
+        for host in hosts:
+            # DNS hosts are case-insensitive -- lowercase both sides so
+            # ``GITHUB.COM`` allowlist entries match ``github.com`` commands
+            # (and vice-versa).
+            if not any(fnmatch(host.lower(), pattern.lower()) for pattern in self._network_allowlist):
+                return f"blocked: host '{host}' (via '{binary}') is not in the sandbox network allowlist"
         return None
 
     def _build_seccomp_preexec(self):

@@ -91,3 +91,62 @@ class TestJobWritesFileUnderRestrictedSandbox:
         tool_results = [e for e in events if type(e).__name__ == "ToolResultEvent"]
         assert tool_results, "expected a ToolResultEvent"
         assert all("denied" not in getattr(e, "result", "").lower() for e in tool_results)
+
+
+class TestJobShellAllowlistUnderRestrictedSandbox:
+    """Integration (Wave 2): jobs.shell_allowlist lets an autonomous run
+    execute a matching run_shell command for real under a restricted sandbox,
+    while non-matching commands stay denied."""
+
+    @staticmethod
+    def _agent(tmp_path, command: str, shell_allowlist: list[str]):
+        from koboi.config import Config
+        from koboi.facade import KoboiAgent
+        from tests.conftest import MockClient, make_mock_response, make_mock_tool_call
+
+        config = Config.from_dict(
+            {
+                "agent": {"name": "t", "system_prompt": "h", "max_iterations": 3, "mode": "act"},
+                "llm": {"provider": "openai", "model": "m", "api_key": "test", "base_url": "http://x"},
+                "memory": {"backend": "in_memory"},
+                "sandbox": {"backend": "restricted", "workdir": str(tmp_path)},
+                "tools": {"builtin": ["run_shell"]},
+            },
+            validate=True,
+        )
+        agent = KoboiAgent.from_dict(config.raw)
+        agent._core.client = MockClient(
+            [
+                make_mock_response(tool_calls=[make_mock_tool_call("run_shell", {"command": command})]),
+                make_mock_response(content="done"),
+            ]
+        )
+        if hasattr(agent._core, "_tool_pipeline"):
+            del agent._core._tool_pipeline
+        agent._core.approval_handler = AutonomousApprovalHandler(
+            trust_db=agent.trust_db,
+            audit_trail=agent._core.audit_trail,
+            auto_approve_tools={"write_file", "delete_file"},
+            shell_allowlist=shell_allowlist,
+        )
+        return agent
+
+    @staticmethod
+    async def _tool_results(agent):
+        events = []
+        async for ev in agent.run_stream("run it"):
+            events.append(ev)
+        return [e for e in events if type(e).__name__ == "ToolResultEvent"]
+
+    async def test_allowlisted_command_executes(self, tmp_path):
+        agent = self._agent(tmp_path, "echo allowlisted > out.txt", ["echo*"])
+        results = await self._tool_results(agent)
+        assert results and all("denied" not in r.result.lower() for r in results)
+        # The command REALLY ran inside the workdir.
+        assert (tmp_path / "out.txt").read_text().strip() == "allowlisted"
+
+    async def test_non_matching_command_denied(self, tmp_path):
+        agent = self._agent(tmp_path, "touch nope.txt", ["echo*"])
+        results = await self._tool_results(agent)
+        assert results and any("denied" in r.result.lower() for r in results)
+        assert not (tmp_path / "nope.txt").exists()

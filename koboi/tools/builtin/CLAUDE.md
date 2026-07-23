@@ -1,7 +1,7 @@
 # koboi/tools/builtin/ -- Built-in tool implementations
 
 ## What this is
-The 13 shipped tools, each a `@tool()`-decorated function in its own module and registered by
+The 17 shipped tool modules, each a `@tool()`-decorated function in its own module and registered by
 `register_all()` (`__init__.py`, called from the facade). Sync tools run in a thread via
 `asyncio.to_thread`; the registry calls `str(result)` on every return. See the parent
 `koboi/tools/CLAUDE.md` for the registry, `@tool()`, `RiskLevel`, and dependency-injection mechanics.
@@ -9,18 +9,22 @@ The 13 shipped tools, each a `@tool()`-decorated function in its own module and 
 ## Tools
 ```
 calculator.py   calculate                                SAFE        math expression evaluator
-filesystem.py   list_files / read_file / write_file / delete_file   MODERATE   read/write/list/delete files
+filesystem.py   list_files / read_file / edit_file / apply_patch / write_file / delete_file   SAFE (list/read) + DESTRUCTIVE (write/edit/patch/delete; idempotent=False)   file ops; edit_file = exact-string replace (unique match or replace_all, atomic swap); apply_patch = unified-diff patch (single file, multi-hunk, content-matched so line drift is tolerated, all-or-nothing atomic swap); read_file takes optional offset/limit (numbered line range); parser in _patch.py
 shell.py        run_shell                                DESTRUCTIVE execute shell commands
 web.py          web_search / web_fetch                   SAFE        web search + fetch (backends in koboi/websearch/)
 memory.py       memory_store / memory_recall             SAFE        persistent KV memory
 search.py       grep_search / glob_find                  SAFE        regex/glob search in files
-git.py          git_status / git_log / git_diff          MODERATE    git operations
+git.py          git_status / git_log / git_diff (SAFE, read-only) + git_add / git_commit / git_checkout (MODERATE) + git_push (DESTRUCTIVE)   git ops; commit is idempotent=False w/ -c identity fallback (koboi-agent <agent@koboi.local>) when the repo has none, and returns a clear "No staged changes" message instead of git's success-looking "nothing to commit"; git_add([""]) falls back to add-all; push takes no force flag (ref/remote args reject --force/-f/--force-with-lease/+ref/ref:ref); ref args guarded by SAFE_TARGET_RE + leading-dash rejection
 subagent.py     delegate_tasks                           MODERATE    parallel sub-agent delegation
 task.py         task_create / task_list / task_get / task_update / task_add_dependency   SAFE   structured task management
 ingest.py       ingest_url                               MODERATE    fetch a URL + chunk into the live corpus (W3; needs rag.live + a fetch provider)
 handover.py     transfer_to_human                        SAFE        yield the conversation to a human operator (B1; raises AgentHandoverError)
 peer.py         call_peer_agent                          SAFE        cross-instance A2A fan-out (POSTs each peer's /v1/peer/invoke; needs `peers:` config + the `peer_registry` dep; idempotent=False; SAFE like web_fetch so it works in the interactive path without HITL approval)
 media.py        generate_image/video/music/speech +       MODERATE+   multimodal generation (Surplus/mock); deps=media_provider; generate_video=DESTRUCTIVE (1800s); +async submit_media_job/check_media_job (opt-in via media:)
+repo_map.py     repo_map                                 SAFE        directory tree + best-effort symbol outline (W4); read-only, on the chat/plan allowlist; Python = real ast.parse signatures, other langs = regex best-effort
+github.py       github_create_pr / github_update_pr (DESTRUCTIVE, idempotent=False) + github_list_prs / github_get_pr (SAFE, read-only)   PR tooling (W4); in-process httpx (bypasses sandbox network tiers, like web_fetch); needs `github:` config + `github_client` dep
+background_shell.py  submit_background_shell (DESTRUCTIVE, idempotent=False) + check_background_shell (SAFE) / kill_background_shell (MODERATE, idempotent)   long-running processes (W4); opt-in `agent.background_shell.enabled`; manager in koboi/harness/background_shell.py; live process runs OUTSIDE the approval pipeline once started
+typecheck.py    run_typecheck                            SAFE        run ruff/mypy/pyright on a validated path (fixed allowlist, never a user command -> no injection surface); read-only, on the chat/plan allowlist; non-zero output is prefixed `[exit code: N]` (same token as run_shell); when self_healing is on, TypecheckHook (priority 4) parses the output into structured file:line diagnostics + refines error_kind to `typecheck_failed`
 ```
 
 ## Conventions
@@ -39,4 +43,7 @@ media.py        generate_image/video/music/speech +       MODERATE+   multimodal
 - **`ingest_url` needs `rag.live: true`** -- the facade wires the `LiveCorpus` + `fetch_provider`
   deps only then; without it the tool returns an error string.
 - **Mode-blocking is name-keyed** (`modes.py`): non-read-only tools are blocked in chat/plan unless
-  allowlisted in `mode.read_only_tools` or the agent runs in act+.
+  allowlisted in `mode.read_only_tools` or the agent runs in act+. The read-only matcher accepts
+  exact names plus `prefix.`/`prefix_` separators (so `read_file`/`grep_search`/`glob_find`/`list_files`
+  and the exact names `git_status`/`git_log`/`git_diff` pass); `edit_file`/`write_file`/`run_shell`
+  never do -- a coding agent needs `agent.mode: act`.

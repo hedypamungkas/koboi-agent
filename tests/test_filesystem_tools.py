@@ -9,6 +9,8 @@ from koboi.tools.builtin.filesystem import (
     list_files,
     read_file,
     write_file,
+    edit_file,
+    apply_patch,
     delete_file,
     _validate_path,
 )
@@ -69,7 +71,9 @@ class TestReadFile:
 
         # Pass max_read_size via _tool_config
         result = read_file(path=str(test_file), _tool_config={"max_read_size": 100})
-        assert len(result) <= 100 + len("\n... (file truncated, too long)")
+        assert result.startswith("x" * 100)
+        assert "truncated at 100 chars" in result
+        assert "offset/limit" in result
 
     def test_read_file_nonexistent_file(self, tmp_path):
         """Test read_file with nonexistent file."""
@@ -127,27 +131,29 @@ class TestPathValidation:
         assert result == str(tmp_path)  # Returns resolved path
 
     def test_validate_path_with_sandbox(self, tmp_path, monkeypatch):
-        """Test _validate_path with sandbox enabled."""
-        # Set sandbox directory
+        """Test _validate_path with sandbox enabled genuinely asserts containment."""
+        import os
+
+        import koboi.tools.builtin.filesystem as fs
+
+        # _SANDBOX_DIR is captured at module import time, so setenv alone is
+        # insufficient -- mirror the module global too, the way the other fs
+        # tests in this file do (otherwise the test would always pass).
         monkeypatch.setenv("KOBOI_SANDBOX_DIR", str(tmp_path))
+        monkeypatch.setattr(fs, "_SANDBOX_DIR", str(tmp_path))
 
-        # Should allow paths within sandbox
-        result = _validate_path(str(tmp_path / "test.txt"))
-        # Result should be resolved path within sandbox
-        assert str(tmp_path) in result or "private" in result  # macOS resolves to /private
+        # A path inside the sandbox resolves to itself (modulo realpath).
+        inside = tmp_path / "inside.txt"
+        result = _validate_path(str(inside))
+        assert result == os.path.realpath(str(inside))
+        assert str(tmp_path) in result
 
-        # Should raise PermissionError for paths outside sandbox
-        # Note: On macOS, /etc resolves to /private/etc which may not match tmp_path
-        try:
-            # Use a clearly different path
-            result = _validate_path("/var/tmp/test")
-            # If it doesn't raise, at least check it's not our sandbox
-            if str(tmp_path) not in result:
-                pass  # Expected - different path
-            else:
-                assert False, "Should have raised PermissionError or returned different path"
-        except PermissionError:
-            pass  # Expected
+        # Paths clearly outside the sandbox MUST raise -- the prior body's
+        # try/except swallowed this assertion, so containment was never verified.
+        with pytest.raises(PermissionError):
+            _validate_path("/etc/passwd")
+        with pytest.raises(PermissionError):
+            _validate_path("/var/tmp/koboi_outside_probe.txt")
 
 
 class TestToolConfig:
@@ -305,3 +311,459 @@ class TestEdgeCases:
         result = list_files(path=str(tmp_path))
         for filename in special_files:
             assert filename in result
+
+
+class TestReadFileRanged:
+    def test_read_file_with_offset_and_limit(self, tmp_path):
+        """offset/limit returns a numbered line range with a range header."""
+        test_file = tmp_path / "ranged.txt"
+        test_file.write_text("\n".join(f"line {i}" for i in range(1, 11)) + "\n")
+
+        result = read_file(path=str(test_file), offset=3, limit=2)
+        assert "(lines 3-4 of 10" in result
+        assert "line 3" in result
+        assert "line 4" in result
+        assert "line 2" not in result
+        assert "line 5" not in result
+        # cat -n style line numbers
+        assert "     3\t" in result
+
+    def test_read_file_with_offset_only_reads_to_eof(self, tmp_path):
+        """offset without limit reads to end of file."""
+        test_file = tmp_path / "ranged.txt"
+        test_file.write_text("a\nb\nc\nd\n")
+
+        result = read_file(path=str(test_file), offset=3)
+        assert "(lines 3-4 of 4" in result
+        assert "c" in result and "d" in result
+
+    def test_read_file_with_limit_only_starts_at_line_one(self, tmp_path):
+        """limit without offset starts at line 1."""
+        test_file = tmp_path / "ranged.txt"
+        test_file.write_text("a\nb\nc\n")
+
+        result = read_file(path=str(test_file), limit=2)
+        assert "(lines 1-2 of 3" in result
+        assert "c" not in result.split("\n", 1)[1]
+
+    def test_read_file_offset_beyond_eof(self, tmp_path):
+        """offset past the last line returns a clear error."""
+        test_file = tmp_path / "short.txt"
+        test_file.write_text("only\n")
+
+        result = read_file(path=str(test_file), offset=5)
+        assert "Error" in result
+        assert "beyond end of file" in result
+
+    def test_read_file_default_call_unchanged(self, tmp_path):
+        """No offset/limit keeps the plain-content contract."""
+        test_file = tmp_path / "plain.txt"
+        test_file.write_text("Hello, world!")
+
+        assert read_file(path=str(test_file)) == "Hello, world!"
+
+    def test_read_file_range_streams_large_file(self, tmp_path):
+        # Streaming: a huge file with a small requested range must not load the
+        # whole file into memory (the old readlines() did -- OOM on large inputs).
+        import tracemalloc
+
+        big = tmp_path / "big.txt"
+        with big.open("w") as f:
+            for i in range(50_000):
+                f.write(f"line-{i:06d}\n")
+        tracemalloc.start()
+        result = read_file(path=str(big), offset=25_000, limit=3)
+        _cur, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        assert "(lines 25000-25002 of 50000" in result
+        # File is ~450KB; the old readlines() materialized all of it. Peak heap
+        # during a streamed 3-line window must stay well under the file size.
+        assert peak < 4_000_000, f"streaming regressed: peak={peak}"
+
+    def test_read_file_rejects_nonpositive_offset_and_limit(self, tmp_path):
+        # Negative/zero used to silently clamp (offset=-3 -> 1), masking mistakes.
+        test_file = tmp_path / "f.txt"
+        test_file.write_text("a\nb\nc\n")
+        assert "must be >= 1" in read_file(path=str(test_file), offset=0)
+        assert "must be >= 1" in read_file(path=str(test_file), offset=-3)
+        assert "must be >= 1" in read_file(path=str(test_file), limit=0)
+        assert "must be >= 1" in read_file(path=str(test_file), limit=-2)
+
+    def test_read_file_range_no_trailing_newline_last_line(self, tmp_path):
+        """A file without a trailing newline still surfaces the final line via offset."""
+        test_file = tmp_path / "noeol.txt"
+        test_file.write_text("a\nb")  # NO trailing newline on the last line
+        result = read_file(path=str(test_file), offset=2)
+        assert "(lines 2-2 of 2" in result
+        # The final line (no newline) must still be present in the body, not
+        # silently dropped by the line iterator's last partial line.
+        assert "b" in result.split("\n", 1)[1]
+
+    def test_read_file_range_returns_line_numbers(self, tmp_path):
+        """The ranged body uses cat -n style '     N\\t<line>' formatting."""
+        test_file = tmp_path / "numbered.txt"
+        test_file.write_text("alpha\nbeta\n")
+        result = read_file(path=str(test_file), offset=1, limit=2)
+        # 6-wide right-aligned line number, then a literal tab, then the content.
+        assert "     1\talpha" in result
+        assert "     2\tbeta" in result
+
+
+class TestEditFile:
+    def test_edit_file_unique_replace(self, tmp_path):
+        """A unique old_string is replaced and written to disk."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\nc = 3\n")
+
+        result = edit_file(path=str(test_file), old_string="b = 2", new_string="b = 20")
+        assert "Successfully replaced 1 occurrence(s)" in result
+        assert test_file.read_text() == "a = 1\nb = 20\nc = 3\n"
+
+    def test_edit_file_oserror_returns_error_string(self, tmp_path, monkeypatch):
+        # ENOSPC/EIO during the atomic swap must return "Error:" (the tool
+        # contract is -> str), not raise out of the tool. Temp file is cleaned up.
+        import os
+
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        def boom(*_a, **_k):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr("os.replace", boom)
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2")
+        assert result.startswith("Error:")
+        assert not any(p.startswith(".edit_file_") for p in os.listdir(tmp_path))
+
+    def test_edit_file_no_match_errors_and_leaves_file_unchanged(self, tmp_path):
+        """0 matches -> error, file untouched."""
+        test_file = tmp_path / "code.py"
+        original = "a = 1\n"
+        test_file.write_text(original)
+
+        result = edit_file(path=str(test_file), old_string="zzz", new_string="y")
+        assert "Error" in result
+        assert "not found" in result
+        assert test_file.read_text() == original
+
+    def test_edit_file_multiple_matches_errors_with_count(self, tmp_path):
+        """Ambiguous old_string -> error naming the match count, file untouched."""
+        test_file = tmp_path / "code.py"
+        original = "x = 1\ny = 2\nx = 1\n"
+        test_file.write_text(original)
+
+        result = edit_file(path=str(test_file), old_string="x = 1", new_string="x = 9")
+        assert "Error" in result
+        assert "matched 2 times" in result
+        assert "replace_all" in result
+        assert test_file.read_text() == original
+
+    def test_edit_file_replace_all(self, tmp_path):
+        """replace_all replaces every occurrence and reports the count."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("x = 1\ny = 2\nx = 1\n")
+
+        result = edit_file(path=str(test_file), old_string="x = 1", new_string="x = 9", replace_all=True)
+        assert "Successfully replaced 2 occurrence(s)" in result
+        assert test_file.read_text() == "x = 9\ny = 2\nx = 9\n"
+
+    def test_edit_file_identical_strings_rejected(self, tmp_path):
+        """old_string == new_string is rejected up front."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 1")
+        assert "Error" in result
+        assert "identical" in result
+
+    def test_edit_file_nonexistent_file(self, tmp_path):
+        """Missing file -> not-found error."""
+        result = edit_file(path=str(tmp_path / "missing.py"), old_string="a", new_string="b")
+        assert "Error" in result
+        assert "not found" in result
+
+    def test_edit_file_advisory_note_without_prior_read(self, tmp_path):
+        """Editing a never-read path emits the read-before-write advisory."""
+        from koboi.tools.builtin.filesystem import reset_read_before_write
+
+        reset_read_before_write()
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2")
+        assert "without having read it first" in result
+
+        # After a read, the advisory disappears.
+        test_file2 = tmp_path / "code2.py"
+        test_file2.write_text("a = 1\n")
+        read_file(path=str(test_file2))
+        result2 = edit_file(path=str(test_file2), old_string="a = 1", new_string="a = 2")
+        assert "without having read it first" not in result2
+
+    def test_edit_file_preserves_permissions(self, tmp_path):
+        """The atomic swap keeps the original file mode."""
+        import os as _os
+        import stat
+
+        test_file = tmp_path / "script.sh"
+        test_file.write_text("echo old\n")
+        test_file.chmod(0o755)
+
+        edit_file(path=str(test_file), old_string="old", new_string="new")
+        mode = stat.S_IMODE(_os.stat(test_file).st_mode)
+        assert mode == 0o755
+
+    def test_edit_file_outside_sandbox_blocked(self, tmp_path, monkeypatch):
+        """Sandbox containment applies to edit_file like the other fs tools."""
+        import koboi.tools.builtin.filesystem as fs
+
+        sandbox_dir = tmp_path / "sandbox"
+        sandbox_dir.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret = 1\n")
+        monkeypatch.setattr(fs, "_SANDBOX_DIR", str(sandbox_dir))
+
+        result = edit_file(path=str(outside), old_string="secret = 1", new_string="secret = 2")
+        assert "Error" in result
+        assert "no access" in result
+        assert outside.read_text() == "secret = 1\n"
+
+    def test_edit_file_replace_all_with_single_occurrence(self, tmp_path):
+        """replace_all=True with exactly 1 match still succeeds and reports 1."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2", replace_all=True)
+        assert "Successfully replaced 1 occurrence(s)" in result
+        assert test_file.read_text() == "a = 2\n"
+
+    def test_edit_file_empty_new_string_deletes_match(self, tmp_path):
+        """An empty new_string deletes the matched text (str.replace semantics)."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\n")
+
+        result = edit_file(path=str(test_file), old_string="b = 2\n", new_string="")
+        assert "Successfully replaced 1 occurrence(s)" in result
+        assert test_file.read_text() == "a = 1\n"
+
+    def test_edit_file_new_string_contains_old_no_recursion(self, tmp_path):
+        """str.replace does not recurse on its own output: 'abc'->'abcabc' stops at one."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("abc\n")
+
+        result = edit_file(path=str(test_file), old_string="abc", new_string="abcabc")
+        assert "Successfully replaced 1 occurrence(s)" in result
+        # Exactly one substitution -- the new substring containing the old must
+        # not be re-matched (a hand-rolled scan would loop forever here).
+        assert test_file.read_text() == "abcabc\n"
+
+    def test_edit_file_preserves_no_trailing_newline(self, tmp_path):
+        """Editing a file without a trailing newline keeps the no-newline ending."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1")  # NO trailing newline
+
+        result = edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2")
+        assert "Successfully replaced 1 occurrence(s)" in result
+        # The atomic swap must not append a trailing newline the source did not have.
+        assert test_file.read_text() == "a = 2"
+
+    def test_edit_file_tempfile_cleaned_up_on_success(self, tmp_path):
+        """After a successful edit, no .edit_file_* temp file leaks in the dir."""
+        import os
+
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        edit_file(path=str(test_file), old_string="a = 1", new_string="a = 2")
+        leftover = [p for p in os.listdir(tmp_path) if p.startswith(".edit_file_")]
+        assert leftover == [], f"temp file leak after success: {leftover}"
+
+
+class TestApplyPatch:
+    def _patch(self, old, new, context_before="", context_after=""):
+        """Build a minimal single-hunk unified diff replacing ``old`` with ``new``."""
+        return f"@@ -1,3 +1,3 @@\n{context_before}-{old}\n+{new}\n{context_after}"
+
+    def test_apply_patch_single_hunk(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        test_file.write_text("def add(a, b):\n    return a - b\n\ndef sub(a, b):\n    return a - b\n")
+        patch = "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 1 hunk" in result
+        assert "return a + b" in test_file.read_text()
+        # untouched hunk survives
+        assert "def sub(a, b):\n    return a - b" in test_file.read_text()
+
+    def test_apply_patch_oserror_returns_error_string(self, tmp_path, monkeypatch):
+        # OSError during the atomic swap -> "Error:" string, not a raise.
+        import os
+
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+
+        def boom(*_a, **_k):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr("os.replace", boom)
+        result = apply_patch(path=str(test_file), patch="@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n")
+        assert result.startswith("Error:")
+        assert not any(p.startswith(".apply_patch_") for p in os.listdir(tmp_path))
+
+    def test_apply_patch_reports_effective_hunk_count(self, tmp_path):
+        # A context-only (no-op) hunk + a real hunk: the message reports EFFECTIVE
+        # hunks (1), not the total (2) -- otherwise the model thinks more changed.
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\nc = 3\n")
+        patch = "@@ -1,1 +1,1 @@\n a = 1\n@@ -3,1 +3,1 @@\n-c = 3\n+c = 30\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 1 hunk" in result
+        assert "c = 30" in test_file.read_text()
+
+    def test_apply_patch_multi_hunk_atomic(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\nc = 3\n")
+        patch = "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n@@ -3,1 +3,1 @@\n-c = 3\n+c = 30\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 2 hunk" in result
+        assert test_file.read_text() == "a = 10\nb = 2\nc = 30\n"
+
+    def test_apply_patch_all_or_nothing_leaves_file_unchanged(self, tmp_path):
+        """If a later hunk fails, earlier hunks are NOT partially written."""
+        test_file = tmp_path / "code.py"
+        original = "a = 1\nb = 2\n"
+        test_file.write_text(original)
+        patch = "@@ -1,1 +1,1 @@\n-a = 1\n+a = 10\n@@ -2,1 +2,1 @@\n-NOT PRESENT\n+x\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Error" in result
+        assert "hunk #2" in result
+        # File is byte-identical to the original -- no partial mutation.
+        assert test_file.read_text() == original
+
+    def test_apply_patch_context_not_found_error(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        original = "a = 1\n"
+        test_file.write_text(original)
+        patch = "@@ -1,1 +1,1 @@\n-missing\n+new\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Error" in result
+        assert "context not found" in result
+        assert test_file.read_text() == original
+
+    def test_apply_patch_ambiguous_context_error(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        original = "dup\na = 1\ndup\n"
+        test_file.write_text(original)
+        patch = "@@ -1,1 +1,1 @@\n-dup\n+unique\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Error" in result
+        assert "matched 2 times" in result
+
+    def test_apply_patch_tolerates_line_drift(self, tmp_path):
+        """@@ says line 1 but the block is now further down -- content match still applies."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("# header\n# more\n\ndef add(a, b):\n    return a - b\n")
+        # Hunk header claims -1 but the real content is at line 4; tolerated.
+        patch = "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied" in result
+        assert "return a + b" in test_file.read_text()
+
+    def test_apply_patch_no_newline_at_end_of_file(self, tmp_path):
+        """File without a trailing newline patches + keeps no trailing newline."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("x = 1")  # NO trailing newline
+        # The `\ No newline` marker follows BOTH the - and + lines, so the
+        # result also has no trailing newline.
+        patch = "@@ -1,1 +1,1 @@\n-x = 1\n\\ No newline at end of file\n+x = 2\n\\ No newline at end of file\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied" in result
+        assert test_file.read_text() == "x = 2"
+
+    def test_apply_patch_preserves_permissions(self, tmp_path):
+        import os
+        import stat
+
+        test_file = tmp_path / "script.py"
+        test_file.write_text("def add(a, b):\n    return a - b\n")
+        os.chmod(test_file, 0o755)
+        patch = "@@ -1,2 +1,2 @@\n def add(a, b):\n-    return a - b\n+    return a + b\n"
+        apply_patch(path=str(test_file), patch=patch)
+        assert stat.S_IMODE(os.stat(test_file).st_mode) == 0o755
+
+    def test_apply_patch_malformed_patch_error(self, tmp_path):
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+        result = apply_patch(path=str(test_file), patch="this is not a diff")
+        assert "Error" in result
+        assert "hunk header" in result
+
+    def test_apply_patch_accepts_file_header_pair(self, tmp_path):
+        """A --- / +++ header pair (single file) is tolerated and ignored."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\n")
+        patch = "--- a/code.py\n+++ b/code.py\n@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n"
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied" in result
+        assert test_file.read_text() == "a = 2\n"
+
+    def test_apply_patch_nonexistent_file(self, tmp_path):
+        result = apply_patch(path=str(tmp_path / "missing.py"), patch="@@ -1,1 +1,1 @@\n-a\n+b\n")
+        assert "Error" in result
+        assert "not found" in result
+
+    def test_apply_patch_outside_sandbox_blocked(self, tmp_path, monkeypatch):
+        import koboi.tools.builtin.filesystem as fs
+
+        sandbox_dir = tmp_path / "sandbox"
+        sandbox_dir.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_text("a = 1\n")
+        monkeypatch.setattr(fs, "_SANDBOX_DIR", str(sandbox_dir))
+
+        result = apply_patch(path=str(outside), patch="@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n")
+        assert "Error" in result
+        assert "no access" in result
+        assert outside.read_text() == "a = 1\n"
+
+    def test_apply_patch_advisory_note_without_prior_read(self, tmp_path):
+        """Patching a never-read path emits the advisory AND actually mutates the file."""
+        fs_mod = pytest.importorskip("koboi.tools.builtin.filesystem")
+        fs_mod.reset_read_before_write()
+        try:
+            test_file = tmp_path / "code.py"
+            test_file.write_text("a = 1\n")
+
+            patch = "@@ -1,1 +1,1 @@\n-a = 1\n+a = 2\n"
+            result = apply_patch(path=str(test_file), patch=patch)
+            # Advisory is present...
+            assert "Note:" in result
+            # ...AND the patch actually wrote -- the old assertion hid a class of
+            # bugs where the tool reports success but never mutates the file.
+            assert test_file.read_text() == "a = 2\n"
+        finally:
+            fs_mod.reset_read_before_write()
+
+    def test_apply_patch_deletion_hunk(self, tmp_path):
+        """A hunk that only removes lines (no +) applies; surviving lines unchanged."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("a = 1\nb = 2\nc = 3\n")
+        # old_count=2, new_count=1: one context line + one removed line.
+        patch = "@@ -1,2 +1,1 @@\n a = 1\n-b = 2\n"
+
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "Successfully applied 1 hunk" in result
+        assert test_file.read_text() == "a = 1\nc = 3\n"
+
+    def test_apply_patch_all_noop_hunks_reports_no_change(self, tmp_path):
+        """A context-only hunk -> 'made no changes' message and file byte-identical."""
+        test_file = tmp_path / "code.py"
+        original = "a = 1\n"
+        test_file.write_text(original)
+        # Pure context: old_text == new_text -> apply_hunks skips it -> no-op.
+        patch = "@@ -1,1 +1,1 @@\n a = 1\n"
+
+        result = apply_patch(path=str(test_file), patch=patch)
+        assert "made no changes" in result
+        assert "no-op" in result
+        # File is untouched at the byte level.
+        assert test_file.read_text() == original

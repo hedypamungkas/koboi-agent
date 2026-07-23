@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from fnmatch import fnmatch
 
 from koboi.tools.registry import tool
+from koboi.tools.builtin._patch import PatchError, apply_hunks, parse_unified_diff
 from koboi.types import RiskLevel
 
 # P0b: kept as a legacy back-compat fallback only. Containment is now driven
@@ -111,7 +113,9 @@ def list_files(path: str, pattern: str | None = None, _deps: dict | None = None)
     name="read_file",
     group="file",
     deps=["sandbox"],
-    description="Read text file content",
+    description=(
+        "Read text file content. For large files, pass offset/limit to read a line range (returned with line numbers)."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -119,11 +123,25 @@ def list_files(path: str, pattern: str | None = None, _deps: dict | None = None)
                 "type": "string",
                 "description": "Path of the file to read",
             },
+            "offset": {
+                "type": "integer",
+                "description": "1-based line number to start reading from (optional)",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of lines to read (optional; default: to end of file)",
+            },
         },
         "required": ["path"],
     },
 )
-def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = None) -> str:
+def read_file(
+    path: str,
+    offset: int | None = None,
+    limit: int | None = None,
+    _tool_config: dict | None = None,
+    _deps: dict | None = None,
+) -> str:
     cfg = _tool_config or {}
     max_read_size = cfg.get("max_read_size", _MAX_READ_SIZE)
     try:
@@ -132,10 +150,12 @@ def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = 
         ts = (_deps or {}).get("tool_state")  # M6: per-session tracking
         if ts is not None:
             ts.read_paths.add(path)
+        if offset is not None or limit is not None:
+            return _read_file_range(path, offset, limit, max_read_size)
         with open(path) as f:
             content = f.read(max_read_size)
         if len(content) == max_read_size:
-            content += "\n... (file truncated, too long)"
+            content += f"\n... (truncated at {max_read_size} chars -- use offset/limit to read the rest)"
         return content
     except FileNotFoundError:
         return f"Error: file '{path}' not found"
@@ -143,6 +163,38 @@ def read_file(path: str, _tool_config: dict | None = None, _deps: dict | None = 
         return f"Error: no access to '{path}'"
     except IsADirectoryError:
         return f"Error: '{path}' is a directory, not a file"
+
+
+def _read_file_range(path: str, offset: int | None, limit: int | None, max_read_size: int) -> str:
+    """Return a numbered line range of ``path`` (1-based ``offset``, ``limit`` lines).
+
+    Streams the file (one line at a time via the file iterator) so a huge file
+    with a small requested range does not load the whole file into memory -- only
+    the selected range is materialized (the old ``readlines()`` loaded the entire
+    file, OOM-ing on large inputs and defeating the offset/limit purpose).
+    """
+    # Negative/zero offset/limit used to silently clamp (offset=-3 -> 1), masking
+    # model mistakes. Surface them as errors instead.
+    if offset is not None and offset < 1:
+        return f"Error: offset must be >= 1 (got {offset})"
+    if limit is not None and limit < 1:
+        return f"Error: limit must be >= 1 (got {limit})"
+    start = offset or 1
+    want_end = start + limit - 1 if limit is not None else None
+    selected: list[str] = []
+    total = 0
+    with open(path) as f:
+        for idx, line in enumerate(f, start=1):  # streams: one line resident at a time
+            total = idx
+            if idx >= start and (want_end is None or idx <= want_end):
+                selected.append(line)
+    if start > total:
+        return f"Error: offset {start} is beyond end of file '{path}' ({total} lines)"
+    end = total if want_end is None else min(total, want_end)
+    body = "".join(f"{i:>6}\t{line}" for i, line in enumerate(selected, start=start))
+    if len(body) > max_read_size:
+        body = body[:max_read_size] + f"\n... (truncated at {max_read_size} chars -- narrow the range)"
+    return f"(lines {start}-{end} of {total} in '{path}')\n{body}"
 
 
 @tool(
@@ -187,6 +239,175 @@ def write_file(path: str, content: str, _deps: dict | None = None) -> str:
         return f"Error: no access to write to '{path}'"
     except IsADirectoryError:
         return f"Error: '{path}' is a directory, not a file"
+
+
+@tool(
+    name="edit_file",
+    group="file",
+    deps=["sandbox"],
+    description=(
+        "Edit a text file by replacing an exact string. old_string must match "
+        "exactly (including whitespace) and be unique in the file unless "
+        "replace_all is set. Preferred over write_file for modifying existing files."
+    ),
+    risk_level=RiskLevel.DESTRUCTIVE,
+    # Issue #48: editing mutates the fs; on crash-resume the loop's
+    # _repair_interrupted_turn must NOT silently replay it (double edits).
+    idempotent=False,
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path of the file to edit",
+            },
+            "old_string": {
+                "type": "string",
+                "description": "Exact text to replace (must be unique in the file unless replace_all)",
+            },
+            "new_string": {
+                "type": "string",
+                "description": "Replacement text",
+            },
+            "replace_all": {
+                "type": "boolean",
+                "description": "Replace every occurrence of old_string (default: false)",
+            },
+        },
+        "required": ["path", "old_string", "new_string"],
+    },
+)
+def edit_file(
+    path: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+    _deps: dict | None = None,
+) -> str:
+    if old_string == new_string:
+        return "Error: old_string and new_string are identical -- nothing to change"
+    try:
+        path = _validate_path(path, sandbox=(_deps or {}).get("sandbox"))
+        note = ""
+        if path not in _read_paths_for(_deps):  # M6: per-session when wired
+            note = f"\nNote: editing '{path}' without having read it first -- verify the path is correct."
+        with open(path) as f:
+            content = f.read()
+        count = content.count(old_string)
+        if count == 0:
+            return f"Error: old_string not found in '{path}' -- re-read the file and match the exact text"
+        if count > 1 and not replace_all:
+            return (
+                f"Error: old_string matched {count} times in '{path}'; provide more "
+                "surrounding context to make it unique, or set replace_all"
+            )
+        new_content = content.replace(old_string, new_string)
+        # Atomic swap: write to a temp file in the same directory, then os.replace,
+        # so a crash mid-write can never leave a truncated file behind.
+        dir_ = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(dir=dir_, prefix=".edit_file_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(new_content)
+            os.chmod(tmp, os.stat(path).st_mode)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        replaced = count if replace_all else 1
+        return f"Successfully replaced {replaced} occurrence(s) in '{path}'{note}"
+    except FileNotFoundError:
+        return f"Error: file '{path}' not found"
+    except PermissionError:
+        return f"Error: no access to '{path}'"
+    except IsADirectoryError:
+        return f"Error: '{path}' is a directory, not a file"
+    except OSError as e:
+        # ENOSPC/EIO/EROFS/EBUSY during the atomic swap -- honor the str-return
+        # contract (every other failure path returns "Error: ...") instead of
+        # raising out of the tool.
+        return f"Error: {e.strerror or e} ('{path}')"
+
+
+@tool(
+    name="apply_patch",
+    group="file",
+    deps=["sandbox"],
+    description=(
+        "Apply a unified-diff patch (git diff / `diff -u` style, with @@ hunk "
+        "headers, context, and +/- lines) to an existing file. Each hunk's "
+        "context must match exactly and uniquely; line drift is tolerated "
+        "(matching is content-based, not by the @@ line number). All hunks "
+        "apply atomically -- if any hunk fails the file is left unchanged and "
+        "the error names which hunk failed. Preferred for multi-line or "
+        "multi-hunk edits; use edit_file for a single exact string replacement."
+    ),
+    risk_level=RiskLevel.DESTRUCTIVE,
+    # Issue #48: patching mutates the fs; on crash-resume the loop's
+    # _repair_interrupted_turn must NOT silently replay it (double edits).
+    idempotent=False,
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path of the file to patch",
+            },
+            "patch": {
+                "type": "string",
+                "description": "Unified-diff patch text (one or more @@ hunks for this single file)",
+            },
+        },
+        "required": ["path", "patch"],
+    },
+)
+def apply_patch(path: str, patch: str, _deps: dict | None = None) -> str:
+    try:
+        path = _validate_path(path, sandbox=(_deps or {}).get("sandbox"))
+        note = ""
+        if path not in _read_paths_for(_deps):  # M6: per-session when wired
+            note = f"\nNote: patching '{path}' without having read it first -- verify the path is correct."
+        with open(path) as f:
+            content = f.read()
+        try:
+            hunks = parse_unified_diff(patch)
+            new_content = apply_hunks(content, hunks)
+        except PatchError as e:
+            return f"Error: {e}"
+        if new_content == content:
+            return f"Patch applied to '{path}' but made no changes (every hunk is a no-op){note}"
+        # Atomic swap (same pattern as edit_file): temp file in the same dir,
+        # os.replace so a crash mid-write can never leave a truncated file.
+        dir_ = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(dir=dir_, prefix=".apply_patch_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(new_content)
+            os.chmod(tmp, os.stat(path).st_mode)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        # Report EFFECTIVE hunks (no-op/context-only hunks don't change anything;
+        # reporting the total misled the model into thinking more changed than did).
+        applied = sum(1 for h in hunks if h.old_text != h.new_text)
+        return f"Successfully applied {applied} hunk(s) to '{path}'{note}"
+    except FileNotFoundError:
+        return f"Error: file '{path}' not found"
+    except PermissionError:
+        return f"Error: no access to '{path}'"
+    except IsADirectoryError:
+        return f"Error: '{path}' is a directory, not a file"
+    except OSError as e:
+        # ENOSPC/EIO/EROFS/EBUSY during the atomic swap -- honor the str-return
+        # contract instead of raising out of the tool.
+        return f"Error: {e.strerror or e} ('{path}')"
 
 
 @tool(

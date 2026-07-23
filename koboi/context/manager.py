@@ -131,6 +131,14 @@ class ContextManager(ABC):
         # object with get_meta/set_meta) set by the facade. Used by sliding_window
         # to persist its summary across restart/resume. None -> in-memory only.
         self.meta_store = None
+        # Wave 3: the budget of the LAST manage() call -- strategies may use it
+        # for a post-shrink fallback (see CodingContextManager).
+        self._last_budget: int | None = None
+        # Wave 3: True when the last manage() call ran the strategy (modified
+        # content), even if the message COUNT stayed the same (body-only
+        # eviction). loop.py ORs this into its count-based _last_compacted so
+        # POST_COMPACT hooks (ReadBeforeWriteResetHook) see an honest signal.
+        self.last_modified: bool = False
 
     def _log(self, detail: str) -> None:
         if self.logger:
@@ -167,13 +175,16 @@ class ContextManager(ABC):
         # re-runs at the next iteration's start). Applied here -- not at call
         # sites -- so the /compact force-path (max_tokens=0) still compacts fully.
         budget = max(0, max_tokens - self.safety_margin)
+        self._last_budget = budget
         if tokens <= budget:
+            self.last_modified = False
             return messages
 
         system_msgs = [m for m in messages if m.get("role") == "system"]
         non_system = [m for m in messages if m.get("role") != "system"]
 
         result, log_detail = await self._build_result(system_msgs, non_system)
+        self.last_modified = True
         result = ensure_tool_integrity(result)
 
         self._log(
@@ -434,3 +445,125 @@ class SlidingWindowManager(ContextManager):
             self._log(f"Summarization failed, keeping previous summary: {exc}")
 
         return self._summary
+
+
+# File tools whose results carry a per-path identity (from tool_call arguments).
+_FILE_TOOLS = {
+    "read_file",
+    "write_file",
+    "edit_file",
+    "apply_patch",  # Wave 2.4: mutation confirmation keyed by `path`
+    "delete_file",
+    "run_typecheck",  # Wave 2.4: diagnostic output keyed by `path`
+}
+
+
+@register_context_strategy(
+    "coding",
+    description="Stub old tool-result bodies; keep newest per-file read verbatim",
+)
+class CodingContextManager(ContextManager):
+    """Tool-result body eviction for long coding sessions (Wave 3).
+
+    Old tool-result BODIES (file reads, test output) collapse to one-line
+    stubs while the newest result per (tool, path) identity stays verbatim --
+    the working set survives, stale bulk goes. Unlike the other strategies it
+    keeps the assistant/tool message PAIRS in place (only the tool ``content``
+    shrinks), so ``ensure_tool_integrity`` never orphans anything.
+
+    Correctness invariants:
+    - stubs are NEW dicts -- ``get_messages()`` shares dict objects with
+      ``ConversationMemory``; in-place mutation would destroy the full-fidelity
+      stored history;
+    - identity key is ``(tool_name, path)`` so a small ``edit_file``
+      confirmation can never evict the newest ``read_file`` body for the path;
+    - still over budget after stubbing -> plain-truncation fallback
+      (system + last ``keep_last``), repaired by the integrity pass.
+    """
+
+    def __init__(
+        self,
+        logger: AgentLogger | None = None,
+        keep_last: int = 20,
+        keep_newest_per_key: int = 1,
+        evict_min_chars: int = 200,
+        summarization_truncation: int | None = None,  # accepted for facade compat; unused
+    ):
+        super().__init__(logger)
+        self.keep_last = keep_last
+        self.keep_newest_per_key = max(1, keep_newest_per_key)
+        self.evict_min_chars = evict_min_chars
+
+    @property
+    def _strategy_name(self) -> str:
+        return "CODING"
+
+    @staticmethod
+    def _id_map(non_system: list[dict]) -> dict[str, tuple[str, str | None]]:
+        """tool_call_id -> (tool_name, path) from assistant tool_calls."""
+        import json as _json
+
+        id_map: dict[str, tuple[str, str | None]] = {}
+        for m in non_system:
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                name = fn.get("name", "") if isinstance(fn, dict) else ""
+                path = None
+                if name in _FILE_TOOLS:
+                    try:
+                        path = _json.loads(fn.get("arguments") or "{}").get("path")
+                    except (ValueError, AttributeError, TypeError):
+                        path = None  # malformed args -> pathless key, never crash
+                tc_id = tc.get("id") if isinstance(tc, dict) else None
+                if tc_id:
+                    id_map[tc_id] = (name, path)
+        return id_map
+
+    async def _build_result(self, system_msgs, non_system):
+        from collections import Counter
+
+        id_map = self._id_map(non_system)
+        protected_from = max(0, len(non_system) - self.keep_last)
+        seen: Counter[tuple[str, str | None]] = Counter()
+        out = list(non_system)
+        stubbed = 0
+        saved_chars = 0
+
+        for idx in range(len(non_system) - 1, -1, -1):
+            m = non_system[idx]
+            if m.get("role") != "tool":
+                continue
+            entry = id_map.get(m.get("tool_call_id", ""))
+            if entry is None:
+                continue  # orphan; ensure_tool_integrity handles it
+            seen[entry] += 1
+            if idx >= protected_from:
+                continue  # recent window: counts toward seen, never stubbed
+            if seen[entry] <= self.keep_newest_per_key:
+                continue  # newest N per identity stay verbatim
+            content = m.get("content")
+            if not isinstance(content, str) or len(content) <= self.evict_min_chars:
+                continue
+            name, path = entry
+            ident = f"({path!r})" if path else ""
+            verb = "re-read" if name == "read_file" else "re-run"
+            # NEW dict: never mutate the memory-owned message in place.
+            out[idx] = {
+                "role": "tool",
+                "tool_call_id": m["tool_call_id"],
+                "content": f"[evicted {name}{ident} result ({len(content)} chars); {verb} if needed]",
+            }
+            stubbed += 1
+            saved_chars += len(content)
+
+        result = system_msgs + out
+        detail = f"stubbed {stubbed} tool results (~{saved_chars} chars)"
+        # Post-shrink fallback: use the raw estimate, NOT _effective_tokens --
+        # last_actual_tokens describes the PREVIOUS full prompt and would force
+        # the fallback forever. The /compact force path (budget 0) always falls
+        # back, which is the intent (force-compact must shrink hard).
+        budget = self._last_budget
+        if budget is not None and estimate_tokens(result) > budget:
+            result = system_msgs + out[-self.keep_last :]
+            detail += f"; still over budget -> truncated to last {self.keep_last}"
+        return result, detail
