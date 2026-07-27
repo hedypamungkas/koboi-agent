@@ -215,6 +215,7 @@ class AgentFactory:
         peer_registry: object | None = None,
         media_provider: object | None = None,
         github_client: object | None = None,
+        bitbucket_client: object | None = None,
     ) -> Agent | RemoteAgentProxy:
         """Build an AgentCore (or RemoteAgentProxy) from an AgentDef (config-driven).
 
@@ -270,6 +271,7 @@ class AgentFactory:
             peer_registry=peer_registry,
             media_provider=media_provider,
             github_client=github_client,
+            bitbucket_client=bitbucket_client,
         )
 
         # G5: register shared MCP tools into this sub-agent's registry (one set of
@@ -307,6 +309,7 @@ class AgentFactory:
         peer_registry: object | None = None,
         media_provider: object | None = None,
         github_client: object | None = None,
+        bitbucket_client: object | None = None,
     ) -> dict[str, Agent | RemoteAgentProxy]:
         """Build all agents from config-driven AgentDef list."""
         agents = {}
@@ -334,6 +337,7 @@ class AgentFactory:
                 peer_registry=peer_registry,
                 media_provider=media_provider,
                 github_client=github_client,
+                bitbucket_client=bitbucket_client,
             )
         return agents
 
@@ -346,6 +350,7 @@ class AgentFactory:
         peer_registry: object | None = None,
         media_provider: object | None = None,
         github_client: object | None = None,
+        bitbucket_client: object | None = None,
     ):
         """Build a ToolRegistry from agent-level tools config."""
         if not tools_config:
@@ -397,6 +402,10 @@ class AgentFactory:
         # facade._setup_github); absent when github.enabled is false/unset.
         if github_client is not None:
             registry.set_dep("github_client", github_client)
+        # Bitbucket PR-tooling client (same shape as github); absent when
+        # bitbucket.enabled is false/unset.
+        if bitbucket_client is not None:
+            registry.set_dep("bitbucket_client", bitbucket_client)
         # Apply defaults/overrides/disabled/groups via the shared helper so this
         # path stays in lock-step with facade._build_tools.
         from koboi.tools.registry import apply_tool_selection

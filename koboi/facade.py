@@ -2181,6 +2181,9 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
     # W4: same client-construction path as the single-agent _setup_github, so
     # orchestration sub-agents get github_* tools too (issue #81's fix pattern).
     github_client = _build_github_client(config.get("github", default={}) or {})
+    # Bitbucket PR-tooling: mirror the github wiring so orchestration sub-agents get
+    # bitbucket_* tools when a ``bitbucket:`` block is configured.
+    bitbucket_client = _build_bitbucket_client(config.get("bitbucket", default={}) or {})
 
     if agent_defs:
         agents_map = AgentFactory.create_all_configured(
@@ -2198,6 +2201,7 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
             fetch_provider=shared_fetch_provider,
             media_provider=media_backend,
             github_client=github_client,
+            bitbucket_client=bitbucket_client,
         )
     else:
         agents_map = {}

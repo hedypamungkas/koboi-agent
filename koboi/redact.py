@@ -62,6 +62,7 @@ SENSITIVE_KEY_NAMES: frozenset[str] = frozenset(
         "authorization",
         "password",
         "passwd",
+        "app_password",  # Bitbucket Cloud app password / repository access token
         "token",
         "access_key",
         "accesskey",

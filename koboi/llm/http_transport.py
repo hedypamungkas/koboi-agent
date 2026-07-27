@@ -69,9 +69,13 @@ class HttpTransport:
             except httpx.TimeoutException as e:
                 raise LLMConnectionError(f"Request timed out after {self._timeout}s: {e}") from e
 
+            # Capture the most recent response headers for rate-limit telemetry hooks
+            # (RateLimitEmitHook reads transport.last_response_headers). Captured on
+            # every response -- success AND error -- so a 429's headers are reflected
+            # too, not just the 2xx quota headers.
+            self._last_response_headers = dict(response.headers)
+
             if response.status_code < 400:
-                # Capture response headers for rate-limit telemetry (contribution #5)
-                self._last_response_headers = dict(response.headers)
                 try:
                     return response.json()
                 except (json.JSONDecodeError, ValueError) as e:

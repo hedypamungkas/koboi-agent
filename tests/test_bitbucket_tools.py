@@ -1,4 +1,4 @@
-"""Tests for koboi.tools.builtin.bitbucket (contribution #6). All HTTP is mocked (no network)."""
+"""Tests for koboi.tools.builtin.bitbucket -- Bitbucket Cloud PR tooling. All HTTP is mocked (no network)."""
 
 from __future__ import annotations
 
@@ -76,6 +76,29 @@ class TestBitbucketClient:
         _, kwargs = mock_client.post.call_args
         assert "reviewers" in kwargs["json"]
 
+    async def test_create_pr_degrades_when_default_reviewers_fails(self):
+        """A failing default-reviewers fetch must not block PR creation (degrade, don't abort)."""
+        err_resp = httpx.Response(404, request=httpx.Request("GET", "https://api.bitbucket.org/2.0"))
+        pr_resp = _response(json_payload={"id": 9, "links": {"html": {"href": "u9"}}})
+        mock_client = _mock_async_client(pr_resp)
+        mock_client.get = AsyncMock(
+            side_effect=httpx.HTTPStatusError("x", request=err_resp.request, response=err_resp)
+        )
+        with patch("koboi.tools.builtin.bitbucket.httpx.AsyncClient", return_value=mock_client):
+            result = await BitbucketClient(username="user", app_password="token").create_pr(
+                workspace="ws",
+                repo_slug="repo",
+                source_branch="feat",
+                dest_branch="main",
+                title="Title",
+                description="Body",
+                default_reviewers=True,
+            )
+        assert result["id"] == 9  # PR was still created
+        mock_client.post.assert_awaited_once()
+        _, kwargs = mock_client.post.call_args
+        assert "reviewers" not in kwargs["json"]  # degraded without reviewers
+
     async def test_update_pr_omits_unset_fields(self):
         mock_client = _mock_async_client(_response(json_payload={"id": "1", "state": "open"}))
         with patch("koboi.tools.builtin.bitbucket.httpx.AsyncClient", return_value=mock_client):
@@ -99,6 +122,37 @@ class TestBitbucketClient:
             result = await BitbucketClient(username="user", app_password="token").list_prs("ws", "repo")
         assert len(result) == 2
         assert result[0]["id"] == 1
+
+    async def test_list_prs_sends_uppercase_state_and_auth(self):
+        """Bitbucket's API wants UPPERCASE OPEN/MERGED/...; the client must resolve the
+        lowercase alias AND attach Basic auth (regression guard for the missing-auth bug)."""
+        mock_client = _mock_async_client(_response(json_payload={"values": []}))
+        with patch("koboi.tools.builtin.bitbucket.httpx.AsyncClient", return_value=mock_client):
+            await BitbucketClient(username="user", app_password="token").list_prs("ws", "repo", state="open")
+        _, kwargs = mock_client.get.call_args
+        assert kwargs["params"]["state"] == "OPEN"  # canonical uppercase
+        assert kwargs["auth"] is not None  # C3: list_prs must authenticate
+
+    async def test_list_prs_all_omits_state_param(self):
+        """'all' (and no state) must OMIT the state param (Bitbucket has no 'all' literal)."""
+        mock_client = _mock_async_client(_response(json_payload={"values": []}))
+        with patch("koboi.tools.builtin.bitbucket.httpx.AsyncClient", return_value=mock_client):
+            await BitbucketClient(username="user", app_password="token").list_prs("ws", "repo", state="all")
+        _, kwargs = mock_client.get.call_args
+        assert "state" not in kwargs["params"]
+        assert kwargs["auth"] is not None
+
+    async def test_all_read_calls_attach_auth(self):
+        """Every BitbucketClient GET must carry auth= (the mock otherwise hides a 401)."""
+        mock_client = _mock_async_client(_response(json_payload={"values": []}))
+        with patch("koboi.tools.builtin.bitbucket.httpx.AsyncClient", return_value=mock_client):
+            bb = BitbucketClient(username="user", app_password="token")
+            await bb.list_prs("ws", "repo")
+            await bb.get_pr("ws", "repo", 1)
+            await bb.get_default_reviewers("ws", "repo")
+        assert mock_client.get.call_count == 3
+        for call in mock_client.get.call_args_list:
+            assert call.kwargs.get("auth") is not None
 
     async def test_get_default_reviewers_returns_uuids(self):
         payload = {"values": [{"uuid": "{uuid-1}"}, {"uuid": "{uuid-2}"}]}
@@ -217,7 +271,7 @@ class TestToolsWithMockedClient:
     async def test_invalid_state_validated_in_list_prs(self):
         client = AsyncMock()
         result = await bitbucket_list_prs("ws", "repo", state="invalid", _deps={"bitbucket_client": client})
-        assert "Error: state must be one of" in result
+        assert "Error: invalid Bitbucket PR state" in result
 
     async def test_create_pr_with_close_source_branch(self):
         client = AsyncMock()

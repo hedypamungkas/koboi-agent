@@ -1,11 +1,14 @@
-"""koboi/tools/builtin/bitbucket -- Bitbucket PR tooling (create/update/get default reviewers).
+"""koboi/tools/builtin/bitbucket -- Bitbucket Cloud PR tooling.
 
-CRITICAL: never implement this via a subprocess call. The Bitbucket app password/token
-must be read directly in Python (config-supplied) and sent as an HTTP header on an
-in-process ``httpx`` call -- never through subprocess env.
+Provides ``bitbucket_create_pr`` / ``bitbucket_update_pr`` / ``bitbucket_list_prs`` /
+``bitbucket_get_pr`` / ``bitbucket_get_default_reviewers`` over the Bitbucket REST API
+v2.0. Mirrors the ``github.py`` PR-tooling shape (in-process ``httpx``, dependency-
+injected client, graceful "not configured" error when no ``bitbucket:`` block is set).
 
-This mirrors the github.py PR tooling implementation, using Bitbucket's REST API v2.0
-with Basic authentication (username=empty, password=app_password/token).
+CRITICAL: never implement this via a subprocess call. The Bitbucket app password must
+be read directly in Python (config-supplied) and sent as HTTP Basic auth on an
+in-process ``httpx`` call -- never through subprocess env (the secret would then be
+visible in the process environment / ps output).
 """
 
 from __future__ import annotations
@@ -23,7 +26,32 @@ _logger = logging.getLogger(__name__)
 # Bitbucket workspace/repo slug names are URL-safe ([A-Za-z0-9._-]); validating against this
 # charset rejects path/query/fragment injection.
 _OWNER_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-_VALID_PR_STATES = ("open", "closed", "all")
+
+# Bitbucket Cloud REST API v2.0 pull-request ``state`` values are UPPERCASE and a
+# different set than GitHub's: OPEN / MERGED / DECLINED / SUPERSEDED. There is no
+# ``closed`` and no ``all`` literal -- listing every state means OMITTING the param.
+# These are the lowercase-friendly aliases the tool accepts; ``all`` maps to "no filter".
+_PR_STATE_ALIASES: dict[str, str | None] = {
+    "open": "OPEN",
+    "merged": "MERGED",
+    "declined": "DECLINED",
+    "superseded": "SUPERSEDED",
+    "all": None,
+}
+
+
+def _resolve_pr_state(state: str | None) -> str | None:
+    """Map a user-facing PR state to Bitbucket's UPPERCASE value, or ``None`` (=all).
+
+    Raises ``ValueError`` for anything that is not a known alias (case-insensitive).
+    """
+    if state is None or state.strip() == "":
+        return None
+    key = state.strip().lower()
+    if key not in _PR_STATE_ALIASES:
+        valid = "/".join(_PR_STATE_ALIASES)
+        raise ValueError(f"invalid Bitbucket PR state {state!r}; expected one of {valid}")
+    return _PR_STATE_ALIASES[key]
 
 
 def _seg(value: str, label: str) -> str:
@@ -49,10 +77,12 @@ class BitbucketClient:
         self._timeout = timeout
 
     def _headers(self) -> dict[str, str]:
-        """Return request headers with Basic authentication.
+        """Return request headers (auth is applied separately via ``_auth()``).
 
-        Bitbucket uses Basic auth with username and app password. For workspace tokens,
-        the username is typically empty (or any value) and the password is the token.
+        Bitbucket uses HTTP Basic auth (username + app password); that is attached
+        per-request through ``httpx.BasicAuth`` (see ``_auth``), NOT folded into these
+        headers. For workspace/repository access tokens the username is typically
+        empty and the password is the token.
         """
         # Bitbucket API requires Accept header for JSON responses
         return {"Accept": "application/json"}
@@ -95,11 +125,21 @@ class BitbucketClient:
             "close_source_branch": close_source_branch,
         }
 
-        # Add default reviewers if requested
+        # Add default reviewers if requested. A failure to fetch default reviewers
+        # (repo without the feature, a permissions error, a transient blip) must not
+        # block PR creation -- degrade to creating the PR without reviewers.
         if default_reviewers:
-            reviewers = await self.get_default_reviewers(workspace, repo_slug)
-            if reviewers:
-                payload["reviewers"] = reviewers
+            try:
+                reviewers = await self.get_default_reviewers(workspace, repo_slug)
+                if reviewers:
+                    payload["reviewers"] = reviewers
+            except (httpx.HTTPError, ValueError) as e:
+                _logger.warning(
+                    "bitbucket: default-reviewers fetch failed for %s/%s; creating PR without reviewers: %r",
+                    workspace,
+                    repo_slug,
+                    e,
+                )
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(url, json=payload, headers=self._headers(), auth=self._auth())
@@ -119,7 +159,7 @@ class BitbucketClient:
         workspace, repo_slug = _seg(workspace, "workspace"), _seg(repo_slug, "repo_slug")
         url = f"{self._api_base}/repositories/{workspace}/{repo_slug}/pullrequests/{pr_id}"
 
-        payload = {}
+        payload: dict[str, object] = {}
         if title is not None:
             payload["title"] = title
         if description is not None:
@@ -163,16 +203,21 @@ class BitbucketClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def list_prs(
-        self, workspace: str, repo_slug: str, state: str = "open", pagelen: int = 50
-    ) -> list[dict]:
-        """List pull requests for a repository."""
+    async def list_prs(self, workspace: str, repo_slug: str, state: str = "open", pagelen: int = 50) -> list[dict]:
+        """List pull requests for a repository.
+
+        ``state`` is resolved via :func:`_resolve_pr_state` to Bitbucket's UPPERCASE
+        value (or omitted entirely for ``all``).
+        """
         workspace, repo_slug = _seg(workspace, "workspace"), _seg(repo_slug, "repo_slug")
         url = f"{self._api_base}/repositories/{workspace}/{repo_slug}/pullrequests"
-        params: dict[str, str | int] = {"state": state, "pagelen": min(pagelen, 100)}
+        resolved_state = _resolve_pr_state(state)
+        params: dict[str, str | int] = {"pagelen": min(pagelen, 100)}
+        if resolved_state is not None:
+            params["state"] = resolved_state
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(url, params=params, headers=self._headers())
+            resp = await client.get(url, params=params, headers=self._headers(), auth=self._auth())
         resp.raise_for_status()
         data = resp.json()
 
@@ -262,7 +307,7 @@ async def bitbucket_create_pr(
 @tool(
     name="bitbucket_update_pr",
     group="bitbucket",
-    description="Update a pull request's title, description, and/or reviewers on Bitbucket.",
+    description="Update a pull request's title and/or description on Bitbucket.",
     parameters={
         "type": "object",
         "properties": {
@@ -317,9 +362,7 @@ async def bitbucket_update_pr(
     idempotent=True,
     deps=["bitbucket_client"],
 )
-async def bitbucket_get_default_reviewers(
-    workspace: str, repo_slug: str, _deps: dict | None = None
-) -> str:
+async def bitbucket_get_default_reviewers(workspace: str, repo_slug: str, _deps: dict | None = None) -> str:
     client, err = _client_or_error(_deps)
     if err:
         return err
@@ -348,8 +391,10 @@ async def bitbucket_get_default_reviewers(
             **_WORKSPACE_REPO_PARAMS,
             "state": {
                 "type": "string",
-                "enum": ["open", "closed", "all"],
-                "description": "Filter by state: 'open' (default), 'closed', or 'all'.",
+                "enum": ["open", "merged", "declined", "superseded", "all"],
+                "description": (
+                    "Filter by state: 'open' (default), 'merged', 'declined', 'superseded', or 'all' (no filter)."
+                ),
             },
         },
         "required": ["workspace", "repo_slug"],
@@ -358,15 +403,14 @@ async def bitbucket_get_default_reviewers(
     idempotent=True,
     deps=["bitbucket_client"],
 )
-async def bitbucket_list_prs(
-    workspace: str, repo_slug: str, state: str = "open", _deps: dict | None = None
-) -> str:
+async def bitbucket_list_prs(workspace: str, repo_slug: str, state: str = "open", _deps: dict | None = None) -> str:
     client, err = _client_or_error(_deps)
     if err:
         return err
-    if state not in _VALID_PR_STATES:
-        return f"Error: state must be one of {_VALID_PR_STATES}, got {state!r}"
     try:
+        # Validate at the boundary (defensive; BitbucketClient.list_prs re-resolves
+        # too, so direct programmatic use is also guarded).
+        _resolve_pr_state(state)
         prs = await client.list_prs(workspace, repo_slug, state=state)
     except httpx.HTTPStatusError as e:
         return f"Error: Bitbucket API returned {e.response.status_code}: {e.response.text[:300]}"
@@ -398,9 +442,7 @@ async def bitbucket_list_prs(
     idempotent=True,
     deps=["bitbucket_client"],
 )
-async def bitbucket_get_pr(
-    workspace: str, repo_slug: str, pr_id: int, _deps: dict | None = None
-) -> str:
+async def bitbucket_get_pr(workspace: str, repo_slug: str, pr_id: int, _deps: dict | None = None) -> str:
     client, err = _client_or_error(_deps)
     if err:
         return err

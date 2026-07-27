@@ -78,6 +78,9 @@ class AnthropicAdapter(LLMClient):
         self._apply_extra_params(body)
         data = await self._transport.post("/messages", body)
         result = self._parse_response(data)
+        # Attach the raw response headers for rate-limit telemetry hooks; kept out of
+        # ``_parse_response`` so that stays a pure static parser (testable in isolation).
+        result.response_headers = getattr(self._transport, "last_response_headers", {})
 
         if response_format:
             result.content, result.tool_calls = self._collapse_structured(result.content, result.tool_calls)
@@ -410,7 +413,8 @@ class AnthropicAdapter(LLMClient):
             )
         return result
 
-    def _parse_response(self, data: dict) -> AgentResponse:
+    @staticmethod
+    def _parse_response(data: dict) -> AgentResponse:
         content_blocks = data.get("content", [])
 
         text_parts: list[str] = []
@@ -439,12 +443,7 @@ class AnthropicAdapter(LLMClient):
                 completion_tokens=usage_raw.get("output_tokens", 0),
             )
 
-        return AgentResponse(
-            content=content,
-            tool_calls=tool_calls,
-            usage=usage,
-            response_headers=getattr(self._transport, "last_response_headers", {}),
-        )
+        return AgentResponse(content=content, tool_calls=tool_calls, usage=usage)
 
     async def close(self) -> None:
         await self._transport.close()

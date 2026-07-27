@@ -116,6 +116,9 @@ _READ_ONLY_TOOLS: set[str] = {
     "repo_map",
     "github_list_prs",
     "github_get_pr",
+    "bitbucket_list_prs",
+    "bitbucket_get_pr",
+    "bitbucket_get_default_reviewers",
     "run_typecheck",  # read-only diagnostic (ruff/mypy/pyright on a validated path)
 }
 

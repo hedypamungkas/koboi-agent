@@ -10,12 +10,9 @@ Opt-in by default (must be enabled via config) to avoid changing existing behavi
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent
-
-if TYPE_CHECKING:
-    pass
 
 _logger = logging.getLogger(__name__)
 
@@ -24,15 +21,15 @@ class RateLimitEmitHook(Hook):
     """Hook that captures and emits rate-limit telemetry from LLM response headers.
 
     Subscribes to POST_LLM_CALL events and extracts rate-limit information from
-    response headers (when available via metadata), then logs it for external
-    consumption by monitoring/webhook systems.
+    response headers (carried on the ``AgentResponse.response_headers`` field), then
+    logs it for external consumption by monitoring/webhook systems.
 
     Default: disabled (opt-in via ``hooks.rate_limit_emit: true``).
     """
 
     priority = 20  # Run early (infrastructure/telemetry tier)
 
-    def __init__(self, emit_func: callable | None = None):
+    def __init__(self, emit_func: Callable[[str, dict], None] | None = None):
         """Initialize the hook.
 
         Args:
@@ -45,22 +42,27 @@ class RateLimitEmitHook(Hook):
         return [HookEvent.POST_LLM_CALL]
 
     async def execute(self, ctx: HookContext) -> HookContext:
-        """Extract rate-limit headers from response metadata and emit telemetry.
+        """Extract rate-limit headers from the LLM response and emit telemetry.
 
-        Headers are expected to be attached to ctx.metadata by the LLM adapter
-        (e.g., in ``koboi/llm/openai_adapter.py``) under the key ``response_headers``.
+        Headers are read from ``ctx.llm_response.response_headers`` (populated by the
+        LLM adapters from the transport's most-recent response headers).
 
         Emits a ``rate_limit.info`` event with fields:
             - provider: str (e.g., "openai", "anthropic")
-            - retry_after: float | None (seconds until retry allowed)
+            - retry_after: float | str | None (seconds, or an HTTP-date string)
             - remaining_requests: int | None
             - remaining_tokens: int | None
             - reset_at: str | None (ISO timestamp or human-readable)
         """
-        # Access headers from metadata (set by LLM adapter)
-        headers = ctx.metadata.get("response_headers") if ctx.metadata else None
-        if not headers or not isinstance(headers, dict):
-            # No headers available (not an error, just skip)
+        # Rate-limit headers are attached to the AgentResponse by the LLM adapter
+        # (``response_headers`` field, populated from the transport's
+        # ``last_response_headers``). The loop fires POST_LLM_CALL with the response
+        # object; it does NOT copy headers into ctx.metadata, so read them here.
+        headers = None
+        if ctx.llm_response is not None:
+            headers = getattr(ctx.llm_response, "response_headers", None)
+        if not isinstance(headers, dict) or not headers:
+            _logger.debug("rate-limit hook: response carried no headers; skipping emit")
             return ctx
 
         # Extract provider from response if available
@@ -83,9 +85,7 @@ class RateLimitEmitHook(Hook):
             headers, "anthropic-ratelimit-unified-tokens-remaining"
         ) or self._parse_header_int(headers, "x-ratelimit-remaining-tokens")
 
-        reset_at = headers.get("anthropic-ratelimit-unified-requests-reset") or headers.get(
-            "x-ratelimit-reset"
-        )
+        reset_at = headers.get("anthropic-ratelimit-unified-requests-reset") or headers.get("x-ratelimit-reset")
 
         # Only emit if we have at least one rate-limit metric
         if retry_after is not None or remaining_requests is not None or remaining_tokens is not None:
@@ -100,8 +100,14 @@ class RateLimitEmitHook(Hook):
 
         return ctx
 
-    def _parse_retry_after(self, headers: dict) -> float | None:
-        """Parse retry-after header (can be seconds int or HTTP-date)."""
+    def _parse_retry_after(self, headers: dict) -> float | str | None:
+        """Parse retry-after header (seconds as a number, or an HTTP-date string).
+
+        Note: providers only emit ``retry-after`` on a 429, which the HTTP transport
+        raises as ``LLMRateLimitError`` *before* a POST_LLM_CALL fires -- so in
+        practice this field is populated only when a provider/proxy emits it on a
+        non-error response. The always-useful signal (remaining/reset) lives on 2xx.
+        """
         val = headers.get("retry-after")
         if not val:
             return None
