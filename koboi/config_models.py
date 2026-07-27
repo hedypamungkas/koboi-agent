@@ -628,8 +628,12 @@ class BitbucketConfig(BaseModel):
     def _reject_unknown_keys_(cls, data: object) -> object:
         # Issue #79 parity: a misspelled app_password (``ap_pasword``) would otherwise
         # leave the credential empty and fail opaquely at runtime with no load-time hint.
+        # Hint values are the real config key NAMES ("app_password"), not secrets --
+        # they map common misspellings to the correct field (issue #79).
         _reject_unknown_keys(
-            cls, data, hints={"ap_pasword": "app_password", "apikey": "app_password", "api_url": "api_base"}
+            cls,
+            data,
+            hints={"ap_pasword": "app_password", "apikey": "app_password", "api_url": "api_base"},  # nosec B105
         )
         return data
 
