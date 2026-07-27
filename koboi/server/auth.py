@@ -23,6 +23,16 @@ _logger = logging.getLogger(__name__)
 #: Endpoints that bypass auth (health probes + the open agent-card; trust via HMAC org-claim).
 OPEN_PATHS = frozenset({"/healthz", "/readyz", CARD_PATH})
 
+#: Prefix that namespaces an A2A peer's ownership identity away from tenant API
+#: key ids (issue #102). Key ids are operator-supplied in the keys file, so an
+#: un-prefixed peer identity could in principle collide with one.
+PEER_OWNER_PREFIX = "peer:"
+
+
+def peer_owner_id(peer_id: str) -> str:
+    """Ownership identity for an inbound A2A peer (``peer:<peer_id>``)."""
+    return f"{PEER_OWNER_PREFIX}{peer_id}"
+
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
@@ -139,7 +149,12 @@ def make_auth_middleware(key_store: KeyStore, *, auth_required: bool = True, pee
             peer_id = peer_registry.validate_inbound_token(token)
             if peer_id is not None:
                 request.state.peer_id = peer_id
-                request.state.api_key_id = peer_id  # caller identity for ownership checks
+                # Issue #102: ownership identity for a peer caller, namespaced so it can
+                # never equal an operator-chosen API key_id (which is free-form in the
+                # keys file). Stamped HERE, not per-route, so every ownership check sees
+                # one identity for a peer -- a session claimed on /v1/peer/invoke is the
+                # same owner string a peer's /v1/sessions call would compare against.
+                request.state.api_key_id = peer_owner_id(peer_id)
                 return await call_next(request)
         if not has_api_keys:
             # Peer-only instance: the token was not a valid peer token.
