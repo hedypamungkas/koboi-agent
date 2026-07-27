@@ -798,11 +798,31 @@ def _register_routes(
     async def get_session(session_id: str, request: Request) -> Response:
         if not is_safe_session_id(session_id):
             return _error_response(400, "bad_request", "invalid session_id", request)
-        if pool.get(session_id) is None:
-            raise HTTPException(status_code=404, detail="session not found")
+        # Owner check FIRST (parity with fork/suspend/resume -- app.py:~1169/~1247/~1203):
+        # a non-owner must be 403'd before we pay for an agent build. Otherwise a denied
+        # GET on a persisted (not-pooled) session would materialize an agent and, at pool
+        # cap, evict a legitimate tenant's warm agent -- for a caller who never reads it.
         err = _check_owner(ownership, session_id, request)
         if err:
             return err
+        if pool.get(session_id) is None:
+            # Not pooled in this process (e.g. after a serve restart / snapshot restore --
+            # the koboi-range dismount->remount cycle restores koboi_memory.db and restarts
+            # `koboi serve`). `ownership` is the persisted existence source (same source
+            # fork/suspend consult); rehydrate via get_or_create so pool.get_messages below
+            # reads the persisted conversation, not [].
+            if ownership.get_owner(session_id) is None:
+                raise HTTPException(status_code=404, detail="session not found")
+            try:
+                await pool.get_or_create(session_id)
+            except PoolFull as exc:
+                return _error_response(429, "pool_full", str(exc), request)
+            except Exception as exc:
+                # Rehydrate failures are config/OS/custom-tool-init errors (not client-
+                # correctable). Surface them as an error envelope instead of an opaque
+                # FastAPI 500 so operators get a code + message (parity with fork's 500
+                # "fork_failed" path at app.py:~1187).
+                return _error_response(500, "rehydrate_failed", f"session rehydrate failed: {exc}", request)
         messages = await pool.get_messages(session_id)
         return SessionResponse(session_id=session_id, messages=messages)  # type: ignore[return-value]
 
