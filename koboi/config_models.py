@@ -607,6 +607,37 @@ class GithubConfig(BaseModel):
         return data
 
 
+class BitbucketConfig(BaseModel):
+    """Bitbucket Cloud PR-tooling configuration (opt-in; inert by default).
+
+    In-process httpx client with HTTP Basic auth (username + app password) -- see
+    ``koboi/tools/builtin/bitbucket.py``. The app password must never ride subprocess
+    env; it is supplied via config and sent as a Basic-auth Authorization header.
+    """
+
+    model_config = {"extra": "ignore"}
+
+    enabled: bool = False
+    username: str = ""
+    app_password: str = ""
+    api_base: str = "https://api.bitbucket.org/2.0"
+    timeout: int = Field(default=15, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_unknown_keys_(cls, data: object) -> object:
+        # Issue #79 parity: a misspelled app_password (``ap_pasword``) would otherwise
+        # leave the credential empty and fail opaquely at runtime with no load-time hint.
+        # Hint values are the real config key NAMES ("app_password"), not secrets --
+        # they map common misspellings to the correct field (issue #79).
+        _reject_unknown_keys(
+            cls,
+            data,
+            hints={"ap_pasword": "app_password", "apikey": "app_password", "api_url": "api_base"},  # nosec B105
+        )
+        return data
+
+
 class RlimitsConfig(BaseModel):
     """POSIX resource limits applied to restricted sandbox subprocesses.
 
@@ -946,6 +977,7 @@ class KoboiConfig(BaseModel):
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     peers: PeersConfig = Field(default_factory=PeersConfig)
     github: GithubConfig = Field(default_factory=GithubConfig)
+    bitbucket: BitbucketConfig = Field(default_factory=BitbucketConfig)
     self_healing: SelfHealingConfig = Field(default_factory=SelfHealingConfig)
     handover: dict = Field(default_factory=dict)  # handover.detection / handover.digest / handover.webhooks
     # Pass-through sections read at runtime via ``config.get(<key>, ...)`` but not

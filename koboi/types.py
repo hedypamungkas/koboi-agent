@@ -98,6 +98,8 @@ class AgentResponse:
     #: Model + provider base URL that produced this response (for telemetry/E2E).
     model: str | None = None
     base_url: str | None = None
+    #: Response headers from the LLM provider (for rate-limit telemetry, hooks).
+    response_headers: dict[str, str] = field(default_factory=dict)
 
     @property
     def is_complete(self) -> bool:

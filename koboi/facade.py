@@ -1628,6 +1628,7 @@ class AgentAssembler:
         _setup_tasks(self.tools, self.config, hook_chain=self.hook_chain)
         _setup_peer_registry(self.tools, self.config, peer_registry=peer_registry)
         _setup_github(self.tools, self.config)
+        _setup_bitbucket(self.tools, self.config)
         _setup_background_shell(self.tools, self.config)
 
         # Add the opt-in hooks (skill/task persistence, proactive extraction,
@@ -2180,6 +2181,9 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
     # W4: same client-construction path as the single-agent _setup_github, so
     # orchestration sub-agents get github_* tools too (issue #81's fix pattern).
     github_client = _build_github_client(config.get("github", default={}) or {})
+    # Bitbucket PR-tooling: mirror the github wiring so orchestration sub-agents get
+    # bitbucket_* tools when a ``bitbucket:`` block is configured.
+    bitbucket_client = _build_bitbucket_client(config.get("bitbucket", default={}) or {})
 
     if agent_defs:
         agents_map = AgentFactory.create_all_configured(
@@ -2197,6 +2201,7 @@ def _build_orchestration(config: Config, verbose: bool = False, peer_registry: P
             fetch_provider=shared_fetch_provider,
             media_provider=media_backend,
             github_client=github_client,
+            bitbucket_client=bitbucket_client,
         )
     else:
         agents_map = {}
@@ -2354,6 +2359,46 @@ def _setup_github(tools: ToolRegistry, config: Config) -> None:
     if client is None:
         return
     tools.set_dep("github_client", client)
+
+
+def _build_bitbucket_client(bitbucket_conf: dict) -> object | None:
+    """Build a BitbucketClient from ``bitbucket:`` config, or None if not usable.
+
+    Shared by the single-agent facade path and ``_build_orchestration`` so both
+    wire the same client construction/validation.
+    """
+    if not bitbucket_conf or not bitbucket_conf.get("enabled"):
+        return None
+    username = bitbucket_conf.get("username") or ""
+    app_password = bitbucket_conf.get("app_password") or ""
+    if not app_password:
+        logging.getLogger(__name__).warning(
+            "bitbucket.enabled is true but bitbucket.app_password is empty -- bitbucket_* "
+            "tools will return an error string until a token is configured."
+        )
+        return None
+    from koboi.tools.builtin.bitbucket import BitbucketClient
+
+    return BitbucketClient(
+        username=username,
+        app_password=app_password,
+        api_base=bitbucket_conf.get("api_base", "https://api.bitbucket.org/2.0"),
+        timeout=bitbucket_conf.get("timeout", 15),
+    )
+
+
+def _setup_bitbucket(tools: ToolRegistry, config: Config) -> None:
+    """Inject the Bitbucket PR-tooling client (front door: bitbucket_create_pr/update_pr/list_prs/get_pr).
+
+    Mirrors ``_setup_github``: the bitbucket tools are already registered by
+    ``register_all()`` (so ``tools.builtin`` allowlisting can name them), but a
+    missing/disabled ``bitbucket_client`` dep makes each tool return a graceful error
+    string rather than crash.
+    """
+    client = _build_bitbucket_client(config.get("bitbucket", default={}) or {})
+    if client is None:
+        return
+    tools.set_dep("bitbucket_client", client)
 
 
 def _build_background_shell_manager(agent_conf: dict) -> object | None:

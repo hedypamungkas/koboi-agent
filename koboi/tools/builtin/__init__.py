@@ -22,6 +22,7 @@ def register_all(registry: ToolRegistry) -> None:
         task,
         typecheck,
         web,
+        bitbucket,
     )
 
     for mod in [
@@ -42,5 +43,6 @@ def register_all(registry: ToolRegistry) -> None:
         task,
         typecheck,
         web,
+        bitbucket,
     ]:
         register_decorated(registry, mod)

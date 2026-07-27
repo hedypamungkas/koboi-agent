@@ -302,3 +302,66 @@ class TestConfigBuilder:
         assert d["sandbox"]["rlimits"] == {"nproc": 10}
         assert d["journal"]["record_tool_calls"] is True
         assert d["server"]["workdir_ttl_seconds"] == 120
+
+
+class TestBitbucketConfigSchema:
+    """BitbucketConfig (issue #79 parity with GithubConfig): a ``bitbucket:`` block is a
+    declared field (no misleading 'Unknown config key' warning) and typo'd keys fail closed.
+    """
+
+    def test_bitbucket_block_loads_without_unknown_key_warning(self, caplog):
+        from koboi.config_models import KoboiConfig
+
+        data = {
+            "agent": {"name": "t"},
+            "llm": {"model": "m"},
+            "bitbucket": {"enabled": True, "username": "u", "app_password": "secret"},
+        }
+        with caplog.at_level("WARNING"):
+            cfg = KoboiConfig.model_validate(data)
+        assert not any("Unknown config key 'bitbucket'" in r.message for r in caplog.records)
+        assert cfg.bitbucket.enabled is True
+        assert cfg.bitbucket.username == "u"
+        assert cfg.bitbucket.app_password == "secret"
+        assert cfg.bitbucket.api_base == "https://api.bitbucket.org/2.0"
+
+    def test_bitbucket_block_rejects_typoed_key(self):
+        from pydantic import ValidationError
+
+        from koboi.config_models import KoboiConfig
+
+        data = {"agent": {"name": "t"}, "bitbucket": {"enabled": True, "ap_pasword": "secret"}}
+        with pytest.raises(ValidationError):
+            KoboiConfig.model_validate(data)
+
+    def test_bitbucket_defaults_inert(self):
+        from koboi.config_models import BitbucketConfig
+
+        bb = BitbucketConfig()
+        assert bb.enabled is False
+        assert bb.app_password == ""
+        assert bb.timeout == 15
+
+
+class TestBuildBitbucketClient:
+    """facade._build_bitbucket_client construction/validation (shared by the single-agent
+    path and _build_orchestration)."""
+
+    def test_disabled_or_missing_returns_none(self):
+        from koboi.facade import _build_bitbucket_client
+
+        assert _build_bitbucket_client({}) is None
+        assert _build_bitbucket_client({"enabled": False, "app_password": "p"}) is None
+
+    def test_enabled_without_password_returns_none_and_warns(self, caplog):
+        from koboi.facade import _build_bitbucket_client
+
+        with caplog.at_level("WARNING"):
+            assert _build_bitbucket_client({"enabled": True, "username": "u"}) is None
+        assert any("app_password is empty" in r.message for r in caplog.records)
+
+    def test_enabled_with_password_builds_client(self):
+        from koboi.facade import _build_bitbucket_client
+
+        client = _build_bitbucket_client({"enabled": True, "username": "u", "app_password": "p"})
+        assert client is not None

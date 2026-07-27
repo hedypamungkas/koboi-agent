@@ -194,7 +194,15 @@ class TestReadOnlyToolMatcher:
     def test_wave3_wave4_read_only_additions(self):
         from koboi.modes import is_read_only_tool
 
-        for name in ["repo_map", "github_list_prs", "github_get_pr", "run_typecheck"]:
+        for name in [
+            "repo_map",
+            "github_list_prs",
+            "github_get_pr",
+            "bitbucket_list_prs",
+            "bitbucket_get_pr",
+            "bitbucket_get_default_reviewers",
+            "run_typecheck",
+        ]:
             assert is_read_only_tool(name), f"{name} should be read-only"
 
     def test_registry_snapshot_no_mutating_tool_is_read_only(self):

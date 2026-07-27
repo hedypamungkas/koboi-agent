@@ -44,11 +44,17 @@ class HttpTransport:
         self._timeout = timeout
         self._max_retries = max_retries
         self._client = httpx.AsyncClient(timeout=timeout)
+        self._last_response_headers: dict[str, str] = {}
 
     @property
     def base_url(self) -> str:
         """Provider base URL (for telemetry / result attribution)."""
         return self._base_url
+
+    @property
+    def last_response_headers(self) -> dict[str, str]:
+        """Response headers from the most recent POST request (for rate-limit telemetry)."""
+        return self._last_response_headers
 
     async def post(self, path: str, body: dict) -> dict:
         url = f"{self._base_url}{path}"
@@ -62,6 +68,12 @@ class HttpTransport:
                 raise LLMConnectionError(f"Connection failed to {self._base_url}: {e}") from e
             except httpx.TimeoutException as e:
                 raise LLMConnectionError(f"Request timed out after {self._timeout}s: {e}") from e
+
+            # Capture the most recent response headers for rate-limit telemetry hooks
+            # (RateLimitEmitHook reads transport.last_response_headers). Captured on
+            # every response -- success AND error -- so a 429's headers are reflected
+            # too, not just the 2xx quota headers.
+            self._last_response_headers = dict(response.headers)
 
             if response.status_code < 400:
                 try:

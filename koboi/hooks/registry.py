@@ -115,6 +115,12 @@ _REGISTRY: list[HookEntry] = [
         should_add=lambda config, **kw: config.tracing.get("provider") == "langfuse",
         factory=lambda config, **kw: _create_langfuse_hook(config),
     ),
+    HookEntry(
+        name="RateLimitEmitHook",
+        config_key="hooks.rate_limit_emit",
+        should_add=lambda config, **kw: bool(config.get("hooks", "rate_limit_emit", default=False)),
+        factory=lambda config, **kw: _create_rate_limit_hook(config),
+    ),
 ]
 
 
@@ -230,6 +236,12 @@ def _create_langfuse_hook(config: Config) -> Hook:
         secret_key=tracing_conf.get("secret_key", ""),
         base_url=tracing_conf.get("base_url", "http://localhost:3300"),
     )
+
+
+def _create_rate_limit_hook(config: Config) -> Hook:
+    from koboi.hooks.rate_limit_hook import RateLimitEmitHook
+
+    return RateLimitEmitHook()
 
 
 # ---------------------------------------------------------------------------

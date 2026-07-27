@@ -108,6 +108,7 @@ class OpenAIAdapter(LLMClient):
             usage=usage,
             model=self._model,
             base_url=getattr(self._transport, "base_url", None),
+            response_headers=getattr(self._transport, "last_response_headers", {}),
         )
 
         if self._logger:
