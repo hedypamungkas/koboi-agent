@@ -31,6 +31,7 @@ agent_card.py      Self-describing signed agent-card (CARD_PATH, build_agent_car
                    org-claim via peers.org_secret; PeerRegistry.verify_all gates verified-only peers; _a2a_refresh_loop
                    in app.py re-stamps the card + re-verifies hourly so it never ages out)
 mcp_registry.py    SessionMcpRegistry -- in-process per-session MCP server attach/detach/reconnect (/v1/sessions/{id}/mcp/servers)
+                   + check_stdio_attach() -- issue #91 default-deny gate for tenant-supplied stdio command/args
 idempotency.py     IdempotencyRegistry -- in-memory TTL for /chat/stream Idempotency-Key (409-reject)
 schema.py          Pure-Pydantic-v2 request/response models + ErrorResponse/ErrorDetail envelope
 sse.py             Pure SSE wire encoder -- keepalive on silence, always terminates data: [DONE]
@@ -131,6 +132,22 @@ POST   /v1/media/jobs                 Async media job (202; video/music); poll G
   `checkpoint.ok=false` + `checkpoint.error`. Suspend is sqlite-only (409 `not_persisted`
   otherwise) and 404s a non-existent session (parity with DELETE/fork/resume). No `/resume`
   endpoint -- remount is `resume_on_startup` (jobs) or `/chat/stream` lazy rebuild.
+- **Runtime MCP stdio attach is default-deny (issue #91, authenticated RCE)**: `POST
+  /v1/sessions/{id}/mcp/servers` spawns a caller-supplied `command`, and the only guard used
+  to be `facade._MCP_DEFAULT_RUNNERS` -- a BASENAME allow-list of interpreters that each
+  execute whatever lands in `args` (nothing validated `args` at all), so any authenticated
+  tenant could POST `{"command":"python3","args":["-c","<payload>"]}` and get code execution.
+  The 400 that came back was cosmetic: the payload ran at `Popen` time, before the MCP
+  handshake failed. Enforcement lives in the ROUTE (not `_create_mcp_client`, which the
+  trusted YAML path shares -- an `untrusted=` kwarg there would default to the fail-OPEN
+  value for every future caller) via `mcp_registry.check_stdio_attach`, threaded in as the
+  `mcp_runtime_attach` param of `_register_routes` (same pattern as `job_shell_allowlist`).
+  Config `server.mcp_runtime_attach: {allow_stdio, allowed_commands}` (Pydantic
+  `McpRuntimeAttachConfig`, `extra="forbid"`). Three 403 codes: `stdio_attach_disabled`
+  (not opted in -- the default), `stdio_command_not_allowed` (EXACT match required; no
+  basename matching, no `_MCP_DEFAULT_RUNNERS` fallback, empty list attaches nothing),
+  `stdio_args_rejected` (inline-code/stdin-eval arg). `streamable-http` spawns no process
+  and is deliberately ungated; the facade's runner allow-list stays as a second layer.
 - **Per-session sandbox workdir** (`workdir_for(session_id)` = `{workspace_root}/{id}`);
   `session_id` validated at the route boundary AND in `workdir_for` (defense-in-depth).
   Eagerly `mkdir`-ed; GC'd at `server.workdir_ttl_seconds`.

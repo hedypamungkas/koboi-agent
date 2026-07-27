@@ -43,6 +43,7 @@ from koboi.server.jobs import (
     run_job,
     _emit_handover_webhook,
 )
+from koboi.server.mcp_registry import check_stdio_attach
 from koboi.server.middleware import request_id_middleware
 from koboi.server.ownership import OwnershipStore
 from koboi.server.workflow_store import WorkflowStore
@@ -297,6 +298,9 @@ def create_app(
     # Wave-1b: opt-in external suspend/snapshot (e.g. koboi-range). Off by default; when
     # unset the /v1/sessions/{id}/suspend route self-disables (404) -- byte-identical.
     suspend_enabled = config.get("server", "suspend_enabled", default=False)
+    # Issue #91: operator gate for tenant-driven runtime MCP stdio attach. Absent
+    # (the default) -> POST /v1/sessions/{id}/mcp/servers refuses every stdio body.
+    mcp_runtime_attach = config.get("server", "mcp_runtime_attach", default={}) or {}
 
     # M3: session ownership + M4: job store. Control-plane state persists to a file
     # so ``resume_on_startup`` works; see ``_sidecar_db_path`` for the resolution rules.
@@ -592,6 +596,7 @@ def create_app(
         peer_rate_limiter,
         job_shell_allowlist=job_shell_allowlist,
         suspend_enabled=suspend_enabled,
+        mcp_runtime_attach=mcp_runtime_attach,
     )
     for registrar in extra_routes:
         registrar(app, pool)
@@ -741,6 +746,7 @@ def _register_routes(
     peer_rate_limiter: Any | None = None,
     job_shell_allowlist: list[str] | None = None,
     suspend_enabled: bool = False,
+    mcp_runtime_attach: dict | None = None,
 ) -> None:
     # Issue #52: ownership gate (fail-closed for unowned-with-history).
     # Closes the IDOR where a pre-existing/CLI-created session (full history, no
@@ -1022,6 +1028,20 @@ def _register_routes(
 
         conf = body.model_dump()
         transport = conf.get("transport", "stdio")
+        # Issue #91: this route is reachable by any authenticated tenant, so a stdio
+        # attach is untrusted input -- gate it BEFORE _create_mcp_client (whose runner
+        # allow-list assumes a trusted YAML author and vets only the basename, never
+        # ``args``). streamable-http spawns no process and is deliberately untouched.
+        if transport == "stdio":
+            attach_cfg = mcp_runtime_attach or {}
+            denial = check_stdio_attach(
+                str(conf.get("command") or ""),
+                conf.get("args") or [],
+                allow_stdio=bool(attach_cfg.get("allow_stdio", False)),
+                allowed_commands=attach_cfg.get("allowed_commands") or [],
+            )
+            if denial is not None:
+                return _error_response(403, denial[0], denial[1], request)
         risk_map = {
             "safe": RiskLevel.SAFE,
             "moderate": RiskLevel.MODERATE,
