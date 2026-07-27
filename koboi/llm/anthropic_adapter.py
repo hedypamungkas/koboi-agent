@@ -410,8 +410,7 @@ class AnthropicAdapter(LLMClient):
             )
         return result
 
-    @staticmethod
-    def _parse_response(data: dict) -> AgentResponse:
+    def _parse_response(self, data: dict) -> AgentResponse:
         content_blocks = data.get("content", [])
 
         text_parts: list[str] = []
@@ -440,7 +439,12 @@ class AnthropicAdapter(LLMClient):
                 completion_tokens=usage_raw.get("output_tokens", 0),
             )
 
-        return AgentResponse(content=content, tool_calls=tool_calls, usage=usage)
+        return AgentResponse(
+            content=content,
+            tool_calls=tool_calls,
+            usage=usage,
+            response_headers=getattr(self._transport, "last_response_headers", {}),
+        )
 
     async def close(self) -> None:
         await self._transport.close()
