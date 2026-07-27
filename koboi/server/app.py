@@ -799,7 +799,19 @@ def _register_routes(
         if not is_safe_session_id(session_id):
             return _error_response(400, "bad_request", "invalid session_id", request)
         if pool.get(session_id) is None:
-            raise HTTPException(status_code=404, detail="session not found")
+            # Not in this process's in-memory pool. If it persists in the DB (e.g. after a
+            # serve restart / snapshot restore -- the koboi-range dismount->remount cycle
+            # restores koboi_memory.db and restarts `koboi serve`), rehydrate it on demand
+            # instead of 404ing. `ownership` records every created session and survives a
+            # restart (SQLite sidecar) -> the authoritative existence check (mirrors the
+            # suspend/list pattern at app.py:~1157/~1235). Rehydrate via get_or_create so
+            # pool.get_messages below reads the persisted conversation, not [].
+            if ownership.get_owner(session_id) is None:
+                raise HTTPException(status_code=404, detail="session not found")
+            try:
+                await pool.get_or_create(session_id)
+            except PoolFull as exc:
+                return _error_response(429, "pool_full", str(exc), request)
         err = _check_owner(ownership, session_id, request)
         if err:
             return err
