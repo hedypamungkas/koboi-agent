@@ -15,9 +15,18 @@ Filtering order (block-list WINS over allow-list, so a var like
 ``KOBOI_DB_TOKEN`` matches the ``KOBOI_*`` allow-glob but is stripped by the
 ``*_TOKEN`` block-glob):
   1. start from ``os.environ.copy()`` (preserves values, not just keys);
-  2. if passthrough is set, return the base env unchanged;
+  2. if passthrough is set, return the base env minus AUTH_BOUNDARY_BLOCKLIST;
   3. keep only allow-listed keys (default set + KOBOI_* glob + user list);
   4. drop any key matching the secret block-list (default + user list).
+
+``AUTH_BOUNDARY_BLOCKLIST`` (the server's own Bearer keys, ``KOBOI_API_KEYS`` /
+``KOBOI_API_KEYS_FILE``) is the one set stripped even under passthrough: those
+vars would let a model-authored command authenticate to the REST API as any
+tenant, and no subprocess has a legitimate use for them (issue #99).
+
+Scope note: this only covers spawn sites that route through here (run_shell,
+git_*, skill ``!`cmd```` preprocessing, both sandbox backends). The stdio MCP
+client spawns its servers with the inherited env and is NOT filtered.
 """
 
 from __future__ import annotations
@@ -52,13 +61,25 @@ DEFAULT_ENV_ALLOWLIST: frozenset[str] = frozenset(
 # Glob allow-list patterns (matched case-insensitively against env var names).
 ENV_GLOB_ALLOWLIST: tuple[str, ...] = ("KOBOI_*",)
 
+# Auth-boundary vars: the server's OWN Bearer API keys (or a pointer to the
+# file holding them). Leaking these lets a model-authored command authenticate
+# to the REST API as any tenant, so they are stripped UNCONDITIONALLY --
+# including under the ``env_passthrough`` escape hatch (issue #99).
+AUTH_BOUNDARY_BLOCKLIST: tuple[str, ...] = (
+    "KOBOI_API_KEYS",  # explicit; *_KEYS also covers it
+    "KOBOI_API_KEYS_FILE",  # path to key material; no glob covers it
+)
+
 # Secret-shaped block-list. Each entry is an fnmatch glob, matched
 # case-insensitively. Catches API keys, DB URLs, etc. even if they slip
 # through the allow-list via the KOBOI_* glob.
 SECRET_BLOCKLIST: tuple[str, ...] = (
     "*_KEY",
+    "*_KEYS",  # plural sibling of *_KEY (issue #99: KOBOI_API_KEYS slipped through)
     "*_SECRET",
+    "*_SECRETS",
     "*_TOKEN",
+    "*_TOKENS",
     "*PASSWORD*",
     "*PASSPHRASE*",
     "DATABASE_URL",
@@ -71,6 +92,8 @@ SECRET_BLOCKLIST: tuple[str, ...] = (
     "GITHUB_TOKEN",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
+    "*_API_KEYS",  # explicit; *_KEYS already covers it
+    *AUTH_BOUNDARY_BLOCKLIST,
 )
 
 # Module-level defaults, populated once at agent startup by
@@ -126,7 +149,9 @@ def build_safe_env(tool_config: dict | None = None) -> dict[str, str]:
     cfg = tool_config or _env_defaults or {}
     passthrough = bool(cfg.get("env_passthrough") or os.environ.get("KOBOI_ENV_PASSTHROUGH") in ("1", "true", "yes"))
     if passthrough:
-        return base
+        # Passthrough restores the full env for trusted CI -- except the auth
+        # boundary, which no subprocess ever needs (issue #99).
+        return {k: v for k, v in base.items() if not _matches_any(k.upper(), AUTH_BOUNDARY_BLOCKLIST)}
 
     extra_allow = tuple(cfg.get("env_allowlist") or [])
     extra_block = tuple(cfg.get("env_blocklist") or [])

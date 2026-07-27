@@ -6,6 +6,8 @@ import os
 import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from koboi.tools.builtin.shell import _build_env, _get_npm_root, run_shell, MAX_OUTPUT, TIMEOUT
 
 
@@ -120,6 +122,29 @@ class TestRunShellEnvViaRegistry:
         result = await registry.execute("run_shell", json.dumps({"command": "echo [${OPENAI_API_KEY}]"}))
         assert "sk-secret-leak" not in result
         assert "[]" in result  # var expanded to empty under the sanitized env
+
+
+class TestServerAuthKeysNeverReachSubprocess:
+    """Issue #99 end-to-end: the server's Bearer keys must not reach a real subprocess."""
+
+    @pytest.mark.parametrize(
+        ("var", "sentinel"),
+        [
+            ("KOBOI_API_KEYS", "sk-koboi-admin-MASTER"),
+            ("KOBOI_API_KEYS_FILE", "/data/koboi-keys.json"),
+        ],
+    )
+    def test_run_shell_cannot_echo_auth_keys(self, var, sentinel, tmp_path, monkeypatch):
+        from koboi.sandbox.restricted import RestrictedProcessBackend
+
+        monkeypatch.setenv(var, sentinel)
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        sandbox = RestrictedProcessBackend(workdir=str(ws), network="deny")
+        result = run_shell(f"echo LEAKED=[${var}]", cwd=str(ws), _deps={"sandbox": sandbox})
+        # positive assertion first: the command really ran (not an Error: ... path)
+        assert "LEAKED=[]" in result, result
+        assert sentinel not in result
 
 
 class TestNpmRootCaching:

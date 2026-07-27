@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 from koboi.harness.env import (
@@ -56,6 +57,79 @@ class TestBuildSafeEnvDefaults:
     def test_unknown_var_stripped(self):
         with patch.dict("os.environ", {"SOMETHING_RANDOM": "v", "PATH": "/x"}, clear=True):
             assert "SOMETHING_RANDOM" not in build_safe_env()
+
+
+class TestServerAuthKeysStripped:
+    """Issue #99: the server's own Bearer keys must never reach a subprocess.
+
+    ``env_passthrough: False`` is passed explicitly so the config arg is truthy
+    (an empty dict would fall through to the module-level ``_env_defaults``).
+    """
+
+    NO_PASSTHROUGH = {"env_passthrough": False}
+
+    def test_koboi_api_keys_stripped(self):
+        with patch.dict("os.environ", {"KOBOI_API_KEYS": "sk-koboi-admin-MASTER", "PATH": "/x"}, clear=True):
+            assert "KOBOI_API_KEYS" not in build_safe_env(self.NO_PASSTHROUGH)
+
+    def test_koboi_api_keys_file_stripped(self):
+        # A path to key material is still a pointer at the auth boundary.
+        with patch.dict("os.environ", {"KOBOI_API_KEYS_FILE": "/data/keys.json", "PATH": "/x"}, clear=True):
+            assert "KOBOI_API_KEYS_FILE" not in build_safe_env(self.NO_PASSTHROUGH)
+
+    def test_plural_secret_globs_stripped(self):
+        names = ("SOME_KEYS", "VENDOR_API_KEYS", "SOME_TOKENS", "SOME_SECRETS")
+        with patch.dict("os.environ", dict.fromkeys(names, "leak") | {"PATH": "/x"}, clear=True):
+            env = build_safe_env(self.NO_PASSTHROUGH)
+            for name in names:
+                assert name not in env
+
+    def test_benign_koboi_vars_still_present(self):
+        benign = {
+            "KOBOI_HOST": "0.0.0.0",  # nosec B104 - test fixture value, not a bind
+            "KOBOI_PORT": "8080",
+            "KOBOI_CONFIG": "/app/configs/x.yaml",
+            "KOBOI_VERBOSE": "1",
+            "KOBOI_DARK": "1",
+            "KOBOI_LIGHT": "0",
+            "KOBOI_SANDBOX_DIR": "/sb",
+            "KOBOI_EXTENSIONS_DIR": "/ext",
+            "KOBOI_WORKFLOWS_DIR": "/wf",
+        }
+        with patch.dict("os.environ", benign | {"PATH": "/x"}, clear=True):
+            env = build_safe_env(self.NO_PASSTHROUGH)
+            for k, v in benign.items():
+                assert env.get(k) == v, k
+
+    def test_other_secrets_still_stripped(self):
+        secrets = {"OPENAI_API_KEY": "sk-x", "DATABASE_URL": "postgres://x"}
+        with patch.dict("os.environ", secrets | {"PATH": "/x"}, clear=True):
+            env = build_safe_env(self.NO_PASSTHROUGH)
+            assert "OPENAI_API_KEY" not in env
+            assert "DATABASE_URL" not in env
+
+    def test_user_allowlist_cannot_re_enable_auth_keys(self):
+        with patch.dict("os.environ", {"KOBOI_API_KEYS": "sk-koboi-admin-MASTER", "PATH": "/x"}, clear=True):
+            env = build_safe_env({"env_allowlist": ["KOBOI_API_KEYS"]})
+            assert "KOBOI_API_KEYS" not in env
+
+    def test_auth_keys_stripped_even_under_passthrough(self):
+        """Passthrough is a trusted-CI escape hatch -- but not for the auth boundary."""
+        with patch.dict(
+            "os.environ",
+            {"KOBOI_API_KEYS": "sk-koboi-admin-MASTER", "OPENAI_API_KEY": "sk-x", "PATH": "/x"},
+            clear=True,
+        ):
+            env = build_safe_env({"env_passthrough": True})
+            # passthrough still restores ordinary secrets (documented behavior) ...
+            assert env.get("OPENAI_API_KEY") == "sk-x"
+            # ... but never the server's own Bearer keys.
+            assert "KOBOI_API_KEYS" not in env
+
+    def test_passthrough_does_not_mutate_os_environ(self):
+        with patch.dict("os.environ", {"KOBOI_API_KEYS": "sk-koboi-admin-MASTER", "PATH": "/x"}, clear=True):
+            build_safe_env({"env_passthrough": True})
+            assert os.environ["KOBOI_API_KEYS"] == "sk-koboi-admin-MASTER"
 
 
 class TestEnvPassthrough:
