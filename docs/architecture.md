@@ -1106,7 +1106,10 @@ The tool surface is `call_peer_agent` (`koboi/tools/builtin/peer.py`, SAFE; need
 + the `peer_registry` dep). The inbound receiver `POST /v1/peer/invoke` authenticates via
 `peers.inbound_tokens` (hashed), runs through `AutonomousApprovalHandler` (deny-by-default on
 destructive tools without a Trust-DB rule), and uses an ephemeral session so it never collides
-with a human-driven `/chat/stream`. Signed agent-card discovery lives at
+with a human-driven `/chat/stream`. A caller MAY pass `X-Session-Id` for cross-call continuity;
+that path is ownership-gated exactly like every other session-scoped route (issue #102) — a
+tenant-owned session, or an unowned one that already has persisted history, is `403`, and an
+otherwise usable id is claimed for the peer identity `peer:<peer_id>`. Signed agent-card discovery lives at
 `GET /.well-known/agent-card` (`koboi/server/agent_card.py`: `build_agent_card`/`sign_card`/
 `verify_card`) — open (no Bearer), served regardless of `peers.enabled`, HMAC-claimed to an
 `org_secret` so a caller can verify the peer is who it says it is.

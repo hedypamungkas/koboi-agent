@@ -59,7 +59,7 @@ POST   /v1/sessions/{id}/mcp/servers  Attach an MCP server to a session (in-proc
 DELETE /v1/sessions/{id}/mcp/servers/{sid}  Detach a session MCP server
 POST   /v1/sessions/{id}/mcp/servers/{sid}/reconnect  Reconnect a session MCP server
 POST   /v1/chat/stream                Interactive SSE chat (lock + HITL + idempotency + per-request mode/cap)
-POST   /v1/peer/invoke                A2A inbound receiver (sync JSON; peer-token auth via peers.inbound_tokens; AutonomousApprovalHandler; ephemeral session)
+POST   /v1/peer/invoke                A2A inbound receiver (sync JSON; peer-token auth via peers.inbound_tokens; AutonomousApprovalHandler; ephemeral session, or an owner-checked X-Session-Id)
 GET    /.well-known/agent-card      This instance's signed agent-card (OPEN, no Bearer; HMAC org-claim; trust via peers.org_secret). Served regardless of peers.enabled (metadata only -- no secrets)
 POST   /v1/sessions/{id}/approve      Resolve a pending HITL approval
 POST   /v1/sessions/{id}/transfer     Reassign session ownership to a human operator (handover take-over)
@@ -162,6 +162,20 @@ POST   /v1/media/jobs                 Async media job (202; video/music); poll G
   carries tenant `result` → use HTTPS + a secret. Config is threaded `create_app` →
   `_register_routes(job_webhooks=...)` → `_start_job` (NOT a create_app closure: routes
   live in `_register_routes`). v1: terminal statuses only.
+- **`/v1/peer/invoke` is ownership-gated on `X-Session-Id` (issue #102, IDOR fix)**: the route
+  used to format-check the header and go straight to `pool.get_or_create`, so a peer token could
+  name a tenant's session and both READ it (the victim's history rides into the pooled agent's
+  context) and WRITE to it (the peer's turn persisted; `ephemeral=False` so it wasn't evicted).
+  It now runs the same `_check_owner` gate as every other session-scoped route and CLAIMS the
+  session for the peer on first use. The peer's ownership identity is `peer:<peer_id>`, stamped
+  once in the auth middleware (`auth.peer_owner_id`) so it is namespaced away from operator-chosen
+  API key ids AND identical across every route. **All inbound peer tokens map to the single
+  `_PEER_ID = "peer"`** (`peers.py`), so peers are not mutually isolated — one peer can reuse
+  another's continuity session. That's the pre-existing A2A trust model (same-org peers), not a
+  regression; per-token peer ids are the fix if per-peer isolation is ever needed. Ephemeral
+  (no-header) sessions stay unowned — they're evicted at the end of the call, so an ownership row
+  would only leak. The gate runs BEFORE `try_acquire`, so a rejected call never consumes a
+  concurrency slot.
 - **Handover flow** (`handover:` config, PR #40): the `transfer_to_human` tool /
   `HandoverDetectionHook` raise `AgentHandoverError`; `_run_agent` (SSE) converts it to a
   `HandoverEvent` and `run_job` converts it to an `awaiting_human` terminal status. No Future

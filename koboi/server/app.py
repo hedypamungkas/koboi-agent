@@ -1506,9 +1506,13 @@ def _register_routes(
         """A2A inbound receiver: a peer koboi instance runs the configured agent on
         ``message`` and gets its final answer as JSON (sync, not SSE).
 
-        Auth stamps ``request.state.peer_id`` (peer branch in the auth middleware);
-        this route never calls ``_check_owner`` -- the peer owns the (ephemeral)
-        session it creates, so there is no tenant-owner IDOR surface.
+        Auth stamps ``request.state.peer_id`` plus a namespaced ownership identity
+        (``peer:<peer_id>``) on ``request.state.api_key_id``. A caller-supplied
+        ``X-Session-Id`` goes through the SAME ``_check_owner`` gate every other
+        session-scoped route uses (issue #102): a session owned by a tenant -- or
+        unowned but already carrying persisted history -- is 403, and an otherwise
+        usable one is claimed for this peer. Peer-minted ephemeral sessions (no
+        header) stay unowned; they are evicted at the end of the call.
         """
         if peer_registry is None or not peer_registry.has_peers:
             return _error_response(404, "peers_disabled", "A2A peers not configured on this instance", request)
@@ -1519,8 +1523,6 @@ def _register_routes(
         # Rate limit: bound how many calls a single peer token can make per minute.
         if peer_rate_limiter is not None and not peer_rate_limiter.allow(peer_id):
             return _error_response(429, "rate_limited", "A2A peer rate limit exceeded", request)
-        if peer_rate_limiter is not None and not peer_rate_limiter.try_acquire(peer_id):
-            return _error_response(429, "too_many_concurrent", "too many concurrent A2A calls", request)
 
         # Fresh ephemeral session per call (isolation, no history bleed); optional
         # X-Session-Id for cross-call continuity.
@@ -1530,6 +1532,21 @@ def _register_routes(
         session_id = header_sid or f"peer-{pool.new_session_id()}"
         ephemeral = header_sid is None
 
+        # Issue #102 (IDOR): a caller-supplied session id is ownership-gated exactly
+        # like every other session-scoped route -- otherwise a peer token could name a
+        # tenant's session and both read its history (it lands in the pooled agent's
+        # context) and write the peer's turn into it. Runs BEFORE try_acquire so a
+        # rejected call never consumes (and, on an early return, leaks) a concurrency
+        # slot. Ephemeral peer-minted ids skip the gate: they are unguessable, fresh
+        # and evicted below.
+        if header_sid is not None:
+            err = _check_owner(ownership, session_id, request)
+            if err:
+                return err
+
+        if peer_rate_limiter is not None and not peer_rate_limiter.try_acquire(peer_id):
+            return _error_response(429, "too_many_concurrent", "too many concurrent A2A calls", request)
+
         # The receiver ignores the caller's body.mode (security: a peer caller must not
         # control the receiver's execution mode). max_iterations is a ceiling (safe to honor).
         effective_max_iter = min(body.max_iterations, max_iter_cap) if body.max_iterations is not None else None
@@ -1538,6 +1555,15 @@ def _register_routes(
             agent = await pool.get_or_create(session_id)
         except PoolFull as exc:
             return _error_response(429, "pool_full", str(exc), request)
+
+        # Issue #102: claim a continuity session for this peer (after get_or_create, so a
+        # PoolFull never leaves an orphan owner row -- same ordering as /v1/chat/stream).
+        # Later calls then match on the owner-equality branch of _check_owner, and no
+        # tenant can take the session over. Ephemeral ids stay unowned (evicted below).
+        # The identity expression is byte-identical to _check_owner's so the value we
+        # write can never be one the next check rejects.
+        if not ephemeral and ownership.get_owner(session_id) is None:
+            ownership.set_owner(session_id, getattr(request.state, "api_key_id", "dev"))
 
         # P4: continue the W3C trace (honors an inbound traceparent) + link it into Langfuse.
         tracing_context.begin_request(request.headers.get("traceparent"))
