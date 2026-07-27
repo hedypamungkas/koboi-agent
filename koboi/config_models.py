@@ -736,6 +736,27 @@ class JournalConfig(BaseModel):
     checkpoint: bool | JournalCheckpointConfig = False
 
 
+class McpRuntimeAttachConfig(BaseModel):
+    """``server.mcp_runtime_attach`` -- operator gate for tenant-driven MCP attach (issue #91).
+
+    ``POST /v1/sessions/{id}/mcp/servers`` is reachable by any authenticated tenant
+    and spawns the stdio ``command`` it is handed. Default-deny: ``allow_stdio``
+    is off, and even when it is on only an EXACT match in ``allowed_commands``
+    attaches (no basename matching, no fallback to the trusted-YAML runner list
+    in ``facade._MCP_DEFAULT_RUNNERS`` -- every runner there executes ``args``).
+    Enforced in ``koboi/server/mcp_registry.py:check_stdio_attach``. The
+    ``streamable-http`` transport spawns no process and is not gated.
+
+    Fail-closed schema (``extra="forbid"``): a typo'd key raises at config load
+    rather than silently leaving the gate misconfigured.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    allow_stdio: bool = False
+    allowed_commands: list[str] = Field(default_factory=list)
+
+
 class ServerConfig(BaseModel):
     """Top-level ``server:`` section -- REST/SSE serving (fully wired).
 
@@ -768,6 +789,8 @@ class ServerConfig(BaseModel):
     # {chat, plan, act, auto}; yolo requires explicit opt-in. limits.max_iterations_cap
     # (default 25) clamps the per-request max_iterations knob.
     allowed_modes: list[str] = Field(default_factory=list)
+    # Issue #91: default-deny gate for runtime MCP stdio attach over HTTP.
+    mcp_runtime_attach: McpRuntimeAttachConfig = Field(default_factory=McpRuntimeAttachConfig)
 
 
 class JobWebhookConfig(BaseModel):

@@ -459,7 +459,14 @@ class TestMcpRouteGuards:
 
     async def test_add_register_close_failure_logs_502(self, monkeypatch):
         # 29-D variant: connect ok, register fails, and client.close() also fails -> warning + 502.
-        app = _app()
+        # Issue #91: runtime stdio attach is default-deny, so opt in explicitly.
+        cfg = _config(
+            server={
+                "auth_required": False,
+                "mcp_runtime_attach": {"allow_stdio": True, "allowed_commands": ["python3"]},
+            }
+        )
+        app = create_app(cfg, client_factory=_factory(), enable_cors=False)
 
         class _Client:
             name = "bad"

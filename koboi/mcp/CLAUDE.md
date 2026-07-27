@@ -83,7 +83,12 @@ picks the subclass by `transport` (`"stdio"` default, `"streamable-http"`) -> `c
   Enterprise token expiry (~1h) is now handled automatically.
 - **stdio runner allow-list** (basename match): `_MCP_DEFAULT_RUNNERS` =
   `{npx, uvx, python, python3, node, uv, deno, bun}`. Other runners raise `ValueError`;
-  permit more via `mcp.allowlist_commands`.
+  permit more via `mcp.allowlist_commands`. This assumes a TRUSTED config author -- every
+  runner on it executes arbitrary code passed in `args`, which `_create_mcp_client` does not
+  inspect. It is therefore NOT sufficient for the HTTP runtime-attach route (issue #91):
+  `POST /v1/sessions/{id}/mcp/servers` applies its own default-deny gate
+  (`server.mcp_runtime_attach`, `koboi/server/mcp_registry.py:check_stdio_attach`) BEFORE
+  reaching this factory, and never falls back to `_MCP_DEFAULT_RUNNERS`.
 - **HTTP client SSRF-blocks** private/internal/loopback URLs at `connect()` (reuses the web
   tool's `_check_url_ssrf`); raises `MCPError`.
 - **A failed MCP server connect is a WARNING, not fatal** -- `register_mcp_tools` for that

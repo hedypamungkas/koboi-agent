@@ -55,6 +55,14 @@ server:
     drain_seconds: 60
   limits:
     max_iterations_cap: 25
+  # Runtime MCP attach over HTTP (POST /v1/sessions/{id}/mcp/servers). Tenant-supplied
+  # stdio commands are spawned on this host, so stdio attach is DENIED by default
+  # (issue #91). Opt in only with an EXACT command allow-list -- never an interpreter
+  # (python/node/npx/... all execute arbitrary code handed to them in `args`).
+  # mcp_runtime_attach:
+  #   allow_stdio: true
+  #   allowed_commands:
+  #     - /opt/mcp/weather-server
   # CORS: required when a browser frontend calls this server from a different origin.
   # Lock allow_origins to your CF Pages domain in production.
   cors:

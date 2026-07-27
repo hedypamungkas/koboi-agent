@@ -101,7 +101,12 @@ class TestSessionMcpRegistry:
 # --- Endpoint integration tests (real todo_server subprocess) ---
 
 
-def _app():
+def _app(stdio_commands: list[str] | None = None):
+    """Build the app. ``stdio_commands`` opts into the issue #91 runtime stdio-attach
+    gate (``server.mcp_runtime_attach``); without it every stdio attach is 403'd."""
+    server: dict = {"auth_required": False}
+    if stdio_commands is not None:
+        server["mcp_runtime_attach"] = {"allow_stdio": True, "allowed_commands": stdio_commands}
     cfg = {
         "agent": {"name": "srv", "system_prompt": "h", "max_iterations": 3},
         "llm": {
@@ -112,7 +117,7 @@ def _app():
         },
         "memory": {"backend": "in_memory"},
         "sandbox": {"backend": "restricted"},
-        "server": {"auth_required": False},
+        "server": server,
     }
     from koboi.config import Config
 
@@ -124,7 +129,8 @@ async def test_add_list_reconnect_delete_mcp_server():
     server = os.path.join(REPO, "mcp_servers", "todo_server.py")
     if not os.path.exists(server):
         pytest.skip("todo_server.py not present")
-    app = _app()
+    # Issue #91: runtime stdio attach is default-deny; the operator must opt in.
+    app = _app([sys.executable])
     async with httpx.AsyncClient(base_url="http://t", transport=ASGITransport(app=app)) as c:
         sid = (await c.post("/v1/sessions")).json()["session_id"]
 
@@ -168,7 +174,9 @@ async def test_mcp_endpoints_404s():
 
 
 async def test_add_mcp_server_bad_command_400():
-    app = _app()
+    # Operator-allow-listed, so the issue #91 gate passes it through -- proving the
+    # facade's own runner allow-list is still a second, independent layer.
+    app = _app(["/usr/bin/evil-binary"])
     async with httpx.AsyncClient(base_url="http://t", transport=ASGITransport(app=app)) as c:
         sid = (await c.post("/v1/sessions")).json()["session_id"]
         # runner not in the stdio allow-list -> ValueError -> 400 mcp_connect_failed
@@ -198,7 +206,7 @@ def test_register_after_ensure_populated_no_duplicate():
 
 async def test_add_mcp_server_register_failure_502(monkeypatch):
     """29-D: connect succeeds but discover_tools fails -> 502 + client.close() called."""
-    app = _app()
+    app = _app(["python3"])
 
     class _ConnectsButBadDiscover:
         def __init__(self):
@@ -256,7 +264,7 @@ async def test_add_mcp_server_register_failure_502(monkeypatch):
 
 async def test_add_mcp_server_unexpected_exception_500(monkeypatch):
     """29-F: an exception NOT in the caught family (TypeError) propagates to 500."""
-    app = _app()
+    app = _app(["python3"])
 
     def _boom(*a, **k):
         raise TypeError("unexpected server bug")
