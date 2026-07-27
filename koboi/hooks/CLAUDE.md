@@ -32,6 +32,7 @@ failure_classifier_hook.py  FailureClassifierHook -- tags ctx.metadata['failure_
 typecheck_hook.py           TypecheckHook -- parses run_typecheck ruff/mypy/pyright output into ctx.metadata['typecheck_diagnostics'] + refines tool_error_kind to typecheck_failed (priority 4, self-healing Wave 2.4; fail-soft)
 ladder_router_hook.py       LadderRouterHook -- picks ONE recovery rung per POST_OUTPUT turn (reflect-if-budget else handover), stamps ctx.metadata['recovery_plan'] (priority 6, self-healing P2a)
 reflection_hook.py          ReflectionHook -- verifier-grounded reflection loop: POST_TOOL_USE repeated-error critique + POST_OUTPUT low-grounding reground + optional CRITIC tool-verification (priority 60, self-healing P1/P4)
+rate_limit_hook.py           RateLimitEmitHook -- captures provider rate-limit headers from `response_headers` and emits telemetry (POST_LLM_CALL, priority 20; opt-in `hooks.rate_limit_emit: true`)
 ```
 
 ## HookEvent values (15)

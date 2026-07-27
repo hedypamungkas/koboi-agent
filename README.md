@@ -145,7 +145,7 @@ koboi is an **autonomous-loop** framework (the Claude Code / AutoGPT family) wit
 | Area | What you get |
 |---|---|
 | **Models** | OpenAI, Anthropic, Cloudflare Workers AI; `ProviderPool` failover + named-providers resolver — switch models without rewriting agents |
-| **Tools** | 17 builtin modules (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media, peer, repo_map, github, background_shell, typecheck) + custom tools via `@tool()`; sync or async, dependency-injected |
+| **Tools** | 18 builtin modules (calculator, filesystem, shell, web, memory, search, git, subagent, task, ingest, handover, media, peer, repo_map, github, background_shell, typecheck, bitbucket) + custom tools via `@tool()`; sync or async, dependency-injected |
 | **Safety** | Input/output guardrails, policy engine, approval handlers, graduated trust DB, rate limiting, audit trail, secret redaction |
 | **Sandbox** | Passthrough (default) or restricted: per-session workdir, rlimits, PATH allowlist, secret-stripped env, SOFT token-scan or **HARD seccomp** syscall egress deny (Linux) |
 | **Memory** | In-memory or SQLite-WAL (hosts the step journal); opt-in **proactive long-term memory** (auto-extract facts → semantic recall each turn → always-in-context core block) |
@@ -248,7 +248,7 @@ flowchart LR
   subgraph LOOP["Autonomous loop (governed)"]
     AC["AgentCore<br/>+ tool pipeline"]
     HK["HookChain<br/>15 lifecycle events"]
-    TR["ToolRegistry<br/>17 builtin + custom"]
+    TR["ToolRegistry<br/>18 builtin + custom"]
     JN["StepJournal<br/>crash-resume · SQLite WAL"]
     SB["Sandbox<br/>passthrough → seccomp HARD"]
     TU["Trust · Approval<br/>deny-by-default"]

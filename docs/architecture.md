@@ -292,7 +292,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 - **Pydantic validation** -- optional schema validation via `config_models.py`
 - **`ConfigBuilder`** -- fluent API for programmatic construction: `.agent().llm().tools().build()`
 
-### Config sections (33)
+### Config sections (34)
 
 | Section | Controls |
 |---------|----------|
@@ -315,6 +315,7 @@ config = Config.from_string("agent:\n  name: test")       # from string
 | `sandbox` | Backend (passthrough/restricted), workdir, network (`soft`/`allowlist`+`network_allowlist` host-globs), network_isolation (seccomp/seccomp_strict), git_init, rlimits -- fail-closed on invalid/typo'd keys |
 | `journal` | Step journal (enabled, record_tool_calls) — crash/redeploy resume; `checkpoint` (shadow-repo workdir checkpoints that roll back an interrupted non-idempotent tool call) |
 | `github` | GitHub PR tooling (`enabled`, `token`); in-process httpx; PR tools gated SAFE (list/get) / DESTRUCTIVE (create/update) — bypasses sandbox network tiers like `web_fetch` |
+| `bitbucket` | Bitbucket Cloud PR tooling (`enabled`, `username`, `app_password`, `api_base`, `timeout`); in-process httpx + HTTP Basic auth; mirrors `github` risk gating; app password never rides subprocess env |
 | `server` | HTTP/SSE serving: host/port, auth, pool, timeouts, allowed_modes, idempotency |
 | `jobs` | Autonomous jobs: max_concurrent, queue_depth, ttl, resume_on_startup, `webhooks` (HMAC-signed terminal-status callbacks) |
 | `hooks` | Declarative external-command hooks: `allow_exec` gate, `on_event` entries (see `docs/custom-hooks.md`) |
@@ -1037,7 +1038,9 @@ unattended. All opt-in; the default agent is unaffected.
   on full success** (all-or-nothing temp + `os.replace`); `run_typecheck` (SAFE, fixed
   ruff/mypy/pyright allowlist -- never a user command, so no injection surface unlike `run_shell`);
   GitHub PR tooling `github_create_pr`/`update_pr` (DESTRUCTIVE) + `list_prs`/`get_pr` (SAFE) in
-  `github.py` via an in-process httpx client (`github:` config).
+  `github.py` via an in-process httpx client (`github:` config); Bitbucket Cloud analog
+  `bitbucket_create_pr`/`update_pr` + `list_prs`/`get_pr`/`get_default_reviewers` in
+  `bitbucket.py` (`bitbucket:` config, HTTP Basic auth).
 - **`context.strategy: coding`** (`koboi/context/manager.py`): body-eviction strategy -- evicts
   stale file/tool bodies from the context window while keeping summaries, so a long coding run
   stays under budget.

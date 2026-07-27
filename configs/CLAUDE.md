@@ -57,7 +57,7 @@ base_url: "${OPENAI_BASE_URL:http://localhost:8080/v1}"
 ```
 
 ## Top-level sections
-`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `peers`, `media`, `self_healing`, `github`, `replay`
+`agent`, `mode`, `llm`, `providers`, `pools`, `tools`, `context`, `rag`, `embedding`, `guardrails`, `tracing`, `harness`, `policy`, `skills`, `mcp`, `memory`, `subagent`, `orchestration`, `sandbox`, `journal`, `server`, `jobs`, `hooks`, `eval`, `keybindings`, `websearch`, `research`, `handover`, `peers`, `media`, `self_healing`, `github`, `bitbucket`, `replay`
 
 ### Notable sub-sections (recently added)
 - `memory.proactive` — opt-in long-term memory: `enabled` (master), `extract` (D: auto-extract facts at SESSION_END), `recall` (C: semantic recall + inject top-N each turn), `core_block` (B: always-in-context summary); `top_k`/`min_score`/`max_facts` tune recall. Recall needs a dedicated `embedding:` model.
